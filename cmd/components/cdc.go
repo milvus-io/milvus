@@ -21,7 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/cdc"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CDC struct {

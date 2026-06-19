@@ -71,6 +71,79 @@ func TestRegisterRuntimeInfo(t *testing.T) {
 	assert.Equal(t, "pulsar", mqType)
 }
 
+// TestCleanupQueryNodeCollectionMetrics tests that CleanupQueryNodeCollectionMetrics
+// correctly cleans up all metrics for a given nodeID and collectionID.
+func TestCleanupQueryNodeCollectionMetrics(t *testing.T) {
+	nodeID := int64(1)
+	collectionID := int64(100)
+	nodeIDStr := "1"
+	collectionIDStr := "100"
+
+	// Set up some metrics for the collection
+	// QueryNodeConsumerMsgCount: nodeID, msgType, collectionID
+	QueryNodeConsumerMsgCount.WithLabelValues(nodeIDStr, "insert", collectionIDStr).Add(10)
+	// QueryNodeConsumeTimeTickLag: nodeID, msgType, collectionID
+	QueryNodeConsumeTimeTickLag.WithLabelValues(nodeIDStr, "insert", collectionIDStr).Set(5)
+	// QueryNodeNumEntities: database, collectionName, nodeID, collectionID, segmentState
+	QueryNodeNumEntities.WithLabelValues("default", "test_collection", nodeIDStr, collectionIDStr, "growing").Set(100)
+	// QueryNodeEntitiesSize: nodeID, collectionID, segmentState
+	QueryNodeEntitiesSize.WithLabelValues(nodeIDStr, collectionIDStr, "growing").Set(1024)
+	// QueryNodeNumSegments: nodeID, collectionID, segmentState, segmentLevel
+	QueryNodeNumSegments.WithLabelValues(nodeIDStr, collectionIDStr, "sealed", "L1").Set(5)
+	// QueryNodeSQCount: nodeID, queryType, status, requestScope, collectionID
+	QueryNodeSQCount.WithLabelValues(nodeIDStr, "search", "success", "default", collectionIDStr).Add(50)
+	// QueryNodeLevelZeroSize: nodeID, collectionID, channelName
+	QueryNodeLevelZeroSize.WithLabelValues(nodeIDStr, collectionIDStr, "ch1").Set(256)
+
+	// Set up metrics for a different collection (should not be cleaned up)
+	otherCollectionIDStr := "200"
+	QueryNodeConsumerMsgCount.WithLabelValues(nodeIDStr, "insert", otherCollectionIDStr).Add(20)
+	QueryNodeNumEntities.WithLabelValues("default", "other_collection", nodeIDStr, otherCollectionIDStr, "growing").Set(200)
+
+	// Helper function to count metrics
+	countCounterMetrics := func(vec *prometheus.CounterVec) int {
+		ch := make(chan prometheus.Metric, 100)
+		vec.Collect(ch)
+		close(ch)
+		count := 0
+		for range ch {
+			count++
+		}
+		return count
+	}
+
+	countGaugeMetrics := func(vec *prometheus.GaugeVec) int {
+		ch := make(chan prometheus.Metric, 100)
+		vec.Collect(ch)
+		close(ch)
+		count := 0
+		for range ch {
+			count++
+		}
+		return count
+	}
+
+	// Record counts before cleanup
+	consumerCountBefore := countCounterMetrics(QueryNodeConsumerMsgCount)
+	numEntitiesBefore := countGaugeMetrics(QueryNodeNumEntities)
+
+	// Clean up metrics for the target collection
+	CleanupQueryNodeCollectionMetrics(nodeID, collectionID)
+
+	// Verify that the target collection's metrics are cleaned up
+	// and other collection's metrics still exist
+	consumerCountAfter := countCounterMetrics(QueryNodeConsumerMsgCount)
+	numEntitiesAfter := countGaugeMetrics(QueryNodeNumEntities)
+
+	// At least one metric should be removed from each
+	assert.Less(t, consumerCountAfter, consumerCountBefore)
+	assert.Less(t, numEntitiesAfter, numEntitiesBefore)
+
+	// Other collection's metrics should still exist
+	assert.Greater(t, consumerCountAfter, 0)
+	assert.Greater(t, numEntitiesAfter, 0)
+}
+
 // TestDeletePartialMatch test deletes all metrics where the variable labels contain all of those
 // passed in as labels based on DeletePartialMatch API
 func TestDeletePartialMatch(t *testing.T) {

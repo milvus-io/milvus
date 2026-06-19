@@ -6,22 +6,25 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ wal.WAL = (*roWALAdaptorImpl)(nil)
 
 type roWALAdaptorImpl struct {
+	*rate.WALRateLimitComponent
 	log.Binder
+
 	lifetime        *typeutil.Lifetime
 	availableCtx    context.Context
 	availableCancel context.CancelFunc
@@ -56,6 +59,10 @@ func (w *roWALAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel 
 
 func (w *roWALAdaptorImpl) GetReplicateCheckpoint() (*wal.ReplicateCheckpoint, error) {
 	panic("we cannot get replicate checkpoint from a read only wal")
+}
+
+func (w *roWALAdaptorImpl) GetSalvageCheckpoint() []*wal.ReplicateCheckpoint {
+	panic("we cannot get salvage checkpoint from a read only wal")
 }
 
 // Append writes a record to the log.
@@ -161,6 +168,9 @@ func (w *roWALAdaptorImpl) Close() {
 
 	// close all metrics.
 	w.scanMetrics.Close()
+
+	// close the rate limit component.
+	w.WALRateLimitComponent.Close()
 }
 
 // forceCancelAfterGracefulTimeout forces to cancel the context after the graceful timeout.

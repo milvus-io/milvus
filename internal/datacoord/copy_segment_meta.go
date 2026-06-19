@@ -19,12 +19,16 @@ package datacoord
 import (
 	"context"
 
+	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 // Copy Segment Metadata Manager
@@ -78,6 +82,7 @@ type CopySegmentMeta interface {
 	// Job operations
 	AddJob(ctx context.Context, job CopySegmentJob) error
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
+	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
 	CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) int
@@ -240,6 +245,7 @@ type copySegmentMeta struct {
 	catalog      metastore.DataCoordCatalog // Persistent storage backend (etcd)
 	meta         *meta                      // Segment metadata for task execution
 	snapshotMeta *snapshotMeta              // Snapshot metadata for reading source data
+	alloc        allocator.Allocator        // For allocating new build IDs in copy segment tasks
 }
 
 // ===========================================================================================
@@ -269,7 +275,7 @@ type copySegmentMeta struct {
 // - Restoring state on startup enables crash recovery
 // - In-memory cache provides fast lookups without etcd round trips
 // - Metadata references enable tasks to access segment/snapshot data
-func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog, meta *meta, snapshotMeta *snapshotMeta) (CopySegmentMeta, error) {
+func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog, meta *meta, snapshotMeta *snapshotMeta, alloc allocator.Allocator) (CopySegmentMeta, error) {
 	// Load jobs and tasks from persistent storage
 	restoredJobs, err := catalog.ListCopySegmentJobs(ctx)
 	if err != nil {
@@ -285,6 +291,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 		catalog:      catalog,
 		meta:         meta,
 		snapshotMeta: snapshotMeta,
+		alloc:        alloc,
 	}
 
 	// Reconstruct task objects with metadata references
@@ -293,6 +300,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 			copyMeta:     copySegmentMeta,
 			meta:         meta,
 			snapshotMeta: snapshotMeta,
+			alloc:        alloc,
 			tr:           timerecord.NewTimeRecorder("copy segment task"),
 			times:        taskcommon.NewTimes(),
 		}
@@ -311,6 +319,23 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 
 	copySegmentMeta.jobs = jobs
 	copySegmentMeta.tasks = tasks
+
+	// Note: no ref-count rebuild is needed on restart. Restore protection is provided
+	// by pins persisted on SnapshotInfo (see createRestoreJob / RestoreSnapshot phase 0),
+	// which survive restart automatically via snapshotMeta reload. Terminal jobs have
+	// already released their pin; active jobs still hold theirs.
+	//
+	// Upgrade caveat: CopySegmentJob rows persisted by pre-pin-refactor datacoord carry
+	// PinId=0 (proto default). The terminal-transition guard at UpdateJobStateAndReleaseRef
+	// skips Unpin for such jobs (no pin existed). DropSnapshot protection for these
+	// in-flight legacy jobs is NOT retroactively established — plan upgrades during
+	// quiet periods, or drain active restores before switching binaries.
+	//
+	// Rollback caveat: if post-pin-refactor data is read by a pre-refactor binary, the
+	// old code ignores CopySegmentJob.PinId and uses its in-memory ref counter. Pins
+	// persisted on SnapshotInfo remain but are never unpinned → orphan pins. The pin
+	// TTL (dataCoord.snapshot.restorePinTTLSeconds) caps the blast radius.
+
 	return copySegmentMeta, nil
 }
 
@@ -339,43 +364,34 @@ func (m *copySegmentMeta) AddJob(ctx context.Context, job CopySegmentJob) error 
 	return nil
 }
 
+// updateJob applies actions to a job and persists the result.
+// Must be called with m.mu write lock held.
+// Returns (previous job, updated job, error). If job not found, returns (nil, nil, nil).
+func (m *copySegmentMeta) updateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (CopySegmentJob, CopySegmentJob, error) {
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return nil, nil, nil
+	}
+	updatedJob := job.Clone()
+	for _, action := range actions {
+		action(updatedJob)
+	}
+	err := m.catalog.SaveCopySegmentJob(ctx, updatedJob.(*copySegmentJob).CopySegmentJob)
+	if err != nil {
+		return nil, nil, err
+	}
+	m.jobs[updatedJob.GetJobId()] = updatedJob
+	return job, updatedJob, nil
+}
+
 // UpdateJob modifies an existing job using functional update actions.
 //
-// Process flow:
-//  1. Acquire write lock
-//  2. Clone the job to avoid modifying the original
-//  3. Apply all update actions to the clone
-//  4. Persist updated job to catalog
-//  5. Update in-memory cache with the new job
-//  6. Release lock
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - jobID: ID of job to update
-//   - actions: Functional updates to apply (e.g., UpdateCopyJobState)
-//
 // Thread safety: Protected by write lock
-// Idempotency: Safe to call with same updates (last write wins)
-//
-// Why functional updates:
-// - Composable: Can combine multiple updates in one call
-// - Type-safe: Each action has specific purpose
-// - Flexible: Easy to add new update types
 func (m *copySegmentMeta) UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if job, ok := m.jobs[jobID]; ok {
-		updatedJob := job.Clone()
-		for _, action := range actions {
-			action(updatedJob)
-		}
-		err := m.catalog.SaveCopySegmentJob(ctx, updatedJob.(*copySegmentJob).CopySegmentJob)
-		if err != nil {
-			return err
-		}
-		m.jobs[updatedJob.GetJobId()] = updatedJob
-	}
-	return nil
+	_, _, err := m.updateJob(ctx, jobID, actions...)
+	return err
 }
 
 // GetJob retrieves a job by ID from in-memory cache.
@@ -438,6 +454,74 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 	return len(m.getJobBy(filters...))
 }
 
+// UpdateJobStateAndReleaseRef updates job state and unpins the source snapshot
+// if the job transitions to a terminal state (Completed/Failed).
+//
+// This ensures snapshot pins are released immediately when restore jobs finish,
+// while Job records are retained for audit purposes (3 hours).
+//
+// Locking strategy: the state-mutate section takes m.mu; the Unpin call (an etcd
+// roundtrip via snapshotMeta.SaveSnapshot) runs AFTER releasing m.mu to avoid
+// blocking all copy-segment job operations on an external write. Double-unpin is
+// prevented because only one caller observes the `!wasTerminal → isTerminal`
+// transition under m.mu; every subsequent caller sees wasTerminal=true.
+func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
+	m.mu.Lock()
+	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
+	if err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	if prevJob == nil {
+		m.mu.Unlock()
+		log.Warn("UpdateJobStateAndReleaseRef: job not found", zap.Int64("jobID", jobID))
+		return nil
+	}
+
+	previousState := prevJob.GetState()
+	newState := updatedJob.GetState()
+	isTerminal := newState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+		newState == datapb.CopySegmentJobState_CopySegmentJobFailed
+	wasTerminal := previousState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+		previousState == datapb.CopySegmentJobState_CopySegmentJobFailed
+
+	shouldUnpin := isTerminal && !wasTerminal && updatedJob.GetPinId() > 0
+	pinID := updatedJob.GetPinId()
+	sourceCollectionID := updatedJob.GetSourceCollectionId()
+	snapshotName := updatedJob.GetSnapshotName()
+	m.mu.Unlock()
+
+	if !shouldUnpin {
+		return nil
+	}
+
+	unpinCollID, unpinName, remaining, unpinErr := m.snapshotMeta.UnpinSnapshot(ctx, pinID)
+	if unpinErr != nil {
+		// Unpin failure is non-fatal for the state transition (already persisted).
+		// Pins carry a TTL (dataCoord.snapshot.restorePinTTLSeconds) so an orphan
+		// left here will self-heal; we still log loudly so operators can detect
+		// a broken unpin path early instead of waiting for TTL expiry.
+		log.Warn("failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL",
+			zap.Int64("jobID", jobID),
+			zap.Int64("pinID", pinID),
+			zap.Int64("sourceCollectionID", sourceCollectionID),
+			zap.String("snapshot", snapshotName),
+			zap.Error(unpinErr))
+		return nil
+	}
+	if unpinName != "" {
+		setSnapshotActivePinsGauge(unpinCollID, unpinName, remaining)
+	}
+	log.Info("unpinned source snapshot on job completion",
+		zap.Int64("jobID", jobID),
+		zap.Int64("pinID", pinID),
+		zap.Int64("sourceCollectionID", sourceCollectionID),
+		zap.String("snapshot", snapshotName),
+		zap.String("previousState", previousState.String()),
+		zap.String("newState", newState.String()))
+	return nil
+}
+
 // RemoveJob deletes a job from both persistent storage and memory cache.
 //
 // Process flow:
@@ -452,11 +536,24 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 func (m *copySegmentMeta) RemoveJob(ctx context.Context, jobID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.jobs[jobID]; ok {
+
+	// Check if job exists
+	_, ok := m.jobs[jobID]
+	if ok {
+		// Remove from persistent storage first to maintain consistency
+		// If this fails, we return error without modifying in-memory state
 		err := m.catalog.DropCopySegmentJob(ctx, jobID)
 		if err != nil {
 			return err
 		}
+
+		// Note: Snapshot restore reference was already decremented when the job
+		// transitioned to a terminal state (Completed/Failed), not here at removal.
+		// This decouples reference lifetime from job metadata cleanup.
+		log.Info("removed copy segment job",
+			zap.Int64("jobID", jobID))
+
+		// Remove from in-memory cache
 		delete(m.jobs, jobID)
 	}
 	return nil
@@ -490,6 +587,7 @@ func (m *copySegmentMeta) AddTask(ctx context.Context, task CopySegmentTask) err
 	t.copyMeta = m
 	t.meta = m.meta
 	t.snapshotMeta = m.snapshotMeta
+	t.alloc = m.alloc
 
 	err := m.catalog.SaveCopySegmentTask(ctx, t.task.Load())
 	if err != nil {

@@ -90,7 +90,7 @@ class PhyLogicalBinaryExpr : public Expr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -102,6 +102,18 @@ class PhyLogicalBinaryExpr : public Expr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return std::nullopt;
+    }
+
+    bool
+    CanExecuteAllAtOnce() const override {
+        return inputs_[0]->CanExecuteAllAtOnce() &&
+               inputs_[1]->CanExecuteAllAtOnce();
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        inputs_[0]->SetExecuteAllAtOnce();
+        inputs_[1]->SetExecuteAllAtOnce();
     }
 
  private:

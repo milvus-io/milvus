@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -139,7 +140,50 @@ class Chunk {
         return true;
     };
 
+    int64_t
+    PhysicalOffsetOf(int64_t logical_offset) const {
+        AssertInfo(logical_offset >= 0 && logical_offset < row_nums_,
+                   "Logical offset {} out of range, row nums {}",
+                   logical_offset,
+                   row_nums_);
+        if (!nullable_) {
+            return logical_offset;
+        }
+        AssertInfo(valid_[logical_offset],
+                   "Logical offset {} is null",
+                   logical_offset);
+        BuildValidRankBlocks();
+        const auto block_id = logical_offset / kValidRankBlockSize;
+        int64_t physical_offset = valid_rank_blocks_[block_id];
+        const auto block_start = block_id * kValidRankBlockSize;
+        for (int64_t i = block_start; i < logical_offset; ++i) {
+            physical_offset += valid_[i] ? 1 : 0;
+        }
+        return physical_offset;
+    }
+
  protected:
+    void
+    BuildValidRankBlocks() const {
+        std::call_once(valid_rank_blocks_once_, [&]() {
+            const auto num_blocks =
+                (row_nums_ + kValidRankBlockSize - 1) / kValidRankBlockSize;
+            valid_rank_blocks_.resize(num_blocks + 1);
+            int64_t valid_count = 0;
+            for (int64_t block_id = 0; block_id < num_blocks; ++block_id) {
+                valid_rank_blocks_[block_id] = valid_count;
+                const auto block_start = block_id * kValidRankBlockSize;
+                const auto block_end =
+                    std::min(block_start + kValidRankBlockSize, row_nums_);
+                for (int64_t i = block_start; i < block_end; ++i) {
+                    valid_count += valid_[i] ? 1 : 0;
+                }
+            }
+            valid_rank_blocks_[num_blocks] = valid_count;
+        });
+    }
+
+    static constexpr int64_t kValidRankBlockSize = 256;
     char* data_;
     int64_t row_nums_;
     uint64_t size_;
@@ -148,6 +192,8 @@ class Chunk {
         valid_;  // parse null bitmap to valid_ to be compatible with SpanBase
 
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard_{nullptr};
+    mutable std::once_flag valid_rank_blocks_once_;
+    mutable std::vector<int64_t> valid_rank_blocks_;
 };
 
 // for fixed size data, includes fixed size array
@@ -449,7 +495,7 @@ class ArrayChunk : public Chunk {
 
 // A VectorArrayChunk is similar to an ArrayChunk but is specialized for storing arrays of vectors.
 // Key differences and characteristics:
-// - No Nullability: VectorArrayChunk does not support null values. Unlike ArrayChunk, it does not have a null bitmap.
+// - Nullable fields use a null bitmap plus compact payload for valid rows.
 // - Fixed Vector Dimensions: All vectors within a VectorArrayChunk have the same, fixed dimension, specified at creation.
 //   However, each row (array of vectors) can contain a variable number of these fixed-dimension vectors.
 //
@@ -469,11 +515,14 @@ class VectorArrayChunk : public Chunk {
                      char* data,
                      uint64_t size,
                      milvus::DataType element_type,
-                     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
-        : Chunk(row_nums, data, size, false, chunk_mmap_guard),
+                     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard,
+                     bool nullable)
+        : Chunk(row_nums, data, size, nullable, chunk_mmap_guard),
           dim_(dim),
           element_type_(element_type) {
-        offsets_lens_ = reinterpret_cast<uint32_t*>(data);
+        auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
+        offsets_lens_ =
+            reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
 
         auto offset = 0;
         offsets_.reserve(row_nums_ + 1);
@@ -486,6 +535,14 @@ class VectorArrayChunk : public Chunk {
 
     VectorArrayView
     View(int64_t idx) const {
+        AssertInfo(idx >= 0 && idx < row_nums_,
+                   "VectorArrayChunk::View offset {} out of range, "
+                   "rows {}",
+                   idx,
+                   row_nums_);
+        AssertInfo(!nullable_ || valid_[idx],
+                   "VectorArrayChunk::View offset {} is null",
+                   idx);
         int idx_off = 2 * idx;
         auto offset = offsets_lens_[idx_off];
         auto len = offsets_lens_[idx_off + 1];
@@ -527,9 +584,21 @@ class VectorArrayChunk : public Chunk {
         views.reserve(len);
         auto end_offset = start_offset + len;
         for (int64_t i = start_offset; i < end_offset; i++) {
-            views.emplace_back(View(i));
+            if (nullable_) {
+                if (valid_[i]) {
+                    views.emplace_back(View(i));
+                } else {
+                    views.emplace_back();
+                }
+            } else {
+                views.emplace_back(View(i));
+            }
         }
-        // vector array does not support null, so just return {}.
+        if (nullable_) {
+            FixedVector<bool> res_valid(valid_.begin() + start_offset,
+                                        valid_.begin() + end_offset);
+            return {std::move(views), std::move(res_valid)};
+        }
         return {std::move(views), {}};
     }
 

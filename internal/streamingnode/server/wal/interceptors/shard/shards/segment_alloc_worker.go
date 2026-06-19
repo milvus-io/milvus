@@ -11,14 +11,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // asyncAllocSegment allocates a new growing segment asynchronously.
-func (m *partitionManager) asyncAllocSegment() {
+func (m *partitionManager) asyncAllocSegment(schemaVersion int32, useGrowingSourceFlush bool) {
 	if m.onAllocating != nil {
 		m.Logger().Debug("segment alloc worker is already on allocating")
 		// manager is already on allocating.
@@ -27,11 +27,13 @@ func (m *partitionManager) asyncAllocSegment() {
 	// Create a notifier to notify the waiter when the allocation is done.
 	m.onAllocating = make(chan struct{})
 	w := &segmentAllocWorker{
-		ctx:          m.ctx,
-		collectionID: m.collectionID,
-		partitionID:  m.partitionID,
-		vchannel:     m.vchannel,
-		wal:          m.wal.Get(),
+		ctx:                   m.ctx,
+		collectionID:          m.collectionID,
+		partitionID:           m.partitionID,
+		vchannel:              m.vchannel,
+		wal:                   m.wal.Get(),
+		schemaVersion:         schemaVersion,
+		useGrowingSourceFlush: useGrowingSourceFlush,
 	}
 	w.SetLogger(m.Logger())
 	// It should always done asynchronously.
@@ -49,9 +51,11 @@ type segmentAllocWorker struct {
 	wal          wal.WAL
 	// The following fields are preserved across retries to ensure the same segment
 	// configuration is used when rebuilding the message after a failed append.
-	segmentID      uint64            // allocated segment ID
-	storageVersion int64             // storage version determined at first attempt
-	limitation     segmentLimitation // segment limitation determined at first attempt
+	segmentID             uint64            // allocated segment ID
+	storageVersion        int64             // storage version determined at first attempt
+	limitation            segmentLimitation // segment limitation determined at first attempt
+	schemaVersion         int32
+	useGrowingSourceFlush bool
 }
 
 // do is the main loop of the segment allocation worker.
@@ -97,6 +101,10 @@ func (w *segmentAllocWorker) doOnce() error {
 	// Build a fresh message each time to avoid reusing a contaminated message.
 	// After a failed WAL append, the message may have internal state set (e.g., WAL term)
 	// that would cause a panic if reused.
+	// TODO: include SchemaVersion in CreateSegmentMessageHeader so that the flusher
+	// can propagate it to DataCoord's AllocSegment RPC. Currently streaming-created
+	// segments get SchemaVersion=0, causing unnecessary backfill triggers.
+	// Tracked in companion PR: https://github.com/milvus-io/milvus/pull/48865
 	msg := message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel(w.vchannel).
 		WithHeader(&message.CreateSegmentMessageHeader{
@@ -107,6 +115,7 @@ func (w *segmentAllocWorker) doOnce() error {
 			MaxRows:        w.limitation.SegmentRows,
 			MaxSegmentSize: w.limitation.SegmentSize,
 			Level:          datapb.SegmentLevel_L1,
+			SchemaVersion:  w.schemaVersion,
 		}).
 		WithBody(&message.CreateSegmentMessageBody{}).
 		MustBuildMutable()

@@ -24,11 +24,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type OpenAIEmbeddingProvider struct {
@@ -39,14 +40,14 @@ type OpenAIEmbeddingProvider struct {
 	embedDimParam int64
 	user          string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.OpenaiAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.OpenaiAKEnvStr)
 	}
 
 	if url == "" {
@@ -59,7 +60,7 @@ func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbed
 
 func createAzureOpenAIEmbeddingClient(apiKey string, url string, resourceName string) (*openai.AzureOpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service", models.AzureOpenaiAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.AzureOpenaiAKEnvStr)
 	}
 
 	if url == "" {
@@ -71,7 +72,7 @@ func createAzureOpenAIEmbeddingClient(apiKey string, url string, resourceName st
 		}
 	}
 	if url == "" {
-		return nil, fmt.Errorf("Must configure the %s environment variable in the Milvus service", models.AzureOpenaiResourceName)
+		return nil, merr.WrapErrParameterInvalidMsg("must configure the %s environment variable in the Milvus service", models.AzureOpenaiResourceName)
 	}
 	c := openai.NewAzureOpenAIEmbeddingClient(apiKey, url)
 	return c, nil
@@ -122,6 +123,8 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		}
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := OpenAIEmbeddingProvider{
 		client:        c,
 		fieldDim:      fieldDim,
@@ -129,7 +132,7 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		user:          user,
 		embedDimParam: dim,
 		maxBatch:      128,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -159,16 +162,16 @@ func (provider *OpenAIEmbeddingProvider) CallEmbedding(ctx context.Context, text
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), provider.user, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), provider.user, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if end-i != len(resp.Data) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+			return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 		}
 		for _, item := range resp.Data {
 			if len(item.Embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embedding))
 			}
 			data = append(data, item.Embedding)

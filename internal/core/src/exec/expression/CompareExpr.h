@@ -165,27 +165,30 @@ class PhyCompareFilterExpr : public Expr {
         pinned_index_right_ = PinIndex(op_ctx_, segment, right_field_meta);
         is_left_indexed_ = pinned_index_left_.size() > 0;
         is_right_indexed_ = pinned_index_right_.size() > 0;
+        left_use_index_data_ =
+            is_left_indexed_ && segment->HasRawData(left_field_.get());
+        right_use_index_data_ =
+            is_right_indexed_ && segment->HasRawData(right_field_.get());
         if (segment->is_chunked()) {
             left_num_chunk_ =
-                is_left_indexed_ ? pinned_index_left_.size()
+                left_use_index_data_ ? pinned_index_left_.size()
                 : segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
                     : segment->num_chunk_data(left_field_);
             right_num_chunk_ =
-                is_right_indexed_ ? pinned_index_right_.size()
+                right_use_index_data_ ? pinned_index_right_.size()
                 : segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
                     : segment->num_chunk_data(right_field_);
             num_chunk_ = left_num_chunk_;
         } else {
-            num_chunk_ = is_left_indexed_
+            num_chunk_ = left_use_index_data_
                              ? pinned_index_left_.size()
                              : upper_div(segment_chunk_reader_.active_count_,
                                          segment_chunk_reader_.SizePerChunk());
         }
-
         AssertInfo(
             batch_size_ > 0,
             fmt::format("expr batch size should greater than zero, but now: {}",
@@ -206,7 +209,7 @@ class PhyCompareFilterExpr : public Expr {
     MoveCursor() override {
         if (!has_offset_input_) {
             if (segment_chunk_reader_.segment_->is_chunked()) {
-                if (is_left_indexed_) {
+                if (left_use_index_data_) {
                     MoveCursorForIndexed(left_current_chunk_pos_);
                 } else {
                     segment_chunk_reader_.MoveCursorForMultipleChunk(
@@ -216,7 +219,7 @@ class PhyCompareFilterExpr : public Expr {
                         left_num_chunk_,
                         batch_size_);
                 }
-                if (is_right_indexed_) {
+                if (right_use_index_data_) {
                     MoveCursorForIndexed(right_current_chunk_pos_);
                 } else {
                     segment_chunk_reader_.MoveCursorForMultipleChunk(
@@ -237,7 +240,7 @@ class PhyCompareFilterExpr : public Expr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -251,13 +254,33 @@ class PhyCompareFilterExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
+    }
+
  private:
+    segcore::PinnedIndexView
+    LeftPinnedIndexForRawLookup() const {
+        if (!left_use_index_data_) {
+            return {};
+        }
+        return {pinned_index_left_.data(), pinned_index_left_.size()};
+    }
+
+    segcore::PinnedIndexView
+    RightPinnedIndexForRawLookup() const {
+        if (!right_use_index_data_) {
+            return {};
+        }
+        return {pinned_index_right_.data(), pinned_index_right_.size()};
+    }
+
     int64_t
     GetCurrentRows() {
         if (segment_chunk_reader_.segment_->is_chunked()) {
             auto current_rows =
-                is_left_indexed_ && segment_chunk_reader_.segment_->HasRawData(
-                                        left_field_.get())
+                left_use_index_data_
                     ? left_current_chunk_pos_
                     : segment_chunk_reader_.segment_->num_rows_until_chunk(
                           left_field_, left_current_chunk_id_) +
@@ -307,7 +330,6 @@ class PhyCompareFilterExpr : public Expr {
                              const ValTypes&... values) {
         int64_t size = input->size();
         int64_t processed_size = 0;
-        const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
         if (segment_chunk_reader_.segment_->is_chunked() ||
             segment_chunk_reader_.segment_->type() == SegmentType::Growing) {
             for (auto i = 0; i < size; ++i) {
@@ -337,6 +359,20 @@ class PhyCompareFilterExpr : public Expr {
                 auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
                     op_ctx_, right_field_, right_chunk_id);
                 auto right_chunk = pw_right.get();
+                const bool* left_valid_data = left_chunk.valid_data();
+                const bool* right_valid_data = right_chunk.valid_data();
+                if (left_valid_data && !left_valid_data[left_chunk_offset]) {
+                    res[processed_size] = false;
+                    valid_res[processed_size] = false;
+                    processed_size++;
+                    continue;
+                }
+                if (right_valid_data && !right_valid_data[right_chunk_offset]) {
+                    res[processed_size] = false;
+                    valid_res[processed_size] = false;
+                    processed_size++;
+                    continue;
+                }
                 const T* left_data = left_chunk.data() + left_chunk_offset;
                 const U* right_data = right_chunk.data() + right_chunk_offset;
                 func.template operator()<FilterType::random>(
@@ -346,18 +382,6 @@ class PhyCompareFilterExpr : public Expr {
                     1,
                     res + processed_size,
                     values...);
-                const bool* left_valid_data = left_chunk.valid_data();
-                const bool* right_valid_data = right_chunk.valid_data();
-                // mask with valid_data
-                if (left_valid_data && !left_valid_data[left_chunk_offset]) {
-                    res[processed_size] = false;
-                    valid_res[processed_size] = false;
-                    continue;
-                }
-                if (right_valid_data && !right_valid_data[right_chunk_offset]) {
-                    res[processed_size] = false;
-                    valid_res[processed_size] = false;
-                }
                 processed_size++;
             }
             return processed_size;
@@ -370,22 +394,34 @@ class PhyCompareFilterExpr : public Expr {
             auto right_chunk = pw_right.get();
             const T* left_data = left_chunk.data();
             const U* right_data = right_chunk.data();
-            func.template operator()<FilterType::random>(
-                left_data, right_data, input->data(), size, res, values...);
             const bool* left_valid_data = left_chunk.valid_data();
             const bool* right_valid_data = right_chunk.valid_data();
-            // mask with valid_data
-            for (int i = 0; i < size; ++i) {
-                if (left_valid_data && !left_valid_data[(*input)[i]]) {
-                    res[i] = false;
-                    valid_res[i] = false;
-                    continue;
+            if (left_valid_data || right_valid_data) {
+                for (int i = 0; i < size; ++i) {
+                    auto offset = (*input)[i];
+                    if (left_valid_data && !left_valid_data[offset]) {
+                        res[i] = false;
+                        valid_res[i] = false;
+                        continue;
+                    }
+                    if (right_valid_data && !right_valid_data[offset]) {
+                        res[i] = false;
+                        valid_res[i] = false;
+                        continue;
+                    }
+                    func.template operator()<FilterType::random>(
+                        left_data + offset,
+                        right_data + offset,
+                        nullptr,
+                        1,
+                        res + i,
+                        values...);
                 }
-                if (right_valid_data && !right_valid_data[(*input)[i]]) {
-                    res[i] = false;
-                    valid_res[i] = false;
-                }
+                processed_size += size;
+                return processed_size;
             }
+            func.template operator()<FilterType::random>(
+                left_data, right_data, input->data(), size, res, values...);
             processed_size += size;
             return processed_size;
         }
@@ -559,6 +595,8 @@ class PhyCompareFilterExpr : public Expr {
     const FieldId right_field_;
     bool is_left_indexed_;
     bool is_right_indexed_;
+    bool left_use_index_data_;
+    bool right_use_index_data_;
     int64_t num_chunk_{0};
     int64_t left_num_chunk_{0};
     int64_t right_num_chunk_{0};

@@ -29,18 +29,18 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var RestRequestInterceptorErr = errors.New("interceptor error placeholder")
@@ -755,7 +755,8 @@ func (h *HandlersV1) insert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		err, httpReq.Data, _ = checkAndSetData(body.([]byte), collSchema, false)
+		var validDataMap map[string][]bool
+		httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with insert data", zap.Any("body", body), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -765,7 +766,7 @@ func (h *HandlersV1) insert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		insertReq := req.(*milvuspb.InsertRequest)
-		insertReq.FieldsData, err = anyToColumns(httpReq.Data, nil, collSchema, true, false)
+		insertReq.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, true, false)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -832,6 +833,7 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		httpReq.CollectionName = singleUpsertReq.CollectionName
 		httpReq.Data = []map[string]interface{}{singleUpsertReq.Data}
 		httpReq.PartialUpdate = singleUpsertReq.PartialUpdate
+		httpReq.FieldOps = singleUpsertReq.FieldOps
 	}
 	if httpReq.CollectionName == "" || httpReq.Data == nil {
 		log.Warn("high level restful api, upsert require parameter: [collectionName, data], but miss")
@@ -847,6 +849,15 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		NumRows:        uint32(len(httpReq.Data)),
 		PartialUpdate:  httpReq.PartialUpdate,
 	}
+	fieldOps, err := buildFieldPartialUpdateOps(httpReq.FieldOps)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return
+	}
+	req.FieldOps = fieldOps
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
@@ -863,7 +874,8 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 			}
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		err, httpReq.Data, _ = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
+		var validDataMap map[string][]bool
+		httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -873,7 +885,7 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		upsertReq := req.(*milvuspb.UpsertRequest)
-		upsertReq.FieldsData, err = anyToColumns(httpReq.Data, nil, collSchema, false, httpReq.PartialUpdate)
+		upsertReq.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, false, httpReq.PartialUpdate)
 		if err != nil {
 			log.Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -930,6 +942,14 @@ func (h *HandlersV1) search(c *gin.Context) {
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+		})
+		return
+	}
+	if httpReq.SearchAggregation != nil {
+		err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for REST v1 search")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
 		})
 		return
 	}

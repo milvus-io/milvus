@@ -9,25 +9,41 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
 #include <memory>
-#include <thread>
 
 #include "Executor.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus::futures {
 
 const int kNumPriority = 3;
 
 folly::CPUThreadPoolExecutor*
-getGlobalCPUExecutor() {
-    auto thread_num = std::thread::hardware_concurrency();
+getSearchCPUExecutor() {
+    auto thread_num = std::max(1, milvus::CPU_NUM);
     static folly::CPUThreadPoolExecutor executor(
         thread_num,
         folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(kNumPriority),
-        std::make_shared<folly::NamedThreadFactory>("MILVUS_CPU_"));
+        std::make_shared<folly::NamedThreadFactory>("MILVUS_SEARCH_"));
     return &executor;
+}
+
+folly::CPUThreadPoolExecutor*
+getLoadCPUExecutor() {
+    auto thread_num = std::max(1, milvus::CPU_NUM);
+    static folly::CPUThreadPoolExecutor executor(
+        thread_num,
+        folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(kNumPriority),
+        std::make_shared<folly::NamedThreadFactory>("MILVUS_LOAD_"));
+    return &executor;
+}
+
+folly::CPUThreadPoolExecutor*
+getGlobalCPUExecutor() {
+    return getSearchCPUExecutor();
 }
 
 };  // namespace milvus::futures

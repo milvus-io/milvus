@@ -1,12 +1,10 @@
---extra-index-url https://test.pypi.org/simple/
+--find-links https://test.pypi.org/simple/pymilvus/
 pytest-cov==2.8.1
 requests>=2.32.4
 scikit-learn>=1.5.2
-timeout_decorator==0.5.0
-ujson==5.5.0
+ujson==5.10.0
 pytest==8.3.4
 pytest-asyncio==0.24.0
-pytest-assume==2.4.3
 pytest-timeout==1.3.3
 pytest-repeat==0.8.0
 allure-pytest==2.7.0
@@ -14,45 +12,41 @@ pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
 
+pytest-assume==2.4.3
 pytest-rerunfailures==14.0
 pytest_tagging==1.6.0
-ndg-httpsclient
-pyopenssl
-pyasn1
 pytest-html==3.1.1
 delayed-assert==0.3.5
 kubernetes==17.17.0
-PyYAML==6.0
+PyYAML==6.0.2
 pytest-sugar==0.9.5
-pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.7.0rc122
-pymilvus[bulk_writer]==2.7.0rc122
+pymilvus==3.1.0rc39
+pymilvus[bulk_writer]==3.1.0rc39
 # for protobuf
 protobuf>=5.29.5
 
 # for customize config test
 python-benedict==0.24.3
-timeout-decorator==0.5.0
 
 # for bulk insert test
 minio==7.2.0
-npy-append-array==0.9.15
+npy-append-array==0.9.19
 Faker==19.2.0
 
 # for benchmark
-h5py==3.8.0
+h5py==3.11.0
 
 # for log
 loguru==0.7.0
 
 # util
-psutil==5.9.4
-pandas==1.5.3
-numpy==1.26.4
-tenacity==8.1.0
+psutil==5.9.8
+pandas==2.2.3
+numpy==2.2.6
+tenacity==8.2.3
 rich==13.7.0
 # for standby test
 etcd-sdk-python==0.0.6
@@ -60,17 +54,23 @@ deepdiff==8.6.1
 
 # for test result analyzer
 prettytable==3.8.0
-pyarrow==14.0.1
-fastparquet==2023.7.0
+pyarrow==23.0.1
+fastparquet==2024.11.0
 
 # for bf16 datatype
-ml-dtypes==0.2.0
+ml-dtypes==0.5.1
+
+# for text processing
+Unidecode==1.3.8
 
 # for full text search
 tantivy==0.22.0
 bm25s==0.2.0
-jieba==0.42.1
-Unidecode==1.3.8
+# rjieba 0.1.11 wraps jieba-rs 0.6.x, closest to Milvus' pinned jieba-rs 0.6.8.
+rjieba==0.1.11
+
+# for minhash function test
+xxhash>=3.0.0
 
 
 # for perf test
@@ -84,6 +84,12 @@ python-dotenv<=2.0.0
 
 # for geometry
 shapely==2.1.1
+
+# for external table formats
+pylance==6.0.0
+vortex-data==0.56.0; python_version >= "3.11"
+substrait==0.26.0; python_version >= "3.11"
+pyiceberg[sql-sqlite]==0.8.1
 
 # for time zone
 tzdata>=2024.1

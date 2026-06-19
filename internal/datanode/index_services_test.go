@@ -27,20 +27,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestIndexTaskWhenStoppingNode(t *testing.T) {
@@ -70,6 +70,45 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		assert.Fail(t, "timeout task chan")
 	}
+}
+
+func TestCreateIndexTaskInitializesIndexStorePathVersion(t *testing.T) {
+	t.Run("CreateJobV2", func(t *testing.T) {
+		ctx := context.Background()
+		paramtable.Init()
+		node := NewDataNode(ctx)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		req := &workerpb.CreateJobRequest{
+			ClusterID:             "cluster-1",
+			BuildID:               1,
+			StorageConfig:         &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		}
+		status, err := node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+			ClusterID: "cluster-1",
+			TaskID:    1,
+			JobType:   indexpb.JobType_JobTypeIndexJob,
+			Request: &workerpb.CreateJobV2Request_IndexRequest{
+				IndexRequest: req,
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+
+		resp, err := node.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
+			ClusterID: "cluster-1",
+			TaskIDs:   []int64{1},
+			JobType:   indexpb.JobType_JobTypeIndexJob,
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetIndexJobResults().GetResults(), 1)
+		assert.Equal(t,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			resp.GetIndexJobResults().GetResults()[0].GetIndexStorePathVersion(),
+		)
+	})
 }
 
 type IndexServiceSuite struct {
@@ -493,11 +532,14 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			err = merr.Error(resp.GetStatus())
 			s.NoError(err)
 			s.Equal(1, len(resp.GetAnalyzeJobResults().GetResults()))
-			if resp.GetAnalyzeJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
-				s.Equal("", resp.GetAnalyzeJobResults().GetResults()[0].GetCentroidsFile())
+			result := resp.GetAnalyzeJobResults().GetResults()[0]
+			if result.GetState() == indexpb.JobState_JobStateFinished {
+				centroidsFile := result.GetCentroidsFile()
+				s.NotEmpty(centroidsFile)
+				s.Contains(centroidsFile, "/"+common.Centroids)
 				break
 			}
-			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetAnalyzeJobResults().GetResults()[0].GetState())
+			s.Equal(indexpb.JobState_JobStateInProgress, result.GetState())
 			time.Sleep(time.Second)
 		}
 

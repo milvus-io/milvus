@@ -53,11 +53,11 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "storage/FileManager.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
-namespace pb = milvus::proto;
 
 using Param = std::tuple<DataType,
                          /*index type*/ std::string,
@@ -192,7 +192,7 @@ TEST_P(GrowingIndexTest, Correctness) {
     auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
@@ -205,23 +205,23 @@ TEST_P(GrowingIndexTest, Correctness) {
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
     auto& config = SegcoreConfig::default_config();
-    config.set_chunk_rows(1024);
-    config.set_enable_interim_segment_index(true);
-    if (dense_vec_intermin_index_type.has_value()) {
-        config.set_dense_vector_intermin_index_type(
-            dense_vec_intermin_index_type.value());
-        if (dense_vec_intermin_index_type.value() ==
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 1024;
+    interim_config.dense_vector_interim_index_type =
+        dense_vec_intermin_index_type;
+    if (dense_vec_intermin_index_type.has_value() &&
+        dense_vec_intermin_index_type.value() ==
             knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR) {
-            auto nlist = config.get_nlist();
-            config.set_sub_dim(4);
-            config.set_nprobe(int(0.4 * nlist));
-            config.set_refine_ratio(4.0);
-            if (dense_refine_type.has_value()) {
-                config.set_refine_quant_type(dense_refine_type.value());
-                config.set_refine_with_quant_flag(false);
-            }
+        interim_config.nprobe = int(0.4 * config.get_nlist());
+        interim_config.sub_dim = 4;
+        interim_config.refine_ratio = 4.0F;
+        if (dense_refine_type.has_value()) {
+            interim_config.refine_quant_type = dense_refine_type.value();
+            interim_config.refine_with_quant_flag = false;
         }
     }
+    ApplyInterimIndexConfigForTest(interim_config, config);
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
@@ -371,7 +371,6 @@ TEST_P(GrowingIndexTest, Correctness) {
 
 TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     constexpr int N = 1024;
-    constexpr int TOPK = 100;
     constexpr int dim = 4;
     constexpr int add_cont = 5;
 
@@ -384,7 +383,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
 
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
@@ -443,10 +442,17 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
         }
         EXPECT_EQ(index->Count(), (add_cont + 1) * N);
     } else if (is_sparse) {
+        // Use the CC (concurrent) variant of sparse index types, since
+        // non-CC sparse indices do not support incremental Add() after
+        // the initial Build().
+        auto cc_index_type =
+            (index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND)
+                ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
+                : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
         auto index =
             std::make_unique<milvus::index::VectorMemIndex<sparse_u32_f32>>(
                 DataType::NONE,
-                index_type,
+                cc_index_type,
                 metric_type,
                 knowhere::Version::GetCurrentVersion().VersionNumber(),
                 false,
@@ -467,25 +473,137 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     }
 }
 
+TEST(GrowingIndexNullableVectorTest,
+     ScannDvrRefinerUsesCompactPhysicalVectorIds) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 50;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "1"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        vec, std::move(index_params), std::move(type_params));
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 1024;
+    interim_config.nlist = 1;
+    interim_config.nprobe = 1;
+    interim_config.dense_vector_interim_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR;
+    interim_config.sub_dim = dim;
+    interim_config.refine_ratio = 1.0F;
+    interim_config.refine_quant_type = "NONE";
+    interim_config.refine_with_quant_flag = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
+    IndexMetaPtr meta =
+        std::make_shared<CollectionIndexMeta>(100, std::move(field_map));
+    auto segment_growing = CreateGrowingSegment(schema, meta, 1, config);
+
+    std::vector<int64_t> pks(row_count);
+    std::vector<idx_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count, 100);
+    for (int64_t i = 0; i < row_count; ++i) {
+        pks[i] = i;
+        row_ids[i] = i;
+    }
+
+    FixedVector<bool> valid_data(row_count);
+    std::fill(valid_data.begin(), valid_data.end(), true);
+    valid_data[0] = false;
+
+    std::vector<float> compact_vectors((row_count - 1) * dim, 1000.0f);
+    // logical row 1 -> physical 0, intentionally far from the query.
+    compact_vectors[0] = 1000.0f;
+    compact_vectors[1] = 0.0f;
+    compact_vectors[2] = 0.0f;
+    compact_vectors[3] = 0.0f;
+    // logical row 2 -> physical 1, exactly equal to the query.
+    compact_vectors[dim] = 0.0f;
+    compact_vectors[dim + 1] = 0.0f;
+    compact_vectors[dim + 2] = 0.0f;
+    compact_vectors[dim + 3] = 0.0f;
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk]);
+    auto vec_array = CreateVectorDataArrayFrom(compact_vectors.data(),
+                                               valid_data.data(),
+                                               row_count,
+                                               row_count - 1,
+                                               (*schema)[vec]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+    insert_data->set_num_rows(row_count);
+
+    auto reserved_offset = segment_growing->PreInsert(row_count);
+    segment_growing->Insert(reserved_offset,
+                            row_count,
+                            row_ids.data(),
+                            timestamps.data(),
+                            insert_data.get());
+
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch(
+        "", "embeddings", 5, knowhere::metric::L2, R"({"nprobe": 1})", -1);
+    auto plan =
+        query::CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    std::array<float, dim> query = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob(1, dim, query.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto result = segment_growing->Search(plan.get(), ph_group.get(), 100);
+
+    ASSERT_EQ(result->seg_offsets_.size(), 5);
+    ASSERT_EQ(result->distances_.size(), 5);
+    bool found_exact_query_row = false;
+    for (size_t i = 0; i < result->seg_offsets_.size(); ++i) {
+        if (result->seg_offsets_[i] == 2) {
+            EXPECT_FLOAT_EQ(result->distances_[i], 0.0f);
+            found_exact_query_row = true;
+        }
+    }
+    EXPECT_TRUE(found_exact_query_row);
+}
+
 TEST_P(GrowingIndexTest, MissIndexMeta) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+
     auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
-    auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
+    schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
-    auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
     auto segment = CreateGrowingSegment(schema, nullptr);
 }
 
 TEST_P(GrowingIndexTest, GetVector) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+
     auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
@@ -497,7 +615,6 @@ TEST_P(GrowingIndexTest, GetVector) {
         {"dim", std::to_string(dim)}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
-    auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
     if (dense_vec_intermin_index_type.has_value()) {

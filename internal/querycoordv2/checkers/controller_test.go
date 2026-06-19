@@ -34,11 +34,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type CheckerControllerSuite struct {
@@ -87,7 +87,7 @@ func (suite *CheckerControllerSuite) SetupTest() {
 
 	// Initialize global factories before creating checkers
 	assign.InitGlobalAssignPolicyFactory(suite.scheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetManager)
-	balance.InitGlobalBalancerFactory(suite.scheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetManager)
+	balance.InitGlobalBalancerFactory(suite.scheduler, suite.nodeMgr, suite.dist, suite.targetManager)
 
 	suite.controller = NewCheckerController(suite.meta, suite.dist, suite.targetManager, suite.nodeMgr, suite.scheduler, suite.broker)
 }
@@ -101,9 +101,9 @@ func (suite *CheckerControllerSuite) TearDownTest() {
 func (suite *CheckerControllerSuite) TestBasic() {
 	ctx := context.Background()
 	// set meta
-	suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	suite.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	suite.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -114,8 +114,8 @@ func (suite *CheckerControllerSuite) TestBasic() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	suite.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	suite.meta.HandleNodeUp(ctx, 1)
+	suite.meta.HandleNodeUp(ctx, 2)
 
 	// set target
 	channels := []*datapb.VchannelInfo{

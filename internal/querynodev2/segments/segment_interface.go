@@ -19,16 +19,22 @@ package segments
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// BinlogSaver is a minimal interface for saving binlog paths to DataCoord.
+// This avoids depending on the full broker.Broker interface.
+type BinlogSaver interface {
+	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
+}
 
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
 type ResourceUsage struct {
@@ -89,10 +95,15 @@ type Segment interface {
 	Release(ctx context.Context, opts ...releaseOption)
 	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
 
-	// Bloom filter related
-	SetBloomFilter(bf *pkoracle.BloomFilterSet)
-	BloomFilterExist() bool
-	UpdateBloomFilter(pks []storage.PrimaryKey)
+	// PK candidate related (BloomFilterSet for regular segments, ExternalSegmentCandidate for external)
+	// Segment implements pkoracle.Candidate: MayPkExist, BatchPkExist, ID, Partition, Type,
+	// PkCandidateExist, UpdatePkCandidate, Stats, Charge, Refund — with protective guards (e.g. skipGrowingBF).
+	SetPKCandidate(candidate pkoracle.Candidate)
+	PkCandidateExist() bool
+	UpdatePkCandidate(pks []storage.PrimaryKey)
+	Stats() *storage.PkStatistics
+	Charge()
+	Refund()
 	MayPkExist(lc *storage.LocationsCache) bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 
@@ -105,9 +116,20 @@ type Segment interface {
 	GetBM25Stats() map[int64]*storage.BM25Stats
 
 	// Read operations
+	// Search executes a search on the segment.
+	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
+
+	// FlushData flushes data from segment memory directly to storage via C++ milvus-storage.
+	// This is a unified interface that combines data extraction and writing:
+	//   - C++ side extracts data directly from ConcurrentVector (no query engine overhead)
+	//   - C++ side writes data to storage (TEXT fields via TextColumnWriter, others via PackedWriter)
+	//   - Returns binlog paths and metadata (all processing in C++ side)
+	// Go layer only provides thin wrapper for FFI call - no business logic.
+	// TODO: Implement C++ FlushData interface (Phase 1.3, 1.4, 2.3)
+	FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error)
 	IsLazyLoad() bool
 	ResetIndexesLazyLoad(lazyState bool)
 
@@ -116,4 +138,51 @@ type Segment interface {
 	RemoveUnusedFieldFiles() error
 
 	GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo
+}
+
+// FlushConfig contains configuration for flushing segment data.
+// All paths and settings are passed to C++ side via FFI.
+type FlushConfig struct {
+	// Segment base path for binlog storage
+	SegmentBasePath string
+	// Partition base path for LOB storage (TEXT fields)
+	PartitionBasePath string
+	// Collection ID
+	CollectionID int64
+	// Partition ID
+	PartitionID int64
+	// TEXT column field IDs
+	TextFieldIDs []int64
+	// LOB base paths for each TEXT field (same order as TextFieldIDs)
+	// Format: {partition_path}/lobs/{field_id}
+	TextLobPaths []string
+	// BM25 output sparse vector field IDs whose stats should be collected for
+	// the flushed offset range.
+	BM25FieldIDs []int64
+	// BM25 stats log IDs, in the same order as BM25FieldIDs.
+	BM25StatsLogIDs []int64
+	// WriteMergedBM25Stats writes a compound BM25 stats file in the same
+	// manifest transaction. It should be true only for the final flush.
+	WriteMergedBM25Stats bool
+	// ReadVersion is the manifest version to read from.
+	// Must be set to the last version acknowledged by DataCoord (via SaveBinlogPaths).
+	// Use ManifestEarliest for the first flush so retries never append to latest.
+	ReadVersion int64
+	// WriterFormat is passed as writer.format. For incremental growing flushes,
+	// it may be resolved from the acknowledged manifest to keep appends
+	// compatible with existing column groups.
+	WriterFormat string
+}
+
+// FlushResult contains the result of flushing segment data.
+// All data is returned from C++ side via FFI.
+// In Storage V3 FFI mode, only manifest path is needed (all file info is in manifest).
+type FlushResult struct {
+	// Manifest path (Storage V3 - contains all file information).
+	// The committed version is encoded in the path and can be extracted
+	// via packed.UnmarshalManifestPath when needed.
+	ManifestPath string
+	// Number of rows flushed
+	NumRows   int64
+	BM25Stats map[int64]*storage.BM25Stats
 }

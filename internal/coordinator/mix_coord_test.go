@@ -28,19 +28,20 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
 )
 
 func TestMixcoord_EnableActiveStandby(t *testing.T) {
@@ -79,7 +80,6 @@ func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	err = core.Init()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_StandBy, core.GetStateCode())
-	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
 	err = core.Start()
@@ -401,9 +401,9 @@ func TestMixCoord_SnapshotMethods(t *testing.T) {
 		}
 
 		req := &datapb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			DbName:         "default",
-			CollectionName: "test_collection",
+			Name:                 "test_snapshot",
+			TargetDbName:         "default",
+			TargetCollectionName: "test_collection",
 		}
 
 		mockey.PatchConvey("test RestoreSnapshot", t, func() {
@@ -480,5 +480,189 @@ func TestMixCoord_SnapshotMethods(t *testing.T) {
 			assert.Equal(t, 1, len(resp.GetJobs()))
 			assert.Equal(t, int64(12345), resp.GetJobs()[0].GetJobId())
 		})
+	})
+}
+
+func TestMixCoord_ExternalCollectionRefreshMethods(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("RefreshExternalCollection_Success", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.RefreshExternalCollectionRequest{
+			CollectionId:   1001,
+			CollectionName: "test_collection",
+		}
+
+		expectedResp := &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Success(),
+			JobId:  54321,
+		}
+		mockRefresh := mockey.Mock((*datacoord.Server).RefreshExternalCollection).Return(expectedResp, nil).Build()
+		defer mockRefresh.UnPatch()
+
+		resp, err := coord.RefreshExternalCollection(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, int64(54321), resp.GetJobId())
+		assert.Equal(t, merr.Success(), resp.GetStatus())
+	})
+
+	t.Run("RefreshExternalCollection_Error", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.RefreshExternalCollectionRequest{
+			CollectionId:   1001,
+			CollectionName: "test_collection",
+		}
+
+		expectedErr := errors.New("mock refresh error")
+		mockRefresh := mockey.Mock((*datacoord.Server).RefreshExternalCollection).Return(nil, expectedErr).Build()
+		defer mockRefresh.UnPatch()
+
+		resp, err := coord.RefreshExternalCollection(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, expectedErr, err)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("GetRefreshExternalCollectionProgress_Success", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 54321,
+		}
+
+		expectedResp := &datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Success(),
+			JobInfo: &datapb.ExternalCollectionRefreshJob{
+				JobId:          54321,
+				CollectionName: "test_collection",
+				State:          indexpb.JobState_JobStateInProgress,
+				Progress:       50,
+			},
+		}
+		mockProgress := mockey.Mock((*datacoord.Server).GetRefreshExternalCollectionProgress).Return(expectedResp, nil).Build()
+		defer mockProgress.UnPatch()
+
+		resp, err := coord.GetRefreshExternalCollectionProgress(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, int64(54321), resp.GetJobInfo().GetJobId())
+		assert.Equal(t, int64(50), resp.GetJobInfo().GetProgress())
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, resp.GetJobInfo().GetState())
+	})
+
+	t.Run("GetRefreshExternalCollectionProgress_Error", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 54321,
+		}
+
+		expectedErr := errors.New("mock get progress error")
+		mockProgress := mockey.Mock((*datacoord.Server).GetRefreshExternalCollectionProgress).Return(nil, expectedErr).Build()
+		defer mockProgress.UnPatch()
+
+		resp, err := coord.GetRefreshExternalCollectionProgress(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, expectedErr, err)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("ListRefreshExternalCollectionJobs_Success", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 1001,
+		}
+
+		expectedResp := &datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Success(),
+			Jobs: []*datapb.ExternalCollectionRefreshJob{
+				{
+					JobId:          54321,
+					CollectionName: "test_collection",
+					State:          indexpb.JobState_JobStateFinished,
+					Progress:       100,
+				},
+				{
+					JobId:          54322,
+					CollectionName: "test_collection",
+					State:          indexpb.JobState_JobStateFailed,
+					Progress:       50,
+					FailReason:     "Test failure",
+				},
+			},
+		}
+		mockList := mockey.Mock((*datacoord.Server).ListRefreshExternalCollectionJobs).Return(expectedResp, nil).Build()
+		defer mockList.UnPatch()
+
+		resp, err := coord.ListRefreshExternalCollectionJobs(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, 2, len(resp.GetJobs()))
+		assert.Equal(t, int64(54321), resp.GetJobs()[0].GetJobId())
+		assert.Equal(t, indexpb.JobState_JobStateFinished, resp.GetJobs()[0].GetState())
+		assert.Equal(t, int64(54322), resp.GetJobs()[1].GetJobId())
+		assert.Equal(t, indexpb.JobState_JobStateFailed, resp.GetJobs()[1].GetState())
+	})
+
+	t.Run("ListRefreshExternalCollectionJobs_Error", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 1001,
+		}
+
+		expectedErr := errors.New("mock list jobs error")
+		mockList := mockey.Mock((*datacoord.Server).ListRefreshExternalCollectionJobs).Return(nil, expectedErr).Build()
+		defer mockList.UnPatch()
+
+		resp, err := coord.ListRefreshExternalCollectionJobs(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, expectedErr, err)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("ListRefreshExternalCollectionJobs_EmptyList", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 9999,
+		}
+
+		expectedResp := &datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Success(),
+			Jobs:   []*datapb.ExternalCollectionRefreshJob{},
+		}
+		mockList := mockey.Mock((*datacoord.Server).ListRefreshExternalCollectionJobs).Return(expectedResp, nil).Build()
+		defer mockList.UnPatch()
+
+		resp, err := coord.ListRefreshExternalCollectionJobs(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, 0, len(resp.GetJobs()))
 	})
 }

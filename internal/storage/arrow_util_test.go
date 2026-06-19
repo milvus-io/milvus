@@ -20,9 +20,12 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func TestGenerateEmptyArray(t *testing.T) {
@@ -230,4 +233,85 @@ func TestGenerateEmptyArray(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateEmptyArrayFromSchemaNullableDenseVectorUsesBinaryArrow(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID:  100,
+		Name:     "nullable_float_vector",
+		DataType: schemapb.DataType_FloatVector,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "4"},
+		},
+	}
+
+	arr, err := GenerateEmptyArrayFromSchema(field, 3)
+	defer arr.Release()
+
+	assert.NoError(t, err)
+	assert.Equal(t, arrow.BinaryTypes.Binary, arr.DataType())
+	assert.Equal(t, 3, arr.Len())
+	for i := 0; i < arr.Len(); i++ {
+		assert.True(t, arr.IsNull(i))
+	}
+}
+
+func TestGenerateEmptyArrayFromSchemaNullableVectorAppendsToRecordBuilder(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID:  100,
+		Name:     "embeddings_new",
+		DataType: schemapb.DataType_FloatVector,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "4"},
+		},
+	}
+	arr, err := GenerateEmptyArrayFromSchema(field, 3)
+	assert.NoError(t, err)
+	defer arr.Release()
+	assert.IsType(t, &array.Binary{}, arr)
+
+	rec := NewSimpleArrowRecord(array.NewRecord(
+		arrow.NewSchema([]arrow.Field{{Name: field.Name, Type: arr.DataType(), Nullable: true}}, nil),
+		[]arrow.Array{arr},
+		int64(arr.Len()),
+	), map[FieldID]int{field.FieldID: 0})
+	defer rec.Release()
+
+	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+	defer rb.Release()
+	assert.NoError(t, rb.Append(rec, 0, arr.Len()))
+	rebuilt := rb.Build()
+	defer rebuilt.Release()
+	assert.Equal(t, arr.Len(), rebuilt.Column(field.FieldID).Len())
+	for i := 0; i < arr.Len(); i++ {
+		assert.True(t, rebuilt.Column(field.FieldID).IsNull(i))
+	}
+}
+
+func TestRecordBuilderNullableDenseVectorPreservesDimMetadata(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "nullable_float_vector",
+				DataType: schemapb.DataType_FloatVector,
+				Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+
+	rb := NewRecordBuilder(schema)
+	rec := rb.Build()
+	defer rec.Release()
+
+	field := rec.(*simpleArrowRecord).ArrowSchema().Field(0)
+	assert.Equal(t, arrow.BinaryTypes.Binary, field.Type)
+	dim, ok := field.Metadata.GetValue("dim")
+	assert.True(t, ok)
+	assert.Equal(t, "4", dim)
 }

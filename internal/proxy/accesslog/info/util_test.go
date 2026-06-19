@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 )
 
 func TestGetSdkTypeByUserAgent(t *testing.T) {
@@ -205,5 +205,19 @@ func TestGetCurUserFromContext(t *testing.T) {
 
 		_, err := getCurUserFromContext(ctx)
 		assert.Error(t, err)
+	})
+}
+
+func TestListToString(t *testing.T) {
+	t.Run("empty list", func(t *testing.T) {
+		assert.Equal(t, "[]", listToString([]string{}))
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		assert.Equal(t, "[\"foo\"]", listToString([]string{"foo"}))
+	})
+
+	t.Run("multiple elements", func(t *testing.T) {
+		assert.Equal(t, "[\"foo\", \"bar\"]", listToString([]string{"foo", "bar"}))
 	})
 }

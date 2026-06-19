@@ -17,21 +17,19 @@
 package pipeline
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
-	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 type insertNodeMsg struct {
 	insertMsgs    []*InsertMsg
 	deleteMsgs    []*DeleteMsg
-	insertDatas   map[int64]*delegator.InsertData
 	timeRange     TimeRange
 	schema        *schemapb.CollectionSchema
 	schemaVersion uint64
@@ -70,6 +68,8 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			msg.schema = body.GetUpdates().GetSchema()
 			msg.schemaVersion = taskMsg.BeginTs()
 		}
+	case commonpb.MsgType_ManualFlush:
+		// ManualFlush is consumed in filterNode.filtrate(); no insert/delete payload here.
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

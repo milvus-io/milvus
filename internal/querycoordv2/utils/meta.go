@@ -19,18 +19,19 @@ package utils
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func GetPartitions(ctx context.Context, targetMgr meta.TargetManagerInterface, collectionID int64) ([]int64, error) {
@@ -83,25 +84,25 @@ func GroupSegmentsByReplica(ctx context.Context, replicaMgr *meta.ReplicaManager
 // RecoverReplicaOfCollection recovers all replica of collection with latest resource group.
 func RecoverReplicaOfCollection(ctx context.Context, m *meta.Meta, collectionID typeutil.UniqueID) {
 	logger := log.With(zap.Int64("collectionID", collectionID))
-	rgNames := m.ReplicaManager.GetResourceGroupByCollection(ctx, collectionID)
+	rgNames := m.GetResourceGroupByCollection(ctx, collectionID)
 	if rgNames.Len() == 0 {
 		logger.Error("no resource group found for collection")
 		return
 	}
-	rgs, err := m.ResourceManager.GetNodesOfMultiRG(ctx, rgNames.Collect())
+	rgs, err := m.GetResourceGroups(ctx, rgNames.Collect())
 	if err != nil {
 		logger.Error("unreachable code as expected, fail to get resource group for replica", zap.Error(err))
 		return
 	}
 
-	if err := m.ReplicaManager.RecoverNodesInCollection(ctx, collectionID, rgs); err != nil {
+	if err := m.RecoverNodesInCollection(ctx, collectionID, rgs); err != nil {
 		logger.Warn("fail to set available nodes in replica", zap.Error(err))
 	}
 }
 
 // RecoverAllCollectionrecovers all replica of all collection in resource group.
 func RecoverAllCollection(m *meta.Meta) {
-	for _, collection := range m.CollectionManager.GetAll(context.TODO()) {
+	for _, collection := range m.GetAll(context.TODO()) {
 		RecoverReplicaOfCollection(context.TODO(), m, collection)
 	}
 }
@@ -140,7 +141,7 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		if !m.ContainResourceGroup(ctx, rgName) {
 			return nil, merr.WrapErrResourceGroupNotFound(rgName)
 		}
-		nodes, err := m.ResourceManager.GetNodes(ctx, rgName)
+		nodes, err := m.GetNodes(ctx, rgName)
 		if err != nil {
 			return nil, err
 		}
@@ -158,13 +159,13 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 
 // SpawnReplicasWithReplicaConfig spawns replicas with replica config.
 func SpawnReplicasWithReplicaConfig(ctx context.Context, m *meta.Meta, params meta.SpawnWithReplicaConfigParams) ([]*meta.Replica, error) {
-	replicas, err := m.ReplicaManager.SpawnWithReplicaConfig(ctx, params)
+	replicas, err := m.SpawnWithReplicaConfig(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 	RecoverReplicaOfCollection(ctx, m, params.CollectionID)
 	if streamingutil.IsStreamingServiceEnabled() {
-		m.RecoverSQNodesInCollection(ctx, params.CollectionID, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs())
+		m.RecoverSQNodesInCollection(ctx, params.CollectionID, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup())
 	}
 	return replicas, nil
 }
@@ -178,14 +179,14 @@ func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, re
 		return nil, err
 	}
 	// Spawn it in replica manager.
-	replicas, err := m.ReplicaManager.Spawn(ctx, collection, replicaNumInRG, channels, loadPriority)
+	replicas, err := m.Spawn(ctx, collection, replicaNumInRG, channels, loadPriority)
 	if err != nil {
 		return nil, err
 	}
 	// Active recover it.
 	RecoverReplicaOfCollection(ctx, m, collection)
 	if streamingutil.IsStreamingServiceEnabled() {
-		m.RecoverSQNodesInCollection(ctx, collection, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs())
+		m.RecoverSQNodesInCollection(ctx, collection, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup())
 	}
 	return replicas, nil
 }
@@ -203,14 +204,17 @@ func ReassignReplicaToRG(
 		return nil, nil, nil, err
 	}
 
-	replicas := m.ReplicaManager.GetByCollection(context.TODO(), collectionID)
+	replicas := m.GetByCollection(context.TODO(), collectionID)
 	replicasInRG := lo.GroupBy(replicas, func(replica *meta.Replica) string {
 		return replica.GetResourceGroup()
 	})
 
 	// if rg doesn't exist in newResourceGroups, add all replicas to candidateToRelease
+	// Sort outRg in reverse lexicographic order so that replicas from lexicographically larger RGs
+	// are added first (released first during scale-down), preserving replicas from smaller RGs.
 	candidateToRelease := make([]*meta.Replica, 0)
 	outRg, _ := lo.Difference(lo.Keys(replicasInRG), newResourceGroups)
+	sort.Sort(sort.Reverse(sort.StringSlice(outRg)))
 	if len(outRg) > 0 {
 		for _, rgName := range outRg {
 			candidateToRelease = append(candidateToRelease, replicasInRG[rgName]...)
@@ -219,8 +223,12 @@ func ReassignReplicaToRG(
 
 	// if rg has more replicas than newAssignment's replica number, add the rest replicas to candidateToMove
 	// also set the lacked replica number as rg's replicaToSpawn value
+	// Sort newAssignment keys for deterministic behavior.
 	replicaToSpawn := make(map[string]int, len(newAssignment))
-	for rgName, count := range newAssignment {
+	sortedAssignmentRGs := lo.Keys(newAssignment)
+	sort.Strings(sortedAssignmentRGs)
+	for _, rgName := range sortedAssignmentRGs {
+		count := newAssignment[rgName]
 		if len(replicasInRG[rgName]) > count {
 			candidateToRelease = append(candidateToRelease, replicasInRG[rgName][count:]...)
 		} else {
@@ -243,9 +251,13 @@ func ReassignReplicaToRG(
 
 	// if candidateToMove is not empty, pick replica from candidate add add it to replicaToTransfer
 	// which means if rg has less replicas than expected, we transfer some existed replica to it.
+	// Sort RGs in lexicographic order so that existing replicas are preferentially transferred to
+	// the lexicographically smallest RG, maintaining QN assignment stability during scale-up.
 	replicaToTransfer := make(map[string][]*meta.Replica)
+	sortedSpawnRGs := lo.Keys(replicaToSpawn)
+	sort.Strings(sortedSpawnRGs)
 	if candidateIdx < len(candidateToRelease) {
-		for rg := range replicaToSpawn {
+		for _, rg := range sortedSpawnRGs {
 			for replicaToSpawn[rg] > 0 && candidateIdx < len(candidateToRelease) {
 				if replicaToTransfer[rg] == nil {
 					replicaToTransfer[rg] = make([]*meta.Replica, 0)

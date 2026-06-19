@@ -35,18 +35,18 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/generic"
-	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/generic"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type GrpcComponent interface {
@@ -419,6 +419,10 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 	// grpc err
 	log.Warn("call received grpc error", zap.Error(err))
 	switch {
+	case IsConnectionClosingErr(err):
+		// Connection is being torn down, retry is pointless.
+		// Fast-fail and force reconnection for next call.
+		return false, true, true, err
 	case funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded):
 		// canceled or deadline exceeded
 		return true, c.needResetCancel(), false, err
@@ -428,10 +432,14 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 		// so if new interface appear in new coord, will got a unimplemented error
 		return false, true, true, merr.WrapErrServiceUnimplemented(err)
 	case IsServerIDMismatchErr(err):
-		if ok := c.checkNodeSessionExist(ctx); !ok {
-			// if session doesn't exist, no need to retry for datanode/indexnode/querynode/proxy
-			return false, false, false, err
+		if c.isNode {
+			// Node connections: fast-fail to let shard client handle failover.
+			// Retrying is futile because NodeID (injected via interceptor at
+			// connection time) won't change during retry.
+			return false, true, true, err
 		}
+		// Coord connections: retry with force reset (only one coord instance,
+		// getAddrFunc may return new address after reset).
 		return true, true, true, err
 	case IsCrossClusterRoutingErr(err):
 		return true, true, true, err
@@ -541,7 +549,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			return true, err
 		}
 		return false, nil
-	}, retry.Attempts(uint(c.MaxAttempts)),
+	}, retry.Attempts(retry.MaxAttemptsFromContextOrDefault(ctx, uint(c.MaxAttempts))),
 		// Because the previous InitialBackoff and MaxBackoff were float, and the unit was s.
 		// For compatibility, this is multiplied by 1000.
 		retry.Sleep(time.Duration(c.InitialBackoff*1000)*time.Millisecond),
@@ -611,13 +619,23 @@ func (c *ClientBase[T]) SetSession(sess *sessionutil.Session) {
 }
 
 func IsCrossClusterRoutingErr(err error) bool {
+	if err == nil {
+		return false
+	}
 	// GRPC utilizes `status.Status` to encapsulate errors,
 	// hence it is not viable to employ the `errors.Is` for assessment.
 	return strings.Contains(err.Error(), merr.ErrServiceCrossClusterRouting.Error())
 }
 
 func IsServerIDMismatchErr(err error) bool {
+	if err == nil {
+		return false
+	}
 	// GRPC utilizes `status.Status` to encapsulate errors,
 	// hence it is not viable to employ the `errors.Is` for assessment.
 	return strings.Contains(err.Error(), merr.ErrNodeNotMatch.Error())
+}
+
+func IsConnectionClosingErr(err error) bool {
+	return errors.Is(err, grpc.ErrClientConnClosing)
 }

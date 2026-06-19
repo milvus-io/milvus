@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 type Controller interface {
@@ -80,7 +80,7 @@ func (dc *ControllerImpl) SyncAll(ctx context.Context) {
 			if err != nil {
 				log.Warn("SyncAll come across err when getting data distribution", zap.Error(err))
 			} else {
-				handler.handleDistResp(ctx, resp, true)
+				handler.handleDistResp(ctx, resp)
 			}
 		}(h)
 	}

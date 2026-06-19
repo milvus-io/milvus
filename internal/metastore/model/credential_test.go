@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
 var (
@@ -15,14 +15,17 @@ var (
 		Tenant:            "tenant-1",
 		IsSuper:           true,
 		Sha256Password:    "xxxx",
+		Description:       "description",
 	}
 
+	description  = "description"
 	credentialPb = &internalpb.CredentialInfo{
 		Username:          "user",
 		EncryptedPassword: "password",
 		Tenant:            "tenant-1",
 		IsSuper:           true,
 		Sha256Password:    "xxxx",
+		Description:       &description,
 	}
 )
 

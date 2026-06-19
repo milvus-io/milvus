@@ -99,13 +99,19 @@ EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 USE_DYNAMIC_SIMD="ON"
-USE_OPENDAL="OFF"
+USE_SVS="OFF"
 TANTIVY_FEATURES=""
 INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="ON"
+if [[ "$(uname)" == "Darwin" ]]; then
+  ENABLE_AZURE_FS="OFF"
+fi
 : "${ENABLE_GCP_NATIVE:="OFF"}"
+# Build acceleration options (override via env vars)
+: "${USE_PCH:="ON"}"
+: "${USE_UNITY_BUILD:="OFF"}"
 
-while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
+while getopts "p:t:s:n:a:y:x:f:S:ulcgbZh" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -148,8 +154,8 @@ while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
   x)
     INDEX_ENGINE=$OPTARG
     ;;
-  o)
-    USE_OPENDAL=$OPTARG
+  S)
+    USE_SVS=$OPTARG
     ;;
   f)
     TANTIVY_FEATURES=$OPTARG
@@ -160,7 +166,7 @@ while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
 parameter:
 -p: install prefix(default: $(pwd)/milvus)
 -d: db data path(default: /tmp/milvus)
--t: build type(default: Debug)
+-t: build type: Release/RelWithDebInfo/Debug/MinSizeRel (default: Release)
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
@@ -170,12 +176,12 @@ parameter:
 -b: build embedded milvus(default: OFF)
 -a: build milvus with AddressSanitizer(default: false)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
--o: build milvus with opendal(default: false)
+-S: build milvus with SVS/Intel Scalable Vector Search(default: OFF)
 -f: build milvus with tantivy features(default: '')
 -h: help
 
 usage:
-./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o]
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o]
                 "
     exit 0
     ;;
@@ -193,7 +199,18 @@ if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
 fi
 source ${ROOT_DIR}/scripts/setenv.sh
 
-CMAKE_GENERATOR="Unix Makefiles"
+# Use Ninja if available for faster builds, fallback to Unix Makefiles
+if command -v ninja &> /dev/null; then
+    CMAKE_GENERATOR="Ninja"
+    # If ninja is available but build dir has Makefile (not build.ninja), clean it
+    if [[ -f "${BUILD_OUTPUT_DIR}/Makefile" && ! -f "${BUILD_OUTPUT_DIR}/build.ninja" ]]; then
+        echo "Detected Makefile build but ninja is available, cleaning build directory..."
+        rm -rf "${BUILD_OUTPUT_DIR}"
+        mkdir -p "${BUILD_OUTPUT_DIR}"
+    fi
+else
+    CMAKE_GENERATOR="Unix Makefiles"
+fi
 
 # build with diskann index if OS is ubuntu or rocky or amzn
 if [ -f /etc/os-release ]; then
@@ -218,8 +235,9 @@ export CMAKE_POLICY_VERSION_MINIMUM=3.5
 arch=$(uname -m)
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
+-DCMAKE_TOOLCHAIN_FILE=${BUILD_OUTPUT_DIR}/conan/conan_toolchain.cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
--DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
+-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
@@ -231,11 +249,13 @@ ${CMAKE_EXTRA_ARGS} \
 -DUSE_ASAN=${USE_ASAN} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
 -DCPU_ARCH=${CPU_ARCH} \
--DUSE_OPENDAL=${USE_OPENDAL} \
+-DWITH_SVS=${USE_SVS} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
 -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
--DENABLE_AZURE_FS=${ENABLE_AZURE_FS} "
+-DENABLE_AZURE_FS=${ENABLE_AZURE_FS} \
+-DMILVUS_USE_PCH=${USE_PCH} \
+-DMILVUS_UNITY_BUILD=${USE_UNITY_BUILD} "
 # Azure build variables removed as we now use Arrow with Azure support directly
 CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
 
@@ -243,11 +263,24 @@ echo "CC $CC"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 
-set
+# Export PROTOC for Rust crates (e.g. lance-encoding) that need it at build time
+if [ -z "$PROTOC" ]; then
+  _PROTOC=$(grep -m1 "^Protobuf_PROTOC_EXECUTABLE" CMakeCache.txt 2>/dev/null | cut -d= -f2-)
+  if [ -n "$_PROTOC" ] && [ -f "$_PROTOC" ]; then
+    export PROTOC="$_PROTOC"
+    echo "Exported PROTOC=$PROTOC for Rust builds"
+  fi
+fi
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
+  if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
+    BUILD_CMD="ninja"
+  else
+    BUILD_CMD="make"
+  fi
+
   # cpplint check
-  make lint
+  ${BUILD_CMD} lint
   if [ $? -ne 0 ]; then
     echo "ERROR! cpplint check failed"
     exit 1
@@ -255,7 +288,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "cpplint check passed!"
 
   # clang-format check
-  make check-clang-format
+  ${BUILD_CMD} check-clang-format
   if [ $? -ne 0 ]; then
     echo "ERROR! clang-format check failed"
     exit 1
@@ -263,7 +296,11 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "clang-format check passed!"
 else
   # compile and build
-  make -j ${jobs} install || exit 1
+  if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
+    ninja -j ${jobs} install || exit 1
+  else
+    make -j ${jobs} install || exit 1
+  fi
 fi
 
 if command -v ccache &> /dev/null

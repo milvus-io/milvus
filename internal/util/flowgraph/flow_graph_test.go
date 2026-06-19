@@ -18,7 +18,6 @@ package flowgraph
 
 import (
 	"context"
-	"math"
 	"math/rand"
 	"os"
 	"testing"
@@ -26,7 +25,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Flow graph basic example: count `c = pow(a) + 2`
@@ -85,7 +84,7 @@ func (n *nodeB) Operate(in []Msg) []Msg {
 	if !ok {
 		return nil
 	}
-	b := math.Pow(a.num, 2)
+	b := a.num * a.num
 	var res Msg = &numMsg{
 		num: b,
 	}
@@ -214,7 +213,7 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 
 			// output check
 			d := <-outputChan
-			res := math.Pow(a, 2) + 2
+			res := a*a + 2
 			assert.Equal(t, d, res)
 		}
 	}()

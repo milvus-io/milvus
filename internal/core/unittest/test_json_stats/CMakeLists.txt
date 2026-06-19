@@ -24,8 +24,8 @@ add_executable(json_stats_test
 )
 
 target_link_libraries(json_stats_test
-    gtest
-    gmock
+    GTest::gtest
+    GTest::gmock
     milvus_core
     milvus-storage
 )

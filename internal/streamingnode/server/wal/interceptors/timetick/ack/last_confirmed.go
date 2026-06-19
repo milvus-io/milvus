@@ -2,8 +2,8 @@ package ack
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type uncommittedTxnInfo struct {

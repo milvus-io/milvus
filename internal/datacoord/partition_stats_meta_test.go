@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 type PartitionStatsMetaSuite struct {
@@ -138,7 +138,7 @@ func (s *PartitionStatsMetaSuite) TestDropPartitionStats() {
 	version2 := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
 	s.Equal(int64(101), version2)
 
-	err = partitionStatsMeta.DropPartitionStatsInfo(context.Background(), partitionStats[1])
+	_ = partitionStatsMeta.DropPartitionStatsInfo(context.Background(), partitionStats[1])
 	s.Equal(1, len(partitionStatsMeta.partitionStatsInfos[channel][partitionID].infos))
 	version3 := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
 	s.Equal(int64(100), version3)

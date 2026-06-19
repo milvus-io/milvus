@@ -5,34 +5,16 @@ import (
 	"sort"
 	"unicode/utf8"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-func BuildSparseFieldData(field *schemapb.FieldSchema, sparseArray *schemapb.SparseFloatArray) *schemapb.FieldData {
-	return &schemapb.FieldData{
-		Type:      field.GetDataType(),
-		FieldName: field.GetName(),
-		Field: &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: sparseArray.GetDim(),
-				Data: &schemapb.VectorField_SparseFloatVector{
-					SparseFloatVector: sparseArray,
-				},
-			},
-		},
-		FieldId: field.GetFieldID(),
-	}
-}
 
 func SetBM25Params(req *internalpb.SearchRequest, avgdl float64) error {
 	log := log.With(zap.Int64("collection", req.GetCollectionID()))
@@ -126,11 +108,11 @@ func bytesOffsetToRuneOffset(text string, spans SpanList) error {
 	for i, span := range spans {
 		startOffset, ok := offsetMap[span[0]]
 		if !ok {
-			return errors.Errorf("start offset: %d not found (text: %d bytes)", span[0], len(text))
+			return merr.WrapErrServiceInternalMsg("start offset: %d not found (text: %d bytes)", span[0], len(text))
 		}
 		endOffset, ok := offsetMap[span[1]]
 		if !ok {
-			return errors.Errorf("end offset: %d not found (text: %d bytes)", span[1], len(text))
+			return merr.WrapErrServiceInternalMsg("end offset: %d not found (text: %d bytes)", span[1], len(text))
 		}
 		spans[i][0] = startOffset
 		spans[i][1] = endOffset

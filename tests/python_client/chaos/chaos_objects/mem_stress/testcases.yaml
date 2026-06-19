@@ -83,3 +83,12 @@ Collections:
             flush: fail
           cluster_n_nodes:
             flush: degrade
+  -
+    testcase:
+      name: test_woodpecker_mem_stress
+      chaos: chaos_woodpecker_mem_stress.yaml
+      expectation:
+          cluster_1_node:
+            flush: fail
+          cluster_n_nodes:
+            flush: degrade

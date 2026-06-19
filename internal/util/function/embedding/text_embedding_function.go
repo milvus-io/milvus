@@ -20,18 +20,16 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -48,7 +46,9 @@ const (
 	cohereProvider       string = "cohere"
 	siliconflowProvider  string = "siliconflow"
 	teiProvider          string = "tei"
+	ycProvider           string = "yc"
 	zillizProvider       string = "zilliz"
+	geminiProvider       string = "gemini"
 )
 
 func hasEmptyString(texts []string) bool {
@@ -62,18 +62,18 @@ func hasEmptyString(texts []string) bool {
 
 func TextEmbeddingOutputsCheck(fields []*schemapb.FieldSchema) error {
 	if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_FloatVector && fields[0].DataType != schemapb.DataType_Int8Vector) {
-		return errors.New("TextEmbedding function output field must be a FloatVector or Int8Vector field")
+		return merr.WrapErrParameterInvalidMsg("TextEmbedding function output field must be a FloatVector or Int8Vector field") //nolint:staticcheck // starts with proper noun
 	}
 	return nil
 }
 
 func TextEmbeddingInputsCheck(name string, fields []*schemapb.FieldSchema) error {
 	if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-		return errors.New("TextEmbedding function input field must be a VARCHAR/TEXT field")
+		return merr.WrapErrParameterInvalidMsg("TextEmbedding function input field must be a VARCHAR/TEXT field") //nolint:staticcheck // starts with proper noun
 	}
 
 	if fields[0].Nullable {
-		return fmt.Errorf("function input field cannot be nullable: function %s, field %s", name, fields[0].GetName())
+		return merr.WrapErrParameterInvalidMsg("function input field cannot be nullable: function %s, field %s", name, fields[0].GetName())
 	}
 	return nil
 }
@@ -97,7 +97,7 @@ func isValidInputDataType(dataType schemapb.DataType) bool {
 
 func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (*TextEmbeddingFunction, error) {
 	if len(functionSchema.GetOutputFieldNames()) != 1 {
-		return nil, fmt.Errorf("Text function should only have one output field, but now is %d", len(functionSchema.GetOutputFieldNames()))
+		return nil, merr.WrapErrParameterInvalidMsg("text function should only have one output field, but now is %d", len(functionSchema.GetOutputFieldNames()))
 	}
 
 	base, err := NewFunctionBase(coll, functionSchema)
@@ -112,7 +112,7 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	var newProviderErr error
 	conf := paramtable.Get().FunctionCfg.GetTextEmbeddingProviderConfig(base.provider)
 	if !models.IsEnable(conf) {
-		return nil, fmt.Errorf("Text embedding model provider [%s] is disabled", base.provider)
+		return nil, merr.WrapErrParameterInvalidMsg("text embedding model provider [%s] is disabled", base.provider)
 	}
 	credentials := credentials.NewCredentials(paramtable.Get().CredentialCfg.GetCredentials())
 	batchFactor := paramtable.Get().FunctionCfg.GetBatchFactor()
@@ -136,11 +136,15 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 		embP, newProviderErr = NewSiliconflowEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	case teiProvider:
 		embP, newProviderErr = NewTEIEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
+	case ycProvider:
+		embP, newProviderErr = NewYCEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	case zillizProvider:
 		conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 		embP, newProviderErr = NewZillizEmbeddingProvider(base.outputFields[0], functionSchema, conf, extraInfo)
+	case geminiProvider:
+		embP, newProviderErr = NewGeminiEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	default:
-		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, zillizProvider)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, ycProvider, zillizProvider, geminiProvider)
 	}
 
 	if newProviderErr != nil {
@@ -162,18 +166,18 @@ func (runner *TextEmbeddingFunction) Check(ctx context.Context) error {
 	case [][]float32:
 		dim = len(embds[0])
 		if runner.GetOutputFields()[0].DataType != schemapb.DataType_FloatVector {
-			return fmt.Errorf("Embedding model output and field type mismatch, model output is %s, field type is %s", schemapb.DataType_name[int32(schemapb.DataType_FloatVector)], schemapb.DataType_name[int32(runner.GetOutputFields()[0].DataType)])
+			return merr.WrapErrParameterInvalidMsg("embedding model output and field type mismatch, model output is %s, field type is %s", schemapb.DataType_name[int32(schemapb.DataType_FloatVector)], schemapb.DataType_name[int32(runner.GetOutputFields()[0].DataType)])
 		}
 	case [][]int8:
 		dim = len(embds[0])
 		if runner.GetOutputFields()[0].DataType != schemapb.DataType_Int8Vector {
-			return fmt.Errorf("Embedding model output and field type mismatch, model output is %s, field type is %s", schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)], schemapb.DataType_name[int32(runner.GetOutputFields()[0].DataType)])
+			return merr.WrapErrParameterInvalidMsg("embedding model output and field type mismatch, model output is %s, field type is %s", schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)], schemapb.DataType_name[int32(runner.GetOutputFields()[0].DataType)])
 		}
 	default:
-		return fmt.Errorf("Unsupport embedding type: %s", reflect.TypeOf(embds).String())
+		return merr.WrapErrParameterInvalidMsg("unsupported embedding type: %s", reflect.TypeOf(embds).String())
 	}
 	if dim != int(runner.embProvider.FieldDim()) {
-		return fmt.Errorf("The dim set in the schema is inconsistent with the dim of the model, dim in schema is %d, dim of model is %d", runner.embProvider.FieldDim(), dim)
+		return merr.WrapErrParameterInvalidMsg("the dim set in the schema is inconsistent with the dim of the model, dim in schema is %d, dim of model is %d", runner.embProvider.FieldDim(), dim)
 	}
 	return nil
 }
@@ -243,25 +247,25 @@ func (runner *TextEmbeddingFunction) packToFieldData(embds any) ([]*schemapb.Fie
 
 func (runner *TextEmbeddingFunction) ProcessInsert(ctx context.Context, inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
 	if len(inputs) != 1 {
-		return nil, fmt.Errorf("Text embedding function only receives one input field, but got [%d]", len(inputs))
+		return nil, merr.WrapErrParameterInvalidMsg("text embedding function only receives one input field, but got [%d]", len(inputs))
 	}
 
 	if !isValidInputDataType(inputs[0].Type) {
-		return nil, fmt.Errorf("Text embedding only supports varchar or text field as input field, but got %s", schemapb.DataType_name[int32(inputs[0].Type)])
+		return nil, merr.WrapErrParameterInvalidMsg("text embedding only supports varchar or text field as input field, but got %s", schemapb.DataType_name[int32(inputs[0].Type)])
 	}
 
 	texts := inputs[0].GetScalars().GetStringData().GetData()
 	if texts == nil {
-		return nil, errors.New("Input texts is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("input texts is empty")
 	}
 
 	// make sure all texts are not empty
 	if hasEmptyString(texts) {
-		return nil, errors.New("There is an empty string in the input data, TextEmbedding function does not support empty text")
+		return nil, merr.WrapErrParameterInvalidMsg("there is an empty string in the input data, TextEmbedding function does not support empty text")
 	}
 	numRows := len(texts)
 	if numRows > runner.MaxBatch() {
-		return nil, fmt.Errorf("Embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
+		return nil, merr.WrapErrParameterInvalidMsg("embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
 	}
 
 	embds, err := runner.embProvider.CallEmbedding(ctx, texts, models.InsertMode)
@@ -276,11 +280,11 @@ func (runner *TextEmbeddingFunction) ProcessSearch(ctx context.Context, placehol
 	texts := funcutil.GetVarCharFromPlaceholder(placeholderGroup.Placeholders[0]) // Already checked externally
 	numRows := len(texts)
 	if numRows > runner.MaxBatch() {
-		return nil, fmt.Errorf("Embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
+		return nil, merr.WrapErrParameterInvalidMsg("embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
 	}
 	// make sure all texts are not empty
 	if hasEmptyString(texts) {
-		return nil, errors.New("There is an empty string in the queries, TextEmbedding function does not support empty text")
+		return nil, merr.WrapErrParameterInvalidMsg("there is an empty string in the queries, TextEmbedding function does not support empty text")
 	}
 	embds, err := runner.embProvider.CallEmbedding(ctx, texts, models.SearchMode)
 	if err != nil {
@@ -291,27 +295,27 @@ func (runner *TextEmbeddingFunction) ProcessSearch(ctx context.Context, placehol
 	} else if runner.GetOutputFields()[0].DataType == schemapb.DataType_Int8Vector {
 		return funcutil.Int8VectorsToPlaceholderGroup(embds.([][]int8)), nil
 	}
-	return nil, fmt.Errorf("Text embedding function doesn't support % vector", schemapb.DataType_name[int32(runner.GetOutputFields()[0].DataType)])
+	return nil, merr.WrapErrParameterInvalidMsg("text embedding function doesn't support % vector", schemapb.DataType_name[int32(runner.GetOutputFields()[0].DataType)])
 }
 
 func (runner *TextEmbeddingFunction) ProcessBulkInsert(ctx context.Context, inputs []storage.FieldData) (map[storage.FieldID]storage.FieldData, error) {
 	if len(inputs) != 1 {
-		return nil, fmt.Errorf("TextEmbedding function only receives one input, bug got [%d]", len(inputs))
+		return nil, merr.WrapErrParameterInvalidMsg("TextEmbedding function only receives one input, bug got [%d]", len(inputs)) //nolint:staticcheck // starts with proper noun
 	}
 
 	if !isValidInputDataType(inputs[0].GetDataType()) {
-		return nil, fmt.Errorf("TextEmbedding function only supports varchar or text field as input field, but got %s", schemapb.DataType_name[int32(inputs[0].GetDataType())])
+		return nil, merr.WrapErrParameterInvalidMsg("TextEmbedding function only supports varchar or text field as input field, but got %s", schemapb.DataType_name[int32(inputs[0].GetDataType())]) //nolint:staticcheck // starts with proper noun
 	}
 
 	texts, ok := inputs[0].GetDataRows().([]string)
 	if !ok {
-		return nil, errors.New("Input texts is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("input texts is empty")
 	}
 
 	// make sure all texts are not empty
 	// In storage.FieldData, null is also stored as an empty string
 	if hasEmptyString(texts) {
-		return nil, errors.New("There is an empty string in the input data, TextEmbedding function does not support empty text")
+		return nil, merr.WrapErrParameterInvalidMsg("there is an empty string in the input data, TextEmbedding function does not support empty text")
 	}
 	embds, err := runner.embProvider.CallEmbedding(ctx, texts, models.InsertMode)
 	if err != nil {
@@ -346,5 +350,5 @@ func (runner *TextEmbeddingFunction) ProcessBulkInsert(ctx context.Context, inpu
 			runner.outputFields[0].FieldID: field,
 		}, nil
 	}
-	return nil, errors.New("Unknow embedding type")
+	return nil, merr.WrapErrFunctionFailedMsg("unknown embedding type")
 }

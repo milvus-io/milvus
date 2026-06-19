@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <iostream>
 #include <memory>
@@ -572,6 +573,13 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
               1, data_type, nullable, total_num_rows) {
     }
 
+    explicit FieldDataStringImpl(DataType data_type,
+                                 bool nullable,
+                                 FixedVector<std::string>&& data)
+        : FieldDataImpl<std::string, true>(
+              1, data_type, nullable, std::move(data)) {
+    }
+
     int64_t
     DataSize() const override {
         int64_t data_size = 0;
@@ -592,6 +600,21 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
     }
 
     void
+    FillFieldData(const std::shared_ptr<arrow::Array> array) override {
+        AssertInfo(
+            array->type()->id() == arrow::Type::type::STRING ||
+                array->type()->id() == arrow::Type::type::BINARY,
+            "inconsistent data type, expected: STRING or BINARY, got: {}",
+            array->type()->ToString());
+        if (array->type()->id() == arrow::Type::type::STRING) {
+            return FillFieldData(
+                std::dynamic_pointer_cast<arrow::StringArray>(array));
+        }
+        return FillFieldData(
+            std::dynamic_pointer_cast<arrow::BinaryArray>(array));
+    }
+
+    void
     FillFieldData(const std::shared_ptr<arrow::StringArray>& array) override {
         auto n = array->length();
         if (n == 0) {
@@ -599,6 +622,37 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
         }
 
         std::lock_guard lck(tell_mutex_);
+        null_count_ += array->null_count();
+        if (length_ + n > get_num_rows()) {
+            resize_field_data(length_ + n);
+        }
+
+        for (int64_t i = 0; i < n; ++i) {
+            data_[length_ + i] = std::string(array->GetView(i));
+        }
+        if (IsNullable()) {
+            auto valid_data = array->null_bitmap_data();
+            if (valid_data != nullptr) {
+                bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                    valid_data,
+                    array->offset(),
+                    valid_data_.data(),
+                    length_,
+                    n);
+            }
+        }
+        length_ += n;
+    }
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) override {
+        auto n = array->length();
+        if (n == 0) {
+            return;
+        }
+
+        std::lock_guard lck(tell_mutex_);
+        null_count_ += array->null_count();
         if (length_ + n > get_num_rows()) {
             resize_field_data(length_ + n);
         }
@@ -700,6 +754,12 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
                                bool nullable,
                                int64_t total_num_rows = 0)
         : FieldDataImpl<Json, true>(1, data_type, nullable, total_num_rows) {
+    }
+
+    explicit FieldDataJsonImpl(DataType data_type,
+                               bool nullable,
+                               FixedVector<Json>&& data)
+        : FieldDataImpl<Json, true>(1, data_type, nullable, std::move(data)) {
     }
 
     int64_t
@@ -843,17 +903,65 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
 
 // is_type_entire_row set be true as each element in data_ is a VectorArray
 class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
+    using Base = FieldDataImpl<VectorArray, true>;
+
  public:
     explicit FieldDataVectorArrayImpl(DataType data_type,
+                                      bool nullable,
                                       int64_t total_num_rows = 0)
-        : FieldDataImpl<VectorArray, true>(
-              1, data_type, false, total_num_rows) {
+        : Base(1, data_type, nullable, total_num_rows) {
+    }
+
+    using Base::FillFieldData;
+
+    void
+    FillFieldData(const void* field_data,
+                  const uint8_t* valid_data,
+                  ssize_t total_element_count,
+                  ssize_t offset) override {
+        AssertInfo(this->nullable_, "requires nullable to be true");
+        if (total_element_count == 0) {
+            return;
+        }
+
+        int64_t valid_count = 0;
+        if (valid_data == nullptr) {
+            valid_count = total_element_count;
+        } else {
+            for (ssize_t i = 0; i < total_element_count; ++i) {
+                auto bit_pos = offset + i;
+                valid_count +=
+                    (valid_data[bit_pos >> 3] >> (bit_pos & 0x07)) & 1;
+            }
+        }
+
+        std::lock_guard lck(this->tell_mutex_);
+        resize_nullable_field_data(this->length_ + total_element_count,
+                                   this->valid_count_ + valid_count);
+        if (valid_data != nullptr) {
+            bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                valid_data,
+                offset,
+                this->valid_data_.data(),
+                this->length_,
+                total_element_count);
+        }
+        if (valid_count > 0) {
+            std::copy_n(static_cast<const VectorArray*>(field_data),
+                        valid_count,
+                        this->data_.data() + this->valid_count_);
+            this->valid_count_ += valid_count;
+        }
+        this->null_count_ += total_element_count - valid_count;
+        this->length_ += total_element_count;
     }
 
     int64_t
     DataSize() const override {
+        std::shared_lock lck(this->tell_mutex_);
+        auto count = this->nullable_ ? this->valid_count_ : this->length_;
         int64_t data_size = 0;
-        for (size_t offset = 0; offset < length(); ++offset) {
+        for (size_t offset = 0; offset < count; ++offset) {
             data_size += data_[offset].byte_size();
         }
         return data_size;
@@ -861,11 +969,46 @@ class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
 
     int64_t
     DataSize(ssize_t offset) const override {
+        auto count = this->nullable_ ? this->get_valid_rows() : length();
+        AssertInfo(offset < get_num_rows(),
+                   "field data subscript out of range");
+        AssertInfo(offset < count, "subscript position don't has valid value");
+        return data_[offset].byte_size();
+    }
+
+    int64_t
+    get_valid_rows() const override {
+        std::shared_lock lck(this->tell_mutex_);
+        if (this->nullable_) {
+            return this->valid_count_;
+        }
+        return this->length_;
+    }
+
+    bool
+    is_valid(ssize_t offset) const override {
+        std::shared_lock lck(this->tell_mutex_);
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
         AssertInfo(offset < length(),
                    "subscript position don't has valid value");
-        return data_[offset].byte_size();
+        if (!this->nullable_) {
+            return true;
+        }
+        return (this->valid_data_[offset >> 3] >> (offset & 0x07)) & 1;
+    }
+
+ private:
+    void
+    resize_nullable_field_data(int64_t num_rows, int64_t valid_count) {
+        std::lock_guard lck(this->num_rows_mutex_);
+        if (num_rows > this->num_rows_) {
+            this->num_rows_ = num_rows;
+            this->valid_data_.resize((num_rows + 7) / 8, 0xFF);
+        }
+        if (valid_count > this->valid_count_) {
+            this->data_.resize(valid_count);
+        }
     }
 };
 

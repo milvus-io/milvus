@@ -8,12 +8,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 var defaultCollectionNotFoundTolerance = 10
@@ -43,8 +43,9 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 	}
 
 	var checkpoint message.MessageID
+	walName := impl.wal.Get().WALName()
 	for _, info := range recoveryInfos {
-		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(impl.wal.Get().WALName(), info.GetInfo().GetSeekPosition().GetMsgID())
+		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(walName, info.GetInfo().GetSeekPosition().GetMsgID())
 		if checkpoint == nil || messageID.LT(checkpoint) {
 			checkpoint = messageID
 		}
@@ -89,7 +90,7 @@ func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string
 			return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 		}
 		return nil
-	}, retry.AttemptAlways())
+	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 	return resp, err
 }
 

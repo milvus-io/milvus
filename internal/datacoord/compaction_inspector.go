@@ -26,25 +26,26 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration{
-	datapb.CompactionType_MixCompaction:          30 * time.Minute,
-	datapb.CompactionType_Level0DeleteCompaction: 30 * time.Minute,
-	datapb.CompactionType_ClusteringCompaction:   60 * time.Minute,
-	datapb.CompactionType_SortCompaction:         20 * time.Minute,
+	datapb.CompactionType_MixCompaction:               30 * time.Minute,
+	datapb.CompactionType_Level0DeleteCompaction:      30 * time.Minute,
+	datapb.CompactionType_ClusteringCompaction:        60 * time.Minute,
+	datapb.CompactionType_SortCompaction:              20 * time.Minute,
+	datapb.CompactionType_BumpSchemaVersionCompaction: 30 * time.Minute,
 }
 
 type CompactionInspector interface {
@@ -178,19 +179,20 @@ func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) i
 }
 
 func newCompactionInspector(meta CompactionMeta,
-	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
+	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, analyzeScheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
 ) *compactionInspector {
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionInspector{
-		queueTasks:     NewCompactionQueue(capacity, getPrioritizer()),
-		meta:           meta,
-		allocator:      allocator,
-		stopCh:         make(chan struct{}),
-		executingTasks: make(map[int64]CompactionTask),
-		cleaningTasks:  make(map[int64]CompactionTask),
-		handler:        handler,
-		scheduler:      scheduler,
-		ievm:           ievm,
+		queueTasks:       NewCompactionQueue(capacity, getPrioritizer()),
+		meta:             meta,
+		allocator:        allocator,
+		stopCh:           make(chan struct{}),
+		executingTasks:   make(map[int64]CompactionTask),
+		cleaningTasks:    make(map[int64]CompactionTask),
+		handler:          handler,
+		scheduler:        scheduler,
+		analyzeScheduler: analyzeScheduler,
+		ievm:             ievm,
 	}
 }
 
@@ -220,7 +222,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
@@ -245,7 +247,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 
 	// The schedule loop will stop if either:
 	// 1. no more task to schedule (the task queue is empty)
-	// 2. no avaiable slots
+	// 2. no available slots
 	for {
 		t, err := c.queueTasks.Dequeue()
 		if err != nil {
@@ -261,7 +263,10 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+			// BumpSchemaVersionCompaction shares the same exclusion rules as Mix/Sort:
+			// - Channel-level mutual exclusion with L0 (L0 may write delta logs to any segment on the channel)
+			// - Label-level exclusion registered for Clustering awareness
 			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
 				continue
@@ -408,7 +413,7 @@ func (c *compactionInspector) cleanCompactionTaskMeta() {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
 				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
-				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds()) {
+				if duration > Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds() {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(context.TODO(), task)
 					log.Ctx(context.TODO()).Debug("drop compaction task meta", zap.Int64("planID", task.PlanID))
@@ -586,6 +591,8 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 		task = newL0CompactionTask(t, c.allocator, c.meta)
 	case datapb.CompactionType_ClusteringCompaction:
 		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.handler, c.analyzeScheduler)
+	case datapb.CompactionType_BumpSchemaVersionCompaction:
+		task = newBumpSchemaVersionTask(t, c.allocator, c.meta, c.ievm)
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}

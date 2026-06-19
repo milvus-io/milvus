@@ -59,6 +59,10 @@ define_option_string(MILVUS_DEPENDENCY_SOURCE
 
 define_option(MILVUS_USE_CCACHE "Use ccache when compiling (if available)" ON)
 
+define_option(MILVUS_USE_PCH "Use precompiled headers to speed up compilation" ON)
+
+define_option(MILVUS_UNITY_BUILD "Use CMake unity (jumbo) build to speed up compilation" OFF)
+
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 

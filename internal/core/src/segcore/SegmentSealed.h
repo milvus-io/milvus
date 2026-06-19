@@ -20,7 +20,7 @@
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "index/Index.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/JsonFlatIndex.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
@@ -34,7 +34,7 @@ namespace milvus::segcore {
 class SegmentSealed : public SegmentInternalInterface {
  public:
     virtual void
-    LoadIndex(const LoadIndexInfo& info) = 0;
+    LoadIndex(LoadIndexInfo& info) = 0;
     virtual void
     LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& meta) = 0;
     virtual void
@@ -57,9 +57,9 @@ class SegmentSealed : public SegmentInternalInterface {
                int64_t count) const = 0;
 
     virtual void
-    LoadTextIndex(
-        std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto,
-        milvus::OpContext* op_ctx = nullptr) = 0;
+    LoadTextIndex(milvus::OpContext* op_ctx,
+                  std::shared_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
+                      info_proto) = 0;
 
     virtual InsertRecord<true>&
     get_insert_record() = 0;
@@ -121,12 +121,53 @@ class SegmentSealed : public SegmentInternalInterface {
                 }
                 auto ca = SemiInlineGet(best_match->PinCells(op_ctx, {0}));
                 auto index = ca->get_cell_of(0);
-                return PinWrapper<const index::IndexBase*>(ca, index);
+                return PinWrapper<const index::IndexBase*>(std::move(ca),
+                                                           index);
             });
         if (res.get() == nullptr) {
             return {};
         }
         return {res};
+    }
+
+    // Mirror of the JsonFlatIndex prefix-matching loop in PinJsonIndex(),
+    // but only reads the nested_path metadata and returns it -- does not
+    // touch the CacheSlot or pin any cell. Callers can use this to decide
+    // whether a JSON query is compatible with the indexed path before
+    // committing to the ScalarIndex exec path (and paying for a pin).
+    std::string
+    GetJsonFlatIndexNestedPath(FieldId field_id,
+                               std::string_view query_path) const override {
+        return json_indices.withRLock([&](auto& vec) -> std::string {
+            std::string best_path;
+            int path_len_diff = std::numeric_limits<int>::max();
+            for (const auto& index : vec) {
+                if (index.field_id != field_id) {
+                    continue;
+                }
+                if (index.cast_type.data_type() !=
+                    JsonCastType::DataType::JSON) {
+                    continue;
+                }
+                if (query_path.length() < index.nested_path.length()) {
+                    continue;
+                }
+                if (query_path.substr(0, index.nested_path.length()) !=
+                    index.nested_path) {
+                    continue;
+                }
+                int current_len_diff =
+                    query_path.length() - index.nested_path.length();
+                if (current_len_diff < path_len_diff) {
+                    path_len_diff = current_len_diff;
+                    best_path = index.nested_path;
+                }
+                if (path_len_diff == 0) {
+                    break;
+                }
+            }
+            return best_path;
+        });
     }
 
     virtual PinWrapper<index::NgramInvertedIndex*>

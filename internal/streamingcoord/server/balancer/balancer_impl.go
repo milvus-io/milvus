@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
@@ -16,38 +15,42 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
 	versionChecker260 = "<2.6.0-dev"
 	versionChecker265 = "<2.6.6-dev"
+	versionChecker300 = "<3.0.0-beta"
 )
+
+// errVersionWatchDone is an INTERNAL break-signal sentinel used by
+// blockUntilRoleGreaterThanVersion to exit the resolver watch callback.
+// Never crosses any gRPC boundary.
+var errVersionWatchDone = errors.New("done")
 
 // RecoverBalancer recover the balancer working.
 func RecoverBalancer(
 	ctx context.Context,
-	incomingNewChannel ...string, // Concurrent incoming new channel directly from the configuration.
-	// we should add a rpc interface for creating new incoming new channel.
+	provider ChannelProvider,
 ) (Balancer, error) {
-	sort.Strings(incomingNewChannel)
-
 	policyBuilder := mustGetPolicy(paramtable.Get().StreamingCfg.WALBalancerPolicyName.GetValue())
 	policy := policyBuilder.Build()
 	logger := resource.Resource().Logger().With(log.FieldComponent("balancer"), zap.String("policy", policyBuilder.Name()))
 	policy.SetLogger(logger)
 
 	// Recover the channel view from catalog.
-	manager, err := channel.RecoverChannelManager(ctx, incomingNewChannel...)
+	manager, err := channel.RecoverChannelManager(ctx, provider.GetInitialChannels()...)
 	if err != nil {
-		return nil, errors.Wrap(err, "fail to recover channel manager")
+		return nil, merr.Wrap(err, "fail to recover channel manager")
 	}
 	manager.SetLogger(resource.Resource().Logger().With(log.FieldComponent("channel-manager")))
 	ctx, cancel := context.WithCancelCause(context.Background())
@@ -55,11 +58,12 @@ func RecoverBalancer(
 		ctx:                    ctx,
 		cancel:                 cancel,
 		lifetime:               typeutil.NewLifetime(),
+		provider:               provider,
 		channelMetaManager:     manager,
 		policy:                 policy,
 		reqCh:                  make(chan *request, 5),
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
-		freezeNodes:            typeutil.NewSet[int64](),
+		freezeNodes:            typeutil.NewConcurrentSet[int64](),
 	}
 	b.SetLogger(logger)
 	ready260Future, err := b.checkIfAllNodeGreaterThan260AndWatch(ctx)
@@ -77,11 +81,12 @@ type balancerImpl struct {
 	ctx                    context.Context
 	cancel                 context.CancelCauseFunc
 	lifetime               *typeutil.Lifetime
+	provider               ChannelProvider
 	channelMetaManager     *channel.ChannelManager
 	policy                 Policy                                // policy is the balance policy, TODO: should be dynamic in future.
 	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
-	freezeNodes            typeutil.Set[int64]                   // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
+	freezeNodes            *typeutil.ConcurrentSet[int64]        // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 
 	fileResourceChecker FileResourceChecker
 	checkerMu           sync.RWMutex
@@ -118,9 +123,65 @@ func (b *balancerImpl) ReplicateRole() replicateutil.Role {
 	return b.channelMetaManager.ReplicateRole()
 }
 
-// GetAllStreamingNodes fetches all streaming node info.
-func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+// GetAllStreamingNodes fetches all streaming node info with resource group (including frozen nodes).
+func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
 	return resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+}
+
+// GetAvailableStreamingNodes fetches streaming node info with resource group excluding frozen nodes.
+func (b *balancerImpl) GetAvailableStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
+	nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make(map[int64]*types.StreamingNodeInfoWithResourceGroup, len(nodes))
+	for nodeID, info := range nodes {
+		if !b.freezeNodes.Contain(nodeID) {
+			filtered[nodeID] = info
+		}
+	}
+	return filtered, nil
+}
+
+// ConfirmPrimaryResourceGroupReady returns nil iff every RW pchannel is currently
+// assigned to a streaming node that belongs to the configured primary resource group.
+// If streaming.primaryResourceGroup is not configured, returns nil.
+func (b *balancerImpl) ConfirmPrimaryResourceGroupReady(ctx context.Context) error {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("balancer is closing")
+	}
+	defer b.lifetime.Done()
+
+	primaryRG := paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()
+	if primaryRG == "" {
+		return nil
+	}
+	nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+	if err != nil {
+		return err
+	}
+	assignment, err := b.channelMetaManager.GetLatestChannelAssignment()
+	if err != nil {
+		return err
+	}
+	for _, rel := range assignment.Relations {
+		// Only RW pchannels carry WAL writes; RO pchannels (e.g., CDC source) are
+		// not constrained by the local primary RG.
+		if rel.Channel.AccessMode != types.AccessModeRW {
+			continue
+		}
+		node, ok := nodes[rel.Node.ServerID]
+		if !ok {
+			return status.NewInner("pchannel %s: assigned node %d not found in streaming nodes",
+				rel.Channel.Name, rel.Node.ServerID)
+		}
+		if node.ResourceGroup != primaryRG {
+			return status.NewInner("pchannel %s still on rg=%s, expected primary rg=%s (WAL migration in progress)",
+				rel.Channel.Name, node.ResourceGroup, primaryRG)
+		}
+	}
+	return nil
 }
 
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
@@ -130,7 +191,7 @@ func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string)
 
 // WaitUntilWALbasedDDLReady waits until the WAL based DDL is ready.
 func (b *balancerImpl) WaitUntilWALbasedDDLReady(ctx context.Context) error {
-	if b.channelMetaManager.IsWALBasedDDLEnabled() {
+	if b.channelMetaManager.IsStreamingVersionAtLeast(channel.StreamingVersion265) {
 		return nil
 	}
 	if err := b.channelMetaManager.WaitUntilStreamingEnabled(ctx); err != nil {
@@ -139,7 +200,22 @@ func (b *balancerImpl) WaitUntilWALbasedDDLReady(ctx context.Context) error {
 	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.StreamingNodeRole, versionChecker265); err != nil {
 		return err
 	}
-	return b.channelMetaManager.MarkWALBasedDDLEnabled(ctx)
+	return b.channelMetaManager.MarkStreamingVersion(ctx, channel.StreamingVersion265)
+}
+
+// WaitUntilSchemaDropReady waits until every Proxy can attach schema version
+// to insert messages, so schema-drop DDL cannot race with legacy writes.
+func (b *balancerImpl) WaitUntilSchemaDropReady(ctx context.Context) error {
+	if b.channelMetaManager.IsStreamingVersionAtLeast(channel.StreamingVersion300) {
+		return nil
+	}
+	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+		return err
+	}
+	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.ProxyRole, versionChecker300); err != nil {
+		return err
+	}
+	return b.channelMetaManager.MarkStreamingVersion(ctx, channel.StreamingVersion300)
 }
 
 // WatchChannelAssignments watches the balance result.
@@ -231,6 +307,7 @@ func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *req
 // Close close the balancer.
 func (b *balancerImpl) Close() {
 	b.lifetime.SetState(typeutil.LifetimeStateStopped)
+	b.provider.Close()
 	// cancel all watch opeartion by context.
 	b.cancel(ErrBalancerClosed)
 	b.lifetime.Wait()
@@ -301,6 +378,14 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 		case <-channelChanged.WaitChan():
 			// balance triggered by channel changed.
 			channelChanged.Sync()
+		case newChannels, ok := <-b.provider.NewIncomingChannels():
+			if !ok {
+				return
+			}
+			if err := b.channelMetaManager.AddPChannels(b.backgroundTaskNotifier.Context(), newChannels); err != nil {
+				b.Logger().Warn("failed to add dynamic channels", zap.Error(err), zap.Strings("channels", newChannels))
+			}
+			// new pchannels added dynamically, trigger rebalance
 		}
 		if err := b.balanceUntilNoChanged(b.backgroundTaskNotifier.Context()); err != nil {
 			if b.backgroundTaskNotifier.Context().Err() != nil {
@@ -416,9 +501,8 @@ func (b *balancerImpl) blockUntilExpectedInitialStreamingNodeNumReached(ctx cont
 	}
 }
 
-// blockUntilRoleGreaterThanVersion block until the role is greater than 2.6.0 at background.
+// blockUntilRoleGreaterThanVersion blocks until every session of the role is outside versionChecker.
 func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, role string, versionChecker string) error {
-	doneErr := errors.New("done")
 	logger := b.Logger().With(zap.String("role", role))
 	logger.Info("start to wait that the nodes is greater than version", zap.String("version", versionChecker))
 	// Check if there's any proxy or data node with version < 2.6.0.
@@ -430,12 +514,12 @@ func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, rol
 	r := rb.Resolver()
 	err := r.Watch(ctx, func(vs resolver.VersionedState) error {
 		if len(vs.Sessions()) == 0 {
-			return doneErr
+			return errVersionWatchDone
 		}
 		logger.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
 		return nil
 	})
-	if err != nil && !errors.Is(err, doneErr) {
+	if err != nil && !errors.Is(err, errVersionWatchDone) {
 		logger.Info("fail to wait that the nodes is greater than version", zap.String("version", versionChecker), zap.Error(err))
 		return err
 	}
@@ -475,8 +559,9 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	b.Logger().Info("start to balance")
 	pchannelView := b.channelMetaManager.CurrentPChannelsView()
 
-	b.Logger().Info("collect all status...")
-	nodeStatus, err := b.fetchStreamingNodeStatus(ctx)
+	rgName := paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()
+	b.Logger().Info("collect all status...", zap.String("resourceGroupHint", rgName))
+	nodeStatus, err := b.fetchStreamingNodeStatus(ctx, rgName)
 	if err != nil {
 		return false, err
 	}
@@ -489,14 +574,14 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	currentLayout := generateCurrentLayout(pchannelView, nodeStatus, accessMode)
 	expectedLayout, err := b.policy.Balance(currentLayout)
 	if err != nil {
-		return false, errors.Wrap(err, "fail to balance")
+		return false, merr.Wrap(err, "fail to balance")
 	}
 
 	b.Logger().Info("balance policy generate result success, try to assign...", zap.Stringer("expectedLayout", expectedLayout))
 	// bookkeeping the meta assignment started.
 	modifiedChannels, err := b.channelMetaManager.AssignPChannels(ctx, expectedLayout.ChannelAssignment)
 	if err != nil {
-		return false, errors.Wrap(err, "fail to assign pchannels")
+		return false, merr.Wrap(err, "fail to assign pchannels")
 	}
 
 	if len(modifiedChannels) == 0 {
@@ -507,10 +592,10 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 }
 
 // fetchStreamingNodeStatus fetch the streaming node status.
-func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
-	nodeStatus, err := resource.Resource().StreamingNodeManagerClient().CollectAllStatus(ctx)
+func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName string) (map[int64]*types.StreamingNodeStatus, error) {
+	nodeStatus, err := resource.Resource().StreamingNodeManagerClient().CollectAllStatus(ctx, rgName)
 	if err != nil {
-		return nil, errors.Wrap(err, "fail to collect all status")
+		return nil, merr.Wrap(err, "fail to collect all status")
 	}
 
 	// mark the frozen node as frozen in the node status.
@@ -530,12 +615,13 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context) (map[int64]
 	}
 
 	// clean up the freeze node that has been removed from session.
-	for serverID := range b.freezeNodes {
+	b.freezeNodes.Range(func(serverID int64) bool {
 		if _, ok := nodeStatus[serverID]; !ok {
 			b.Logger().Info("freeze node has been removed from session", zap.Int64("serverID", serverID))
 			b.freezeNodes.Remove(serverID)
 		}
-	}
+		return true
+	})
 	return nodeStatus, nil
 }
 

@@ -27,9 +27,9 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
@@ -60,12 +60,14 @@ type searchOption struct {
 	collectionName             string
 	partitionNames             []string
 	outputFields               []string
+	searchAggregation          *SearchAggregation
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
 }
 
 type AnnRequest struct {
 	vectors []entity.Vector
+	ids     column.Column // Primary key IDs for search by ID
 
 	annField        string
 	metricsType     entity.MetricType
@@ -95,19 +97,39 @@ func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnReq
 
 func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 	request := &milvuspb.SearchRequest{
-		Nq:      int64(len(r.vectors)),
 		Dsl:     r.expr,
 		DslType: commonpb.DslType_BoolExprV1,
 	}
 
-	var err error
-	// placeholder group
-	placeHolderGroupBytes, err := vector2PlaceholderGroupBytes(r.vectors)
-	if err != nil {
-		return nil, err
-	}
-	request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
-		PlaceholderGroup: placeHolderGroupBytes,
+	// Determine search mode and build request accordingly
+	if r.ids != nil {
+		// Search by primary key IDs mode
+		if r.ids.Len() == 0 {
+			return nil, errors.New("IDs column for search cannot be empty")
+		}
+
+		request.Nq = int64(r.ids.Len())
+
+		// Convert IDs to protobuf format
+		pbIDs, err := column2IDs(r.ids)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to convert IDs column")
+		}
+		request.SearchInput = &milvuspb.SearchRequest_Ids{
+			Ids: pbIDs,
+		}
+	} else {
+		// Traditional search by vectors mode
+		request.Nq = int64(len(r.vectors))
+
+		// Convert vectors to placeholder group
+		placeHolderGroupBytes, err := vector2PlaceholderGroupBytes(r.vectors)
+		if err != nil {
+			return nil, err
+		}
+		request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: placeHolderGroupBytes,
+		}
 	}
 
 	params := map[string]string{
@@ -244,6 +266,15 @@ func (r *AnnRequest) WithANNSField(annsField string) *AnnRequest {
 	return r
 }
 
+// WithIDs sets the primary key IDs for search by ID functionality.
+// When IDs are provided, the search will use these IDs to fetch vectors
+// internally and perform ANN search with those vectors.
+// Note: vectors field will be ignored when IDs are set.
+func (r *AnnRequest) WithIDs(ids column.Column) *AnnRequest {
+	r.ids = ids
+	return r
+}
+
 func (r *AnnRequest) WithGroupByField(groupByField string) *AnnRequest {
 	r.groupByField = groupByField
 	return r
@@ -305,6 +336,28 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	request.ConsistencyLevel = commonpb.ConsistencyLevel(opt.consistencyLevel)
 	request.UseDefaultConsistency = opt.useDefaultConsistencyLevel
 	request.OutputFields = opt.outputFields
+	if opt.searchAggregation != nil {
+		if opt.annRequest.groupByField != "" || opt.annRequest.groupSize != 0 || opt.annRequest.strictGroupSize {
+			return nil, errors.New("search_aggregation and group_by_field/group_size are mutually exclusive")
+		}
+		if opt.annRequest.offset > 0 {
+			return nil, errors.New("offset is not supported with search_aggregation")
+		}
+		if rawOffset := strings.TrimSpace(opt.annRequest.searchParam[spOffset]); rawOffset != "" && rawOffset != "0" {
+			return nil, errors.New("offset is not supported with search_aggregation")
+		}
+		if strings.TrimSpace(opt.annRequest.searchParam[spGroupBy]) != "" {
+			return nil, errors.New("group_by_field and search_aggregation cannot be used simultaneously")
+		}
+		if strings.TrimSpace(opt.annRequest.searchParam["group_by_fields"]) != "" {
+			return nil, errors.New("group_by_fields and search_aggregation cannot be used simultaneously")
+		}
+		searchAggregation, err := opt.searchAggregation.protoMessage()
+		if err != nil {
+			return nil, err
+		}
+		request.SearchAggregation = searchAggregation
+	}
 
 	return request, nil
 }
@@ -375,11 +428,19 @@ func (opt *searchOption) WithSearchParam(key, value string) *searchOption {
 	return opt
 }
 
+func (opt *searchOption) WithSearchAggregation(agg *SearchAggregation) *searchOption {
+	opt.searchAggregation = agg
+	return opt
+}
+
 func (opt *searchOption) WithFunctionReranker(fr *entity.Function) *searchOption {
 	opt.annRequest.WithFunctionReranker(fr)
 	return opt
 }
 
+// NewSearchOption creates a new search option for traditional vector search.
+// Provide the query vectors to search for similar vectors in the collection.
+// For search by primary key IDs, use NewSearchByIDsOption instead.
 func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) *searchOption {
 	return &searchOption{
 		annRequest:                 NewAnnRequest("", limit, vectors...),
@@ -387,6 +448,15 @@ func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) 
 		useDefaultConsistencyLevel: true,
 		consistencyLevel:           entity.ClBounded,
 	}
+}
+
+// NewSearchByIDsOption creates a new search option for searching by primary key IDs.
+// When using this option, the search will use the provided IDs to fetch vectors
+// internally and perform ANN search with those vectors.
+func NewSearchByIDsOption(collectionName string, limit int, ids column.Column) *searchOption {
+	opt := NewSearchOption(collectionName, limit, nil)
+	opt.annRequest.WithIDs(ids)
+	return opt
 }
 
 func vector2PlaceholderGroupBytes(vectors []entity.Vector) ([]byte, error) {
@@ -428,6 +498,16 @@ func vector2Placeholder(vectors []entity.Vector) (*commonpb.PlaceholderValue, er
 		placeHolderType = commonpb.PlaceholderType_Int8Vector
 	case entity.Text:
 		placeHolderType = commonpb.PlaceholderType_VarChar
+	case entity.FloatVectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListFloatVector
+	case entity.Float16VectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListFloat16Vector
+	case entity.BFloat16VectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListBFloat16Vector
+	case entity.BinaryVectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListBinaryVector
+	case entity.Int8VectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListInt8Vector
 	default:
 		return nil, errors.Newf("unsupported search data type: %T", vectors[0])
 	}
@@ -642,6 +722,36 @@ func pks2Expr(ids column.Column) string {
 		expr = fmt.Sprintf("%s in [%s]", pkName, strings.Join(data, ","))
 	}
 	return expr
+}
+
+// column2IDs converts a column.Column of primary keys to schemapb.IDs
+// Used for search by primary key functionality
+func column2IDs(ids column.Column) (*schemapb.IDs, error) {
+	if ids == nil {
+		return nil, errors.New("ids column cannot be nil")
+	}
+
+	result := &schemapb.IDs{}
+	switch ids.Type() {
+	case entity.FieldTypeInt64:
+		data := ids.FieldData().GetScalars().GetLongData().GetData()
+		result.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: data,
+			},
+		}
+	case entity.FieldTypeVarChar, entity.FieldTypeString:
+		data := ids.FieldData().GetScalars().GetStringData().GetData()
+		result.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: data,
+			},
+		}
+	default:
+		return nil, fmt.Errorf("unsupported primary key type %v for search by IDs", ids.Type())
+	}
+
+	return result, nil
 }
 
 func NewQueryOption(collectionName string) *queryOption {

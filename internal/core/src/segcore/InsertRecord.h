@@ -12,16 +12,20 @@
 #pragma once
 
 #include <algorithm>
+#include <numeric>
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "TimestampData.h"
 #include "TimestampIndex.h"
+#include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/TrackingStdAllocator.h"
@@ -29,6 +33,7 @@
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
+#include <tuple>
 #include <type_traits>
 
 namespace milvus::segcore {
@@ -40,6 +45,202 @@ constexpr int64_t NoLimit = 0;
 constexpr int64_t BruteForceSelectivity = 10;
 
 using Condition = std::function<bool(int64_t)>;
+
+// Compressed storage for offset -> int64 PK reverse lookup.
+// Uses global base + per-block base + bitpacked deltas.
+// Block size = 128, O(1) random access within each block.
+// Each block stores deltas with a uniform bit width (max bits needed in that block).
+class CompressedInt64PkArray {
+ public:
+    static constexpr int64_t kBlockSize = 128;
+
+    CompressedInt64PkArray() = default;
+
+    void
+    build(const int64_t* pks, int64_t num_rows) {
+        if (num_rows == 0) {
+            return;
+        }
+        num_rows_ = num_rows;
+
+        // Find global minimum as base
+        base_ = pks[0];
+        for (int64_t i = 1; i < num_rows; ++i) {
+            if (pks[i] < base_) {
+                base_ = pks[i];
+            }
+        }
+
+        // Calculate number of blocks
+        int64_t num_blocks = (num_rows + kBlockSize - 1) / kBlockSize;
+        block_bit_widths_.reserve(num_blocks);
+        block_offsets_.reserve(num_blocks);
+        block_bases_.reserve(num_blocks);
+
+        for (int64_t block_id = 0; block_id < num_blocks; ++block_id) {
+            int64_t block_start = block_id * kBlockSize;
+            int64_t block_end = std::min(block_start + kBlockSize, num_rows);
+            int64_t block_count = block_end - block_start;
+
+            // Find block minimum
+            int64_t block_min = pks[block_start];
+            for (int64_t i = block_start + 1; i < block_end; ++i) {
+                if (pks[i] < block_min) {
+                    block_min = pks[i];
+                }
+            }
+
+            // Find max delta to determine bit width
+            uint64_t max_delta = 0;
+            for (int64_t i = block_start; i < block_end; ++i) {
+                uint64_t delta = static_cast<uint64_t>(pks[i] - block_min);
+                if (delta > max_delta) {
+                    max_delta = delta;
+                }
+            }
+
+            uint8_t bits = bit_width(max_delta);
+            block_bases_.push_back(static_cast<uint64_t>(block_min - base_));
+            block_bit_widths_.push_back(bits);
+            block_offsets_.push_back(static_cast<uint32_t>(data_.size()));
+
+            // Pack deltas with uniform bit width
+            if (bits == 0) {
+                // All values identical in this block, no data needed
+            } else {
+                // Number of bytes needed: ceil(block_count * bits / 8)
+                size_t num_bytes =
+                    (static_cast<size_t>(block_count) * bits + 7) / 8;
+                size_t data_start = data_.size();
+                data_.resize(data_start + num_bytes, 0);
+
+                for (int64_t i = 0; i < block_count; ++i) {
+                    uint64_t delta =
+                        static_cast<uint64_t>(pks[block_start + i] - block_min);
+                    pack_value(data_start, i, bits, delta);
+                }
+            }
+        }
+
+        // Shrink to fit
+        data_.shrink_to_fit();
+        block_offsets_.shrink_to_fit();
+        block_bases_.shrink_to_fit();
+        block_bit_widths_.shrink_to_fit();
+    }
+
+    int64_t
+    at(int64_t offset) const {
+        AssertInfo(offset >= 0 && offset < num_rows_,
+                   "offset out of range: {} not in [0, {})",
+                   offset,
+                   num_rows_);
+
+        int64_t block_id = offset / kBlockSize;
+        int64_t idx_in_block = offset % kBlockSize;
+        uint8_t bits = block_bit_widths_[block_id];
+
+        uint64_t delta = 0;
+        if (bits > 0) {
+            delta = unpack_value(block_offsets_[block_id], idx_in_block, bits);
+        }
+
+        return base_ + static_cast<int64_t>(block_bases_[block_id]) +
+               static_cast<int64_t>(delta);
+    }
+
+    void
+    bulk_at(const int64_t* offsets, int64_t count, int64_t* output) const {
+        for (int64_t i = 0; i < count; ++i) {
+            output[i] = at(offsets[i]);
+        }
+    }
+
+    size_t
+    memory_size() const {
+        return sizeof(*this) + data_.capacity() +
+               block_offsets_.capacity() * sizeof(uint32_t) +
+               block_bases_.capacity() * sizeof(uint64_t) +
+               block_bit_widths_.capacity() * sizeof(uint8_t);
+    }
+
+    int64_t
+    num_rows() const {
+        return num_rows_;
+    }
+
+    bool
+    empty() const {
+        return num_rows_ == 0;
+    }
+
+ private:
+    static uint8_t
+    bit_width(uint64_t max_val) {
+        if (max_val == 0) {
+            return 0;
+        }
+        return static_cast<uint8_t>(64 - __builtin_clzll(max_val));
+    }
+
+    void
+    pack_value(size_t data_start, int64_t idx, uint8_t bits, uint64_t value) {
+        uint64_t bit_offset = static_cast<uint64_t>(idx) * bits;
+        size_t byte_offset = data_start + bit_offset / 8;
+        unsigned bit_shift = bit_offset % 8;
+
+        // Low 64 bits of (value << bit_shift)
+        uint64_t lo = value << bit_shift;
+        for (unsigned b = 0; b < 8 && byte_offset + b < data_.size(); ++b) {
+            data_[byte_offset + b] |= static_cast<uint8_t>(lo >> (b * 8));
+        }
+        // High bits that overflowed past 64-bit boundary
+        if (bit_shift > 0 && bit_shift + bits > 64) {
+            uint64_t hi = value >> (64 - bit_shift);
+            for (unsigned b = 0; byte_offset + 8 + b < data_.size() && b < 8;
+                 ++b) {
+                data_[byte_offset + 8 + b] |=
+                    static_cast<uint8_t>(hi >> (b * 8));
+            }
+        }
+    }
+
+    uint64_t
+    unpack_value(uint32_t block_data_offset, int64_t idx, uint8_t bits) const {
+        uint64_t bit_offset = static_cast<uint64_t>(idx) * bits;
+        size_t byte_offset = block_data_offset + bit_offset / 8;
+        unsigned bit_shift = bit_offset % 8;
+
+        // Read low 8 bytes
+        uint64_t lo = 0;
+        for (unsigned b = 0; b < 8 && byte_offset + b < data_.size(); ++b) {
+            lo |= static_cast<uint64_t>(data_[byte_offset + b]) << (b * 8);
+        }
+        uint64_t result = lo >> bit_shift;
+
+        // Read high bytes if crossing 64-bit boundary
+        if (bit_shift > 0 && bit_shift + bits > 64) {
+            uint64_t hi = 0;
+            for (unsigned b = 0; byte_offset + 8 + b < data_.size() && b < 8;
+                 ++b) {
+                hi |= static_cast<uint64_t>(data_[byte_offset + 8 + b])
+                      << (b * 8);
+            }
+            result |= hi << (64 - bit_shift);
+        }
+
+        uint64_t mask = (bits == 64) ? ~uint64_t(0) : (uint64_t(1) << bits) - 1;
+        return result & mask;
+    }
+
+ private:
+    int64_t base_ = 0;  // Global minimum PK
+    int64_t num_rows_ = 0;
+    std::vector<uint32_t> block_offsets_;  // Byte offset of each block in data_
+    std::vector<uint64_t> block_bases_;    // Block base relative to global base
+    std::vector<uint8_t> block_bit_widths_;  // Bit width per block
+    std::vector<uint8_t> data_;              // Bitpacked deltas
+};
 
 class OffsetMap {
  public:
@@ -69,13 +270,36 @@ class OffsetMap {
     using OffsetType = int64_t;
     // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetTypeView& bitset) const = 0;
+    find_first_n(int64_t limit, const BitsetTypeView& bitset) const = 0;
+
+    // Element-level version of find_first_n.
+    // Find first N elements that pass filter, ordered by PK then element_index.
+    // Returns:
+    //   - vector of unique doc_offsets (no duplicates)
+    //   - vector of element_indices per doc (element_indices[i] for doc_offsets[i])
+    //   - has_more flag indicating if there are more results
+    virtual std::
+        tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+        find_first_n_element(
+            int64_t limit,
+            const BitsetTypeView& element_bitset,
+            const IArrayOffsets* array_offsets,
+            const std::optional<QueryIteratorCursor>& cursor) const = 0;
 
     virtual void
     clear() = 0;
 
     virtual size_t
     memory_size() const = 0;
+
+    // Returns true if the implementation stores nothing per-row (e.g.
+    // VirtualPKOffsetMap derives pk→offset via bit-extract). Callers that
+    // fall back to full pk-column scans (GetAllChunks + two-pointers) can
+    // short-circuit to find_range() when this is true — O(M) not O(M+N).
+    virtual bool
+    is_zero_storage() const {
+        return false;
+    }
 };
 
 template <typename T>
@@ -184,7 +408,7 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetTypeView& bitset) const override {
+    find_first_n(int64_t limit, const BitsetTypeView& bitset) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -193,7 +417,23 @@ class OffsetOrderedMap : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, bitset);
+        return find_first_n_by_index(limit, bitset);
+    }
+
+    std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+    find_first_n_element(
+        int64_t limit,
+        const BitsetTypeView& element_bitset,
+        const IArrayOffsets* array_offsets,
+        const std::optional<QueryIteratorCursor>& cursor) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+
+        if (limit == Unlimited || limit == NoLimit) {
+            limit = static_cast<int64_t>(element_bitset.size());
+        }
+
+        return find_first_n_element_by_index(
+            limit, element_bitset, array_offsets, cursor);
     }
 
     void
@@ -210,10 +450,11 @@ class OffsetOrderedMap : public OffsetMap {
 
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_by_index(int64_t limit, const BitsetTypeView& bitset) const {
+    find_first_n_by_index(int64_t limit, const BitsetTypeView& bitset) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto size = bitset.size();
         int64_t cnt = size - bitset.count();
+        auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
@@ -236,7 +477,96 @@ class OffsetOrderedMap : public OffsetMap {
                 }
             }
         }
-        return {seg_offsets, it != map_.end()};
+        return {seg_offsets, more_hit_than_limit && it != map_.end()};
+    }
+
+    std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+    find_first_n_element_by_index(
+        int64_t limit,
+        const BitsetTypeView& element_bitset,
+        const IArrayOffsets* array_offsets,
+        const std::optional<QueryIteratorCursor>& cursor) const {
+        std::vector<int64_t> doc_offsets;
+        std::vector<std::vector<int32_t>> element_indices;
+
+        int64_t hit_num = 0;
+        auto element_size = static_cast<int64_t>(element_bitset.size());
+        // Clamp limit to the actual number of matching elements,
+        // same as find_first_n_by_index does for doc-level queries.
+        int64_t cnt = element_size - element_bitset.count();
+        auto more_hit_than_limit = cnt > limit;
+        limit = std::min(limit, cnt);
+
+        // Traverse map_ in PK order
+        std::vector<int32_t> matching_indices;
+        auto it = map_.begin();
+        for (; hit_num < limit && it != map_.end(); ++it) {
+            // For each PK, traverse from back to front to obtain the latest offset.
+            // Same as find_first_n_by_index: only use the first (newest) offset
+            // that has matching elements, then break to avoid returning stale versions.
+            for (int i = it->second.size() - 1; i >= 0 && hit_num < limit;
+                 --i) {
+                auto doc_offset = it->second[i];
+
+                // Get element range for this doc
+                auto [first_elem, last_elem] =
+                    array_offsets->ElementIDRangeOfRow(doc_offset);
+
+                // Collect all matching element indices for this doc
+                matching_indices.clear();
+                for (int64_t elem_id = first_elem;
+                     elem_id < last_elem && hit_num < limit;
+                     ++elem_id) {
+                    if (elem_id >= element_size) {
+                        continue;
+                    }
+                    if (is_skipped_by_cursor(
+                            it->first, elem_id - first_elem, cursor)) {
+                        continue;
+                    }
+                    if (!element_bitset[elem_id]) {  // 0 means pass filter
+                        matching_indices.push_back(
+                            static_cast<int32_t>(elem_id - first_elem));
+                        hit_num++;
+                    }
+                }
+
+                // Only add doc if it has matching elements
+                if (!matching_indices.empty()) {
+                    doc_offsets.push_back(doc_offset);
+                    element_indices.push_back(std::move(matching_indices));
+                    // PK hit, no need to continue traversing older offsets with the same PK.
+                    break;
+                }
+                if (is_cursor_pk(it->first, cursor)) {
+                    // The cursor applies to the newest visible row for this PK.
+                    // Do not fall through to older offsets of the same PK.
+                    break;
+                }
+            }
+        }
+
+        bool has_more = more_hit_than_limit && hit_num >= limit;
+        return {std::move(doc_offsets), std::move(element_indices), has_more};
+    }
+
+    bool
+    is_skipped_by_cursor(
+        const T& pk,
+        int64_t element_offset,
+        const std::optional<QueryIteratorCursor>& cursor) const {
+        return is_cursor_pk(pk, cursor) &&
+               element_offset <= cursor->last_element_offset;
+    }
+
+    bool
+    is_cursor_pk(const T& pk,
+                 const std::optional<QueryIteratorCursor>& cursor) const {
+        if (!cursor.has_value()) {
+            return false;
+        }
+        auto last_pk = std::get_if<T>(&cursor->last_pk);
+        return last_pk != nullptr && *last_pk == pk;
     }
 
  private:
@@ -364,7 +694,7 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetTypeView& bitset) const override {
+    find_first_n(int64_t limit, const BitsetTypeView& bitset) const override {
         check_search();
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -373,7 +703,23 @@ class OffsetOrderedArray : public OffsetMap {
 
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
-        return find_first_by_index(limit, bitset);
+        return find_first_n_by_index(limit, bitset);
+    }
+
+    std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+    find_first_n_element(
+        int64_t limit,
+        const BitsetTypeView& element_bitset,
+        const IArrayOffsets* array_offsets,
+        const std::optional<QueryIteratorCursor>& cursor) const override {
+        check_search();
+
+        if (limit == Unlimited || limit == NoLimit) {
+            limit = static_cast<int64_t>(element_bitset.size());
+        }
+
+        return find_first_n_element_by_index(
+            limit, element_bitset, array_offsets, cursor);
     }
 
     void
@@ -389,7 +735,7 @@ class OffsetOrderedArray : public OffsetMap {
 
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_by_index(int64_t limit, const BitsetTypeView& bitset) const {
+    find_first_n_by_index(int64_t limit, const BitsetTypeView& bitset) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto size = bitset.size();
         int64_t cnt = size - bitset.count();
@@ -413,6 +759,76 @@ class OffsetOrderedArray : public OffsetMap {
         return {seg_offsets, more_hit_than_limit && it != array_.end()};
     }
 
+    std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+    find_first_n_element_by_index(
+        int64_t limit,
+        const BitsetTypeView& element_bitset,
+        const IArrayOffsets* array_offsets,
+        const std::optional<QueryIteratorCursor>& cursor) const {
+        std::vector<int64_t> doc_offsets;
+        std::vector<std::vector<int32_t>> element_indices;
+
+        int64_t hit_num = 0;
+        auto element_size = static_cast<int64_t>(element_bitset.size());
+        // Clamp limit to the actual number of matching elements,
+        // same as find_first_n_by_index does for doc-level queries.
+        int64_t cnt = element_size - element_bitset.count();
+        auto more_hit_than_limit = cnt > limit;
+        limit = std::min(limit, cnt);
+
+        // Traverse array_ in PK order (already sorted)
+        std::vector<int32_t> matching_indices;
+        auto it = array_.begin();
+        for (; hit_num < limit && it != array_.end(); ++it) {
+            auto doc_offset = it->second;
+
+            // Get element range for this doc
+            auto [first_elem, last_elem] =
+                array_offsets->ElementIDRangeOfRow(doc_offset);
+
+            // Collect all matching element indices for this doc
+            matching_indices.clear();
+            for (int64_t elem_id = first_elem;
+                 elem_id < last_elem && hit_num < limit;
+                 ++elem_id) {
+                if (elem_id >= element_size) {
+                    continue;
+                }
+                if (is_skipped_by_cursor(
+                        it->first, elem_id - first_elem, cursor)) {
+                    continue;
+                }
+                if (!element_bitset[elem_id]) {  // 0 means pass filter
+                    matching_indices.push_back(
+                        static_cast<int32_t>(elem_id - first_elem));
+                    hit_num++;
+                }
+            }
+
+            // Only add doc if it has matching elements
+            if (!matching_indices.empty()) {
+                doc_offsets.push_back(doc_offset);
+                element_indices.push_back(std::move(matching_indices));
+            }
+        }
+
+        bool has_more = more_hit_than_limit && hit_num >= limit;
+        return {std::move(doc_offsets), std::move(element_indices), has_more};
+    }
+
+    bool
+    is_skipped_by_cursor(
+        const T& pk,
+        int64_t element_offset,
+        const std::optional<QueryIteratorCursor>& cursor) const {
+        if (!cursor.has_value()) {
+            return false;
+        }
+        auto last_pk = std::get_if<T>(&cursor->last_pk);
+        return last_pk != nullptr && *last_pk == pk &&
+               element_offset <= cursor->last_element_offset;
+    }
+
     void
     check_search() const {
         AssertInfo(is_sealed,
@@ -424,14 +840,220 @@ class OffsetOrderedArray : public OffsetMap {
     std::vector<std::pair<T, int32_t>> array_;
 };
 
+// VirtualPKOffsetMap is a zero-storage OffsetMap for external collections.
+// Virtual PK = (truncated_segment_id << 32) | offset, so pk→offset is a
+// simple bit-extract: offset = pk & 0xFFFFFFFF. No data structure needed.
+// This replaces OffsetOrderedArray for external tables, saving ~17 GB for
+// 1B rows (which would otherwise store 1B (pk, offset) pairs).
+class VirtualPKOffsetMap : public OffsetMap {
+ public:
+    explicit VirtualPKOffsetMap(int64_t segment_id, int64_t num_rows)
+        : truncated_segment_id_(segment_id & 0xFFFFFFFF),
+          shifted_segment_id_(truncated_segment_id_ << 32),
+          num_rows_(num_rows) {
+    }
+
+    bool
+    contain(const PkType& pk) const override {
+        int64_t vpk = std::get<int64_t>(pk);
+        int64_t seg = static_cast<int64_t>(static_cast<uint64_t>(vpk) >> 32);
+        if (seg != truncated_segment_id_)
+            return false;
+        int64_t offset = vpk & 0xFFFFFFFF;
+        return offset >= 0 && offset < num_rows_;
+    }
+
+    std::vector<int64_t>
+    find(const PkType& pk) const override {
+        int64_t vpk = std::get<int64_t>(pk);
+        int64_t seg = static_cast<int64_t>(static_cast<uint64_t>(vpk) >> 32);
+        if (seg != truncated_segment_id_)
+            return {};
+        int64_t offset = vpk & 0xFFFFFFFF;
+        if (offset >= 0 && offset < num_rows_)
+            return {offset};
+        return {};
+    }
+
+    void
+    find_range(const PkType& pk,
+               proto::plan::OpType op,
+               BitsetTypeView& bitset,
+               Condition condition) const override {
+        int64_t target = std::get<int64_t>(pk);
+        // Virtual PKs for this segment are [base, base+num_rows_)
+        // where base = shifted_segment_id_
+        int64_t base = shifted_segment_id_;
+        int64_t lo = 0, hi = num_rows_;  // offset range
+
+        // Convert target to offset space
+        int64_t target_offset = target - base;
+
+        switch (op) {
+            case proto::plan::OpType::Equal: {
+                if (target_offset >= 0 && target_offset < num_rows_) {
+                    if (condition(target_offset)) {
+                        bitset[target_offset] = true;
+                    }
+                }
+                break;
+            }
+            case proto::plan::OpType::GreaterEqual:
+                lo = std::max(int64_t(0), target_offset);
+                for (int64_t i = lo; i < hi; i++) {
+                    if (condition(i))
+                        bitset[i] = true;
+                }
+                break;
+            case proto::plan::OpType::GreaterThan:
+                lo = std::max(int64_t(0), target_offset + 1);
+                for (int64_t i = lo; i < hi; i++) {
+                    if (condition(i))
+                        bitset[i] = true;
+                }
+                break;
+            case proto::plan::OpType::LessEqual:
+                hi = std::min(num_rows_, target_offset + 1);
+                for (int64_t i = 0; i < hi; i++) {
+                    if (condition(i))
+                        bitset[i] = true;
+                }
+                break;
+            case proto::plan::OpType::LessThan:
+                hi = std::min(num_rows_, target_offset);
+                for (int64_t i = 0; i < hi; i++) {
+                    if (condition(i))
+                        bitset[i] = true;
+                }
+                break;
+            default:
+                ThrowInfo(ErrorCode::Unsupported,
+                          fmt::format("unsupported op type {}", op));
+        }
+    }
+
+    void
+    insert(const PkType& pk, int64_t offset) override {
+        // No-op: virtual PK mapping is computed, not stored
+    }
+
+    void
+    seal() override {
+        // No-op
+    }
+
+    bool
+    empty() const override {
+        return num_rows_ == 0;
+    }
+
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
+    find_first_n(int64_t limit, const BitsetTypeView& bitset) const override {
+        // Virtual PKs are sorted by offset (since pk = base | offset),
+        // so iterating offsets 0..N-1 gives PK-sorted order.
+        auto size = static_cast<int64_t>(bitset.size());
+        int64_t cnt = size - bitset.count();
+        if (limit == Unlimited || limit == NoLimit) {
+            limit = cnt;
+        }
+        auto more_hit_than_limit = cnt > limit;
+        limit = std::min(limit, cnt);
+        std::vector<int64_t> seg_offsets;
+        seg_offsets.reserve(limit);
+        for (int64_t i = 0;
+             i < size && static_cast<int64_t>(seg_offsets.size()) < limit;
+             i++) {
+            if (!bitset[i]) {
+                seg_offsets.push_back(i);
+            }
+        }
+        return {seg_offsets,
+                more_hit_than_limit &&
+                    static_cast<int64_t>(seg_offsets.size()) >= limit};
+    }
+
+    std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+    find_first_n_element(
+        int64_t limit,
+        const BitsetTypeView& element_bitset,
+        const IArrayOffsets* array_offsets,
+        const std::optional<QueryIteratorCursor>& cursor) const override {
+        // External tables don't support array fields, but implement
+        // the interface for completeness.
+        auto element_size = static_cast<int64_t>(element_bitset.size());
+        if (limit == Unlimited || limit == NoLimit) {
+            limit = element_size;
+        }
+        int64_t cnt = element_size - element_bitset.count();
+        auto more_hit_than_limit = cnt > limit;
+        limit = std::min(limit, cnt);
+
+        std::vector<int64_t> doc_offsets;
+        std::vector<std::vector<int32_t>> element_indices;
+        int64_t hit_num = 0;
+
+        for (int64_t doc = 0; doc < num_rows_ && hit_num < limit; doc++) {
+            auto [first_elem, last_elem] =
+                array_offsets->ElementIDRangeOfRow(doc);
+            std::vector<int32_t> matching;
+            for (int64_t e = first_elem; e < last_elem && hit_num < limit;
+                 e++) {
+                if (e < element_size && !element_bitset[e] &&
+                    !is_skipped_by_cursor(doc, e - first_elem, cursor)) {
+                    matching.push_back(static_cast<int32_t>(e - first_elem));
+                    hit_num++;
+                }
+            }
+            if (!matching.empty()) {
+                doc_offsets.push_back(doc);
+                element_indices.push_back(std::move(matching));
+            }
+        }
+        return {std::move(doc_offsets),
+                std::move(element_indices),
+                more_hit_than_limit && hit_num >= limit};
+    }
+
+    void
+    clear() override {
+        // No-op
+    }
+
+    size_t
+    memory_size() const override {
+        return sizeof(VirtualPKOffsetMap);
+    }
+
+    bool
+    is_skipped_by_cursor(
+        int64_t doc,
+        int64_t element_offset,
+        const std::optional<QueryIteratorCursor>& cursor) const {
+        if (!cursor.has_value()) {
+            return false;
+        }
+        auto last_pk = std::get_if<int64_t>(&cursor->last_pk);
+        return last_pk != nullptr && *last_pk == (shifted_segment_id_ | doc) &&
+               element_offset <= cursor->last_element_offset;
+    }
+
+    bool
+    is_zero_storage() const override {
+        return true;
+    }
+
+ private:
+    int64_t truncated_segment_id_;
+    int64_t shifted_segment_id_;
+    int64_t num_rows_;
+};
+
 class InsertRecordSealed {
  public:
-    InsertRecordSealed(const Schema& schema,
-                       const int64_t size_per_chunk,
-                       const storage::MmapChunkDescriptorPtr
-                       /* mmap_descriptor */
-                       = nullptr)
-        : timestamps_(size_per_chunk) {
+    InsertRecordSealed(
+        const Schema& schema,
+        const int64_t size_per_chunk,
+        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
         // for sealed segment, only pk field is added.
         for (auto& field : schema) {
@@ -444,11 +1066,13 @@ class InsertRecordSealed {
                     case DataType::INT64: {
                         pk2offset_ =
                             std::make_unique<OffsetOrderedArray<int64_t>>();
+                        is_int64_pk_ = true;
                         break;
                     }
                     case DataType::VARCHAR: {
                         pk2offset_ =
                             std::make_unique<OffsetOrderedArray<std::string>>();
+                        is_int64_pk_ = false;
                         break;
                     }
                     default: {
@@ -472,6 +1096,14 @@ class InsertRecordSealed {
     bool
     contain(const PkType& pk) const {
         return pk2offset_->contain(pk);
+    }
+
+    // Returns true when the owned pk2offset_ is zero-storage (currently only
+    // VirtualPKOffsetMap). Sealed search_pks uses this to short-circuit the
+    // sorted two-pointers path.
+    bool
+    pk2offset_is_zero_storage() const {
+        return pk2offset_ != nullptr && pk2offset_->is_zero_storage();
     }
 
     std::vector<SegOffset>
@@ -548,6 +1180,9 @@ class InsertRecordSealed {
         switch (data_type) {
             case DataType::INT64: {
                 auto num_chunk = data->num_chunks();
+                std::vector<int64_t> chunk_ids(num_chunk);
+                std::iota(chunk_ids.begin(), chunk_ids.end(), 0);
+                data->PrefetchChunks(nullptr, chunk_ids);
                 for (int i = 0; i < num_chunk; ++i) {
                     auto pw = data->DataOfChunk(nullptr, i);
                     auto pks = reinterpret_cast<const int64_t*>(pw.get());
@@ -580,6 +1215,44 @@ class InsertRecordSealed {
         }
     }
 
+    // Build only the compressed offset->pk mapping (no pk2offset_ index).
+    // Used by sorted segments where pk2offset_ is not needed.
+    void
+    build_offset2pk(milvus::DataType data_type, ChunkedColumnInterface* data) {
+        if (data_type != DataType::INT64 || !is_int64_pk_) {
+            return;
+        }
+        std::lock_guard lck(shared_mutex_);
+        int64_t total_rows = data->NumRows();
+        std::vector<int64_t> all_pks;
+        all_pks.reserve(total_rows);
+
+        auto num_chunk = data->num_chunks();
+        // Prefetch all chunks so that subsequent sequential
+        // DataOfChunk() calls hit the cache instead of blocking
+        // on HIGH pool downloads one at a time.
+        std::vector<int64_t> chunk_ids(num_chunk);
+        std::iota(chunk_ids.begin(), chunk_ids.end(), 0);
+        data->PrefetchChunks(nullptr, chunk_ids);
+
+        for (int i = 0; i < num_chunk; ++i) {
+            auto pw = data->DataOfChunk(nullptr, i);
+            auto pks = reinterpret_cast<const int64_t*>(pw.get());
+            auto chunk_num_rows = data->chunk_row_nums(i);
+            for (int j = 0; j < chunk_num_rows; ++j) {
+                all_pks.push_back(pks[j]);
+            }
+        }
+
+        offset2pk_ = std::make_unique<CompressedInt64PkArray>();
+        offset2pk_->build(all_pks.data(), all_pks.size());
+
+        size_t mem = offset2pk_->memory_size();
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            {static_cast<int64_t>(mem), 0});
+        estimated_memory_size_ += mem;
+    }
+
     bool
     empty_pks() const {
         std::shared_lock lck(shared_mutex_);
@@ -591,27 +1264,50 @@ class InsertRecordSealed {
         std::lock_guard lck(shared_mutex_);
         pk2offset_->seal();
         // update estimated memory size to caching layer
+        // offset2pk_ memory is charged separately in build_offset2pk()
+        size_t total_size = pk2offset_->memory_size();
         cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-            {static_cast<int64_t>(pk2offset_->memory_size()), 0});
-        estimated_memory_size_ += pk2offset_->memory_size();
+            {static_cast<int64_t>(total_size), 0});
+        estimated_memory_size_ += total_size;
     }
 
+    // Replace the pk2offset_ with a VirtualPKOffsetMap for external tables.
+    // This avoids materializing the pk→offset mapping (saves ~17 GB for 1B rows).
     void
-    init_timestamps(const std::vector<Timestamp>& timestamps,
-                    const TimestampIndex& timestamp_index) {
+    set_virtual_pk_offset_map(int64_t segment_id, int64_t num_rows) {
         std::lock_guard lck(shared_mutex_);
-        timestamps_.set_data_raw(0, timestamps.data(), timestamps.size());
-        timestamp_index_ = std::move(timestamp_index);
-        AssertInfo(timestamps_.num_chunk() == 1,
-                   "num chunk not equal to 1 for sealed segment");
-        size_t memory_size = timestamps.size() * sizeof(Timestamp) +
-                             timestamp_index_.memory_size();
-        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-            {static_cast<int64_t>(memory_size), 0});
-        estimated_memory_size_ += memory_size;
+        pk2offset_ = std::make_unique<VirtualPKOffsetMap>(segment_id, num_rows);
+        is_int64_pk_ = true;
     }
 
-    const ConcurrentVector<Timestamp>&
+    // Constant mode: all timestamps return the same value.
+    // Used by external tables where all rows are always visible (ts=0).
+    // Saves ~8 GB for 1B-row external tables.
+    void
+    init_timestamps_constant(int64_t num_rows, Timestamp value = 0) {
+        std::lock_guard lck(shared_mutex_);
+        timestamps_.InitConstant(num_rows, value);
+        // TimestampIndex is not needed — external tables have no TTL or
+        // time-travel. Callers that check timestamps_.empty() will see false
+        // (total_size_ > 0), so the fast paths work correctly.
+    }
+
+    // Own mode: takes ownership of timestamp data (StorageV1 / multi-chunk)
+    void
+    init_timestamps_from_owned(std::vector<Timestamp> data,
+                               TimestampIndex timestamp_index) {
+        std::lock_guard lck(shared_mutex_);
+        size_t count = data.size();
+        timestamps_.InitFromOwnedData(std::move(data));
+        timestamp_index_ = std::move(timestamp_index);
+        size_t ts_data_size = count * sizeof(Timestamp);
+        size_t ts_index_size = timestamp_index_.memory_size();
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            {static_cast<int64_t>(ts_data_size + ts_index_size), 0});
+        estimated_memory_size_ += ts_data_size + ts_index_size;
+    }
+
+    const TimestampData&
     timestamps() const {
         return timestamps_;
     }
@@ -623,6 +1319,7 @@ class InsertRecordSealed {
         if (pk2offset_) {
             pk2offset_->clear();
         }
+        offset2pk_.reset();
 
         reserved = 0;
         if (estimated_memory_size_ > 0) {
@@ -632,13 +1329,43 @@ class InsertRecordSealed {
         }
     }
 
+    // Returns true if PK type is int64 and offset2pk is available
+    bool
+    has_int64_pk_index() const {
+        return is_int64_pk_ && offset2pk_ != nullptr;
+    }
+
+    // Get PK by offset. Only valid when has_int64_pk_index() returns true.
+    int64_t
+    get_int64_pk_by_offset(int64_t offset) const {
+        AssertInfo(
+            has_int64_pk_index(),
+            "get_int64_pk_by_offset requires int64 PK with offset2pk index");
+        return offset2pk_->at(offset);
+    }
+
+    // Bulk get PKs by offsets. Only valid when has_int64_pk_index() returns true.
+    void
+    bulk_get_int64_pks_by_offsets(const int64_t* offsets,
+                                  int64_t count,
+                                  int64_t* output) const {
+        AssertInfo(has_int64_pk_index(),
+                   "bulk_get_int64_pks_by_offsets requires int64 PK with "
+                   "offset2pk index");
+        offset2pk_->bulk_at(offsets, count, output);
+    }
+
  public:
-    ConcurrentVector<Timestamp> timestamps_;
+    TimestampData timestamps_;
     std::atomic<int64_t> reserved = 0;
     // used for timestamps index of sealed segment
     TimestampIndex timestamp_index_;
     // pks to row offset
     std::unique_ptr<OffsetMap> pk2offset_;
+    // offset to pk (compressed), only available for int64 PK
+    std::unique_ptr<CompressedInt64PkArray> offset2pk_;
+    // whether PK type is int64
+    bool is_int64_pk_ = false;
     // estimated memory size of InsertRecord, only used for sealed segment
     int64_t estimated_memory_size_{0};
 
@@ -652,7 +1379,7 @@ class InsertRecordGrowing {
         const Schema& schema,
         const int64_t size_per_chunk,
         const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
-        : timestamps_(size_per_chunk) {
+        : timestamps_(size_per_chunk), row_ids_(size_per_chunk) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
         for (auto& field : schema) {
             auto field_id = field.first;
@@ -779,9 +1506,15 @@ class InsertRecordGrowing {
         return timestamps_;
     }
 
+    const ConcurrentVector<int64_t>&
+    row_ids() const {
+        return row_ids_;
+    }
+
     void
     clear() {
         timestamps_.clear();
+        row_ids_.clear();
         timestamp_index_ = TimestampIndex();
         if (pk2offset_) {
             pk2offset_->clear();
@@ -917,6 +1650,7 @@ class InsertRecordGrowing {
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
+            case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT: {
                 this->append_data<std::string>(
@@ -1087,6 +1821,7 @@ class InsertRecordGrowing {
 
  public:
     ConcurrentVector<Timestamp> timestamps_;
+    ConcurrentVector<int64_t> row_ids_;
     std::atomic<int64_t> reserved = 0;
     TimestampIndex timestamp_index_;
     std::unique_ptr<OffsetMap> pk2offset_;

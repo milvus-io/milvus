@@ -20,20 +20,23 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.DropCollectionRequest) error {
@@ -57,7 +60,7 @@ func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.Drop
 	msg := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(dropCollectionTask.header).
 		WithBody(dropCollectionTask.body).
-		WithBroadcast(channels).
+		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -88,7 +91,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			if err := registry.CallMessageAckCallback(ctx, dropLoadConfigMsg, map[string]*message.AppendResult{
 				streaming.WAL().ControlChannel(): result,
 			}); err != nil {
-				return errors.Wrap(err, "failed to release collection")
+				return merr.Wrap(err, "failed to release collection")
 			}
 
 			// 2. drop the collection index.
@@ -104,12 +107,29 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			if err := registry.CallMessageAckCallback(ctx, dropIndexMsg, map[string]*message.AppendResult{
 				streaming.WAL().ControlChannel(): result,
 			}); err != nil {
-				return errors.Wrap(err, "failed to drop collection index")
+				return merr.Wrap(err, "failed to drop collection index")
+			}
+
+			// 2.5. best-effort drop all snapshots of this collection
+			dropSnapshotsMsg := message.NewDropSnapshotsByCollectionMessageBuilderV2().
+				WithHeader(&message.DropSnapshotsByCollectionMessageHeader{
+					CollectionId: collectionID,
+				}).
+				WithBody(&message.DropSnapshotsByCollectionMessageBody{}).
+				WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+				MustBuildBroadcast().
+				WithBroadcastID(msg.BroadcastHeader().BroadcastID)
+
+			if err := registry.CallMessageAckCallback(ctx, dropSnapshotsMsg, map[string]*message.AppendResult{
+				streaming.WAL().ControlChannel(): result,
+			}); err != nil {
+				log.Ctx(ctx).Warn("best-effort drop collection snapshots failed, will be cleaned up by GC",
+					zap.Int64("collectionID", collectionID), zap.Error(err))
 			}
 
 			// 3. drop the collection meta itself.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
-				return errors.Wrap(err, "failed to drop collection")
+				return merr.Wrap(err, "failed to drop collection")
 			}
 			continue
 		}
@@ -121,11 +141,19 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			ChannelName: vchannel,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return errors.Wrap(err, "failed to drop virtual channel")
+			return merr.Wrap(err, "failed to drop virtual channel")
 		}
 	}
 	// add the collection tombstone to the sweeper.
 	c.tombstoneSweeper.AddTombstone(newCollectionTombstone(c.meta, c.broker, header.CollectionId))
+	// DropCollection already deleted grants for the dropped collection.
+	// Refresh the RBAC policy cache on all proxies so they stop using stale grant entries.
+	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		OpType: int32(typeutil.CacheRefresh),
+	}); err != nil {
+		log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after collection drop, skipping",
+			zap.Int64("collectionID", header.CollectionId), zap.Error(err))
+	}
 	// expire the collection meta cache on proxy.
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
 		ce.OptLPCMDBName(body.DbName),

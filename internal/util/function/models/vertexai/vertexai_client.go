@@ -20,10 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"golang.org/x/oauth2/google"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Instance struct {
@@ -69,6 +69,30 @@ type ErrorInfo struct {
 	RequestID string `json:"request_id"`
 }
 
+// Gemini-specific types for :embedContent endpoint
+
+type GeminiPart struct {
+	Text string `json:"text"`
+}
+
+type GeminiContent struct {
+	Parts []GeminiPart `json:"parts"`
+}
+
+type GeminiEmbedContentRequest struct {
+	Content              GeminiContent `json:"content"`
+	TaskType             string        `json:"taskType,omitempty"`
+	OutputDimensionality int64         `json:"outputDimensionality,omitempty"`
+}
+
+type GeminiEmbeddingValues struct {
+	Values []float32 `json:"values"`
+}
+
+type GeminiEmbedContentResponse struct {
+	Embedding GeminiEmbeddingValues `json:"embedding"`
+}
+
 type VertexAIEmbedding struct {
 	url     string
 	jsonKey []byte
@@ -87,13 +111,13 @@ func NewVertexAIEmbedding(url string, jsonKey []byte, scopes string, token strin
 
 func (c *VertexAIEmbedding) Check() error {
 	if c.url == "" {
-		return errors.New("VertexAI embedding url is empty")
+		return merr.WrapErrParameterInvalidMsg("VertexAI embedding url is empty")
 	}
 	if len(c.jsonKey) == 0 {
-		return errors.New("jsonKey is empty")
+		return merr.WrapErrParameterInvalidMsg("jsonKey is empty")
 	}
 	if c.scopes == "" {
-		return errors.New("Scopes param is empty")
+		return merr.WrapErrParameterInvalidMsg("Scopes param is empty")
 	}
 	return nil
 }
@@ -102,16 +126,51 @@ func (c *VertexAIEmbedding) getAccessToken() (string, error) {
 	ctx := context.Background()
 	creds, err := google.CredentialsFromJSON(ctx, c.jsonKey, c.scopes)
 	if err != nil {
-		return "", fmt.Errorf("Failed to find credentials: %v", err)
+		return "", merr.Wrap(err, "failed to find credentials")
 	}
 	token, err := creds.TokenSource.Token()
 	if err != nil {
-		return "", fmt.Errorf("Failed to get token: %v", err)
+		return "", merr.Wrap(err, "failed to get token")
 	}
 	return token.AccessToken, nil
 }
 
-func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, taskType string, timeoutMs int64) (*GeminiEmbedContentResponse, error) {
+	req := GeminiEmbedContentRequest{
+		Content: GeminiContent{
+			Parts: []GeminiPart{{Text: text}},
+		},
+	}
+	if taskType != "" {
+		req.TaskType = taskType
+	}
+	if dim > 0 {
+		req.OutputDimensionality = dim
+	}
+
+	var token string
+	var err error
+	if c.token != "" {
+		token = c.token
+	} else {
+		token, err = c.getAccessToken()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+	}
+	res, err := models.PostRequest[GeminiEmbedContentResponse](req, url, headers, timeoutMs)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	for _, text := range texts {
 		r.Instances = append(r.Instances, Instance{TaskType: taskType, Content: text})
@@ -135,7 +194,7 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

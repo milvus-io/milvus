@@ -51,7 +51,6 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/plan_c.h"
-#include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "storage/Types.h"
 #include "test_utils/DataGen.h"
@@ -131,7 +130,7 @@ TEST(GroupBY, SealedIndex) {
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
         ASSERT_EQ(20, group_by_values.size());
         //as the total data is 0,0,....6,6, so there will be 7 buckets with [3,3,3,3,3,3,2] items respectively
         //so there will be 20 items returned
@@ -178,7 +177,7 @@ TEST(GroupBY, SealedIndex) {
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
         int size = group_by_values.size();
         ASSERT_EQ(20, size);
         //as the total data is 0,0,....6,6, so there will be 7 buckets with [3,3,3,3,3,3,2] items respectively
@@ -222,7 +221,7 @@ TEST(GroupBY, SealedIndex) {
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
         int size = group_by_values.size();
         ASSERT_EQ(20, size);
         //as the total data is 0,0,....6,6, so there will be 7 buckets with [3,3,3,3,3,3,2] items respectively
@@ -266,7 +265,7 @@ TEST(GroupBY, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
         int size = group_by_values.size();
         ASSERT_EQ(20, size);
         //as the total data is 0,0,....6,6, so there will be 7 buckets with [3,3,3,3,3,3,2] items respectively
@@ -310,7 +309,7 @@ TEST(GroupBY, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
         ASSERT_EQ(20, group_by_values.size());
         int size = group_by_values.size();
 
@@ -355,7 +354,7 @@ TEST(GroupBY, SealedIndex) {
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
         int size = group_by_values.size();
         ASSERT_EQ(size, 6);
         //as there are only two possible values: true, false
@@ -399,7 +398,7 @@ TEST(GroupBY, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
         int size = group_by_values.size();
         ASSERT_EQ(20, size);
         //as the total data is 0,0,....6,6, so there will be 7 buckets with [3,3,3,3,3,3,2] items respectively
@@ -429,14 +428,14 @@ TEST(GroupBY, SealedData) {
     //0. prepare schema
     int dim = 64;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8, true);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
+    schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
     size_t N = 100;
 
@@ -475,7 +474,7 @@ TEST(GroupBY, SealedData) {
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
         int size = group_by_values.size();
         // groups are: (0, 1, 2, 3, 4, null), counts are: (10, 10, 10, 10 ,10, 50)
         ASSERT_EQ(30, size);
@@ -504,147 +503,6 @@ TEST(GroupBY, SealedData) {
     }
 }
 
-TEST(GroupBY, Reduce) {
-    using namespace milvus;
-    using namespace milvus::query;
-    using namespace milvus::segcore;
-
-    //0. prepare schema
-    int dim = 64;
-    auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, false);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32, false);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16, false);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8, false);
-    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL, false);
-    auto string_fid = schema->AddDebugField("string", DataType::VARCHAR, false);
-    auto fp16_fid = schema->AddDebugField(
-        "fakevec_fp16", DataType::VECTOR_FLOAT16, dim, knowhere::metric::L2);
-    auto bf16_fid = schema->AddDebugField(
-        "fakevec_bf16", DataType::VECTOR_BFLOAT16, dim, knowhere::metric::L2);
-    schema->set_primary_field_id(int64_fid);
-
-    //1. load raw data
-    size_t N = 100;
-    uint64_t seed = 512;
-    uint64_t ts_offset = 0;
-    int repeat_count_1 = 2;
-    int repeat_count_2 = 5;
-    auto raw_data1 = DataGen(
-        schema, N, seed, ts_offset, repeat_count_1, 10, 10, false, false);
-    auto raw_data2 = DataGen(
-        schema, N, seed, ts_offset, repeat_count_2, 10, 10, false, false);
-
-    auto segment1 = CreateSealedWithFieldDataLoaded(schema, raw_data1);
-    auto segment2 = CreateSealedWithFieldDataLoaded(schema, raw_data2);
-
-    //3. load index
-    auto vector_data_1 = raw_data1.get_col<float>(vec_fid);
-    auto indexing_1 = GenVecIndexing(
-        N, dim, vector_data_1.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info_1;
-    load_index_info_1.field_id = vec_fid.get();
-    load_index_info_1.index_params = GenIndexParams(indexing_1.get());
-    load_index_info_1.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing_1));
-    load_index_info_1.index_params[METRICS_TYPE] = knowhere::metric::L2;
-    segment1->LoadIndex(load_index_info_1);
-
-    auto vector_data_2 = raw_data2.get_col<float>(vec_fid);
-    auto indexing_2 = GenVecIndexing(
-        N, dim, vector_data_2.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info_2;
-    load_index_info_2.field_id = vec_fid.get();
-    load_index_info_2.index_params = GenIndexParams(indexing_2.get());
-    load_index_info_2.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing_2));
-    load_index_info_2.index_params[METRICS_TYPE] = knowhere::metric::L2;
-    segment2->LoadIndex(load_index_info_2);
-    CSegmentInterface c_segment_1 = segment1.release();
-    CSegmentInterface c_segment_2 = segment2.release();
-
-    //4. search group by respectively
-    auto num_queries = 10;
-    auto topK = 10;
-    int group_size = 3;
-    auto slice_nqs = std::vector<int64_t>{num_queries / 2, num_queries / 2};
-    auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
-
-    // Create ScopedSchemaHandle for parsing expressions
-    ScopedSchemaHandle handle(*schema);
-
-    // Lambda function to execute search and reduce with given group_by_field_id
-    auto executeGroupBySearchAndReduce = [&](int64_t group_by_field_id) {
-        auto plan_str =
-            handle.ParseGroupBySearch("",         // empty filter expression
-                                      "fakevec",  // vector field name
-                                      topK,       // topk
-                                      "L2",       // metric type
-                                      "{\"ef\": 10}",     // search params
-                                      group_by_field_id,  // group_by_field_id
-                                      group_size          // group_size
-            );
-        auto plan =
-            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
-        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-        auto ph_group =
-            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        CPlaceholderGroup c_ph_group = ph_group.release();
-        CSearchPlan c_plan = plan.release();
-
-        CSearchResult c_search_res_1;
-        CSearchResult c_search_res_2;
-        auto status = CSearch(
-            c_segment_1, c_plan, c_ph_group, MAX_TIMESTAMP, &c_search_res_1);
-        ASSERT_EQ(status.error_code, Success);
-        status = CSearch(
-            c_segment_2, c_plan, c_ph_group, MAX_TIMESTAMP, &c_search_res_2);
-        ASSERT_EQ(status.error_code, Success);
-        std::vector<CSearchResult> results;
-        results.push_back(c_search_res_1);
-        results.push_back(c_search_res_2);
-
-        CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData({},
-                                                &cSearchResultData,
-                                                c_plan,
-                                                results.data(),
-                                                results.size(),
-                                                slice_nqs.data(),
-                                                slice_topKs.data(),
-                                                slice_nqs.size());
-        CheckSearchResultDuplicate(results, group_size);
-        DeleteSearchResult(c_search_res_1);
-        DeleteSearchResult(c_search_res_2);
-        DeleteSearchResultDataBlobs(cSearchResultData);
-        DeleteSearchPlan(c_plan);
-        DeletePlaceholderGroup(c_ph_group);
-    };
-
-    // Execute the test with group by INT64 field
-    executeGroupBySearchAndReduce(int64_fid.get());
-
-    // Test Case: Group by INT32 field
-    executeGroupBySearchAndReduce(int32_fid.get());
-
-    // Test Case: Group by INT16 field
-    executeGroupBySearchAndReduce(int16_fid.get());
-
-    // Test Case: Group by INT8 field
-    executeGroupBySearchAndReduce(int8_fid.get());
-
-    // Test Case: Group by BOOL field
-    executeGroupBySearchAndReduce(bool_fid.get());
-
-    // Test Case: Group by VARCHAR field
-    executeGroupBySearchAndReduce(string_fid.get());
-
-    DeleteSegment(c_segment_1);
-    DeleteSegment(c_segment_2);
-}
-
 TEST(GroupBY, GrowingRawData) {
     //0. set up growing segment
     int dim = 128;
@@ -653,7 +511,7 @@ TEST(GroupBY, GrowingRawData) {
     auto metric_type = knowhere::metric::L2;
     auto int64_field_id = schema->AddDebugField("int64", DataType::INT64);
     auto int32_field_id = schema->AddDebugField("int32", DataType::INT32);
-    auto vec_field_id = schema->AddDebugField(
+    schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field_id);
 
@@ -707,7 +565,7 @@ TEST(GroupBY, GrowingRawData) {
         segment_growing_impl->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     CheckGroupBySearchResult(*search_result, topK, num_queries, true);
 
-    auto& group_by_values = search_result->group_by_values_.value();
+    auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
     int size = group_by_values.size();
     ASSERT_EQ(size, 640);
     //as the number of data is 512 and repeated count is 8, the group number is 64 for every query
@@ -811,7 +669,7 @@ TEST(GroupBY, GrowingIndex) {
         segment_growing_impl->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     CheckGroupBySearchResult(*search_result, topK, num_queries, true);
 
-    auto& group_by_values = search_result->group_by_values_.value();
+    auto group_by_values = ExtractFirstFieldGroupByValues(*search_result);
     auto size = group_by_values.size();
     int expected_group_count = 100;
     ASSERT_EQ(size, expected_group_count * group_size * num_queries);

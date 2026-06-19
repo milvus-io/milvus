@@ -111,6 +111,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     bool
+    ShouldUseOp(proto::plan::OpType op) const override {
+        return internal_index_->ShouldUseOp(op);
+    }
+
+    bool
     SupportPatternMatch() const override {
         return internal_index_->SupportPatternMatch();
     }
@@ -120,30 +125,15 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->PatternMatch(pattern, op);
     }
 
-    bool
-    TryUseRegexQuery() const override {
-        return internal_index_->TryUseRegexQuery();
-    }
-
-    bool
-    SupportRegexQuery() const override {
-        return internal_index_->SupportRegexQuery();
-    }
-
     const TargetBitmap
-    RegexQuery(const std::string& pattern) override {
-        return internal_index_->RegexQuery(pattern);
-    }
-
-    const TargetBitmap
-    Range(T value, OpType op) override {
+    Range(const T& value, OpType op) override {
         return internal_index_->Range(value, op);
     }
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override {
         return internal_index_->Range(
             lower_bound_value, lb_inclusive, upper_bound_value, ub_inclusive);
@@ -180,6 +170,23 @@ class HybridScalarIndex : public ScalarIndex<T> {
     IndexStatsPtr
     Upload(const Config& config = {}) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
+ protected:
+    ScalarIndexType
+    SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);
+
+    ScalarIndexType
+    SelectIndexTypeByCardinality(size_t cardinality);
+
+    void
+    BuildInternal(const std::vector<FieldDataPtr>& field_datas);
+
  private:
     ScalarIndexType
     SelectBuildTypeForPrimitiveType(
@@ -187,9 +194,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     ScalarIndexType
     SelectBuildTypeForArrayType(const std::vector<FieldDataPtr>& field_datas);
-
-    ScalarIndexType
-    SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);
 
     ScalarIndexType
     SelectIndexBuildType(size_t n, const T* values);
@@ -202,9 +206,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     void
     DeserializeIndexType(const BinarySet& binary_set);
-
-    void
-    BuildInternal(const std::vector<FieldDataPtr>& field_datas);
 
     std::shared_ptr<ScalarIndex<T>>
     GetInternalIndex();
@@ -221,7 +222,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
-    std::shared_ptr<storage::MemFileManagerImpl> mem_file_manager_{nullptr};
 
     // `tantivy_index_version_` is used to control which kind of tantivy index should be used.
     // There could be the case where milvus version of read node is lower than the version of index builder node(and read node

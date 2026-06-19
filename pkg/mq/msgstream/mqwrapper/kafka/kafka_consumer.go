@@ -4,15 +4,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mq/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type Consumer struct {
@@ -158,7 +157,7 @@ func (kc *Consumer) Chan() <-chan common.Message {
 
 func (kc *Consumer) Seek(id common.MessageID, inclusive bool) error {
 	if kc.hasAssign {
-		return errors.New("kafka consumer is already assigned, can not seek again")
+		return merr.WrapErrMqInternalMsg("kafka consumer is already assigned, can not seek again")
 	}
 
 	offset := kafka.Offset(id.(*KafkaID).MessageID)

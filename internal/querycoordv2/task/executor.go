@@ -18,7 +18,6 @@ package task
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -29,23 +28,23 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // segmentsVersion is used for the flushed segments should not be included in the watch dm channel request
@@ -66,12 +65,13 @@ type Executor struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	executingTasks   *typeutil.ConcurrentSet[string] // task index
-	executingTaskNum atomic.Int32
-	executedFlag     chan struct{}
+	executingTasks    *typeutil.ConcurrentSet[string] // task index
+	channelTaskNum    atomic.Int32                    // channel task pool counter
+	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
 }
 
-func NewExecutor(meta *meta.Meta,
+func NewExecutor(nodeID int64,
+	meta *meta.Meta,
 	dist *meta.DistributionManager,
 	broker meta.Broker,
 	targetMgr meta.TargetManagerInterface,
@@ -79,6 +79,7 @@ func NewExecutor(meta *meta.Meta,
 	nodeMgr *session.NodeManager,
 ) *Executor {
 	return &Executor{
+		nodeID:    nodeID,
 		doneCh:    make(chan struct{}),
 		meta:      meta,
 		dist:      dist,
@@ -88,7 +89,6 @@ func NewExecutor(meta *meta.Meta,
 		nodeMgr:   nodeMgr,
 
 		executingTasks: typeutil.NewConcurrentSet[string](),
-		executedFlag:   make(chan struct{}, 1),
 	}
 }
 
@@ -99,7 +99,7 @@ func (ex *Executor) Stop() {
 	ex.wg.Wait()
 }
 
-func (ex *Executor) GetTaskExecutionCap() int32 {
+func (ex *Executor) GetTotalTaskExecutionCap() int32 {
 	nodeInfo := ex.nodeMgr.Get(ex.nodeID)
 	if nodeInfo == nil || nodeInfo.CPUNum() == 0 {
 		return Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32()
@@ -110,6 +110,36 @@ func (ex *Executor) GetTaskExecutionCap() int32 {
 	return ret
 }
 
+// GetChannelTaskCap returns the capacity reserved for channel tasks.
+func (ex *Executor) GetChannelTaskCap() int32 {
+	total := ex.GetTotalTaskExecutionCap()
+	fraction := Params.QueryCoordCfg.ChannelTaskCapFraction.GetAsFloat()
+	if fraction < 0 {
+		fraction = 0
+	}
+	if fraction > 1 {
+		fraction = 1
+	}
+	cap := int32(math.Ceil(float64(total) * fraction))
+	if cap < 1 {
+		cap = 1
+	}
+	return cap
+}
+
+// GetNonChannelTaskCap returns the capacity for segment/leader/other tasks.
+// NOTE: when channelTaskCapFraction is 1.0, both pools get min-cap=1,
+// so the sum of channel + non-channel caps may exceed total. This is
+// intentional to guarantee liveness for both task types.
+func (ex *Executor) GetNonChannelTaskCap() int32 {
+	total := ex.GetTotalTaskExecutionCap()
+	nonChannelCap := total - ex.GetChannelTaskCap()
+	if nonChannelCap < 1 {
+		nonChannelCap = 1
+	}
+	return nonChannelCap
+}
+
 // Execute executes the given action,
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
@@ -118,10 +148,28 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	if exist {
 		return false
 	}
-	if ex.executingTaskNum.Inc() > ex.GetTaskExecutionCap() {
-		ex.executingTasks.Remove(task.Index())
-		ex.executingTaskNum.Dec()
-		return false
+
+	_, isChannel := task.Actions()[step].(*ChannelAction)
+	if isChannel {
+		cur := ex.channelTaskNum.Inc()
+		if cur > ex.GetChannelTaskCap() {
+			ex.channelTaskNum.Dec()
+			ex.executingTasks.Remove(task.Index())
+			log.Debug("channel task rejected: pool full",
+				zap.Int32("current", cur),
+				zap.Int32("cap", ex.GetChannelTaskCap()))
+			return false
+		}
+	} else {
+		cur := ex.nonChannelTaskNum.Inc()
+		if cur > ex.GetNonChannelTaskCap() {
+			ex.nonChannelTaskNum.Dec()
+			ex.executingTasks.Remove(task.Index())
+			log.Debug("non-channel task rejected: pool full",
+				zap.Int32("current", cur),
+				zap.Int32("cap", ex.GetNonChannelTaskCap()))
+			return false
+		}
 	}
 
 	log := log.With(
@@ -152,30 +200,25 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	return true
 }
 
-func (ex *Executor) GetExecutedFlag() <-chan struct{} {
-	return ex.executedFlag
-}
-
 func (ex *Executor) removeTask(task Task, step int) {
 	if task.Err() != nil {
 		log.Info("execute action done, remove it",
 			zap.Int64("taskID", task.ID()),
 			zap.Int("step", step),
 			zap.Error(task.Err()))
-	} else {
-		select {
-		case ex.executedFlag <- struct{}{}:
-		default:
-		}
 	}
 
 	ex.executingTasks.Remove(task.Index())
-	ex.executingTaskNum.Dec()
+	if _, isChannel := task.Actions()[step].(*ChannelAction); isChannel {
+		ex.channelTaskNum.Dec()
+	} else {
+		ex.nonChannelTaskNum.Dec()
+	}
 }
 
 func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 	switch task.Actions()[step].Type() {
-	case ActionTypeGrow, ActionTypeUpdate, ActionTypeStatsUpdate:
+	case ActionTypeGrow, ActionTypeUpdate, ActionTypeStatsUpdate, ActionTypeReopen:
 		ex.loadSegment(task, step)
 
 	case ActionTypeReduce:
@@ -226,7 +269,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	)
 
 	// get segment's replica first, then get shard leader by replica
-	replica := ex.meta.ReplicaManager.Get(ctx, task.ReplicaID())
+	replica := ex.meta.Get(ctx, task.ReplicaID())
 	if replica == nil {
 		msg := "node doesn't belong to any replica"
 		err := merr.WrapErrNodeNotAvailable(action.Node())
@@ -278,11 +321,11 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 //
 // 	node := ex.nodeMgr.Get(view.Node)
 // 	if node == nil {
-// 		return merr.WrapErrServiceInternal(fmt.Sprintf("node %d is not found", view.Node))
+// 		return merr.WrapErrServiceInternalMsg("node %d is not found", view.Node)
 // 	}
 // 	nodes := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
 // 	if !nodes.Contain(view.Node) {
-// 		return merr.WrapErrServiceInternal(fmt.Sprintf("channel %s at node %d is not working at streamingnode, skip load segment", view.GetChannelName(), view.Node))
+// 		return merr.WrapErrServiceInternalMsg("channel %s at node %d is not working at streamingnode, skip load segment", view.GetChannelName(), view.Node)
 // 	}
 // 	return nil
 // }
@@ -326,9 +369,9 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	} else {
 		req.Shard = task.shard
 
-		if ex.meta.CollectionManager.Exist(ctx, task.CollectionID()) {
+		if ex.meta.Exist(ctx, task.CollectionID()) {
 			// get segment's replica first, then get shard leader by replica
-			replica := ex.meta.ReplicaManager.Get(ctx, task.ReplicaID())
+			replica := ex.meta.Get(ctx, task.ReplicaID())
 			if replica == nil {
 				msg := "node doesn't belong to any replica, try to send release to worker"
 				err := merr.WrapErrNodeNotAvailable(action.Node())
@@ -346,7 +389,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 				// NOTE: for balance segment task, expected load and release execution on the same shard leader
 				if GetTaskType(task) == TaskTypeMove && task.ShardLeaderID() != view.Node {
 					msg := "shard leader changed, skip release"
-					err = merr.WrapErrServiceInternal(fmt.Sprintf("shard leader changed from %d to %d", task.ShardLeaderID(), view.Node))
+					err = merr.WrapErrServiceInternalMsg("shard leader changed from %d to %d", task.ShardLeaderID(), view.Node)
 					log.Warn(msg, zap.Error(err))
 					return
 				}
@@ -440,10 +483,11 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	partitions, err = utils.GetPartitions(ctx, ex.targetMgr, task.collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions", zap.Error(err))
-		return merr.WrapErrServiceInternal(fmt.Sprintf("failed to get partitions for collection=%d", task.CollectionID()))
+		return merr.Wrapf(err, "failed to get partitions for collection=%d", task.CollectionID())
 	}
 
 	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
+
 	req := packSubChannelRequest(
 		task,
 		action,
@@ -574,7 +618,7 @@ func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 		ex.removeTask(task, step)
 	}()
 
-	replica := ex.meta.ReplicaManager.Get(ctx, task.ReplicaID())
+	replica := ex.meta.Get(ctx, task.ReplicaID())
 	if replica == nil {
 		err = merr.WrapErrNodeNotAvailable(action.Node())
 		log.Warn("node doesn't belong to any replica", zap.Error(err))
@@ -802,18 +846,12 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		return nil, nil, nil, err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
-	partitions, err := utils.GetPartitions(ctx, ex.targetMgr, collectionID)
-	if err != nil {
-		log.Warn("failed to get partitions of collection", zap.Error(err))
-		return nil, nil, nil, err
-	}
 
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(ctx, task.CollectionID()),
 		collectionInfo,
 		task.ResourceGroup(),
 		loadFields,
-		partitions...,
 	)
 
 	// get channel first, in case of target updated after segment info fetched

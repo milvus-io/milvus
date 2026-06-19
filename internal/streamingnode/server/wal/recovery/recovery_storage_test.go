@@ -13,22 +13,23 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 func TestRecoveryStorage(t *testing.T) {
@@ -178,6 +179,49 @@ func TestRecoveryStorage(t *testing.T) {
 			assert.Equal(t, b.segmentNum(), len(segmentMetas))
 		}
 	}
+}
+
+func TestRecoveryStorageManualFlushMarksSegmentsFlushed(t *testing.T) {
+	const segmentID = int64(1001)
+	r := &recoveryStorageImpl{
+		segments: map[int64]*segmentRecoveryInfo{
+			segmentID: {
+				meta: &streamingpb.SegmentAssignmentMeta{
+					CollectionId: 1,
+					PartitionId:  2,
+					SegmentId:    segmentID,
+					Vchannel:     "v1",
+					State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+					Stat: &streamingpb.SegmentAssignmentStat{
+						ModifiedRows:          10,
+						ModifiedBinarySize:    100,
+						CreateSegmentTimeTick: 100,
+					},
+				},
+			},
+		},
+	}
+	r.SetLogger(log.With())
+
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.ManualFlushMessageHeader{
+			CollectionId: 1,
+			SegmentIds:   []int64{segmentID},
+		}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(200).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(2))
+
+	r.handleManualFlush(message.MustAsImmutableManualFlushMessageV2(msg))
+	segment := r.segments[segmentID]
+	snapshot, shouldBeRemoved := segment.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, snapshot)
+	assert.True(t, shouldBeRemoved)
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, snapshot.GetState())
+	assert.EqualValues(t, 200, snapshot.GetCheckpointTimeTick())
 }
 
 type streamBuilder struct {

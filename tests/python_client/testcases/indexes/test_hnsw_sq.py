@@ -12,7 +12,7 @@ success = "success"
 pk_field_name = 'id'
 vector_field_name = 'vector'
 dim = ct.default_dim
-default_nb = 2000
+default_nb = ct.default_nb
 default_build_params = {"M": 16, "efConstruction": 200, "sq_type": "SQ8"}
 default_search_params = {"ef": 64, "refine_k": 1}
 
@@ -63,14 +63,23 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
             # search
             nq = 2
             search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-            self.search(client, collection_name, search_vectors,
-                        search_params=default_search_params,
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"enable_milvus_client_api": True,
-                                     "nq": nq,
-                                     "limit": ct.default_limit,
-                                     "pk_name": pk_field_name})
+            if params.get("relaxed_limit"):
+                # Extreme params (e.g. M=2, efConstruction=1) produce a poorly connected
+                # HNSW graph that may return fewer than topK results — only assert > 0.
+                results = client.search(collection_name, search_vectors,
+                                        search_params=default_search_params,
+                                        limit=ct.default_limit)
+                for r in results:
+                    assert len(r) > 0, f"expected > 0 results but got {len(r)}"
+            else:
+                self.search(client, collection_name, search_vectors,
+                            search_params=default_search_params,
+                            limit=ct.default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"enable_milvus_client_api": True,
+                                         "nq": nq,
+                                         "limit": ct.default_limit,
+                                         "pk_name": pk_field_name})
 
             # verify the index params are persisted
             idx_info = client.describe_index(collection_name, vector_field_name)

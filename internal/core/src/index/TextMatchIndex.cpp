@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/uuid/random_generator.hpp>
+#include "common/FastMem.h"
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 #include <shared_mutex>
@@ -20,6 +21,18 @@
 #include "storage/ThreadPools.h"
 
 namespace milvus::index {
+
+namespace {
+std::string
+StripTextLogPrefix(const std::string& path, const std::string& base_prefix) {
+    if (path.size() > base_prefix.size() &&
+        path.compare(0, base_prefix.size(), base_prefix) == 0) {
+        return path.substr(base_prefix.size());
+    }
+    return path;
+}
+}  // namespace
+
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* analyzer_name,
@@ -66,8 +79,9 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    is_index_file_ = false;
 
     path_ = disk_file_manager_->GetLocalTempTextIndexPrefix();
 
@@ -88,8 +102,9 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    is_index_file_ = false;
     d_type_ = TantivyDataType::Text;
 }
 
@@ -102,36 +117,60 @@ TextMatchIndex::Upload(const Config& config) {
 
     for (boost::filesystem::directory_iterator iter(p); iter != end_iter;
          iter++) {
+        auto path_str = iter->path().string();
         if (boost::filesystem::is_directory(*iter)) {
-            LOG_WARN("{} is a directory", iter->path().string());
+            LOG_WARN("{} is a directory", path_str);
         } else {
-            LOG_INFO("trying to add text log: {}", iter->path().string());
-            AssertInfo(disk_file_manager_->AddTextLog(iter->path().string()),
+            LOG_INFO("trying to add text log: {}", path_str);
+            AssertInfo(disk_file_manager_->AddTextLog(path_str),
                        "failed to add text log: {}",
-                       iter->path().string());
-            LOG_INFO("text log: {} added", iter->path().string());
+                       path_str);
+            LOG_INFO("text log: {} added", path_str);
         }
     }
 
     auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
-    mem_file_manager_->AddTextLog(binary_set);
+    this->file_manager_->AddTextLog(binary_set);
     auto remote_mem_path_to_size =
-        mem_file_manager_->GetRemotePathsToFileSize();
+        this->file_manager_->GetRemotePathsToFileSize();
+
+    // Strip the remote basePath prefix to return relative file paths.
+    // This makes the returned paths consistent with JsonKeyStats::Upload()
+    // which also returns relative paths.
+    auto base_prefix = disk_file_manager_->GetRemoteTextLogPrefix() + "/";
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size() +
                         remote_mem_path_to_size.size());
     for (auto& file : remote_paths_to_size) {
-        index_files.emplace_back(file.first, file.second);
+        index_files.emplace_back(StripTextLogPrefix(file.first, base_prefix),
+                                 file.second);
     }
     for (auto& file : remote_mem_path_to_size) {
-        index_files.emplace_back(file.first, file.second);
+        index_files.emplace_back(StripTextLogPrefix(file.first, base_prefix),
+                                 file.second);
     }
-    return IndexStats::New(mem_file_manager_->GetAddedTotalMemSize() +
+    return IndexStats::New(this->file_manager_->GetAddedTotalMemSize() +
                                disk_file_manager_->GetAddedTotalFileSize(),
                            std::move(index_files));
+}
+
+IndexStatsPtr
+TextMatchIndex::UploadUnified(const Config& config) {
+    auto stats = ScalarIndex<std::string>::UploadUnified(config);
+
+    auto base_prefix = this->file_manager_->GetRemoteTextLogPrefix() + "/";
+    std::vector<SerializedIndexFileInfo> index_files;
+    const auto& uploaded = stats->GetSerializedIndexFileInfo();
+    index_files.reserve(uploaded.size());
+    for (const auto& file : uploaded) {
+        index_files.emplace_back(
+            StripTextLogPrefix(file.file_name, base_prefix), file.file_size);
+    }
+
+    return IndexStats::New(stats->GetMemSize(), std::move(index_files));
 }
 
 void
@@ -140,32 +179,57 @@ TextMatchIndex::Load(const Config& config) {
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load text log index");
+
+    // Detect V3 format: single file ending with ".v3"
+    auto& files_value = index_files.value();
+    if (files_value.size() == 1) {
+        const auto& file = files_value[0];
+        auto filename = file.substr(file.find_last_of('/') + 1);
+        if (filename.size() > 3 &&
+            filename.substr(filename.size() - 3) == ".v3") {
+            LOG_INFO("TextMatchIndex::Load V3 format detected: {}", file);
+            InvertedIndexTantivy<std::string>::LoadUnified(config);
+            return;
+        }
+    }
+
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    // V2: existing multi-file load path
     auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
-    auto files_value = index_files.value();
+    // Files are relative paths; prepend base_path to construct absolute remote paths.
+    // This must happen before extracting index_null_offset so all files have full paths.
+    auto base_path =
+        GetValueFromConfig<std::string>(config, STATS_BASE_PATH_KEY)
+            .value_or("");
+    AssertInfo(!base_path.empty(),
+               "stats_base_path is required for loading text index");
+    for (auto& f : files_value) {
+        f = base_path + "/" + f;
+    }
+
     auto it = std::find_if(
         files_value.begin(), files_value.end(), [](const std::string& file) {
             return file.substr(file.find_last_of('/') + 1) ==
                    "index_null_offset";
         });
-    auto load_priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(milvus::proto::common::LoadPriority::HIGH);
     if (it != files_value.end()) {
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
         auto index_datas =
-            mem_file_manager_->LoadIndexToMemory(file, load_priority);
+            this->file_manager_->LoadIndexToMemory(file, load_priority);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         // clear index_datas to free memory early
         index_datas.clear();
         auto index_valid_data = binary_set.GetByName("index_null_offset");
         null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        memcpy(null_offset_.data(),
-               index_valid_data->data.get(),
-               (size_t)index_valid_data->size);
+        milvus::fastmem::FastMemcpy(null_offset_.data(),
+                                    index_valid_data->data.get(),
+                                    (size_t)index_valid_data->size);
     }
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(
@@ -200,7 +264,7 @@ void
 TextMatchIndex::AddNullSealed(int64_t offset) {
     null_offset_.push_back(offset);
     // still need to add null to make offset is correct
-    std::string empty = "";
+    static const std::string empty;
     wrapper_->add_array_data(&empty, 0, offset);
 }
 
@@ -244,12 +308,18 @@ TextMatchIndex::BuildIndexFromFieldData(
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
                     std::unique_lock<folly::SharedMutex> lock(mutex_);
-                    null_offset_.push_back(i);
+                    null_offset_.push_back(offset);
+                    // add empty array doc to register offset in tantivy,
+                    // same as AddNullSealed
+                    static const std::string empty;
+                    wrapper_->add_array_data(&empty, 0, offset);
+                } else {
+                    wrapper_->add_data(
+                        static_cast<const std::string*>(data->RawValue(i)),
+                        1,
+                        offset);
                 }
-                wrapper_->add_data(
-                    static_cast<const std::string*>(data->RawValue(i)),
-                    data->is_valid(i) ? 1 : 0,
-                    offset++);
+                offset++;
             }
         }
     } else {

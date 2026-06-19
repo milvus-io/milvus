@@ -6,11 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestMain(m *testing.M) {
@@ -26,6 +26,10 @@ func TestRegistry(t *testing.T) {
 	id, err := message.UnmarshalMessageID(&commonpb.MessageID{WALName: commonpb.WALName(message.WALNameKafka), Id: kafkaID(123).Marshal()})
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(kafkaID(123)))
+
+	id, err = message.UnmarshalMessageID(kafkaID(-2).IntoProto())
+	assert.NoError(t, err)
+	assert.True(t, id.EQ(kafkaID(-2)))
 }
 
 func TestKafka(t *testing.T) {

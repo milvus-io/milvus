@@ -24,11 +24,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestMinioObjectStorage(t *testing.T) {
@@ -199,31 +201,51 @@ func TestMinioObjectStorage(t *testing.T) {
 	})
 
 	t.Run("test useIAM", func(t *testing.T) {
+		// newMinioObjectStorageWithConfig validates IAM credentials by calling
+		// BucketExists against the configured endpoint. With invalid IAM
+		// credentials on a host where the endpoint is unreachable, the dial
+		// blocks long enough that retry.Do (CheckBucketRetryAttempts=20) drags
+		// the whole package out to the 10min testing.M timeout. Bound each
+		// call with a short context so it fails fast regardless of
+		// environment; the test only asserts an error is returned. Mirrors
+		// the Azure fix in PR #49814.
 		var err error
 		config.UseIAM = true
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err = newMinioObjectStorageWithConfig(cctx, &config)
+		cancel()
 		assert.Error(t, err)
 		config.UseIAM = false
 	})
 
 	t.Run("test ssl", func(t *testing.T) {
+		// Same endpoint-unreachable hang as the "test useIAM" subtest above:
+		// UseSSL=true with a dummy CA cert against a non-TLS minio endpoint
+		// keeps retry.Do dialing until the testing.M timeout. Bound it.
 		var err error
 		config.UseSSL = true
 		config.SslCACert = "/tmp/dummy.crt"
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err = newMinioObjectStorageWithConfig(cctx, &config)
+		cancel()
 		assert.Error(t, err)
 		config.UseSSL = false
 	})
 
 	t.Run("test cloud provider", func(t *testing.T) {
+		// Same endpoint-unreachable hang as the "test useIAM" subtest above.
 		var err error
 		cloudProvider := config.CloudProvider
 		config.CloudProvider = "aliyun"
 		config.UseIAM = true
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err = newMinioObjectStorageWithConfig(cctx, &config)
+		cancel()
 		assert.Error(t, err)
 		config.UseIAM = false
-		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		cctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		_, err = newMinioObjectStorageWithConfig(cctx, &config)
+		cancel()
 		assert.Error(t, err)
 		config.CloudProvider = "gcp"
 		_, err = newMinioObjectStorageWithConfig(ctx, &config)
@@ -415,4 +437,89 @@ func listAllObjectsWithPrefixAtBucket(ctx context.Context, objectStorage ObjectS
 		return nil, nil, err
 	}
 	return dirs, mods, nil
+}
+
+func TestMapObjectStorageError_MinIO_NewErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		inputError    error
+		expectedError error
+	}{
+		// Permanent errors
+		{
+			name:          "AccessDenied",
+			inputError:    minio.ErrorResponse{Code: "AccessDenied"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "InvalidAccessKeyId",
+			inputError:    minio.ErrorResponse{Code: "InvalidAccessKeyId"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "SignatureDoesNotMatch",
+			inputError:    minio.ErrorResponse{Code: "SignatureDoesNotMatch"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "NoSuchBucket",
+			inputError:    minio.ErrorResponse{Code: "NoSuchBucket"},
+			expectedError: merr.ErrIoBucketNotFound,
+		},
+		{
+			name:          "InvalidToken",
+			inputError:    minio.ErrorResponse{Code: "InvalidToken"},
+			expectedError: merr.ErrIoInvalidCredentials,
+		},
+		{
+			name:          "ExpiredToken",
+			inputError:    minio.ErrorResponse{Code: "ExpiredToken"},
+			expectedError: merr.ErrIoInvalidCredentials,
+		},
+		// Client validation errors
+		{
+			name:          "InvalidArgument",
+			inputError:    minio.ErrorResponse{Code: "InvalidArgument"},
+			expectedError: merr.ErrIoInvalidArgument,
+		},
+		{
+			name:          "InvalidRequest",
+			inputError:    minio.ErrorResponse{Code: "InvalidRequest"},
+			expectedError: merr.ErrIoInvalidArgument,
+		},
+		{
+			name:          "InvalidRange",
+			inputError:    minio.ErrorResponse{Code: "InvalidRange"},
+			expectedError: merr.ErrIoInvalidRange,
+		},
+		{
+			name:          "EntityTooLarge",
+			inputError:    minio.ErrorResponse{Code: "EntityTooLarge"},
+			expectedError: merr.ErrIoEntityTooLarge,
+		},
+		{
+			name:          "MaxMessageLengthExceeded",
+			inputError:    minio.ErrorResponse{Code: "MaxMessageLengthExceeded"},
+			expectedError: merr.ErrIoEntityTooLarge,
+		},
+		// Aliyun OSS specific error codes
+		{
+			name:          "AliyunSecurityTokenExpired",
+			inputError:    minio.ErrorResponse{Code: "SecurityTokenExpired"},
+			expectedError: merr.ErrIoInvalidCredentials,
+		},
+		{
+			name:          "AliyunInvalidAccessKeyIdInactive",
+			inputError:    minio.ErrorResponse{Code: "InvalidAccessKeyId.Inactive"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapObjectStorageError("test/path", tt.inputError)
+			assert.True(t, errors.Is(result, tt.expectedError),
+				"expected %v, got %v", tt.expectedError, result)
+		})
+	}
 }

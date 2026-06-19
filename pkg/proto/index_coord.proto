@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.index;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/indexpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/indexpb";
 
 import "common.proto";
 import "internal.proto";
@@ -35,6 +35,16 @@ service IndexCoord {
     }
 }
 
+// Path format version for index files on object storage.
+// Enum values are wire-compatible with the previous int32 encoding:
+// 0 remains BUILD_ROOTED (legacy), 1 remains COLLECTION_ROOTED (new).
+enum IndexStorePathVersion {
+    // legacy: index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
+    INDEX_STORE_PATH_VERSION_BUILD_ROOTED = 0;
+    // new: index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+    INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED = 1;
+}
+
 message IndexInfo {
     int64 collectionID = 1;
     int64 fieldID = 2;
@@ -60,6 +70,7 @@ message FieldIndex {
     IndexInfo index_info = 1;
     bool deleted = 2;
     uint64 create_time = 3;
+    int32 min_schema_version = 4;
 }
 
 message SegmentIndex {
@@ -84,6 +95,10 @@ message SegmentIndex {
     uint64 mem_size = 19; // the total size of index file at local (disk or memory) before loading by knowhere. (not compress)
     int32 current_scalar_index_version = 20;
     string index_type = 21;
+    // Path format version for index files on object storage.
+    // BUILD_ROOTED (0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
+    // COLLECTION_ROOTED (1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+    IndexStorePathVersion index_store_path_version = 22;
 }
 
 message RegisterNodeRequest {
@@ -171,6 +186,7 @@ message IndexFilePathInfo {
     int32 current_index_version = 11;
     uint64 mem_size = 12;
     int32 current_scalar_index_version = 13;
+    IndexStorePathVersion index_store_path_version = 14;
 }
 
 message SegmentInfo {
@@ -233,6 +249,8 @@ message StorageConfig {
     string sslCACert = 14;
     string GcpCredentialJSON = 15;
     uint32 max_connections = 16;
+    string ssl_tls_min_version = 17;
+    bool use_crc32c_checksum = 18;
 }
 
 // Synchronously modify OptionalFieldInfo in index_cgo_msg.proto file
@@ -330,17 +348,6 @@ message StatsTask {
     index.StatsSubJob subJobType = 11;
     bool canRecycle = 12;
     repeated internal.FileResourceInfo file_resources = 13;
-}
-
-message UpdateExternalCollectionTask {
-    int64 collectionID = 1;
-    int64 taskID = 2;
-    int64 version = 3;
-    int64 nodeID = 4;
-    JobState state = 5;
-    string fail_reason = 6;
-    string external_source = 7;
-    string external_spec = 8;
 }
 
 enum StatsSubJob {

@@ -3,8 +3,8 @@ package rewriter
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 type bound struct {
@@ -204,6 +204,10 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 				if !bestLower.inclusive || !bestUpper.inclusive {
 					isEmpty = true
 				}
+			}
+
+			if isEmpty && hasNullableFieldSemantics(g.col) {
+				continue
 			}
 
 			for _, b := range g.lowers {
@@ -604,6 +608,9 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				}
 			}
 			if isEmpty {
+				if hasNullableFieldSemantics(g.col) {
+					continue
+				}
 				// Empty intersection → constant false
 				for _, iv := range g.intervals {
 					used[iv.exprIndex] = true

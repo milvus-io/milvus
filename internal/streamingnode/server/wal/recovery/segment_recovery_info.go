@@ -3,10 +3,10 @@ package recovery
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // newSegmentRecoveryInfoFromSegmentAssignmentMeta creates a new segment recovery info from segment assignment meta.
@@ -85,6 +85,9 @@ func (info *segmentRecoveryInfo) BinarySize() uint64 {
 
 // ObserveInsert is called when an insert message is observed.
 func (info *segmentRecoveryInfo) ObserveInsert(timetick uint64, assignment *messagespb.PartitionSegmentAssignment) {
+	if !info.IsGrowing() {
+		return
+	}
 	if timetick < info.meta.CheckpointTimeTick {
 		// the txn message will share the same time tick.
 		// so we only filter the time tick is less than the checkpoint time tick.

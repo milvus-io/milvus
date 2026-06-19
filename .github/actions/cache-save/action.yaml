@@ -23,9 +23,9 @@ runs:
     if: ${{ inputs.kind == 'all' || inputs.kind == 'cpp' }}
     uses: actions/cache/save@v4
     with:
-      path: .docker/amd64-${{ inputs.os }}-conan
-      key: ${{ inputs.os }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
-      restore-keys: ${{ inputs.os }}-conan-
+      path: .docker/amd64-${{ inputs.os }}-conan2
+      key: ${{ inputs.os }}-conan2-${{ hashFiles('internal/core/conanfile.*') }}
+      restore-keys: ${{ inputs.os }}-conan2-
   - name: Cache Third Party
     if: ${{ inputs.kind == 'all' || inputs.kind == 'thirdparty' }}
     uses: actions/cache/save@v4

@@ -6,9 +6,9 @@ import (
 	"github.com/zilliztech/woodpecker/woodpecker"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)
@@ -41,7 +41,7 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		log.Ctx(ctx).Error("failed to open log writer", zap.String("log_name", opt.Channel.Name), zap.Error(err))
 		return nil, err
 	}
-	log.Ctx(ctx).Info("finish to open log writer", zap.String("log_name", opt.Channel.Name), zap.Error(err))
+	log.Ctx(ctx).Info("finish to open log writer", zap.String("log_name", opt.Channel.Name))
 	return &walImpl{
 		WALHelper: helper.NewWALHelper(opt),
 		p:         p,

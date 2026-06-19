@@ -28,16 +28,17 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
@@ -45,25 +46,28 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ServiceSuite struct {
@@ -560,6 +564,61 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
 	status, err := suite.node.UnsubDmChannel(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
+}
+
+func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "service unavailable",
+			err:  merr.WrapErrServiceUnavailable("streaming WAL is not initialized"),
+			want: true,
+		},
+		{
+			name: "handler client closed",
+			err:  handler.ErrClientClosed,
+			want: true,
+		},
+		{
+			name: "no streaming node deployed",
+			err:  registry.ErrNoStreamingNodeDeployed,
+			want: true,
+		},
+		{
+			name: "no release manual flush preparer",
+			err:  registry.ErrNoReleaseManualFlushPreparer,
+			want: true,
+		},
+		{
+			name: "streaming on shutdown",
+			err:  streamingstatus.NewOnShutdownError("wal is on shutdown"),
+			want: true,
+		},
+		{
+			name: "generic prepare failure",
+			err:  errors.New("prepare failed"),
+			want: false,
+		},
+		{
+			name: "streaming inner failure",
+			err:  streamingstatus.NewInner("prepare failed"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isReleaseManualFlushPrepareUnavailable(tt.err))
+		})
+	}
 }
 
 func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema,
@@ -1240,7 +1299,12 @@ func (suite *ServiceSuite) syncDistribution(ctx context.Context) {
 			PartitionIDs: suite.partitionIDs,
 		},
 		Actions: []*querypb.SyncAction{
-			{Type: querypb.SyncType_UpdateVersion, SealedInTarget: suite.validSegmentIDs, TargetVersion: time.Now().UnixNano()},
+			{
+				Type:                  querypb.SyncType_UpdateVersion,
+				SealedInTarget:        suite.validSegmentIDs,
+				SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100, 3: 100},
+				TargetVersion:         time.Now().UnixNano(),
+			},
 		},
 	})
 }
@@ -1354,7 +1418,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 	}
-	indexMeta := suite.node.composeIndexMeta(ctx, mock_segcore.GenTestIndexInfoList(suite.collectionID, schema), schema)
+	indexMeta := segments.ComposeIndexMeta(ctx, mock_segcore.GenTestIndexInfoList(suite.collectionID, schema), schema)
 	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, indexMeta, LoadMeta)
 
 	// Delegator not found
@@ -1381,7 +1445,8 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	}
 
 	syncVersionAction := &querypb.SyncAction{
-		Type: querypb.SyncType_UpdateVersion,
+		Type:           querypb.SyncType_UpdateVersion,
+		SealedInTarget: suite.validSegmentIDs,
 		SealedSegmentRowCount: map[int64]int64{
 			1: 100,
 			2: 200,
@@ -1538,6 +1603,7 @@ func (suite *ServiceSuite) genCQueryRequest(nq int64, indexType string, schema *
 	}
 
 	return &internalpb.RetrieveRequest{
+		QueryLabel: "query",
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_Retrieve,
 			MsgID:    rand.Int63(),
@@ -1609,6 +1675,7 @@ func (suite *ServiceSuite) TestQuerySegments_Failed() {
 
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
+			QueryLabel:   "query",
 			CollectionID: -1,
 		},
 
@@ -1918,7 +1985,7 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 	req.Request = "---"
 	resp, err = suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 
 	// node unhealthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -2129,11 +2196,14 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 
-	delegator, ok := suite.node.delegators.Get(suite.vchannel)
+	dlg, ok := suite.node.delegators.Get(suite.vchannel)
 	suite.True(ok)
-	sealedSegments, _ := delegator.GetSegmentInfo(false)
-	// 1 level 0 + 3 sealed segments
-	suite.Len(sealedSegments[0].Segments, 3)
+	// snapshot generation is async, wait for it to reflect loaded segments
+	var sealedSegments []delegator.SnapshotItem
+	suite.Require().Eventually(func() bool {
+		sealedSegments, _ = dlg.GetSegmentInfo(false)
+		return len(sealedSegments) > 0 && len(sealedSegments[0].Segments) == 3
+	}, time.Second, 10*time.Millisecond)
 
 	// data
 	req := &querypb.SyncDistributionRequest{
@@ -2156,7 +2226,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-	sealedSegments, _ = delegator.GetSegmentInfo(false)
+	sealedSegments, _ = dlg.GetSegmentInfo(false)
 	suite.Len(sealedSegments[0].Segments, 2)
 
 	releaseAction = &querypb.SyncAction{
@@ -2170,7 +2240,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-	sealedSegments, _ = delegator.GetSegmentInfo(false)
+	sealedSegments, _ = dlg.GetSegmentInfo(false)
 	suite.Len(sealedSegments[0].Segments, 1)
 }
 
@@ -2196,6 +2266,57 @@ func (suite *ServiceSuite) TestSyncDistribution_Failed() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestSyncDistribution_RejectV25Message() {
+	ctx := context.Background()
+	// prepare
+	// watch dmchannel and load some segments
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	// data
+	req := &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      suite.vchannel,
+		LoadMeta: &querypb.LoadMetaInfo{
+			PartitionIDs: suite.partitionIDs,
+		},
+	}
+
+	// Create a v2.5 style message: SealedInTarget is not empty but SealedSegmentRowCount is empty
+	v25StyleAction := &querypb.SyncAction{
+		Type:           querypb.SyncType_UpdateVersion,
+		SealedInTarget: []int64{3, 4, 5}, // Non-empty
+		// Note: SealedSegmentRowCount is not set (empty), simulating v2.5 format
+		GrowingInTarget: []int64{6},
+		DroppedInTarget: []int64{1, 2},
+		TargetVersion:   time.Now().UnixMilli(),
+		Checkpoint:      &msgpb.MsgPosition{Timestamp: 1000},
+		DeleteCP:        &msgpb.MsgPosition{Timestamp: 500},
+	}
+
+	req.Actions = []*querypb.SyncAction{v25StyleAction}
+
+	// This should succeed (no error returned), but the v2.5 message should be rejected
+	status, err := suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	// Verify that the v2.5 message was rejected by checking that no version sync happened
+	// The delegator should not have processed this message
+	// We can verify this by checking if the state was not updated (delegator should remain serviceable: false)
+	shardDelegator, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.True(ok)
+
+	// After rejection, the delegator's version should still be at initial state
+	// (not updated by the v2.5 message)
+	// We verify this indirectly by checking that no segments were marked as excluded
+	suite.Equal(int64(0), shardDelegator.Version())
 }
 
 func (suite *ServiceSuite) TestDelete_Int64() {

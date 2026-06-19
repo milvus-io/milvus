@@ -26,9 +26,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // TestRoundRobinAssignPolicy_AssignSegment_EvenDistribution tests that segments are evenly distributed
@@ -160,6 +160,51 @@ func TestRoundRobinAssignPolicy_AssignSegment_AllNodesNotNormal(t *testing.T) {
 	plansForced := policy.AssignSegment(context.Background(), 100, segments, nodes, true)
 	assert.NotNil(t, plansForced)
 	assert.Equal(t, 1, len(plansForced))
+}
+
+func TestRoundRobinAssignPolicy_AssignSegment_BatchLimitOnlyForBalance(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.Key)
+
+	mockScheduler := task.NewMockScheduler(t)
+	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+
+	nodeManager := session.NewNodeManager()
+	for i := int64(1); i <= 2; i++ {
+		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   i,
+			Address:  "localhost",
+			Hostname: "node",
+		}))
+		nodeManager.Get(i).SetState(session.NodeStateNormal)
+	}
+
+	policy := newRoundRobinAssignPolicy(nodeManager, mockScheduler, nil)
+	segments := make([]*meta.Segment, 5)
+	for i := range segments {
+		segments[i] = &meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        int64(i + 1),
+				NumOfRows: 1000,
+			},
+		}
+	}
+
+	nodes := []int64{1, 2}
+	balancePlans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	assert.Equal(t, 2, len(balancePlans))
+
+	for i := int64(1); i <= 2; i++ {
+		nodeManager.Get(i).SetState(session.NodeStateStopping)
+	}
+
+	balancePlans = policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	assert.Nil(t, balancePlans)
+
+	forcePlans := policy.AssignSegment(context.Background(), 100, segments, nodes, true)
+	assert.Equal(t, 5, len(forcePlans))
 }
 
 // TestRoundRobinAssignPolicy_AssignSegment_SingleNode tests with single node

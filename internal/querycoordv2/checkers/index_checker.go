@@ -23,18 +23,19 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const MaxSegmentNumPerGetIndexInfoRPC = 1024
@@ -81,7 +82,7 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
 		return nil
 	}
-	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
+	collectionIDs := c.meta.GetAll(ctx)
 	var tasks []task.Task
 
 	for _, collectionID := range collectionIDs {
@@ -91,8 +92,8 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 			continue
 		}
 
-		collection := c.meta.CollectionManager.GetCollection(ctx, collectionID)
-		schema := c.meta.CollectionManager.GetCollectionSchema(ctx, collectionID)
+		collection := c.meta.GetCollection(ctx, collectionID)
+		schema := c.meta.GetCollectionSchema(ctx, collectionID)
 		if collection == nil {
 			log.Warn("collection released during check index", zap.Int64("collection", collectionID))
 			continue
@@ -104,7 +105,7 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 				c.meta.PutCollectionSchema(ctx, collectionID, collectionSchema.GetSchema())
 			}
 		}
-		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+		replicas := c.meta.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			tasks = append(tasks, c.checkReplica(ctx, collection, replica, indexInfos, schema)...)
 		}
@@ -127,8 +128,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 	idSegmentsStats := make(map[int64]*meta.Segment)
 	targetsStats := make(map[int64][]int64) // segmentID => FieldID
-	redundant := make(map[int64][]int64)    // segmentID => indexIDs
-	redundantSegments := make(map[int64]*meta.Segment)
+	segmentsToUpdate := make(map[int64]*meta.Segment)
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
@@ -146,12 +146,10 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
 		if len(redundantIndices) > 0 {
-			redundant[segment.GetID()] = redundantIndices
-			redundantSegments[segment.GetID()] = segment
+			segmentsToUpdate[segment.GetID()] = segment
 		}
 	}
 
-	segmentsToUpdate := typeutil.NewSet[int64]()
 	for _, segmentIDs := range lo.Chunk(lo.Keys(idSegments), MaxSegmentNumPerGetIndexInfoRPC) {
 		segmentIndexInfos, err := c.broker.GetIndexInfo(ctx, collection.GetCollectionID(), segmentIDs...)
 		if err != nil {
@@ -165,14 +163,14 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 				if missingFields.Contain(fieldIndexInfo.GetFieldID()) &&
 					fieldIndexInfo.GetEnableIndex() &&
 					len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
-					segmentsToUpdate.Insert(segmentID)
+					segmentsToUpdate[segmentID] = idSegments[segmentID]
 				}
 			}
 		}
 	}
 
-	tasks = lo.FilterMap(segmentsToUpdate.Collect(), func(segmentID int64, _ int) (task.Task, bool) {
-		return c.createSegmentUpdateTask(ctx, idSegments[segmentID], replica)
+	tasks = lo.FilterMap(lo.Values(segmentsToUpdate), func(segment *meta.Segment, _ int) (task.Task, bool) {
+		return c.createSegmentUpdateTask(ctx, segment, replica)
 	})
 
 	segmentsStatsToUpdate := typeutil.NewSet[int64]()
@@ -197,11 +195,6 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 		return c.createSegmentStatsUpdateTask(ctx, idSegmentsStats[segmentID], replica)
 	})
 	tasks = append(tasks, tasksStats...)
-
-	dropTasks := lo.FilterMap(lo.Values(redundantSegments), func(segment *meta.Segment, _ int) (task.Task, bool) {
-		return c.createSegmentIndexDropTasks(ctx, replica, segment, redundant[segment.GetID()]), true
-	})
-	tasks = append(tasks, dropTasks...)
 
 	return tasks
 }
@@ -241,14 +234,14 @@ func (c *IndexChecker) checkRedundantIndices(segment *meta.Segment, indexInfos [
 }
 
 func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
-	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
+	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeReopen, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
 	t, err := task.NewSegmentTask(
 		ctx,
 		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 		c.ID(),
 		segment.GetCollectionID(),
 		replica,
-		replica.LoadPriority(),
+		commonpb.LoadPriority_LOW, // Index update is not urgent
 		action,
 	)
 	if err != nil {
@@ -296,14 +289,14 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 }
 
 func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
-	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeStatsUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
+	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeReopen, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
 	t, err := task.NewSegmentTask(
 		ctx,
 		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 		c.ID(),
 		segment.GetCollectionID(),
 		replica,
-		replica.LoadPriority(),
+		commonpb.LoadPriority_LOW, // Stats update is not urgent
 		action,
 	)
 	if err != nil {
@@ -318,15 +311,4 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 	t.SetPriority(task.TaskPriorityLow)
 	t.SetReason("missing json stats")
 	return t, true
-}
-
-func (c *IndexChecker) createSegmentIndexDropTasks(ctx context.Context, replica *meta.Replica, segment *meta.Segment, indexIDs []int64) task.Task {
-	if len(indexIDs) == 0 {
-		return nil
-	}
-	action := task.NewDropIndexAction(segment.Node, task.ActionTypeDropIndex, segment.GetInsertChannel(), indexIDs)
-	t := task.NewDropIndexTask(ctx, c.ID(), replica.GetCollectionID(), replica, segment.GetID(), action)
-	t.SetPriority(task.TaskPriorityLow)
-	t.SetReason("drop index")
-	return t
 }

@@ -26,11 +26,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
 
 type StatsInterceptorSuite struct {
@@ -84,7 +84,7 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 			},
 			expectLabels: [][]string{
 				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, dbName, collection},
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.FailLabel, dbName, collection},
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.FailSystemLabel, dbName, collection},
 			},
 		},
 		{
@@ -120,7 +120,8 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 			},
 			expectLabels: [][]string{
 				{paramtable.GetStringNodeID(), "CreateCollection", metrics.TotalLabel, dbName, collection},
-				{paramtable.GetStringNodeID(), "CreateCollection", metrics.RejectedLabel, dbName, collection},
+				// Unauthenticated is a caller-side rejection -> rejected_user (review §8).
+				{paramtable.GetStringNodeID(), "CreateCollection", metrics.RejectedUserLabel, dbName, collection},
 			},
 		},
 	}

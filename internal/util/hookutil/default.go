@@ -21,9 +21,8 @@ package hookutil
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type DefaultHook struct{}
@@ -31,7 +30,7 @@ type DefaultHook struct{}
 var _ hook.Hook = (*DefaultHook)(nil)
 
 func (d DefaultHook) VerifyAPIKey(key string) (string, error) {
-	return "", errors.New("default hook, can't verify api key")
+	return "", merr.WrapErrParameterInvalidMsg("default hook, can't verify api key")
 }
 
 func (d DefaultHook) Init(params map[string]string) error {
@@ -60,6 +59,6 @@ func (d DefaultExtension) Report(info any) int {
 	return 0
 }
 
-func (d DefaultExtension) ReportRefused(ctx context.Context, req interface{}, resp interface{}, err error, fullMethod string) error {
+func (d DefaultExtension) ReportAction(ctx context.Context, req interface{}, resp interface{}, err error, fullMethod string, action string) error {
 	return nil
 }

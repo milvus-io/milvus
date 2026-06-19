@@ -22,16 +22,21 @@
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "storage/EntryStreamUtils.h"
+#include "tantivy-binding.h"
 
 namespace milvus {
 
 std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
+std::atomic<double> ENTRY_STREAM_BUDGET_RATIO(3.0);
 std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE(DEFAULT_DELETE_DUMP_BATCH_SIZE);
 std::atomic<bool> ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION(
     DEFAULT_ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
+
+std::atomic<bool> JSON_KEY_STATS_ENABLED(DEFAULT_JSON_KEY_STATS_ENABLED);
 
 std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED(
     DEFAULT_GROWING_JSON_KEY_STATS_ENABLED);
@@ -44,6 +49,19 @@ void
 SetIndexSliceSize(const int64_t size) {
     FILE_SLICE_SIZE.store(size << 20);
     LOG_INFO("set config index slice size (byte): {}", FILE_SLICE_SIZE.load());
+}
+
+void
+SetStreamBudgetRatio(const double ratio) {
+    if (ratio <= 0) {
+        LOG_WARN("ignore invalid entry stream budget ratio: {}", ratio);
+        return;
+    }
+    ENTRY_STREAM_BUDGET_RATIO.store(ratio);
+    storage::TransientMemoryBudget::GetEntryStreamBudget()
+        .NotifyCapacityUpdated();
+    LOG_INFO("set entry stream budget ratio: {}",
+             ENTRY_STREAM_BUDGET_RATIO.load());
 }
 
 void
@@ -65,6 +83,13 @@ SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED.store(val);
     LOG_INFO("set default optimize expr enabled: {}",
              OPTIMIZE_EXPR_ENABLED.load());
+}
+
+void
+SetDefaultJSONKeyStatsEnable(bool val) {
+    JSON_KEY_STATS_ENABLED.store(val);
+    LOG_INFO("set default json key stats enabled: {}",
+             JSON_KEY_STATS_ENABLED.load());
 }
 
 void
@@ -114,6 +139,7 @@ SetLogLevel(const char* level) {
             gflags::SetCommandLineOption("minloglevel", "2");
         }
     }
+    tantivy_set_log_level(level);
 }
 
 }  // namespace milvus

@@ -61,8 +61,8 @@ struct BinaryRangeElementFunc {
                                T>
         HighPrecisionType;
     void
-    operator()(T val1,
-               T val2,
+    operator()(const T& val1,
+               const T& val2,
                const T* src,
                size_t n,
                TargetBitmapView res,
@@ -107,30 +107,45 @@ struct BinaryRangeElementFunc {
     }
 };
 
-#define BinaryRangeJSONCompare(cmp)                                \
-    do {                                                           \
-        if (valid_data != nullptr && !valid_data[offset]) {        \
-            res[i] = valid_res[i] = false;                         \
-            break;                                                 \
-        }                                                          \
-        if (has_bitmap_input && !bitmap_input[i + start_cursor]) { \
-            break;                                                 \
-        }                                                          \
-        auto x = src[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                           \
-            if constexpr (std::is_same_v<GetType, int64_t>) {      \
-                auto x = src[offset].template at<double>(pointer); \
-                if (!x.error()) {                                  \
-                    auto value = x.value();                        \
-                    res[i] = (cmp);                                \
-                    break;                                         \
-                }                                                  \
-            }                                                      \
-            res[i] = false;                                        \
-            break;                                                 \
-        }                                                          \
-        auto value = x.value();                                    \
-        res[i] = (cmp);                                            \
+// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
+// number in a single parse.  Branches on actual type to preserve int64
+// precision; uint64 and double values fall back to double comparison,
+// consistent with the Tantivy index and JSON-stats paths.
+// 'cmp' must reference 'value' (int64_t or double depending on the JSON value).
+#define BinaryRangeJSONCompare(cmp)                                    \
+    do {                                                               \
+        if (valid_data != nullptr && !valid_data[offset]) {            \
+            res[i] = valid_res[i] = false;                             \
+            break;                                                     \
+        }                                                              \
+        if (has_bitmap_input && !bitmap_input[i + start_cursor]) {     \
+            break;                                                     \
+        }                                                              \
+        if constexpr (std::is_same_v<GetType, int64_t>) {              \
+            auto x = src[offset].at_numeric(pointer);                  \
+            if (x.error()) {                                           \
+                res[i] = false;                                        \
+                break;                                                 \
+            }                                                          \
+            auto n = x.value();                                        \
+            if (n.is_int64()) {                                        \
+                auto value = n.get_int64();                            \
+                res[i] = (cmp);                                        \
+            } else {                                                   \
+                auto value = n.is_uint64()                             \
+                                 ? static_cast<double>(n.get_uint64()) \
+                                 : n.get_double();                     \
+                res[i] = (cmp);                                        \
+            }                                                          \
+        } else {                                                       \
+            auto x = src[offset].template at<GetType>(pointer);        \
+            if (x.error()) {                                           \
+                res[i] = false;                                        \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value();                                    \
+            res[i] = (cmp);                                            \
+        }                                                              \
     } while (false)
 
 template <typename ValueType,
@@ -142,8 +157,8 @@ struct BinaryRangeElementFuncForJson {
                                        std::string_view,
                                        ValueType>;
     void
-    operator()(ValueType val1,
-               ValueType val2,
+    operator()(const ValueType& val1,
+               const ValueType& val2,
                const std::string& pointer,
                const milvus::Json* src,
                const bool* valid_data,
@@ -181,8 +196,8 @@ struct BinaryRangeElementFuncForArray {
                                        std::string_view,
                                        ValueType>;
     void
-    operator()(ValueType val1,
-               ValueType val2,
+    operator()(const ValueType& val1,
+               const ValueType& val2,
                int index,
                const milvus::ArrayView* src,
                const bool* valid_data,
@@ -269,7 +284,8 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
-        int32_t consistency_level)
+        int32_t consistency_level,
+        const query::PlanOptions& plan_options = {})
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -279,15 +295,22 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                       FromValCase(expr->lower_val_.val_case()),
                       active_count,
                       batch_size,
-                      consistency_level),
+                      consistency_level,
+                      false,
+                      false,
+                      plan_options),
           expr_(expr) {
+        DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    DetermineExecPath() override;
+
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 

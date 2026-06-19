@@ -8,15 +8,16 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // NewAssignmentService creates a new assignment service.
@@ -102,14 +103,30 @@ func (c *AssignmentServiceImpl) ReportAssignmentError(ctx context.Context, pchan
 	// wait for service ready.
 	assignment, err := c.getAssignmentDiscoverOrWait(ctx)
 	if err != nil {
-		return errors.Wrap(err, "at creating assignment service")
+		return merr.Wrap(err, "at creating assignment service")
 	}
 	assignment.ReportAssignmentError(pchannel, assignmentErr)
 	return nil
 }
 
+// GetReplicateConfigurationOpt is the option for GetReplicateConfiguration.
+type GetReplicateConfigurationOpt func(*getReplicateConfigurationOpts)
+
+type getReplicateConfigurationOpts struct {
+	freshRead bool
+}
+
+// WithFreshRead forces reading the latest state from the coord
+// instead of from the local watcher cache.
+// This ensures strong consistency after UpdateReplicateConfiguration.
+func WithFreshRead() GetReplicateConfigurationOpt {
+	return func(o *getReplicateConfigurationOpts) {
+		o.freshRead = true
+	}
+}
+
 // UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
-func (c *AssignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+func (c *AssignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("assignment service client is closing")
 	}
@@ -120,18 +137,57 @@ func (c *AssignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 		return err
 	}
 	_, err = service.UpdateReplicateConfiguration(ctx, &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: config,
+		Configuration: req.GetReplicateConfiguration(),
+		ForcePromote:  req.GetForcePromote(),
 	})
 	return err
 }
 
-func (c *AssignmentServiceImpl) GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
+func (c *AssignmentServiceImpl) GetReplicateConfiguration(ctx context.Context, opts ...GetReplicateConfigurationOpt) (*replicateutil.ConfigHelper, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("assignment service client is closing")
 	}
 	defer c.lifetime.Done()
 
+	o := &getReplicateConfigurationOpts{}
+	for _, opt := range opts {
+		opt(o)
+	}
+	if o.freshRead {
+		return c.getFreshReplicateConfiguration(ctx)
+	}
 	return c.watcher.GetLatestReplicateConfiguration(ctx)
+}
+
+// getFreshReplicateConfiguration creates a new temporary watcher and discover client
+// to get the latest replicate configuration directly from the coord,
+// ensuring strong consistency after UpdateReplicateConfiguration.
+func (c *AssignmentServiceImpl) getFreshReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
+	tmpWatcher := newWatcher()
+
+	service, err := c.service.GetService(ctx)
+	if err != nil {
+		return nil, err
+	}
+	streamClient, err := service.AssignmentDiscover(ctx)
+	if err != nil {
+		return nil, err
+	}
+	adc := newAssignmentDiscoverClient(tmpWatcher, streamClient)
+	defer adc.Close()
+
+	// Cancel the watcher wait if the discover client becomes unavailable.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-adc.Available():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	return tmpWatcher.GetLatestReplicateConfiguration(ctx)
 }
 
 // Close closes the assignment service.

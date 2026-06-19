@@ -26,8 +26,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -147,6 +147,9 @@ func (m *Manager) EvictCachedValue(key string) {
 }
 
 func (m *Manager) EvictCacheValueByFormat(keys ...string) {
+	if len(keys) == 0 {
+		return
+	}
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 	// cause param'value may rely on other params, so we need to evict all the cached value when config is changed
@@ -269,8 +272,7 @@ func (m *Manager) AddSource(source Source) error {
 	sourceName := source.GetSourceName()
 	_, ok := m.sources.Get(sourceName)
 	if ok {
-		err := errors.New("duplicate source supplied")
-		return err
+		return ErrSourceDuplicate
 	}
 
 	source.SetManager(m)
@@ -278,8 +280,7 @@ func (m *Manager) AddSource(source Source) error {
 
 	err := m.pullSourceConfigs(sourceName)
 	if err != nil {
-		err = fmt.Errorf("failed to load %s cause: %x", sourceName, err)
-		return err
+		return errors.Wrapf(err, "failed to load source %s", sourceName)
 	}
 
 	source.SetEventHandler(m)
@@ -338,7 +339,7 @@ func (m *Manager) UpdateSourceOptions(opts ...Option) {
 func (m *Manager) pullSourceConfigs(source string) error {
 	configSource, ok := m.sources.Get(source)
 	if !ok {
-		return errors.New("invalid source or source not added")
+		return ErrSourceInvalid
 	}
 
 	configs, err := configSource.GetConfigurations()
@@ -540,7 +541,7 @@ func (m *Manager) ProcessImmutableConfigs() error {
 
 	if len(savedConfigs) > 0 {
 		log.Info("triggering etcd source refresh after saving immutable configs", zap.Strings("savedConfigs", savedConfigs))
-		if refreshErr := etcdSourceImpl.refreshConfigurations(); refreshErr != nil {
+		if refreshErr := etcdSourceImpl.RefreshConfigurationsLinearizable(); refreshErr != nil {
 			log.Warn("failed to refresh etcd configurations after saving immutable configs", zap.Error(refreshErr))
 		} else {
 			log.Info("successfully refreshed etcd configurations after saving immutable configs")
@@ -548,14 +549,14 @@ func (m *Manager) ProcessImmutableConfigs() error {
 	}
 
 	if len(saveErrors) > 0 {
-		return fmt.Errorf("failed to save %d immutable configs to etcd", len(saveErrors))
+		return errors.Wrapf(ErrImmutableConfigSaveFailed, "%d config(s) failed", len(saveErrors))
 	}
 	return nil
 }
 
 func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) error {
 	if etcdSource == nil || etcdSource.etcdCli == nil {
-		return errors.New("etcd client is not available")
+		return ErrEtcdClientUnavailable
 	}
 	etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, key)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -565,7 +566,7 @@ func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) er
 		Then(clientv3.OpPut(etcdKey, value)).
 		Commit()
 	if err != nil {
-		return fmt.Errorf("failed to put config to etcd: %w", err)
+		return errors.Wrap(err, "failed to put config to etcd")
 	}
 	if !resp.Succeeded {
 		log.Info("config already exists in etcd, skip writing",
@@ -581,19 +582,55 @@ func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) er
 // UpdateConfigInEtcd updates a configuration value in etcd.
 // Unlike SaveConfigToEtcd, this function will update the config even if it already exists.
 func (m *Manager) UpdateConfigInEtcd(etcdSource *EtcdSource, key, value string) error {
+	return m.AlterConfigsInEtcd(etcdSource, map[string]string{key: value}, nil)
+}
+
+// AlterConfigsInEtcd atomically updates and/or deletes configuration values in etcd.
+// Both updates (put) and deletes are executed in a single etcd transaction.
+func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]string, deletes []string) error {
 	if etcdSource == nil || etcdSource.etcdCli == nil {
-		return errors.New("etcd client is not available")
+		return ErrEtcdClientUnavailable
 	}
-	fmtKey := formatKey(key)
-	etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
+
+	if len(updates) == 0 && len(deletes) == 0 {
+		return ErrNoConfigsToAlter
+	}
+
+	// Build transaction operations
+	ops := make([]clientv3.Op, 0, len(updates)+len(deletes))
+	for key, value := range updates {
+		fmtKey := formatKey(key)
+		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
+		ops = append(ops, clientv3.OpPut(etcdKey, value))
+	}
+	for _, key := range deletes {
+		fmtKey := formatKey(key)
+		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
+		ops = append(ops, clientv3.OpDelete(etcdKey))
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := etcdSource.etcdCli.Put(ctx, etcdKey, value)
-	if err != nil {
-		return fmt.Errorf("failed to update config in etcd: %w", err)
-	}
-	log.Info("config updated in etcd",
-		zap.String("etcdKey", etcdKey), zap.String("configKey", fmtKey), zap.String("value", value))
 
+	_, err := etcdSource.etcdCli.Txn(ctx).
+		Then(ops...).
+		Commit()
+	if err != nil {
+		return errors.Wrap(err, "failed to atomically alter configs in etcd")
+	}
+
+	// Proactively refresh local EtcdSource so the write is immediately visible in this process,
+	// rather than waiting for the async etcd-watch refresher. Linearizable read (no
+	// WithSerializable) ensures the follower we read from has applied the txn we just
+	// committed — the async refresher's serializable path would not provide that guarantee.
+	if err := etcdSource.RefreshConfigurationsLinearizable(); err != nil {
+		return err
+	}
+
+	log.Info("configs atomically altered in etcd",
+		zap.Int("updates", len(updates)),
+		zap.Int("deletes", len(deletes)),
+		zap.Any("updated", updates),
+		zap.Strings("deleted", deletes))
 	return nil
 }

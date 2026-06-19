@@ -18,7 +18,6 @@ package delegator
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"time"
 
@@ -27,22 +26,22 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -120,7 +119,12 @@ func (sd *shardDelegator) addL0GrowingBF(ctx context.Context, segment segments.S
 func (sd *shardDelegator) addL0ForGrowingLoad(ctx context.Context, segment segments.Segment) error {
 	deltalogs := sd.getLevel0Deltalogs(segment.Partition())
 	log.Info("forwarding L0 via loader...", zap.Int64("segmentID", segment.ID()), zap.Int("deltalogsNum", len(deltalogs)))
-	return sd.loader.LoadDeltaLogs(ctx, segment, deltalogs)
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    segment.ID(),
+		CollectionID: segment.Collection(),
+		Deltalogs:    deltalogs,
+	}
+	return sd.loader.LoadDeltaLogs(ctx, segment, loadInfo)
 }
 
 func (sd *shardDelegator) forwardL0ByBF(ctx context.Context,
@@ -130,7 +134,7 @@ func (sd *shardDelegator) forwardL0ByBF(ctx context.Context,
 	worker cluster.Worker,
 ) error {
 	// after L0 segment feature
-	// growing segemnts should have load stream delete as well
+	// growing segments should have load stream delete as well
 	deleteScope := querypb.DataScope_All
 	switch candidate.Type() {
 	case commonpb.SegmentState_Sealed:
@@ -271,8 +275,8 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(bfCost.Milliseconds()))
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
+	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(bfCost.Microseconds()) / 1000.0)
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(forwardDeleteCost.Microseconds()) / 1000.0)
 }
 
 func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData []*DeleteData) {
@@ -349,7 +353,7 @@ func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(forwardDeleteCost.Microseconds()) / 1000.0)
 }
 
 // applyDeleteBatch handles delete record and apply them to corresponding workers in batch.

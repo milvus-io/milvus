@@ -12,7 +12,7 @@ success = "success"
 pk_field_name = 'id'
 vector_field_name = 'vector'
 dim = ct.default_dim
-default_nb = 2000
+default_nb = ct.default_nb
 default_build_params = {"search_list_size": 100, "beamwidth": 10, "pq_code_budget_gb": 1.0, "num_threads": 8, "max_degree": 64, "indexing_list_size": 100, "build_dram_budget_gb": 2.0, "search_dram_budget_gb": 1.0}
 default_search_params = {"search_list_size": 100, "beamwidth": 10, "search_dram_budget_gb": 1.0}
 
@@ -76,21 +76,13 @@ class TestDiskannBuildParams(TestMilvusClientV2Base):
         schema, _ = self.create_schema(client)
         schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
         if vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
-            schema.add_field(vector_field_name, datatype=vector_data_type)
+            schema.add_field(vector_field_name, datatype=vector_data_type, nullable=True)
         else:
-            schema.add_field(vector_field_name, datatype=vector_data_type, dim=dim)
+            schema.add_field(vector_field_name, datatype=vector_data_type, dim=dim, nullable=True)
         self.create_collection(client, collection_name, schema=schema)
         insert_times = 2
-        random_vectors = list(cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=vector_data_type)) \
-            if vector_data_type == DataType.FLOAT_VECTOR \
-            else cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=vector_data_type)
-        for j in range(insert_times):
-            start_pk = j * default_nb
-            rows = [{
-                pk_field_name: i + start_pk,
-                vector_field_name: random_vectors[i + start_pk]
-            } for i in range(default_nb)]
-            self.insert(client, collection_name, rows)
+        rows = cf.gen_row_data_by_schema(insert_times * default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         index_params = self.prepare_index_params(client)[0]
         metric_type = cf.get_default_metric_for_vector_type(vector_data_type)

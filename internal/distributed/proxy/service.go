@@ -37,6 +37,8 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -44,9 +46,9 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/federpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -61,18 +63,18 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var (
@@ -95,6 +97,7 @@ type Server struct {
 
 	ctx                context.Context
 	wg                 sync.WaitGroup
+	grpcHTTPWg         sync.WaitGroup
 	proxy              types.ProxyComponent
 	httpListener       net.Listener
 	grpcListener       net.Listener
@@ -145,9 +148,9 @@ func authenticate(c *gin.Context) {
 		log.Ctx(context.TODO()).Warn("fail to verify apikey", zap.Error(err))
 	}
 
-	hookutil.GetExtension().ReportRefused(context.Background(), nil, &milvuspb.BoolResponse{
+	hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
 		Status: merr.Status(merr.ErrNeedAuthenticate),
-	}, nil, c.FullPath())
+	}, nil, c.FullPath(), hookutil.ActionAuthorize)
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
@@ -183,10 +186,33 @@ func (s *Server) registerHTTPServer() {
 	})
 }
 
+func (s *Server) httpHandler(ginHandler http.Handler) http.Handler {
+	if s.listenerManager == nil || !s.listenerManager.portShareMode {
+		return ginHandler
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			s.grpcHTTPWg.Add(1)
+			defer s.grpcHTTPWg.Done()
+			s.grpcExternalServer.ServeHTTP(w, r)
+			return
+		}
+		ginHandler.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) serveHTTP(listener net.Listener) error {
+	if err := s.httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, cmux.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.New()
 	ginHandler.Use(httpserver.MetricsHandlerFunc)
+	ginHandler.Use(httpserver.TraceIDHandlerFunc)
 	ginHandler.Use(accesslog.AccessLogMiddleware)
 	ginHandler.Use(httpserver.LoggerHandlerFunc(), gin.Recovery())
 	ginHandler.Use(httpserver.RequestHandlerFunc)
@@ -200,9 +226,33 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
-	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
+	http2Server := &http2.Server{}
+	Params := &proxy.Params.HTTPCfg
+	s.httpServer = &http.Server{
+		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
+		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
+		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
+		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),
+		IdleTimeout:       Params.IdleTimeout.GetAsDurationByParse(),
+		MaxHeaderBytes:    Params.MaxHeaderBytes.GetAsInt(),
+	}
+	if err := http2.ConfigureServer(s.httpServer, http2Server); err != nil {
+		errChan <- err
+		return
+	}
 	errChan <- nil
-	if err := s.httpServer.Serve(s.listenerManager.HTTPListener()); err != nil && err != cmux.ErrServerClosed {
+	if s.listenerManager.portShareMode {
+		serveErrChan := make(chan error, 2)
+		go func() { serveErrChan <- s.serveHTTP(s.listenerManager.HTTP2Listener()) }()
+		go func() { serveErrChan <- s.serveHTTP(s.listenerManager.HTTPListener()) }()
+		for i := 0; i < 2; i++ {
+			if err := <-serveErrChan; err != nil {
+				log.Ctx(s.ctx).Error("start Proxy http server to listen failed", zap.Error(err))
+				errChan <- err
+				return
+			}
+		}
+	} else if err := s.serveHTTP(s.listenerManager.HTTPListener()); err != nil {
 		log.Ctx(s.ctx).Error("start Proxy http server to listen failed", zap.Error(err))
 		errChan <- err
 		return
@@ -308,7 +358,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		}
 		if !certPool.AppendCertsFromPEM(rootBuf) {
 			log.Warn("fail to append ca to cert")
-			errChan <- errors.New("fail to append ca to cert")
+			errChan <- merr.WrapErrParameterInvalidMsg("fail to append ca to cert")
 			return
 		}
 
@@ -335,6 +385,10 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
 
+	if s.listenerManager.portShareMode {
+		log.Info("Proxy external grpc server is served by shared http2 server")
+		return
+	}
 	if err := s.grpcExternalServer.Serve(s.listenerManager.ExternalGrpcListener()); err != nil && err != cmux.ErrServerClosed {
 		log.Error("failed to serve on Proxy's listener", zap.Error(err))
 		errChan <- err
@@ -573,14 +627,27 @@ func (s *Server) Stop() (err error) {
 	go func() {
 		defer gracefulWg.Done()
 
-		// try to close grpc server firstly, it has the same root listener with cmux server and
-		// http listener that tls has not been enabled.
-		if s.grpcExternalServer != nil {
-			logger.Info("Proxy stop external grpc server")
-			utils.GracefulStopGRPCServer(s.grpcExternalServer)
+		portShareMode := s.listenerManager != nil && s.listenerManager.portShareMode
+		if portShareMode && s.httpServer != nil {
+			logger.Info("Proxy shutdown http server...")
+			ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().ProxyGrpcServerCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+			if err := s.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, cmux.ErrServerClosed) {
+				logger.Warn("Proxy failed to shutdown http server", zap.Error(err))
+			}
+			cancel()
 		}
 
-		if s.httpServer != nil {
+		if s.grpcExternalServer != nil {
+			logger.Info("Proxy stop external grpc server")
+			if portShareMode {
+				s.grpcHTTPWg.Wait()
+				s.grpcExternalServer.Stop()
+			} else {
+				utils.GracefulStopGRPCServer(s.grpcExternalServer)
+			}
+		}
+
+		if !portShareMode && s.httpServer != nil {
 			logger.Info("Proxy stop http server...")
 			s.httpServer.Close()
 		}
@@ -666,6 +733,16 @@ func (s *Server) BatchDescribeCollection(ctx context.Context, request *milvuspb.
 // AddCollectionField add a field to collection
 func (s *Server) AddCollectionField(ctx context.Context, request *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.proxy.AddCollectionField(ctx, request)
+}
+
+// AddCollectionStructField add a struct field to collection
+func (s *Server) AddCollectionStructField(ctx context.Context, request *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	return s.proxy.AddCollectionStructField(ctx, request)
+}
+
+// AlterCollectionSchema alters the collection schema (add/drop fields)
+func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return s.proxy.AlterCollectionSchema(ctx, request)
 }
 
 // GetCollectionStatistics notifies Proxy to get a collection's Statistics
@@ -976,6 +1053,10 @@ func (s *Server) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest
 	return s.proxy.CreateRole(ctx, req)
 }
 
+func (s *Server) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterRole(ctx, req)
+}
+
 func (s *Server) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	return s.proxy.DropRole(ctx, req)
 }
@@ -1162,6 +1243,10 @@ func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	return s.proxy.GetQuotaMetrics(ctx, req)
 }
 
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.proxy.ClearReadTaskQueue(ctx, req)
+}
+
 // AddFileResource add file resource
 func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
 	return s.proxy.AddFileResource(ctx, req)
@@ -1182,6 +1267,11 @@ func (s *Server) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb
 	return s.proxy.UpdateReplicateConfiguration(ctx, req)
 }
 
+// GetReplicateConfiguration retrieves the current cross-cluster replication topology.
+func (s *Server) GetReplicateConfiguration(ctx context.Context, req *milvuspb.GetReplicateConfigurationRequest) (*milvuspb.GetReplicateConfigurationResponse, error) {
+	return s.proxy.GetReplicateConfiguration(ctx, req)
+}
+
 // GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.
 func (s *Server) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error) {
 	return s.proxy.GetReplicateInfo(ctx, req)
@@ -1190,6 +1280,11 @@ func (s *Server) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicat
 // CreateReplicateStream establishes a replication stream on the target Milvus cluster.
 func (s *Server) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
 	return s.proxy.CreateReplicateStream(stream)
+}
+
+// DumpMessages streams messages from a WAL range for data salvage.
+func (s *Server) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
+	return s.proxy.DumpMessages(req, stream)
 }
 
 // ComputePhraseMatchSlop computes the minimum slop required for phrase matching.
@@ -1225,6 +1320,14 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.List
 	return s.proxy.ListRestoreSnapshotJobs(ctx, req)
 }
 
+func (s *Server) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error) {
+	return s.proxy.PinSnapshotData(ctx, req)
+}
+
+func (s *Server) UnpinSnapshotData(ctx context.Context, req *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	return s.proxy.UnpinSnapshotData(ctx, req)
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests
 func (s *Server) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
 	return s.proxy.ClientHeartbeat(ctx, req)
@@ -1243,4 +1346,20 @@ func (s *Server) PushClientCommand(ctx context.Context, req *milvuspb.PushClient
 // DeleteClientCommand deletes a client command
 func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return s.proxy.DeleteClientCommand(ctx, req)
+}
+
+func (s *Server) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	return s.proxy.BatchUpdateManifest(ctx, req)
+}
+
+func (s *Server) RefreshExternalCollection(ctx context.Context, req *milvuspb.RefreshExternalCollectionRequest) (*milvuspb.RefreshExternalCollectionResponse, error) {
+	return s.proxy.RefreshExternalCollection(ctx, req)
+}
+
+func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error) {
+	return s.proxy.GetRefreshExternalCollectionProgress(ctx, req)
+}
+
+func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
+	return s.proxy.ListRefreshExternalCollectionJobs(ctx, req)
 }

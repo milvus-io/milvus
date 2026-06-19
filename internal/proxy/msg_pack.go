@@ -19,12 +19,12 @@ package proxy
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func genInsertMsgsByPartition(ctx context.Context,
@@ -78,8 +78,10 @@ func genInsertMsgsByPartition(ctx context.Context,
 			return nil, err
 		}
 
-		// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
-		if requestSize+curRowMessageSize >= threshold && msg.NumRows > 0 {
+		// If the insert message size exceeds the threshold, flush the current
+		// message first. A single row can be larger than the threshold, so do
+		// not emit an empty message before adding that row.
+		if msg.NumRows > 0 && requestSize+curRowMessageSize >= threshold {
 			repackedMsgs = append(repackedMsgs, msg)
 			msg = createInsertMsg(segmentID, channelName)
 			requestSize = 0

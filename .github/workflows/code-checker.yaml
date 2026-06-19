@@ -101,8 +101,8 @@ jobs:
 
   rockylinux:
     if: ${{ false }} # skip for now
-    name: Code Checker rockylinux8
-    # Run in amazonlinux docker
+    name: Code Checker rockylinux9
+    # Run in rockylinux docker
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -120,13 +120,13 @@ jobs:
       - name: Download Caches
         uses: ./.github/actions/cache-restore
         with:
-          os: 'rockylinux8'
+          os: 'rockylinux9'
       - name: Code Check
         run: |
-          sed -i 's/ubuntu22.04/rockylinux8/g' .env
+          sed -i 's/ubuntu22.04/rockylinux9/g' .env
           ./build/builder.sh /bin/bash -c "make install"
       - name: Save Caches
         uses: ./.github/actions/cache-save
         if: github.event_name != 'pull_request'
         with:
-          os: 'rockylinux8'
+          os: 'rockylinux9'

@@ -26,8 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 func TestCompactionTaskMetaSuite(t *testing.T) {
@@ -164,4 +164,26 @@ func (suite *CompactionTaskMetaSuite) TestReloadFromKV_PreAllocatedSegmentIDsCom
 	clusteringTasks := meta.GetCompactionTasksByTriggerID(2)
 	suite.Equal(1, len(clusteringTasks))
 	suite.Equal(datapb.CompactionTaskState_failed, clusteringTasks[0].State)
+}
+
+// TestReloadFromKV_BumpSchemaVersionTaskSurvives verifies that an in-progress schema bump compaction
+func (suite *CompactionTaskMetaSuite) TestReloadFromKV_BumpSchemaVersionTaskSurvives() {
+	bumpSchemaVersionTask := &datapb.CompactionTask{
+		PlanID:                 10,
+		TriggerID:              10,
+		Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
+		State:                  datapb.CompactionTaskState_executing,
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 100, End: 101},
+	}
+
+	catalog := mocks.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return([]*datapb.CompactionTask{bumpSchemaVersionTask}, nil).Once()
+
+	meta, err := newCompactionTaskMeta(context.TODO(), catalog)
+	suite.NoError(err)
+
+	tasks := meta.GetCompactionTasksByTriggerID(10)
+	suite.Equal(1, len(tasks))
+	suite.Equal(datapb.CompactionTaskState_executing, tasks[0].State,
+		"schema bump task must survive reload even with nil PreAllocatedSegmentIDs")
 }

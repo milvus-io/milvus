@@ -22,9 +22,9 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // GetServerVersionOption is the interface for GetServerVersion request.
@@ -141,7 +141,8 @@ func (c *Client) BackupRBAC(ctx context.Context, option BackupRBACOption, callOp
 			}),
 			Roles: lo.Map(rbacMeta.GetRoles(), func(role *milvuspb.RoleEntity, _ int) *entity.Role {
 				return &entity.Role{
-					RoleName: role.GetName(),
+					RoleName:    role.GetName(),
+					Description: role.GetDescription(),
 				}
 			}),
 			RoleGrants: lo.Map(rbacMeta.GetGrants(), func(grant *milvuspb.GrantEntity, _ int) *entity.RoleGrants {
@@ -186,7 +187,7 @@ func (opt *restoreRBACOption) Request() *milvuspb.RestoreRBACMetaRequest {
 				}
 			}),
 			Roles: lo.Map(opt.meta.Roles, func(role *entity.Role, _ int) *milvuspb.RoleEntity {
-				return &milvuspb.RoleEntity{Name: role.RoleName}
+				return &milvuspb.RoleEntity{Name: role.RoleName, Description: role.Description}
 			}),
 			Grants: lo.Map(opt.meta.RoleGrants, func(grant *entity.RoleGrants, _ int) *milvuspb.GrantEntity {
 				return &milvuspb.GrantEntity{

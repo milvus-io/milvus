@@ -150,7 +150,7 @@ MmapBlocksHandler::AllocateFixSizeBlock() {
         // return a mmap_block in fix_size_blocks_cache_
         auto block = std::move(fix_size_blocks_cache_.front());
         fix_size_blocks_cache_.pop();
-        return std::move(block);
+        return block;
     } else {
         // if space not enough for create a new block, clear cache and check again
         if (GetFixFileSize() + Size() > max_disk_limit_) {
@@ -165,7 +165,7 @@ MmapBlocksHandler::AllocateFixSizeBlock() {
         auto new_block = std::make_unique<MmapBlock>(
             GetMmapFilePath(), GetFixFileSize(), MmapBlock::BlockType::Fixed);
         new_block->Init();
-        return std::move(new_block);
+        return new_block;
     }
 }
 
@@ -188,7 +188,7 @@ MmapBlocksHandler::AllocateLargeBlock(const uint64_t size) {
     auto new_block = std::make_unique<MmapBlock>(
         GetMmapFilePath(), size, MmapBlock::BlockType::Variable);
     new_block->Init();
-    return std::move(new_block);
+    return new_block;
 }
 
 void
@@ -269,12 +269,13 @@ void
 MmapChunkManager::UnRegister(
     const MmapChunkDescriptor::ID descriptor_inner_id) {
     std::unique_lock<std::shared_mutex> lck(mtx_);
-    if (blocks_table_.find(descriptor_inner_id) != blocks_table_.end()) {
-        auto& blocks = blocks_table_[descriptor_inner_id];
+    auto it = blocks_table_.find(descriptor_inner_id);
+    if (it != blocks_table_.end()) {
+        auto& blocks = it->second;
         for (auto i = 0; i < blocks.size(); i++) {
             blocks_handler_->Deallocate(std::move(blocks[i]));
         }
-        blocks_table_.erase(descriptor_inner_id);
+        blocks_table_.erase(it);
     }
 }
 

@@ -10,14 +10,17 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/Utils.h"
+#include "segcore/default_fs.h"
 
 #include <cxxabi.h>
 #include <folly/ExceptionWrapper.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -29,6 +32,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Channel.h"
+#include "common/Consts.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
@@ -65,8 +69,47 @@
 
 namespace milvus::segcore {
 
+namespace {
+
 void
-ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
+InitEmptyVectorArrayRow(proto::schema::VectorField* row,
+                        DataType element_type) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT: {
+            row->mutable_float_vector();
+            break;
+        }
+        case DataType::VECTOR_BINARY: {
+            row->mutable_binary_vector();
+            break;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            row->mutable_float16_vector();
+            break;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            row->mutable_bfloat16_vector();
+            break;
+        }
+        case DataType::VECTOR_INT8: {
+            row->mutable_int8_vector();
+            break;
+        }
+        default: {
+            ThrowInfo(DataTypeInvalid,
+                      "unsupported ArrayOfVector element type {}",
+                      element_type);
+        }
+    }
+}
+
+}  // namespace
+
+void
+// Takes a non-const DataArray& because VARCHAR strings are moved (not copied)
+// into the PkType variant vector. Callers must ensure the DataArray is
+// discarded after this call — the VARCHAR fields will be in a moved-from state.
+ParsePksFromFieldData(std::vector<PkType>& pks, DataArray& data) {
     auto data_type = static_cast<DataType>(data.type());
     switch (data_type) {
         case DataType::INT64: {
@@ -76,8 +119,11 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
             break;
         }
         case DataType::VARCHAR: {
-            auto& src_data = data.scalars().string_data().data();
-            std::copy(src_data.begin(), src_data.end(), pks.begin());
+            auto* src_data =
+                data.mutable_scalars()->mutable_string_data()->mutable_data();
+            for (size_t i = 0; i < pks.size(); i++) {
+                pks[i] = std::move(*src_data->Mutable(i));
+            }
             break;
         }
         default: {
@@ -483,7 +529,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         case DataType::VECTOR_SPARSE_U32_F32: {
-            // does nothing here
+            vector_array->mutable_sparse_float_vector();
             break;
         }
         case DataType::VECTOR_INT8: {
@@ -494,11 +540,14 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
         }
         case DataType::VECTOR_ARRAY: {
             auto obj = vector_array->mutable_vector_array();
+            obj->set_dim(dim);
             obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
                 field_meta.get_element_type()));
             obj->mutable_data()->Reserve(count);
             for (int i = 0; i < count; i++) {
-                *(obj->mutable_data()->Add()) = proto::schema::VectorField();
+                auto* row = obj->mutable_data()->Add();
+                row->set_dim(dim);
+                InitEmptyVectorArrayRow(row, field_meta.get_element_type());
             }
             break;
         }
@@ -515,7 +564,8 @@ CreateEmptyVectorDataArray(int64_t count,
                            int64_t valid_count,
                            const void* valid_data,
                            const FieldMeta& field_meta) {
-    int64_t data_count = (field_meta.is_nullable() && valid_data != nullptr)
+    int64_t data_count = (field_meta.is_nullable() && valid_data != nullptr &&
+                          field_meta.get_data_type() != DataType::VECTOR_ARRAY)
                              ? valid_count
                              : count;
     auto data_array = CreateEmptyVectorDataArray(data_count, field_meta);
@@ -598,6 +648,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
             obj->mutable_data()->Add(data, data + count);
             break;
         }
+        case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
@@ -763,6 +814,24 @@ CreateVectorDataArrayFrom(const void* data_raw,
                           int64_t count,
                           int64_t valid_count,
                           const FieldMeta& field_meta) {
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+        field_meta.is_nullable() && valid_data != nullptr) {
+        auto data_array = CreateEmptyVectorDataArray(
+            count, valid_count, valid_data, field_meta);
+        auto dst = data_array->mutable_vectors()
+                       ->mutable_vector_array()
+                       ->mutable_data();
+        auto src = reinterpret_cast<const VectorFieldProto*>(data_raw);
+        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+        int64_t src_offset = 0;
+        for (int64_t i = 0; i < count; ++i) {
+            if (valid_data_bool[i]) {
+                dst->at(i) = src[src_offset++];
+            }
+        }
+        return data_array;
+    }
+
     auto data_array =
         CreateVectorDataArrayFrom(data_raw, valid_count, field_meta);
     if (field_meta.is_nullable() && valid_data != nullptr) {
@@ -785,10 +854,25 @@ CreateDataArrayFrom(const void* data_raw,
             data_raw, valid_data, count, field_meta);
     }
 
-    return CreateVectorDataArrayFrom(data_raw, count, field_meta);
+    auto data_array = CreateVectorDataArrayFrom(data_raw, count, field_meta);
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+        field_meta.is_nullable() && valid_data != nullptr) {
+        auto obj = data_array->mutable_valid_data();
+        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+        obj->Add(valid_data_bool, valid_data_bool + count);
+    }
+    return data_array;
 }
 
 // TODO remove merge dataArray, instead fill target entity when get data slice
+//
+// IMPORTANT: This function uses std::move to transfer string/bytes data from
+// the per-segment output_fields_data_ (accessed via MergeBase) into the merged
+// DataArray. This is safe because each per-segment DataArray is discarded after
+// MergeDataArray completes — callers must not read the per-segment
+// output_fields_data_ again after this point. Each offset within a segment must
+// be referenced at most once in merge_bases, so no element is moved twice.
+// If this invariant changes, the std::move calls below must be revisited.
 std::unique_ptr<DataArray>
 MergeDataArray(std::vector<MergeBase>& merge_bases,
                const FieldMeta& field_meta) {
@@ -814,11 +898,25 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             }
 
             if (!is_valid) {
+                if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+                    auto vector_array = data_array->mutable_vectors();
+                    auto dim = field_meta.get_dim();
+                    vector_array->set_dim(dim);
+                    auto obj = vector_array->mutable_vector_array();
+                    obj->set_dim(dim);
+                    obj->set_element_type(
+                        proto::schema::DataType(field_meta.get_element_type()));
+                    auto* row = obj->mutable_data()->Add();
+                    row->set_dim(dim);
+                    InitEmptyVectorArrayRow(row, field_meta.get_element_type());
+                }
                 continue;
             }
 
             int64_t physical_offset =
-                merge_base.getValidDataOffset(field_meta.get_id());
+                field_meta.get_data_type() == DataType::VECTOR_ARRAY
+                    ? src_offset
+                    : merge_base.getValidDataOffset(field_meta.get_id());
 
             auto vector_array = data_array->mutable_vectors();
             auto dim = 0;
@@ -834,13 +932,13 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
                 auto data = VEC_FIELD_DATA(src_field_data, float16);
                 auto obj = vector_array->mutable_float16_vector();
-                obj->assign(data + physical_offset * dim * sizeof(float16),
+                obj->append(data + physical_offset * dim * sizeof(float16),
                             dim * sizeof(float16));
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_BFLOAT16) {
                 auto data = VEC_FIELD_DATA(src_field_data, bfloat16);
                 auto obj = vector_array->mutable_bfloat16_vector();
-                obj->assign(data + physical_offset * dim * sizeof(bfloat16),
+                obj->append(data + physical_offset * dim * sizeof(bfloat16),
                             dim * sizeof(bfloat16));
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                 AssertInfo(
@@ -849,25 +947,28 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto num_bytes = dim / 8;
                 auto data = VEC_FIELD_DATA(src_field_data, binary);
                 auto obj = vector_array->mutable_binary_vector();
-                obj->assign(data + physical_offset * num_bytes, num_bytes);
+                obj->append(data + physical_offset * num_bytes, num_bytes);
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_SPARSE_U32_F32) {
-                auto& src_vec = src_field_data->vectors().sparse_float_vector();
+                auto* mutable_src_vec = src_field_data->mutable_vectors()
+                                            ->mutable_sparse_float_vector();
                 auto dst = vector_array->mutable_sparse_float_vector();
-                if (src_vec.dim() > dst->dim()) {
-                    dst->set_dim(src_vec.dim());
+                if (mutable_src_vec->dim() > dst->dim()) {
+                    dst->set_dim(mutable_src_vec->dim());
                 }
                 vector_array->set_dim(dst->dim());
-                auto& src_contents = src_vec.contents(physical_offset);
-                *(dst->mutable_contents()->Add()) = src_contents;
+                *(dst->mutable_contents()->Add()) =
+                    std::move(*mutable_src_vec->mutable_contents()->Mutable(
+                        physical_offset));
             } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
                 auto data = VEC_FIELD_DATA(src_field_data, int8);
                 auto obj = vector_array->mutable_int8_vector();
-                obj->assign(data + physical_offset * dim * sizeof(int8),
+                obj->append(data + physical_offset * dim * sizeof(int8),
                             dim * sizeof(int8));
             } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
                 auto& data = src_field_data->vectors().vector_array();
                 auto obj = vector_array->mutable_vector_array();
+                obj->set_dim(dim);
                 obj->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
                 *(obj->mutable_data()->Add()) = data.data(physical_offset);
@@ -925,32 +1026,44 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }
+            case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT: {
-                auto& data = FIELD_DATA(src_field_data, string);
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_string_data()
+                                        ->mutable_data();
                 auto obj = scalar_array->mutable_string_data();
-                *(obj->mutable_data()->Add()) = data[src_offset];
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
             case DataType::JSON: {
-                auto& data = FIELD_DATA(src_field_data, json);
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_json_data()
+                                        ->mutable_data();
                 auto obj = scalar_array->mutable_json_data();
-                *(obj->mutable_data()->Add()) = data[src_offset];
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
             case DataType::GEOMETRY: {
-                auto& data = FIELD_DATA(src_field_data, geometry);
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_geometry_data()
+                                        ->mutable_data();
                 auto obj = scalar_array->mutable_geometry_data();
-                *(obj->mutable_data()->Add()) = std::string(
-                    data[src_offset].data(), data[src_offset].size());
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
             case DataType::ARRAY: {
-                auto& data = FIELD_DATA(src_field_data, array);
                 auto obj = scalar_array->mutable_array_data();
                 obj->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
-                *(obj->mutable_data()->Add()) = data[src_offset];
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_array_data()
+                                        ->mutable_data();
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
             default: {
@@ -1261,12 +1374,10 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
-        for (auto& codec : codecs) {
-            auto reader = codec->GetReader();
-            channel->push(reader);
-        }
+        storage::ProcessFuturesInOrder(
+            codec_futures, [&](std::unique_ptr<storage::DataCodec> codec) {
+                channel->push(codec->GetReader());
+            });
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
@@ -1283,12 +1394,10 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                        .GetRemoteChunkManager();
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority));
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
-        for (auto& codec : codecs) {
-            auto field_data = codec->GetFieldData();
-            channel->push(field_data);
-        }
+        storage::ProcessFuturesInOrder(
+            codec_futures, [&](std::unique_ptr<storage::DataCodec> codec) {
+                channel->push(codec->GetFieldData());
+            });
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
@@ -1331,6 +1440,8 @@ getCacheWarmupPolicy(const std::string& warmup_policy,
             return CacheWarmupPolicy::CacheWarmupPolicy_Disable;
         } else if (warmup_policy == "sync") {
             return CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+        } else if (warmup_policy == "async") {
+            return CacheWarmupPolicy::CacheWarmupPolicy_Async;
         }
         // Unknown policy string, should not happen, been checked by milvus proxy side
         AssertInfo(false, "Unknown warmup policy '{}'", warmup_policy);
@@ -1368,6 +1479,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
 
     milvus::index::CreateIndexInfo index_info;
     index_info.field_type = load_index_info->field_type;
+    index_info.field_name = load_index_info->schema.name();
     index_info.index_engine_version = engine_version;
 
     auto config = milvus::index::ParseConfigFromIndexParams(
@@ -1443,6 +1555,8 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
                                           load_index_info->field_id,
                                           load_index_info->index_build_id,
                                           load_index_info->index_version};
+    index_meta.index_store_path_version =
+        load_index_info->index_store_path_version;
     config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
     if (load_index_info->field_type == milvus::DataType::JSON) {
@@ -1453,8 +1567,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
             .GetRemoteChunkManager();
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     AssertInfo(fs != nullptr, "arrow file system is nullptr");
     milvus::storage::FileManagerContext file_manager_context(
         field_meta, index_meta, remote_chunk_manager, fs);
@@ -1597,6 +1710,113 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
         }
     }
 
-    return std::move(ret);
+    return ret;
 }
+
+// sortEqualScoresOneNQ sorts an equal-score run within [nq_begin, nq_end) by
+// PK ASC, using in-place cyclic permutation. Handles optional element_indices_
+// and composite_group_by_values_ fields.
+static void
+sortEqualScoresOneNQ(size_t nq_begin,
+                     size_t nq_end,
+                     SearchResult* search_result) {
+    if (nq_end - nq_begin <= 1)
+        return;
+
+    std::vector<size_t> indices;
+    size_t start = nq_begin;
+    while (start < nq_end) {
+        size_t end = start + 1;
+        while (end < nq_end &&
+               std::fabs(search_result->distances_[end] -
+                         search_result->distances_[start]) < EPSILON) {
+            ++end;
+        }
+
+        if (end - start > 1) {
+            indices.resize(end - start);
+            std::iota(indices.begin(), indices.end(), 0);
+
+            std::sort(indices.begin(),
+                      indices.end(),
+                      [&search_result, start](size_t i, size_t j) {
+                          return search_result->primary_keys_[start + i] <
+                                 search_result->primary_keys_[start + j];
+                      });
+
+            const bool has_element_level =
+                search_result->element_level_ &&
+                !search_result->element_indices_.empty();
+            const bool has_group_by = search_result->HasGroupBy();
+
+            // In-place cyclic permutation over the equal-score run.
+            for (size_t i = 0; i < indices.size();) {
+                size_t target = indices[i];
+                if (target == i) {
+                    ++i;
+                    continue;
+                }
+
+                PkType temp_pk =
+                    std::move(search_result->primary_keys_[start + i]);
+                int64_t temp_offset = search_result->seg_offsets_[start + i];
+                int32_t temp_elem_idx =
+                    has_element_level
+                        ? search_result->element_indices_[start + i]
+                        : -1;
+                CompositeGroupKey temp_group_by_val;
+                if (has_group_by) {
+                    temp_group_by_val =
+                        std::move(search_result->composite_group_by_values_
+                                      .value()[start + i]);
+                }
+
+                size_t curr = i;
+                while (indices[curr] != i) {
+                    size_t next = indices[curr];
+                    search_result->primary_keys_[start + curr] =
+                        std::move(search_result->primary_keys_[start + next]);
+                    search_result->seg_offsets_[start + curr] =
+                        search_result->seg_offsets_[start + next];
+                    if (has_element_level) {
+                        search_result->element_indices_[start + curr] =
+                            search_result->element_indices_[start + next];
+                    }
+                    if (has_group_by) {
+                        search_result->composite_group_by_values_
+                            .value()[start + curr] =
+                            std::move(search_result->composite_group_by_values_
+                                          .value()[start + next]);
+                    }
+                    indices[curr] = curr;
+                    curr = next;
+                }
+
+                search_result->primary_keys_[start + curr] = std::move(temp_pk);
+                search_result->seg_offsets_[start + curr] = temp_offset;
+                if (has_element_level) {
+                    search_result->element_indices_[start + curr] =
+                        temp_elem_idx;
+                }
+                if (has_group_by) {
+                    search_result->composite_group_by_values_
+                        .value()[start + curr] = std::move(temp_group_by_val);
+                }
+                indices[curr] = curr;
+            }
+        }
+
+        start = end;
+    }
+}
+
+void
+SortEqualScoresByPks(SearchResult* search_result) {
+    for (int64_t i = 0; i < search_result->total_nq_; i++) {
+        auto nq_begin = search_result->topk_per_nq_prefix_sum_[i];
+        auto nq_end = search_result->topk_per_nq_prefix_sum_[i + 1];
+        sortEqualScoresOneNQ(nq_begin, nq_end, search_result);
+    }
+}
+
 }  // namespace milvus::segcore

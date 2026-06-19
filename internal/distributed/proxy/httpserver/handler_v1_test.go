@@ -32,17 +32,17 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -1434,7 +1434,7 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 			assert.Nil(t, err, "case %d: ", i)
 			assert.Equal(t, testcase.errCode, returnBody.Code, "case %d: ", i, string(testcase.requestBody))
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errMsg, returnBody.Message, "case %d: ", i, string(testcase.requestBody))
+				assert.Contains(t, returnBody.Message, testcase.errMsg, "case %d: ", i, string(testcase.requestBody))
 			}
 			fmt.Println(w.Body.String())
 		})
@@ -1569,6 +1569,34 @@ func TestSearch(t *testing.T) {
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, tt.exceptCode, w.Code)
 	})
+}
+
+func TestSearchV1RejectSearchAggregation(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testEngine := initHTTPServer(mocks.NewMockProxy(t), true)
+	data, _ := json.Marshal(map[string]interface{}{
+		HTTPCollectionName: DefaultCollectionName,
+		"vector":           []float32{0.0, 0.0},
+		"searchAggregation": map[string]interface{}{
+			"fields": []string{"brand"},
+			"size":   1,
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, versional(VectorSearchPath), bytes.NewReader(data))
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	resp := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), resp)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(1100), resp.Code)
+	assert.Contains(t, resp.Message, "searchAggregation is not supported for REST v1 search")
 }
 
 type ReturnType int

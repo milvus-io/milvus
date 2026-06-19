@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func Test_VerifyFloat(t *testing.T) {
@@ -74,4 +76,29 @@ func Test_VerifyFloats64(t *testing.T) {
 	data = []float64{2.5, 32.2, 53.254, math.Inf(-1)}
 	err = VerifyFloats64(data)
 	assert.Error(t, err)
+}
+
+func Test_ConvertFloat32ToFP16BF16BytesAllowsTinyValues(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		dataType schemapb.DataType
+		values   []float32
+	}{
+		{
+			name:     "float16 tiny values",
+			dataType: schemapb.DataType_Float16Vector,
+			values:   []float32{0, 1e-9, -1e-9},
+		},
+		{
+			name:     "bfloat16 tiny values",
+			dataType: schemapb.DataType_BFloat16Vector,
+			values:   []float32{0, 1e-38, -1e-38},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := ConvertFloat32ToFP16BF16Bytes(tt.values, tt.dataType)
+			assert.NoError(t, err)
+			assert.Len(t, data, len(tt.values)*2)
+		})
+	}
 }

@@ -29,8 +29,6 @@ set(FETCHCONTENT_QUIET     OFF)
 # Find pthreads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-add_subdirectory(milvus-common)
-
 add_subdirectory(knowhere)
 
 add_subdirectory(boost_ext)
@@ -38,9 +36,6 @@ add_subdirectory(rocksdb)
 add_subdirectory(rdkafka)
 add_subdirectory(simdjson)
 add_subdirectory(bsoncxx)
-if (USE_OPENDAL)
-    add_subdirectory(opendal)
-endif()
 add_subdirectory(tantivy)
 
 if (LINUX)

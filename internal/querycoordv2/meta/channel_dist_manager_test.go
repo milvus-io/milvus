@@ -24,9 +24,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 type ChannelDistManagerSuite struct {
@@ -105,6 +105,25 @@ func (suite *ChannelDistManagerSuite) TestVersion() {
 	suite.Greater(v2, v1)
 }
 
+func (suite *ChannelDistManagerSuite) TestNodeOffline() {
+	dist := suite.dist
+
+	// Verify node 1 has channels (node 1 has dmc0 and dmc1)
+	channels := dist.GetByFilter(WithNodeID2Channel(suite.nodes[1]))
+	suite.Len(channels, 2)
+
+	// Simulate node offline by calling Update with empty channels
+	dist.Update(suite.nodes[1])
+
+	// Verify node 1's channels are removed
+	channels = dist.GetByFilter(WithNodeID2Channel(suite.nodes[1]))
+	suite.Len(channels, 0)
+
+	// Verify other nodes are not affected
+	channels = dist.GetByFilter(WithNodeID2Channel(suite.nodes[0]))
+	suite.Len(channels, 1)
+}
+
 func (suite *ChannelDistManagerSuite) TestGetBy() {
 	dist := suite.dist
 
@@ -119,26 +138,26 @@ func (suite *ChannelDistManagerSuite) TestGetBy() {
 	}
 
 	// Test GetByCollection
-	channels = dist.GetByCollectionAndFilter(suite.collection)
+	channels = dist.GetByFilter(WithCollectionID2Channel(suite.collection))
 	suite.Len(channels, 4)
 	suite.AssertCollection(channels, suite.collection)
-	channels = dist.GetByCollectionAndFilter(-1)
+	channels = dist.GetByFilter(WithCollectionID2Channel(-1))
 	suite.Len(channels, 0)
 
 	// Test GetByNodeAndCollection
 	// 1. Valid node and valid collection
 	for _, node := range suite.nodes {
-		channels := dist.GetByCollectionAndFilter(suite.collection, WithNodeID2Channel(node))
+		channels := dist.GetByFilter(WithCollectionID2Channel(suite.collection), WithNodeID2Channel(node))
 		suite.AssertNode(channels, node)
 		suite.AssertCollection(channels, suite.collection)
 	}
 
 	// 2. Valid node and invalid collection
-	channels = dist.GetByCollectionAndFilter(-1, WithNodeID2Channel(suite.nodes[1]))
+	channels = dist.GetByFilter(WithCollectionID2Channel(-1), WithNodeID2Channel(suite.nodes[1]))
 	suite.Len(channels, 0)
 
 	// 3. Invalid node and valid collection
-	channels = dist.GetByCollectionAndFilter(suite.collection, WithNodeID2Channel(-1))
+	channels = dist.GetByFilter(WithCollectionID2Channel(suite.collection), WithNodeID2Channel(-1))
 	suite.Len(channels, 0)
 }
 
@@ -400,13 +419,14 @@ func TestGetChannelDistJSON(t *testing.T) {
 	assert.Equal(t, 2, len(channels))
 
 	checkResult := func(channel *metricsinfo.DmChannel) {
-		if channel.NodeID == 1 {
+		switch channel.NodeID {
+		case 1:
 			assert.Equal(t, "channel-1", channel.ChannelName)
 			assert.Equal(t, int64(100), channel.CollectionID)
-		} else if channel.NodeID == 2 {
+		case 2:
 			assert.Equal(t, "channel-2", channel.ChannelName)
 			assert.Equal(t, int64(200), channel.CollectionID)
-		} else {
+		default:
 			assert.Failf(t, "unexpected node id", "unexpected node id %d", channel.NodeID)
 		}
 	}
@@ -414,4 +434,20 @@ func TestGetChannelDistJSON(t *testing.T) {
 	for _, channel := range channels {
 		checkResult(channel)
 	}
+
+	channels = manager.GetChannelDist(100)
+	assert.Len(t, channels, 1)
+	assert.Equal(t, int64(100), channels[0].CollectionID)
+	assert.Equal(t, "channel-1", channels[0].ChannelName)
+
+	views := manager.GetLeaderView(0)
+	assert.Len(t, views, 2)
+
+	views = manager.GetLeaderView(100)
+	assert.Len(t, views, 1)
+	assert.Equal(t, int64(100), views[0].CollectionID)
+	assert.Equal(t, "channel-1", views[0].Channel)
+
+	views = manager.GetLeaderView(300)
+	assert.Len(t, views, 0)
 }

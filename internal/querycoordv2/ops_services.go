@@ -22,18 +22,20 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error) {
@@ -82,7 +84,7 @@ func (s *Server) ActivateChecker(ctx context.Context, req *querypb.ActivateCheck
 	}
 	if err := s.checkerController.Activate(utils.CheckerType(req.CheckerID)); err != nil {
 		log.Warn("failed to activate checker", zap.Error(err))
-		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)), nil
 	}
 	return merr.Success(), nil
 }
@@ -96,7 +98,7 @@ func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateC
 	}
 	if err := s.checkerController.Deactivate(utils.CheckerType(req.CheckerID)); err != nil {
 		log.Warn("failed to deactivate checker", zap.Error(err))
-		return merr.Status(merr.WrapErrServiceInternal(err.Error())), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)), nil
 	}
 	return merr.Success(), nil
 }
@@ -110,7 +112,7 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return &querypb.ListQueryNodeResponse{
-			Status: merr.Status(errors.Wrap(err, errMsg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", errMsg)),
 		}, nil
 	}
 
@@ -130,7 +132,7 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 		return 0, false // Discard this node
 	})
 
-	nodesSuspended := s.meta.ResourceManager.GetNodesSuspended(nodeIDs)
+	nodesSuspended := s.meta.GetNodesSuspended(nodeIDs)
 
 	// Loop through each node in the `nodes` slice.
 	for _, node := range nodes {
@@ -157,7 +159,7 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return &querypb.GetQueryNodeDistributionResponse{
-			Status: merr.Status(errors.Wrap(err, errMsg)),
+			Status: merr.Status(merr.Wrapf(err, "%s", errMsg)),
 		}, nil
 	}
 
@@ -313,7 +315,7 @@ func (s *Server) IsNodeSuspended(ctx context.Context, nodeID int64) (bool, error
 		log.Warn(errMsg, zap.Error(err))
 		return false, err
 	}
-	isSuspended := s.meta.ResourceManager.IsNodeSuspended(nodeID)
+	isSuspended := s.meta.IsNodeSuspended(nodeID)
 	return isSuspended, nil
 }
 
@@ -335,7 +337,7 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 		return merr.Status(err), nil
 	}
 
-	s.meta.ResourceManager.HandleNodeDown(ctx, req.GetNodeID())
+	s.meta.HandleNodeDown(ctx, req.GetNodeID())
 	return merr.Success(), nil
 }
 
@@ -347,7 +349,7 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 	errMsg := "failed to resume query node"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, errMsg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", errMsg)), nil
 	}
 
 	info := s.nodeMgr.Get(req.GetNodeID())
@@ -362,7 +364,7 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 			merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be resumed")), nil
 	}
 
-	s.meta.ResourceManager.HandleNodeUp(ctx, req.GetNodeID())
+	s.meta.HandleNodeUp(ctx, req.GetNodeID())
 
 	return merr.Success(), nil
 }
@@ -381,7 +383,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
 	// check whether srcNode is healthy
@@ -391,7 +393,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		return merr.Status(err), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByNode(ctx, req.GetSourceNodeID())
+	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -440,7 +442,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		if err != nil {
 			msg := "failed to balance segments"
 			log.Warn(msg, zap.Error(err))
-			return merr.Status(errors.Wrap(err, msg)), nil
+			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 		}
 	}
 	return merr.Success(), nil
@@ -460,7 +462,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
 	// check whether srcNode is healthy
@@ -470,7 +472,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		return merr.Status(err), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByNode(ctx, req.GetSourceNodeID())
+	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -491,7 +493,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		dstNodeSet.Remove(srcNode)
 
 		// check sealed segment list
-		channels := s.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(srcNode))
+		channels := s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(srcNode))
 		toBalance := typeutil.NewSet[*meta.DmChannel]()
 		if req.GetTransferAll() {
 			toBalance.Insert(channels...)
@@ -514,10 +516,87 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		if err != nil {
 			msg := "failed to balance channels"
 			log.Warn(msg, zap.Error(err))
-			return merr.Status(errors.Wrap(err, msg)), nil
+			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 		}
 	}
 	return merr.Success(), nil
+}
+
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	log := log.Ctx(ctx)
+	log.Info("ClearReadTaskQueue request received",
+		zap.String("taskType", req.GetTaskType()),
+		zap.String("reason", req.GetReason()))
+
+	resp := &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	nodes := s.nodeMgr.GetAll()
+	group := &errgroup.Group{}
+	results := make(chan *internalpb.ClearReadTaskQueueComponentResult, len(nodes))
+	for _, node := range nodes {
+		if node.IsStoppingState() {
+			continue
+		}
+		nodeID := node.ID()
+		group.Go(func() error {
+			nodeResp, err := s.cluster.ClearReadTaskQueue(ctx, nodeID, req)
+			if errors.Is(err, merr.ErrServiceUnimplemented) {
+				return nil
+			}
+			if err != nil {
+				results <- &internalpb.ClearReadTaskQueueComponentResult{
+					Status: merr.Status(err),
+					Role:   typeutil.QueryNodeRole,
+					NodeID: nodeID,
+				}
+				return merr.Wrapf(err, "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
+			}
+
+			if len(nodeResp.GetResults()) > 0 {
+				for _, result := range nodeResp.GetResults() {
+					results <- result
+				}
+			} else {
+				results <- &internalpb.ClearReadTaskQueueComponentResult{
+					Status:          nodeResp.GetStatus(),
+					Role:            typeutil.QueryNodeRole,
+					NodeID:          nodeID,
+					QueuedCleared:   nodeResp.GetQuerynodeQueuedCleared(),
+					QueuedNqCleared: nodeResp.GetQueuedNqCleared(),
+				}
+			}
+			if !merr.Ok(nodeResp.GetStatus()) {
+				return merr.Wrapf(merr.Error(nodeResp.GetStatus()), "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
+			}
+			return nil
+		})
+	}
+
+	err := group.Wait()
+	close(results)
+	for result := range results {
+		resp.Results = append(resp.Results, result)
+		if result.GetRole() == typeutil.QueryNodeRole && merr.Ok(result.GetStatus()) {
+			resp.QuerynodeQueuedCleared += result.GetQueuedCleared()
+			resp.QueuedNqCleared += result.GetQueuedNqCleared()
+		}
+	}
+	if err != nil {
+		resp.Status = merr.Status(err)
+	}
+
+	log.Info("cleared querynode read task queues",
+		zap.String("taskType", req.GetTaskType()),
+		zap.String("reason", req.GetReason()),
+		zap.Int("queryNodes", len(resp.GetResults())),
+		zap.Int64("queuedCleared", resp.GetQuerynodeQueuedCleared()),
+		zap.Int64("queuedNQCleared", resp.GetQueuedNqCleared()),
+		zap.Error(err))
+	return resp, nil
 }
 
 func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {

@@ -25,14 +25,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestClusteringCompactionPolicySuite(t *testing.T) {
@@ -59,12 +59,12 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.catalog = catalog
 
 	compactionTaskMeta, _ := newCompactionTaskMeta(context.TODO(), s.catalog)
 	partitionStatsMeta, _ := newPartitionStatsMeta(context.TODO(), s.catalog)
-	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog)
+	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog, nil)
 
 	meta := &meta{
 		segments:           NewSegmentsInfo(),
@@ -358,6 +358,46 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 	view, _, err := s.clusteringCompactionPolicy.triggerOneCollection(context.TODO(), 1, false)
 	s.Equal(1, len(view))
 	s.NoError(err)
+	s.Equal(testLabel, view[0].GetGroupLabel())
+}
+
+func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSchemaVersionGroup() {
+	paramtable.Get().Save(Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.Key, "0")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.Key)
+
+	testLabel := &CompactionGroupLabel{
+		CollectionID: 1,
+		PartitionID:  10,
+		Channel:      "ch-1",
+	}
+
+	s.meta.collections.Insert(testLabel.CollectionID, &collectionInfo{
+		ID:     testLabel.CollectionID,
+		Schema: newTestScalarClusteringKeySchema(),
+	})
+
+	segments := genSegmentsForMeta(testLabel)
+	versionCounter := int32(0)
+	for id, segment := range segments {
+		versionCounter++
+		segment.SchemaVersion = versionCounter
+		segments[id] = segment
+	}
+	for id, segment := range segments {
+		s.meta.segments.SetSegment(id, segment)
+	}
+
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
+		coll, exist := s.meta.collections.Get(collectionID)
+		if exist {
+			return coll, nil
+		}
+		return nil, nil
+	})
+
+	view, _, err := s.clusteringCompactionPolicy.triggerOneCollection(context.TODO(), 1, false)
+	s.NoError(err)
+	s.Len(view, 1)
 	s.Equal(testLabel, view[0].GetGroupLabel())
 }
 

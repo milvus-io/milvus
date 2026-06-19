@@ -1,8 +1,16 @@
 package helper
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +18,7 @@ import (
 	"google.golang.org/grpc"
 
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
@@ -97,6 +105,7 @@ func teardown() {
 	mc, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: GetAddr(), Username: GetUser(), Password: GetPassword()})
 	if err != nil {
 		log.Error("teardown failed to connect milvus with error", zap.Error(err))
+		return
 	}
 	defer mc.Close(ctx)
 
@@ -112,6 +121,80 @@ func teardown() {
 			_ = mc.DropDatabase(ctx, client.NewDropDatabaseOption(db))
 		}
 	}
+}
+
+// managementBaseURL returns the Milvus management API base URL (port 9091)
+// derived from the gRPC addr flag (e.g. http://host:19530 -> http://host:9091).
+func managementBaseURL() string {
+	host := ""
+	rawAddr := strings.TrimSpace(*addr)
+	if rawAddr != "" {
+		parseAddr := rawAddr
+		if !strings.Contains(rawAddr, "://") {
+			parseAddr = "http://" + rawAddr
+		}
+		if u, err := url.Parse(parseAddr); err == nil {
+			host = u.Hostname()
+		}
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s", net.JoinHostPort(host, "9091"))
+}
+
+// AlterServerConfig changes a Milvus server config via the management HTTP API.
+// It returns the previous value so the caller can restore it.
+// If the management API is unreachable, it returns ("", error).
+func AlterServerConfig(key, value string) (string, error) {
+	// Get current value first
+	prev, _ := GetServerConfig(key)
+
+	body, _ := json.Marshal(map[string]string{"key": key, "value": value})
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Post(managementBaseURL()+"/management/config/alter",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("management API unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("alter config failed (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+	log.Info("AlterServerConfig", zap.String("key", key), zap.String("value", value), zap.String("prev", prev))
+	return prev, nil
+}
+
+// GetServerConfig reads a config value from the management API.
+func GetServerConfig(key string) (string, error) {
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Get(managementBaseURL() + "/management/config/get?keys=" + url.QueryEscape(key))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("get config failed (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+	var result struct {
+		Configs []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+			Error string `json:"error"`
+		} `json:"configs"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("decode config response: %w", err)
+	}
+	if len(result.Configs) == 0 {
+		return "", fmt.Errorf("config %q not found", key)
+	}
+	if result.Configs[0].Error != "" {
+		return "", fmt.Errorf("get config %q failed: %s", key, result.Configs[0].Error)
+	}
+	return result.Configs[0].Value, nil
 }
 
 func RunTests(m *testing.M) int {

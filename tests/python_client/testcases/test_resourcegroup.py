@@ -1001,7 +1001,7 @@ class TestTransferNode(TestcaseBase):
         collection_w = self.init_collection_wrap()
         partition_name = cf.gen_unique_str('par')
         partition_w = self.init_partition_wrap(collection_w, partition_name)
-        data = cf.gen_default_list_data(nb=2000)
+        data = cf.gen_default_list_data(nb=ct.default_nb)
         ins_res, _ = partition_w.insert(data)
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         # 3. create a rgA

@@ -291,6 +291,21 @@ macro_rules! cstr_to_str {
     };
 }
 
+/// Convert a (pointer, length) pair to `&str`, supporting embedded NUL bytes.
+/// This is the macro counterpart of `ptr_len_to_str` for use in FFI functions
+/// that return `RustResult`.
+#[macro_export]
+macro_rules! ptr_to_str {
+    ($ptr:expr, $len:expr) => {
+        match std::str::from_utf8(unsafe {
+            std::slice::from_raw_parts($ptr as *const u8, $len as usize)
+        }) {
+            Ok(s) => s,
+            Err(e) => return RustResult::from_error(e.to_string()),
+        }
+    };
+}
+
 #[no_mangle]
 pub extern "C" fn test_enum_with_array() -> RustResult {
     let array: Vec<u32> = vec![1, 2, 3];

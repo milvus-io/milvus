@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "fmt/core.h"
+#include "pb/index_coord.pb.h"
 #include "pb/schema.pb.h"
 
 namespace milvus::storage {
@@ -89,6 +90,11 @@ struct IndexMeta {
     DataType field_type;
     int64_t dim;
     bool index_non_encoding;
+    // Path format version used by the worker/loader to assemble the object-storage prefix.
+    // See milvus.proto.index.IndexStorePathVersion.
+    milvus::proto::index::IndexStorePathVersion index_store_path_version{
+        milvus::proto::index::IndexStorePathVersion::
+            INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
 };
 
 struct StorageConfig {
@@ -110,6 +116,8 @@ struct StorageConfig {
     bool gcp_native_without_auth = false;
     std::string gcp_credential_json = "";
     uint32_t max_connections = 100;
+    std::string tls_min_version = "";
+    bool use_crc32c_checksum = false;
 
     std::string
     ToString() const {
@@ -125,7 +133,9 @@ struct StorageConfig {
            << ", requestTimeoutMs=" << requestTimeoutMs
            << ", maxConnections=" << max_connections
            << ", gcp_native_without_auth=" << std::boolalpha
-           << gcp_native_without_auth << "]";
+           << gcp_native_without_auth << ", tls_min_version=" << tls_min_version
+           << ", use_crc32c_checksum=" << std::boolalpha << use_crc32c_checksum
+           << "]";
 
         return ss.str();
     }
@@ -142,6 +152,8 @@ struct MmapConfig {
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
     bool mmap_populate;
+    bool json_stats_enable_mmap;
+    std::string json_stats_mmap_path;
     bool
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
@@ -187,6 +199,16 @@ struct MmapConfig {
         return mmap_populate;
     }
 
+    [[nodiscard]] bool
+    GetJsonStatsEnableMmap() const {
+        return json_stats_enable_mmap;
+    }
+
+    [[nodiscard]] const std::string&
+    GetJsonStatsMmapPath() const {
+        return json_stats_mmap_path;
+    }
+
     std::string
     GetMmapPath() {
         return mmap_path;
@@ -206,7 +228,10 @@ struct MmapConfig {
            << ", vector_index_enable_mmap=" << std::boolalpha
            << vector_index_enable_mmap
            << ", vector_field_enable_mmap=" << std::boolalpha
-           << vector_field_enable_mmap << "]";
+           << vector_field_enable_mmap
+           << ", json_stats_enable_mmap=" << std::boolalpha
+           << json_stats_enable_mmap
+           << ", json_stats_mmap_path=" << json_stats_mmap_path << "]";
         return ss.str();
     }
 };

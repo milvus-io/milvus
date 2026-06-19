@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 func TestIsSystemField(t *testing.T) {
@@ -148,6 +148,68 @@ func TestCommonPartitionKeyIsolation(t *testing.T) {
 		res, err = IsPartitionKeyIsolationPropEnabled(props)
 		assert.ErrorContains(t, err, "failed to parse partition key isolation property")
 		assert.False(t, res)
+	})
+}
+
+func TestNamespaceMode(t *testing.T) {
+	t.Run("default mode is partition key", func(t *testing.T) {
+		assert.Equal(t, NamespaceModePartitionKey, GetNamespaceMode())
+		assert.True(t, IsNamespaceModePartitionKey())
+		assert.False(t, IsNamespaceModePartition())
+		assert.NoError(t, ValidateNamespaceMode())
+	})
+
+	t.Run("accepts partition key mode", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceModeKey, Value: NamespaceModePartitionKey},
+		}
+		assert.Equal(t, NamespaceModePartitionKey, GetNamespaceMode(kvs...))
+		assert.True(t, IsNamespaceModePartitionKey(kvs...))
+		assert.False(t, IsNamespaceModePartition(kvs...))
+		assert.NoError(t, ValidateNamespaceMode(kvs...))
+	})
+
+	t.Run("accepts partition mode", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceModeKey, Value: NamespaceModePartition},
+		}
+		assert.Equal(t, NamespaceModePartition, GetNamespaceMode(kvs...))
+		assert.False(t, IsNamespaceModePartitionKey(kvs...))
+		assert.True(t, IsNamespaceModePartition(kvs...))
+		assert.NoError(t, ValidateNamespaceMode(kvs...))
+	})
+
+	t.Run("rejects invalid value", func(t *testing.T) {
+		for _, val := range []string{"invalid", "multitenant"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceModeKey, Value: val},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "valid values")
+		}
+	})
+
+	t.Run("rejects wrong case value", func(t *testing.T) {
+		for _, val := range []string{"PARTITION_KEY", "Partition"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceModeKey, Value: val},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err, "value %q should be rejected", val)
+			assert.Contains(t, err.Error(), "valid values")
+		}
+	})
+
+	t.Run("rejects wrong case key", func(t *testing.T) {
+		for _, key := range []string{"NAMESPACE.MODE", "Namespace.Mode", "namespace.Mode"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: key, Value: NamespaceModePartition},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err, "key %q should be rejected", key)
+			assert.Contains(t, err.Error(), "did you mean")
+		}
 	})
 }
 
@@ -341,11 +403,11 @@ func TestWarmupPolicy(t *testing.T) {
 		// Valid values
 		assert.NoError(t, ValidateWarmupPolicy(WarmupSync))
 		assert.NoError(t, ValidateWarmupPolicy(WarmupDisable))
+		assert.NoError(t, ValidateWarmupPolicy(WarmupAsync))
 
 		// Invalid values
 		assert.Error(t, ValidateWarmupPolicy("invalid"))
 		assert.Error(t, ValidateWarmupPolicy(""))
-		assert.Error(t, ValidateWarmupPolicy("async"))
 	})
 
 	t.Run("IsWarmupKey", func(t *testing.T) {
@@ -393,6 +455,209 @@ func TestWarmupPolicy(t *testing.T) {
 		assert.False(t, IsCollectionWarmupKey("other_key"))
 		assert.False(t, IsCollectionWarmupKey(""))
 	})
+}
+
+func TestQueryMode(t *testing.T) {
+	t.Run("GetQueryMode returns mode when set", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: QueryModeKey, Value: "large_topk"},
+		}
+		assert.Equal(t, QueryModeLargeTopK, GetQueryMode(kvs...))
+	})
+
+	t.Run("GetQueryMode is case sensitive", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: QueryModeKey, Value: "Large_TopK"},
+		}
+		assert.NotEqual(t, QueryModeLargeTopK, GetQueryMode(kvs...))
+		assert.Equal(t, "Large_TopK", GetQueryMode(kvs...))
+	})
+
+	t.Run("GetQueryMode returns empty when not present", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: "other.key", Value: "large_topk"},
+		}
+		assert.Equal(t, "", GetQueryMode(kvs...))
+	})
+
+	t.Run("GetQueryMode returns empty for no kvs", func(t *testing.T) {
+		assert.Equal(t, "", GetQueryMode())
+	})
+
+	t.Run("IsQueryModeLargeTopK returns true", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: QueryModeKey, Value: "large_topk"},
+		}
+		assert.True(t, IsQueryModeLargeTopK(kvs...))
+	})
+
+	t.Run("IsQueryModeLargeTopK returns false when not set", func(t *testing.T) {
+		assert.False(t, IsQueryModeLargeTopK())
+	})
+
+	t.Run("ValidateQueryMode accepts large_topk", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: QueryModeKey, Value: "large_topk"},
+		}
+		assert.NoError(t, ValidateQueryMode(kvs...))
+	})
+
+	t.Run("ValidateQueryMode accepts missing key", func(t *testing.T) {
+		assert.NoError(t, ValidateQueryMode())
+	})
+
+	t.Run("ValidateQueryMode rejects invalid value", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: QueryModeKey, Value: "invalid"},
+		}
+		assert.Error(t, ValidateQueryMode(kvs...))
+	})
+
+	t.Run("ValidateQueryMode rejects wrong case value", func(t *testing.T) {
+		for _, val := range []string{"LARGE_TOPK", "Large_TopK", "Large_Topk"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: QueryModeKey, Value: val},
+			}
+			err := ValidateQueryMode(kvs...)
+			assert.Error(t, err, "value %q should be rejected", val)
+			assert.Contains(t, err.Error(), "valid values")
+		}
+	})
+
+	t.Run("ValidateQueryMode rejects wrong case key", func(t *testing.T) {
+		for _, key := range []string{"QUERY_MODE", "Query_Mode", "Query_mode"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: key, Value: "large_topk"},
+			}
+			err := ValidateQueryMode(kvs...)
+			assert.Error(t, err, "key %q should be rejected", key)
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+}
+
+func TestNamespaceShardingEnabled(t *testing.T) {
+	t.Run("IsNamespaceShardingEnabled returns value when set", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceShardingEnabledKey, Value: "true"},
+		}
+		enabled, err := IsNamespaceShardingEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("IsNamespaceShardingEnabled defaults to false", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: "other.key", Value: "true"},
+		}
+		enabled, err := IsNamespaceShardingEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+		enabled, err = IsNamespaceShardingEnabled()
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("IsNamespaceShardingEnabledKeyExists returns true", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceShardingEnabledKey, Value: "false"},
+		}
+		assert.True(t, IsNamespaceShardingEnabledKeyExists(kvs...))
+	})
+
+	t.Run("IsNamespaceShardingEnabledKeyExists returns false when not set", func(t *testing.T) {
+		assert.False(t, IsNamespaceShardingEnabledKeyExists())
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled accepts true and false", func(t *testing.T) {
+		for _, val := range []string{"true", "false"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceShardingEnabledKey, Value: val},
+			}
+			assert.NoError(t, ValidateNamespaceShardingEnabled(kvs...), "value %q should be accepted", val)
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled accepts missing key", func(t *testing.T) {
+		assert.NoError(t, ValidateNamespaceShardingEnabled())
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled rejects invalid values", func(t *testing.T) {
+		for _, val := range []string{"invalid", "True", "FALSE", "1", "0"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceShardingEnabledKey, Value: val},
+			}
+			err := ValidateNamespaceShardingEnabled(kvs...)
+			assert.Error(t, err, "value %q should be rejected", val)
+			assert.Contains(t, err.Error(), "valid values")
+			assert.Contains(t, err.Error(), "namespace.sharding.enabled")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled rejects wrong case key", func(t *testing.T) {
+		for _, key := range []string{"NAMESPACE.SHARDING.ENABLED", "Namespace.Sharding.Enabled", "Namespace.sharding.enabled"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: key, Value: "true"},
+			}
+			err := ValidateNamespaceShardingEnabled(kvs...)
+			if assert.Error(t, err, "key %q should be rejected", key) {
+				assert.Contains(t, err.Error(), "did you mean")
+			}
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects update", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: NamespaceShardingEnabledKey, Value: "true"}},
+			nil,
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot alter namespace.sharding.enabled")
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects delete", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(nil, []string{NamespaceShardingEnabledKey})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot delete namespace.sharding.enabled")
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects wrong case update", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: "Namespace.Sharding.Enabled", Value: "true"}},
+			nil,
+		)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects wrong case delete", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(nil, []string{"Namespace.Sharding.Enabled"})
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered accepts unrelated changes", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: "other.key", Value: "true"}},
+			[]string{"other.deleted.key"},
+		)
+		assert.NoError(t, err)
+	})
+}
+
+func TestClampScalarIndexVersion(t *testing.T) {
+	max := MaximumScalarIndexEngineVersion
+
+	// Values at or below maximum pass through unchanged
+	assert.Equal(t, int32(0), ClampScalarIndexVersion(0))
+	assert.Equal(t, int32(1), ClampScalarIndexVersion(1))
+	assert.Equal(t, max, ClampScalarIndexVersion(max))
+
+	// Values above maximum are clamped
+	assert.Equal(t, max, ClampScalarIndexVersion(max+1))
+	assert.Equal(t, max, ClampScalarIndexVersion(max+100))
 }
 
 func TestWKTWKBConversion(t *testing.T) {

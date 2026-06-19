@@ -20,24 +20,19 @@ package proxy
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type importTask struct {
@@ -106,6 +101,12 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
+		return merr.WrapErrImportSysFailed("collection schema has no fields")
+	}
+	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
+		return err
+	}
 	it.schema = schema
 
 	channels, err := node.chMgr.getVChannels(collectionID)
@@ -121,7 +122,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	var partitionIDs []int64
 	if isBackup {
 		if req.GetPartitionName() == "" {
-			return merr.WrapErrParameterInvalidMsg("partition not specified")
+			return merr.WrapErrParameterMissingMsg("partition not specified")
 		}
 		// Currently, Backup tool call import must with a partition name, each time restore a partition
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
@@ -183,8 +184,8 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("import request is empty")
 	}
 	if len(req.Files) > Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-		return merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
-			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files)))
+		return merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
+			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))
 	}
 	if !isBackup && !isL0Import {
 		// check file type
@@ -210,45 +211,45 @@ func (it *importTask) getChannels() []pChan {
 }
 
 func (it *importTask) Execute(ctx context.Context) error {
-	jobID, err := it.node.rowIDAllocator.AllocOne()
+	// Call DataCoord's Import method directly instead of broadcasting
+	// DataCoord will handle validation, broadcasting, and job creation
+
+	// Get database ID from database name
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, it.req.GetDbName())
 	if err != nil {
-		log.Ctx(ctx).Warn("alloc job id failed", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to get database info", zap.String("dbName", it.req.GetDbName()), zap.Error(err))
 		return err
 	}
-	msg, err := message.NewImportMessageBuilderV1().
-		WithHeader(&message.ImportMessageHeader{}).WithBody(
-		&msgpb.ImportMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Import,
-				Timestamp: it.BeginTs(),
-			},
-			DbName:         it.req.GetDbName(),
-			CollectionName: it.req.GetCollectionName(),
-			CollectionID:   it.collectionID,
-			PartitionIDs:   it.partitionIDs,
-			Options:        funcutil.KeyValuePair2Map(it.req.GetOptions()),
-			Files:          GetImportFiles(it.req.GetFiles()),
-			Schema:         it.schema.CollectionSchema,
-			JobID:          jobID,
-		}).
-		WithBroadcast(it.vchannels).
-		BuildBroadcast()
+
+	importReq := &internalpb.ImportRequestInternal{
+		DbID:           dbInfo.dbID,
+		CollectionID:   it.collectionID,
+		CollectionName: it.req.GetCollectionName(),
+		PartitionIDs:   it.partitionIDs,
+		ChannelNames:   it.vchannels,
+		Schema:         it.schema.CollectionSchema,
+		Files:          it.req.GetFiles(),
+		Options:        it.req.GetOptions(),
+		DataTimestamp:  0, // DO NOT set - used to differentiate proxy call from ack callback
+		JobID:          0, // Let DataCoord allocate
+	}
+
+	resp, err := it.mixCoord.ImportV2(ctx, importReq)
 	if err != nil {
-		log.Ctx(ctx).Warn("create import message failed", zap.Error(err))
+		log.Ctx(ctx).Warn("import request to datacoord failed", zap.Error(err))
 		return err
 	}
-	resp, err := streaming.WAL().Broadcast().Append(ctx, msg)
-	if err != nil {
-		log.Ctx(ctx).Warn("broadcast import msg failed", zap.Error(err))
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		err = merr.Error(resp.GetStatus())
+		log.Ctx(ctx).Warn("import request rejected by datacoord", zap.Error(err))
 		return err
 	}
+
 	log.Ctx(ctx).Info(
-		"broadcast import msg success",
-		zap.Int64("jobID", jobID),
-		zap.Uint64("broadcastID", resp.BroadcastID),
-		zap.Any("appendResults", resp.AppendResults),
+		"import request sent to datacoord successfully",
+		zap.String("jobID", resp.GetJobID()),
 	)
-	it.resp.JobID = strconv.FormatInt(jobID, 10)
+	it.resp.JobID = resp.GetJobID()
 	return nil
 }
 

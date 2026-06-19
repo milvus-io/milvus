@@ -1,8 +1,8 @@
 package adaptor
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 var messageTypeToCommonpbMsgType = map[message.MessageType]commonpb.MsgType{
@@ -22,6 +22,7 @@ var messageTypeToCommonpbMsgType = map[message.MessageType]commonpb.MsgType{
 	message.MessageTypeAlterCollection:    commonpb.MsgType_AlterCollection,
 	message.MessageTypeTruncateCollection: commonpb.MsgType_TruncateCollection,
 	message.MessageTypeAlterWAL:           commonpb.MsgType_AlterWAL,
+	message.MessageTypeCreateIndex:        commonpb.MsgType_CreateIndex,
 }
 
 // MustGetCommonpbMsgTypeFromMessageType returns the commonpb.MsgType from message.MessageType.

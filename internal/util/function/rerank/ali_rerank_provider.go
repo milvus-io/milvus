@@ -20,13 +20,13 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type aliProvider struct {
@@ -35,9 +35,10 @@ type aliProvider struct {
 	url       string
 	modelName string
 	params    map[string]any
+	timeoutMs int64
 }
 
-func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
+func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
 	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.DashscopeAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
@@ -61,20 +62,23 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("ali rerank model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("ali rerank model name is required")
 	}
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := aliProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
 		client:       client,
 		url:          url,
 		modelName:    modelName,
 		params:       truncateParams,
+		timeoutMs:    timeoutMs,
 	}
 	return &provider, nil
 }
 
-func (provider *aliProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(provider.url, provider.modelName, query, docs, provider.params, 30)
+func (provider *aliProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+	rerankResp, err := provider.client.Rerank(provider.url, provider.modelName, query, docs, provider.params, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ChannelBlacklist manages blacklisted nodes per channel with expiration.

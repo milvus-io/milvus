@@ -26,9 +26,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestCompactionExecutor(t *testing.T) {
@@ -72,8 +73,6 @@ func TestCompactionExecutor(t *testing.T) {
 	})
 
 	t.Run("Test_Enqueue_DefaultSlotUsage", func(t *testing.T) {
-		ex := NewExecutor()
-
 		testCases := []struct {
 			name              string
 			compactionType    datapb.CompactionType
@@ -94,10 +93,16 @@ func TestCompactionExecutor(t *testing.T) {
 				compactionType:    datapb.CompactionType_ClusteringCompaction,
 				expectedSlotUsage: paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 			},
+			{
+				name:              "BumpSchemaVersionCompaction",
+				compactionType:    datapb.CompactionType_BumpSchemaVersionCompaction,
+				expectedSlotUsage: paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64(),
+			},
 		}
 
 		for i, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
+				ex := NewExecutor()
 				mockC := NewMockCompactor(t)
 				mockC.EXPECT().GetPlanID().Return(int64(i + 10))
 				mockC.EXPECT().GetSlotUsage().Return(int64(0)).Times(2)
@@ -106,6 +111,7 @@ func TestCompactionExecutor(t *testing.T) {
 				succeed, err := ex.Enqueue(mockC)
 				assert.True(t, succeed)
 				assert.NoError(t, err)
+				assert.Equal(t, tc.expectedSlotUsage, ex.Slots())
 			})
 		}
 	})
@@ -135,6 +141,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Compact().Return(result, nil)
 		mockC.EXPECT().Complete().Return()
+		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		succeed, err := ex.Enqueue(mockC)
 		assert.True(t, succeed)
@@ -163,6 +170,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Compact().Return(nil, errors.New("compaction failed"))
 		mockC.EXPECT().Complete().Return()
+		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		succeed, err := ex.Enqueue(mockC)
 		assert.True(t, succeed)
@@ -350,6 +358,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetPlanID().Return(planID)
 		mockC.EXPECT().GetSlotUsage().Return(slotUsage).Times(2)
 		mockC.EXPECT().Complete().Return()
+		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.Enqueue(mockC)
 		assert.Equal(t, slotUsage, ex.Slots())
@@ -374,6 +383,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC := NewMockCompactor(t)
 		mockC.EXPECT().GetSlotUsage().Return(int64(10))
 		mockC.EXPECT().Complete().Return()
+		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.tasks[1] = &taskState{
 			compactor: mockC,
@@ -396,6 +406,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
+		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.Enqueue(mockC)
 		ex.mu.RLock()
@@ -441,6 +452,7 @@ func TestCompactionExecutor(t *testing.T) {
 			mockC.EXPECT().GetChannelName().Return("ch1")
 			mockC.EXPECT().GetSlotUsage().Return(int64(4)).Times(2)
 			mockC.EXPECT().Complete().Return()
+			mockC.EXPECT().GetStorageConfig().Return(nil)
 
 			result := &datapb.CompactionPlanResult{
 				PlanID: planID,
@@ -473,5 +485,36 @@ func TestCompactionExecutor(t *testing.T) {
 		for _, result := range results {
 			assert.Equal(t, datapb.CompactionTaskState_completed, result.State)
 		}
+	})
+
+	t.Run("Test_CompleteTask_WithStorageConfig", func(t *testing.T) {
+		ex := NewExecutor()
+		mockC := NewMockCompactor(t)
+
+		planID := int64(1)
+		storageConfig := &indexpb.StorageConfig{
+			StorageType: "minio",
+			Address:     "localhost:9000",
+			BucketName:  "test-bucket",
+		}
+
+		mockC.EXPECT().GetPlanID().Return(planID)
+		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
+		mockC.EXPECT().Complete().Return()
+		mockC.EXPECT().GetStorageConfig().Return(storageConfig)
+
+		ex.Enqueue(mockC)
+		assert.Equal(t, int64(8), ex.Slots())
+
+		result := &datapb.CompactionPlanResult{PlanID: planID}
+		ex.completeTask(planID, result)
+
+		assert.Equal(t, int64(0), ex.Slots())
+
+		ex.mu.RLock()
+		task := ex.tasks[planID]
+		ex.mu.RUnlock()
+		assert.Equal(t, datapb.CompactionTaskState_completed, task.state)
+		assert.Equal(t, result, task.result)
 	})
 }

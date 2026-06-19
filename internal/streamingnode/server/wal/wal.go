@@ -4,8 +4,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 type (
@@ -16,6 +17,8 @@ type (
 // WAL is the WAL framework interface.
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type WAL interface {
+	ratelimit.RateLimitObserverRegistry
+
 	ROWAL
 
 	// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
@@ -27,6 +30,10 @@ type WAL interface {
 	// If the wal is initialized into replica mode, not replicate any message,
 	// the message id of the replicate checkpoint will be 0.
 	GetReplicateCheckpoint() (*ReplicateCheckpoint, error)
+
+	// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
+	// Returns an empty slice if no force promote has occurred.
+	GetSalvageCheckpoint() []*ReplicateCheckpoint
 
 	// Append writes a record to the log.
 	Append(ctx context.Context, msg message.MutableMessage) (*AppendResult, error)

@@ -21,11 +21,9 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -33,8 +31,8 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
@@ -50,20 +48,22 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Only for re-export
@@ -161,7 +161,7 @@ func (s *Server) Register() error {
 func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
 	if s.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }
@@ -256,7 +256,7 @@ func (s *Server) initSession() error {
 	// Init QueryCoord session
 	if s.session == nil {
 		s.session = sessionutil.NewSession(s.ctx)
-		s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
+		s.session.Init(typeutil.QueryCoordRole, s.address, true)
 		s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
@@ -271,16 +271,17 @@ func (s *Server) initQueryCoord() error {
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
 	var idAllocatorKV kv.TxnKV
 	log.Info(fmt.Sprintf("query coordinator connecting to %s.", metaType))
-	if metaType == util.MetaStoreTypeTiKV {
+	switch metaType {
+	case util.MetaStoreTypeTiKV:
 		s.kv = tikv.NewTiKV(s.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
-			tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+			tikv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		idAllocatorKV = tsoutil.NewTSOTiKVBase(s.tikvCli, Params.TiKVCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
-	} else if metaType == util.MetaStoreTypeEtcd {
+	case util.MetaStoreTypeEtcd:
 		s.kv = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		idAllocatorKV = tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
-	} else {
-		return fmt.Errorf("not supported meta store: %s", metaType)
+	default:
+		return merr.WrapErrServiceInternalMsg("unsupported meta store: %s", metaType)
 	}
 	log.Info(fmt.Sprintf("query coordinator successfully connected to %s.", metaType))
 
@@ -338,7 +339,7 @@ func (s *Server) initQueryCoord() error {
 
 	// Init global balancer factory
 	log.Info("init global balancer factory")
-	balance.InitGlobalBalancerFactory(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
+	balance.InitGlobalBalancerFactory(s.taskScheduler, s.nodeMgr, s.dist, s.targetMgr)
 
 	// Init checker controller
 	log.Info("init checker controller")
@@ -639,7 +640,6 @@ func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, no
 }
 
 func (s *Server) watchNodes(revision int64) {
-	log := log.Ctx(s.ctx)
 	defer s.wg.Done()
 
 	s.sessionWatcherMu.Lock()
@@ -654,12 +654,13 @@ func (s *Server) watchNodes(revision int64) {
 		case event, ok := <-s.sessionWatcher.EventChannel():
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
-				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
-				go s.Stop()
-				if s.session.IsTriggerKill() {
-					if p, err := os.FindProcess(os.Getpid()); err == nil {
-						p.Signal(syscall.SIGINT)
-					}
+				log.Ctx(s.ctx).Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
+				if s.ctx.Err() == nil {
+					// ctx is still active, meaning this is not a normal shutdown but a genuine watch failure.
+					// Force exit so the process can be restarted by the orchestrator (e.g. K8s).
+					log.Ctx(s.ctx).Error("force exit due to unexpected session watcher failure")
+					log.Cleanup()
+					os.Exit(sessionutil.ExitCodeEtcd)
 				}
 				return
 			}
@@ -751,7 +752,7 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 	// Note: Node manager doesn't persist node list, so after query coord restart, we cannot
 	// update all node statuses in resource manager based on session and node manager's node list.
 	// Therefore, manual status checking of all nodes in resource manager is needed.
-	s.meta.ResourceManager.CheckNodesInResourceGroup(s.ctx)
+	s.meta.CheckNodesInResourceGroup(s.ctx)
 
 	return nil
 }
@@ -770,7 +771,7 @@ func (s *Server) handleNodeUp(node int64) {
 	s.distController.StartDistInstance(s.ctx, node)
 
 	// need assign to new rg and replica
-	s.meta.ResourceManager.HandleNodeUp(s.ctx, node)
+	s.meta.HandleNodeUp(s.ctx, node)
 
 	s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	s.checkerController.Check()
@@ -787,7 +788,7 @@ func (s *Server) handleNodeDown(node int64) {
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
 
-	s.meta.ResourceManager.HandleNodeDown(context.Background(), node)
+	s.meta.HandleNodeDown(context.Background(), node)
 
 	// clean node's metrics
 	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
@@ -799,7 +800,7 @@ func (s *Server) handleNodeStopping(node int64) {
 	s.nodeMgr.Stopping(node)
 
 	// mark node as stopping in resource manager
-	s.meta.ResourceManager.HandleNodeStopping(context.Background(), node)
+	s.meta.HandleNodeStopping(context.Background(), node)
 
 	// trigger checker to check stopping node
 	s.checkerController.Check()
@@ -875,4 +876,69 @@ func (s *Server) watchLoadConfigChanges() {
 
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
+}
+
+// GetInternalReplicasByCollection returns replicas for a collection from internal meta.
+// This method provides access to internal replica information including resource groups.
+func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
+	return s.meta.GetByCollection(ctx, collectionID)
+}
+
+// CheckAllReplicasServiceable returns an error if any replica has a non-serviceable
+// shard leader for any channel in the collection's current target. Unlike
+// CalculateLoadPercentage (which reads the CollectionObserver's periodically-persisted
+// snapshot), this performs a live check against the distribution manager and so
+// reflects the real-time serviceability after scale-up / scale-down.
+func (s *Server) CheckAllReplicasServiceable(ctx context.Context, collectionID int64) error {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	if len(replicas) == 0 {
+		return merr.WrapErrServiceInternalMsg("no replica found")
+	}
+	for _, replica := range replicas {
+		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Replica) error {
+	channels := s.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
+	if len(channels) == 0 {
+		return merr.WrapErrServiceInternalMsg("no channels in current target")
+	}
+	for channelName := range channels {
+		leader := s.dist.ChannelDistManager.GetShardLeader(channelName, replica)
+		if leader == nil || leader.View == nil {
+			return merr.WrapErrServiceInternalMsg("replica %d (rg=%s): no leader for channel %s",
+				replica.GetID(), replica.GetResourceGroup(), channelName)
+		}
+		if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
+			return merr.Wrapf(err, "replica %d (rg=%s) channel %s not serviceable", replica.GetID(), replica.GetResourceGroup(), channelName)
+		}
+	}
+	return nil
+}
+
+// GetLeakedResourcesByCollection returns the number of segments and channels still held by
+// querynodes that are NOT part of any current replica of the collection. A non-zero result
+// means physical resources have not been fully released yet (e.g., during scale-down a
+// decommissioned replica's querynode may still hold segments while release RPCs are in flight).
+func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionID int64) (leakedSegments, leakedChannels int) {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	validNodes := typeutil.NewUniqueSet()
+	for _, r := range replicas {
+		validNodes.Insert(r.GetNodes()...)
+	}
+	for _, seg := range s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID)) {
+		if !validNodes.Contain(seg.Node) {
+			leakedSegments++
+		}
+	}
+	for _, ch := range s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)) {
+		if !validNodes.Contain(ch.Node) {
+			leakedChannels++
+		}
+	}
+	return leakedSegments, leakedChannels
 }

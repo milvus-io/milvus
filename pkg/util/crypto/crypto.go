@@ -46,3 +46,9 @@ func MD5(str string) string {
 	data := md5.Sum([]byte(str))
 	return hex.EncodeToString(data[:])[8:24]
 }
+
+func GranteeID(str string) string {
+	// #nosec G401 -- RBAC grantee IDs need stable 128-bit identifiers, not password hashing.
+	data := md5.Sum([]byte(str))
+	return hex.EncodeToString(data[:])
+}

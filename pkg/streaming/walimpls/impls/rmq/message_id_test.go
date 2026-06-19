@@ -5,7 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	rawRocksmq "github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func TestMessageID(t *testing.T) {
@@ -24,6 +25,10 @@ func TestMessageID(t *testing.T) {
 	msgID, err := UnmarshalMessageID(rmqID(1).Marshal())
 	assert.NoError(t, err)
 	assert.Equal(t, rmqID(1), msgID)
+
+	msgID, err = UnmarshalMessageID(rmqID(rawRocksmq.EarliestMessageID()).Marshal())
+	assert.NoError(t, err)
+	assert.Equal(t, rmqID(rawRocksmq.EarliestMessageID()), msgID)
 
 	_, err = UnmarshalMessageID(string([]byte{0x01, 0x02, 0x03, 0x04}))
 	assert.Error(t, err)

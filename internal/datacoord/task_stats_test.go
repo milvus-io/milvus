@@ -26,18 +26,19 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type statsTaskSuite struct {
@@ -590,6 +591,30 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		_, err := st.prepareJobRequest(context.Background(), segment)
 		s.Error(err)
 		s.Contains(err.Error(), "failed to get collection info")
+	})
+
+	s.Run("nil schema", func() {
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+			Schema: nil,
+		}, nil)
+		st.handler = handler
+
+		_, err := st.prepareJobRequest(context.Background(), segment)
+		s.Error(err)
+		s.Contains(err.Error(), "collection schema is nil or has no fields")
+	})
+
+	s.Run("empty schema fields", func() {
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{}},
+		}, nil)
+		st.handler = handler
+
+		_, err := st.prepareJobRequest(context.Background(), segment)
+		s.Error(err)
+		s.Contains(err.Error(), "collection schema is nil or has no fields")
 	})
 
 	s.Run("allocation failure", func() {

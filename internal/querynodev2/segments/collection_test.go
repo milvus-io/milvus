@@ -17,15 +17,19 @@
 package segments
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type CollectionManagerSuite struct {
@@ -58,6 +62,19 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		err := s.cm.UpdateSchema(1, schema, 100)
 		s.NoError(err)
+		s.Equal(uint64(100), s.cm.Get(1).SchemaVersion())
+	})
+
+	s.Run("stale_version", func() {
+		currentSchema, currentVersion := s.cm.Get(1).SchemaAndVersion()
+		staleSchema := mock_segcore.GenTestCollectionSchema("stale_collection", schemapb.DataType_Int64, false)
+
+		err := s.cm.UpdateSchema(1, staleSchema, currentVersion-1)
+		s.NoError(err)
+
+		updatedSchema, updatedVersion := s.cm.Get(1).SchemaAndVersion()
+		s.Equal(currentVersion, updatedVersion)
+		s.Same(currentSchema, updatedSchema)
 	})
 
 	s.Run("not_exist_collection", func() {
@@ -75,9 +92,307 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 	s.Run("nil_schema", func() {
 		s.NotPanics(func() {
-			err := s.cm.UpdateSchema(1, nil, 100)
+			err := s.cm.UpdateSchema(1, nil, 101)
 			s.Error(err)
 		})
+	})
+}
+
+func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
+	coll := s.cm.Get(1)
+	schema := mock_segcore.GenTestCollectionSchema("collection_0", schemapb.DataType_Int64, false)
+	coll.setSchema(schema, 0)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	errCh := make(chan string, 1)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+
+			schema, version := coll.SchemaAndVersion()
+			if schema.GetName() != fmt.Sprintf("collection_%d", version) {
+				select {
+				case errCh <- fmt.Sprintf("schema %s does not match version %d", schema.GetName(), version):
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	for i := 1; i <= 1000; i++ {
+		schema := mock_segcore.GenTestCollectionSchema(fmt.Sprintf("collection_%d", i), schemapb.DataType_Int64, false)
+		coll.setSchema(schema, uint64(i))
+	}
+	close(stop)
+	wg.Wait()
+
+	select {
+	case msg := <-errCh:
+		s.Fail(msg)
+	default:
+	}
+
+	schema, version := coll.SchemaAndVersion()
+	s.Equal(uint64(1000), version)
+	s.Equal("collection_1000", schema.GetName())
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
+	// Verify initial collection has IndexMeta set from SetupTest.
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+	s.Require().NotNil(coll.GetCCollection().IndexMeta())
+
+	// Add a new vector field to simulate schema evolution.
+	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+	newVecFieldID := int64(200)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:  newVecFieldID,
+		Name:     "new_float_vector",
+		DataType: schemapb.DataType_FloatVector,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "128"},
+		},
+	})
+
+	// Build IndexMeta from the updated schema (should include the new field).
+	newIndexMeta := mock_segcore.GenTestIndexMeta(1, schema)
+	hasNewField := false
+	for _, meta := range newIndexMeta.GetIndexMetas() {
+		if meta.GetFieldID() == newVecFieldID {
+			hasNewField = true
+			break
+		}
+	}
+	s.Require().True(hasNewField, "precondition: new IndexMeta should contain field %d", newVecFieldID)
+
+	// PutOrRef on an existing collection should update its IndexMeta.
+	err := s.cm.PutOrRef(1, schema, newIndexMeta, &querypb.LoadMetaInfo{
+		LoadType:      querypb.LoadType_LoadCollection,
+		SchemaVersion: 100,
+	})
+	s.Require().NoError(err)
+	defer s.cm.Unref(1, 1)
+
+	updatedCollection := s.cm.Get(1)
+	updatedSchema, updatedVersion := updatedCollection.SchemaAndVersion()
+	s.Equal(uint64(100), updatedVersion)
+	s.Len(updatedSchema.GetFields(), len(schema.GetFields()))
+
+	// Verify IndexMeta now contains the new field.
+	updatedIndexMeta := updatedCollection.GetCCollection().IndexMeta()
+	found := false
+	for _, meta := range updatedIndexMeta.GetIndexMetas() {
+		if meta.GetFieldID() == newVecFieldID {
+			found = true
+			break
+		}
+	}
+	s.True(found,
+		"PutOrRef should update IndexMeta for existing collections; field %d is missing",
+		newVecFieldID)
+}
+
+func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {
+	schema := mock_segcore.GenTestCollectionSchema("collection_cagra", schemapb.DataType_Int64, false)
+	vectorFieldID := int64(0)
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_FloatVector {
+			vectorFieldID = field.GetFieldID()
+			break
+		}
+	}
+	s.Require().NotZero(vectorFieldID)
+
+	tests := []struct {
+		name       string
+		indexType  string
+		adaptValue string
+		expected   bool
+	}{
+		{
+			name:       "GPU_CAGRA adapt for CPU",
+			indexType:  "GPU_CAGRA",
+			adaptValue: "true",
+			expected:   false,
+		},
+		{
+			name:       "GPU_CUVS_CAGRA adapt for CPU",
+			indexType:  "GPU_CUVS_CAGRA",
+			adaptValue: "1",
+			expected:   false,
+		},
+		{
+			name:      "GPU_CAGRA without adapt for CPU",
+			indexType: "GPU_CAGRA",
+			expected:  true,
+		},
+		{
+			name:       "other GPU index",
+			indexType:  "GPU_IVF_FLAT",
+			adaptValue: "true",
+			expected:   true,
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			indexParams := []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: test.indexType},
+				{Key: common.MetricTypeKey, Value: "L2"},
+			}
+			if test.adaptValue != "" {
+				indexParams = append(indexParams, &commonpb.KeyValuePair{Key: "adapt_for_cpu", Value: test.adaptValue})
+			}
+			indexMeta := &segcorepb.CollectionIndexMeta{
+				MaxIndexRowCount: 1,
+				IndexMetas: []*segcorepb.FieldIndexMeta{
+					{
+						FieldID:     vectorFieldID,
+						IndexName:   test.indexType,
+						IndexParams: indexParams,
+					},
+				},
+			}
+
+			collection, err := NewCollection(10, schema, indexMeta, &querypb.LoadMetaInfo{
+				LoadType: querypb.LoadType_LoadCollection,
+			})
+			s.Require().NoError(err)
+			defer DeleteCollection(collection)
+			s.Equal(test.expected, collection.IsGpuIndex())
+		})
+	}
+
+	s.Run("GPU_CAGRA adapt for CPU from load config", func() {
+		params := paramtable.Get()
+		oldEnable := params.KnowhereConfig.Enable.GetValue()
+		adaptKey := params.KnowhereConfig.IndexParam.KeyPrefix + "GPU_CAGRA.load.adapt_for_cpu"
+		oldAdaptValue := params.GetWithDefault(adaptKey, "")
+		defer params.Save(params.KnowhereConfig.Enable.Key, oldEnable)
+		defer func() {
+			if oldAdaptValue == "" {
+				params.Remove(adaptKey)
+				return
+			}
+			params.Save(adaptKey, oldAdaptValue)
+		}()
+
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(adaptKey, "true")
+
+		indexMeta := &segcorepb.CollectionIndexMeta{
+			MaxIndexRowCount: 1,
+			IndexMetas: []*segcorepb.FieldIndexMeta{
+				{
+					FieldID:   vectorFieldID,
+					IndexName: "GPU_CAGRA",
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+						{Key: common.MetricTypeKey, Value: "L2"},
+					},
+				},
+			},
+		}
+
+		collection, err := NewCollection(10, schema, indexMeta, &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
+		defer DeleteCollection(collection)
+		s.False(collection.IsGpuIndex())
+	})
+}
+
+func (s *CollectionManagerSuite) TestRef() {
+	s.Run("ref_existing_collection", func() {
+		ok := s.cm.Ref(1, 1)
+		s.True(ok)
+	})
+
+	s.Run("ref_non_existing_collection", func() {
+		ok := s.cm.Ref(9999, 1)
+		s.False(ok)
+	})
+}
+
+func (s *CollectionManagerSuite) TestUnref() {
+	s.Run("unref_non_existing_collection", func() {
+		// Unref on non-existing collection should return true
+		ok := s.cm.Unref(9999, 1)
+		s.True(ok)
+	})
+
+	s.Run("unref_without_release", func() {
+		// Add more refs first
+		s.cm.Ref(1, 2)
+		// Unref once, should not release (refCount > 0)
+		ok := s.cm.Unref(1, 1)
+		s.False(ok)
+		// Collection should still exist
+		coll := s.cm.Get(1)
+		s.NotNil(coll)
+	})
+
+	s.Run("unref_with_release", func() {
+		// Create a new collection manager for this test
+		cm := NewCollectionManager()
+		schema := mock_segcore.GenTestCollectionSchema("collection_2", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(2, schema, mock_segcore.GenTestIndexMeta(2, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
+
+		// Unref to release the collection (refCount goes to 0)
+		ok := cm.Unref(2, 1)
+		s.True(ok)
+
+		// Collection should be removed
+		coll := cm.Get(2)
+		s.Nil(coll)
+	})
+}
+
+func (s *CollectionManagerSuite) TestList() {
+	ids := s.cm.List()
+	s.Contains(ids, int64(1))
+}
+
+func (s *CollectionManagerSuite) TestListWithName() {
+	names := s.cm.ListWithName()
+	s.Contains(names, int64(1))
+	s.Equal("collection_1", names[1])
+}
+
+func (s *CollectionManagerSuite) TestPutOrRef() {
+	s.Run("put_new_collection", func() {
+		cm := NewCollectionManager()
+		schema := mock_segcore.GenTestCollectionSchema("collection_new", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(100, schema, mock_segcore.GenTestIndexMeta(100, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.NoError(err)
+		coll := cm.Get(100)
+		s.NotNil(coll)
+	})
+
+	s.Run("ref_existing_collection", func() {
+		// Ref existing collection (id=1)
+		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+		err := s.cm.PutOrRef(1, schema, mock_segcore.GenTestIndexMeta(1, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.NoError(err)
 	})
 }
 

@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package milvus.proto.modelservice;
-option go_package="github.com/milvus-io/milvus/pkg/v2/proto/modelservicepb";
+option go_package="github.com/milvus-io/milvus/pkg/v3/proto/modelservicepb";
 
 service TextEmbeddingService {
     rpc Embedding(TextEmbeddingRequest) returns (TextEmbeddingResponse);

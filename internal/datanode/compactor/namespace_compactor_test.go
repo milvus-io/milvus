@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
@@ -21,13 +22,13 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type NamespaceCompactorTestSuite struct {
@@ -39,11 +40,11 @@ type NamespaceCompactorTestSuite struct {
 
 func (s *NamespaceCompactorTestSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
-	paramtable.Get().Save("common.storageType", "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.binlogIO = mock_util.NewMockBinlogIO(s.T())
-	s.binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	s.binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.schema = &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -70,6 +71,11 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 		},
 	}
 	s.setupSortedSegments()
+}
+
+func (s *NamespaceCompactorTestSuite) TearDownSuite() {
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
@@ -114,25 +120,29 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		inserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 		s.Require().NoError(err)
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{
-			SegmentID:      int64(i),
-			FieldBinlogs:   storage.SortFieldBinlogs(inserts),
-			Deltalogs:      []*datapb.FieldBinlog{},
-			StorageVersion: storage.StorageV2,
-			IsSorted:       true,
+			SegmentID:           int64(i),
+			FieldBinlogs:        storage.SortFieldBinlogs(inserts),
+			Deltalogs:           []*datapb.FieldBinlog{},
+			StorageVersion:      storage.StorageV2,
+			IsSorted:            false,
+			IsSortedByNamespace: true,
 		})
 	}
 }
 
 func (s *NamespaceCompactorTestSuite) TestCompactSorted() {
+	// Use time-based IDs so each run writes to a unique V3 manifest path,
+	// preventing the loon library from accumulating rows across runs.
+	idBase := time.Now().UnixNano()
 	plan := &datapb.CompactionPlan{
 		SegmentBinlogs: s.sortedSegments,
 		Schema:         s.schema,
 		PreAllocatedSegmentIDs: &datapb.IDRange{
-			Begin: 0,
+			Begin: idBase,
 			End:   math.MaxInt64,
 		},
 		PreAllocatedLogIDs: &datapb.IDRange{
-			Begin: 0,
+			Begin: idBase + 1000000,
 			End:   math.MaxInt64,
 		},
 		MaxSize: 1024 * 1024 * 1024,
@@ -151,10 +161,25 @@ func (s *NamespaceCompactorTestSuite) TestCompactSorted() {
 }
 
 func (s *NamespaceCompactorTestSuite) assertSorted(segment *datapb.CompactionSegment, sortedByFieldIDs []int64) {
-	reader, err := storage.NewBinlogRecordReader(context.Background(), segment.GetInsertLogs(), s.schema, storage.WithVersion(segment.GetStorageVersion()), storage.WithStorageConfig(&indexpb.StorageConfig{
+	storageConfig := &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    paramtable.Get().LocalStorageCfg.Path.GetValue(),
-	}))
+	}
+	var reader storage.RecordReader
+	var err error
+	if segment.GetManifest() != "" {
+		reader, err = storage.NewManifestRecordReader(context.Background(),
+			segment.GetManifest(), s.schema,
+			storage.WithVersion(segment.GetStorageVersion()),
+			storage.WithStorageConfig(storageConfig),
+		)
+	} else {
+		reader, err = storage.NewBinlogRecordReader(context.Background(),
+			segment.GetInsertLogs(), s.schema,
+			storage.WithVersion(segment.GetStorageVersion()),
+			storage.WithStorageConfig(storageConfig),
+		)
+	}
 	s.Require().NoError(err)
 	records := make([]storage.Record, 0)
 	for {

@@ -29,20 +29,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -216,6 +216,12 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(newSchemaInfo(newTestSchema()), nil)
+	mockCache.On("GetCollectionInfo",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("int64"),
+	).Return(&collectionInfo{}, nil)
 
 	globalMetaCache = mockCache
 
@@ -397,6 +403,140 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 				},
 			}, cit1.newTypeParams)
 	})
+}
+
+func Test_parseIndexParamsAllowsParsableParamsWithinSize(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, strconv.Itoa(100*1024))
+	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
+
+	params, err := json.Marshal(map[string]any{
+		"custom_param": strings.Repeat("A", 1024),
+	})
+	assert.NoError(t, err)
+
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+				{Key: common.ParamsKey, Value: string(params)},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_VarChar,
+		},
+	}
+
+	err = cit.parseIndexParams(context.TODO())
+	assert.NoError(t, err)
+	assert.Contains(t, cit.newIndexParams, &commonpb.KeyValuePair{Key: "custom_param", Value: strings.Repeat("A", 1024)})
+}
+
+func Test_parseIndexParamsRejectsConfiguredMaxIndexParamsSize(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, "64")
+	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
+
+	params, err := json.Marshal(map[string]any{
+		"custom_param": strings.Repeat("A", 128),
+	})
+	assert.NoError(t, err)
+
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+				{Key: common.ParamsKey, Value: string(params)},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_VarChar,
+		},
+	}
+
+	err = cit.parseIndexParams(context.TODO())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index params size")
+	assert.Contains(t, err.Error(), "64")
+}
+
+func Test_parseIndexParamsRejectsOversizedParams(t *testing.T) {
+	params, err := json.Marshal(map[string]any{
+		"malicious_padding": strings.Repeat("A", 100*1024),
+	})
+	assert.NoError(t, err)
+
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+				{Key: common.ParamsKey, Value: string(params)},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_VarChar,
+		},
+	}
+
+	err = cit.parseIndexParams(context.TODO())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index params size")
+}
+
+func Test_parseIndexParamsRejectsOversizedRawParams(t *testing.T) {
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+				{Key: common.ParamsKey, Value: strings.Repeat(" ", 100*1024) + `{"custom_param":"A"}`},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_VarChar,
+		},
+	}
+
+	err := cit.parseIndexParams(context.TODO())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index params size")
+}
+
+func Test_parseIndexParamsRejectsFinalIndexParamsOverLimit(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, "128")
+	Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
+	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE", "large_config": "`+strings.Repeat("A", 128)+`"}`)
+	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
+	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		},
+	}
+
+	err := cit.parseIndexParams(context.TODO())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index params size")
 }
 
 func Test_parseIndexParams(t *testing.T) {
@@ -650,6 +790,42 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("create scalar index on TEXT field", func(t *testing.T) {
+		for name, extraParams := range map[string][]*commonpb.KeyValuePair{
+			"explicit inverted": {
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.IndexINVERTED,
+				},
+			},
+			"explicit autoindex": {
+				{
+					Key:   common.IndexTypeKey,
+					Value: AutoIndexName,
+				},
+			},
+			"default scalar index": {},
+		} {
+			t.Run(name, func(t *testing.T) {
+				cit := &createIndexTask{
+					req: &milvuspb.CreateIndexRequest{
+						ExtraParams: extraParams,
+						IndexName:   "",
+					},
+					fieldSchema: &schemapb.FieldSchema{
+						FieldID:      101,
+						Name:         "FieldID",
+						IsPrimaryKey: false,
+						DataType:     schemapb.DataType_Text,
+					},
+				}
+				err := cit.parseIndexParams(context.TODO())
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "TEXT field does not support user-created scalar index")
+			})
+		}
+	})
+
 	t.Run("create index on VarChar field without index type", func(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
@@ -668,8 +844,6 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
-
-
 			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
 			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
@@ -979,6 +1153,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -1204,6 +1380,35 @@ func Test_parseIndexParams(t *testing.T) {
 		jsonPath, err = funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
 		assert.NoError(t, err)
 		assert.Equal(t, jsonPath, "DynamicField")
+
+		cit = &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.JSONCastTypeKey,
+						Value: "json",
+					},
+					{
+						Key:   common.IndexTypeKey,
+						Value: AutoIndexName,
+					},
+				},
+				IndexName: "",
+				FieldName: "FieldJSON",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_JSON,
+			},
+		}
+		err = cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, indexparamcheck.IndexINVERTED, indexType)
 	})
 }
 
@@ -1267,6 +1472,103 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 		}
 		err := cit.parseIndexParams(context.TODO())
 		assert.True(t, strings.Contains(err.Error(), "float vector index does not support metric type: MAX_SIM"))
+	})
+}
+
+func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
+	// When an ArrayOfVector field uses a non-EmbList metric (e.g., COSINE),
+	// each embedding is indexed independently. The index should only need to
+	// support the element vector type, not the EmbeddingList capability.
+	// This means indexes like IVF_PQ that don't have the EMB_LIST flag
+	// should still work with ArrayOfVector + COSINE.
+	t.Run("ArrayOfVector with COSINE should accept IVF_FLAT", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+					{Key: common.MetricTypeKey, Value: metric.COSINE},
+					{Key: "nlist", Value: "128"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("ArrayOfVector with MaxSimCosine should accept HNSW", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+					{Key: common.MetricTypeKey, Value: metric.MaxSimCosine},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("ArrayOfVector with float element should reject MaxSimHamming", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW_SQ"},
+					{Key: common.MetricTypeKey, Value: metric.MaxSimHamming},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "array of vector with float element type does not support metric type")
+	})
+
+	t.Run("ArrayOfVector with binary element should accept MaxSimHamming", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+					{Key: common.MetricTypeKey, Value: metric.MaxSimHamming},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_BinaryVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
 	})
 }
 
@@ -1453,6 +1755,147 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 			{Key: common.IndexTypeKey, Value: "BIN_IVF_FLAT"},
 			{Key: common.MetricTypeKey, Value: "JACCARD"},
 			{Key: "nlist", Value: "1024"},
+		}, task.newIndexParams)
+	})
+}
+
+func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("cloud autoindex with large_topk query mode selects IVF_FLAT", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
+
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			collectionProperties: []*commonpb.KeyValuePair{
+				{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
+		// Should use IVF_FLAT from LargeTopK config, with user metric type overriding
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: "nlist", Value: "128"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("cloud autoindex without large_topk uses default HNSW", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
+
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			collectionProperties: []*commonpb.KeyValuePair{},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
+		// Should use default HNSW params
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("non-cloud autoindex with large_topk query mode uses default HNSW", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
+		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
+
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			collectionProperties: []*commonpb.KeyValuePair{
+				{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: make([]*commonpb.KeyValuePair, 0),
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		// non-cloud mode does not support LargeTopK override, should use default HNSW
+		found := false
+		for _, kv := range task.newIndexParams {
+			if kv.Key == common.IndexTypeKey {
+				assert.Equal(t, "HNSW", kv.Value)
+				found = true
+			}
+		}
+		assert.True(t, found, "index_type should be set to HNSW")
+	})
+
+	t.Run("no query_mode property uses default", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
+
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			collectionProperties: []*commonpb.KeyValuePair{},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		// Should use default HNSW params
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
 		}, task.newIndexParams)
 	})
 }
@@ -1740,4 +2183,150 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 		// Result should have replaced refine_type
 		assert.Equal(t, "BF16", result["refine_type"])
 	})
+}
+
+func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+	Params.Save(Params.AutoIndexConfig.SparseIndexParams.Key, `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
+	Params.Save(Params.AutoIndexConfig.IntVectorIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT"}`)
+
+	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.SparseIndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IntVectorIndexParams.Key)
+
+	t.Run("ArrayOfVector with FloatVector element uses dense float autoindex", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("ArrayOfVector with SparseFloatVector element is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_SparseFloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_IP"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ArrayOfVector with Int8Vector element is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_Int8Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ArrayOfVector without user metric maps config metric to EmbList", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
+		// Config default metric (COSINE) should be mapped to MAX_SIM_COSINE
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: metric.MaxSimCosine},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("ArrayOfVector sparse without user metric is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_SparseFloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+}
+
+func Test_mapVectorMetricToEmbListMetric(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{metric.COSINE, metric.MaxSimCosine},
+		{metric.L2, metric.MaxSimL2},
+		{metric.IP, metric.MaxSimIP},
+		{metric.HAMMING, metric.MaxSimHamming},
+		{metric.JACCARD, metric.MaxSimJaccard},
+		// case insensitive
+		{"cosine", metric.MaxSimCosine},
+		{"ip", metric.MaxSimIP},
+		{"l2", metric.MaxSimL2},
+		// already EmbList metric - pass through
+		{metric.MaxSimIP, metric.MaxSimIP},
+		{metric.MaxSim, metric.MaxSim},
+		// unknown metric - pass through
+		{"UNKNOWN", "UNKNOWN"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, mapVectorMetricToEmbListMetric(tt.input))
+		})
+	}
 }

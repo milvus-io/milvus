@@ -84,6 +84,13 @@ class VectorMemIndex : public VectorIndex {
 
     int64_t
     Count() override {
+        const auto& offset_mapping = GetOffsetMapping();
+        if (offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0) {
+            return 0;
+        }
+        if (IsEmptyEmbListIndex()) {
+            return 0;
+        }
         return index_.Count();
     }
 
@@ -97,8 +104,15 @@ class VectorMemIndex : public VectorIndex {
     const bool
     HasRawData() const override;
 
+    bool
+    IsIndexRefineEnabled() const override;
+
     std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
+
+    std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    GetEmbListByIds(const DatasetPtr dataset,
+                    const std::string& metric_type) const override;
 
     std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
     GetSparseVector(const DatasetPtr dataset) const override;
@@ -111,6 +125,14 @@ class VectorMemIndex : public VectorIndex {
                     const knowhere::Json& json,
                     const BitsetView& bitset) const override;
 
+    knowhere::expected<knowhere::DataSetPtr>
+    CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
+                  const BitsetView& bitset,
+                  const int64_t* labels,
+                  size_t labels_len,
+                  bool is_cosine,
+                  milvus::OpContext* op_context = nullptr) const override;
+
  protected:
     virtual void
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
@@ -118,6 +140,11 @@ class VectorMemIndex : public VectorIndex {
  private:
     void
     LoadFromFile(const Config& config);
+
+    bool
+    IsEmptyEmbListIndex() const {
+        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+    }
 
  protected:
     Config config_;
@@ -128,6 +155,7 @@ class VectorMemIndex : public VectorIndex {
 
     CreateIndexInfo create_index_info_;
     bool use_knowhere_build_pool_;
+    std::vector<size_t> empty_emb_list_offsets_;
 };
 
 template <typename T>

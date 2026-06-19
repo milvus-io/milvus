@@ -22,10 +22,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestServiceParam(t *testing.T) {
@@ -68,15 +68,38 @@ func TestServiceParam(t *testing.T) {
 		assert.NotEmpty(t, Params.EtcdTLSMinVersion.GetValue())
 		t.Logf("tls minVersion = %s", Params.EtcdTLSMinVersion.GetValue())
 
-		// test UseEmbedEtcd
+		// test etcd auth default values
+		assert.Equal(t, "etcdadmin", Params.EtcdAuthUserName.GetValue())
+		assert.Equal(t, "etcdadmin", Params.EtcdAuthPassword.GetValue())
+		assert.True(t, Params.EtcdEnableAuth.GetAsBool())
+
+		// test UseEmbedEtcd with auth enabled — should auto-disable auth, not panic
 		t.Setenv("etcd.use.embed", "true")
-		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
+		t.Setenv("etcd.auth.enabled", "true")
+		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+		assert.NotPanics(t, func() {
+			NewBaseTable()
+		})
+
+		// test etcd auth enabled with empty credentials should panic
+		t.Setenv("etcd.use.embed", "false")
+		t.Setenv("etcd.auth.enabled", "true")
+		t.Setenv("etcd.auth.userName", "")
+		t.Setenv("etcd.auth.password", "")
 		assert.Panics(t, func() {
 			NewBaseTable()
 		})
 
+		// test etcd auth enabled with valid credentials should not panic
+		t.Setenv("etcd.auth.enabled", "true")
+		t.Setenv("etcd.auth.userName", "milvus")
+		t.Setenv("etcd.auth.password", "milvuspass")
+		assert.NotPanics(t, func() {
+			NewBaseTable()
+		})
+
+		t.Setenv("etcd.auth.enabled", "false")
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
-		t.Setenv("etcd.use.embed", "false")
 		SParams.init(bt)
 	})
 
@@ -108,6 +131,18 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.SegmentRollingMaxBlocks.GetAsInt64(), int64(1000))
 		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsDurationByParse().Seconds(), float64(10))
 
+		// Test default quorum configuration values
+		// Buffer pools (should be empty by default)
+		assert.Equal(t, wpCfg.QuorumBufferPools.GetValue(), "")
+
+		// Selection strategy
+		assert.Equal(t, wpCfg.QuorumAffinityMode.GetValue(), "soft")
+		assert.Equal(t, wpCfg.QuorumReplicas.GetAsInt(), 3)
+		assert.Equal(t, wpCfg.QuorumStrategy.GetValue(), "random")
+
+		// Custom placement (should be empty by default)
+		assert.Equal(t, wpCfg.QuorumCustomPlacement.GetValue(), "")
+
 		assert.Equal(t, wpCfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds(), int64(200))
 		assert.Equal(t, wpCfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds(), int64(10))
 		assert.Equal(t, wpCfg.SyncMaxEntries.GetAsInt(), 10000)
@@ -125,6 +160,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.FencePolicyConditionWrite.GetValue(), "auto")
 
 		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
+		assert.Equal(t, wpCfg.ForceLocalStorage.GetAsBool(), false)
 		assert.Equal(t, wpCfg.RootPath.GetValue(), "default")
 	})
 
@@ -152,6 +188,66 @@ func TestServiceParam(t *testing.T) {
 			// Should use main key value, not fallback
 			assert.Equal(t, wpCfg.RetentionTTL.GetAsDurationByParse().Milliseconds()/1000, int64(24*60*60))
 		}
+	})
+
+	t.Run("test woodpeckerQuorumConfig", func(t *testing.T) {
+		wpCfg := &SParams.WoodpeckerCfg
+
+		// Test setting custom quorum configuration values using JSON format
+		// Buffer pools as JSON array
+		bufferPoolsJSON := `[{"name":"region1","seeds":["node1:8080","node2:8080","node3:8080"]},{"name":"region2","seeds":["node4:8080","node5:8080","node6:8080"]}]`
+		bt.Save("woodpecker.client.quorum.quorumBufferPools", bufferPoolsJSON)
+
+		// Selection strategy
+		bt.Save("woodpecker.client.quorum.quorumSelectStrategy.affinityMode", "hard")
+		bt.Save("woodpecker.client.quorum.quorumSelectStrategy.replicas", "5")
+		bt.Save("woodpecker.client.quorum.quorumSelectStrategy.strategy", "custom")
+
+		// Custom placement as JSON array
+		customPlacementJSON := `[{"name":"replica-1","region":"region1","az":"az-1","resourceGroup":"rg-1"},{"name":"replica-2","region":"region2","az":"az-2","resourceGroup":"rg-2"},{"name":"replica-3","region":"region3","az":"az-3","resourceGroup":"rg-3"},{"name":"replica-4","region":"region1","az":"az-4","resourceGroup":"rg-4"},{"name":"replica-5","region":"region2","az":"az-5","resourceGroup":"rg-5"}]`
+		bt.Save("woodpecker.client.quorum.quorumSelectStrategy.customPlacement", customPlacementJSON)
+
+		// Reinitialize configuration to pick up the new values
+		SParams.WoodpeckerCfg.QuorumBufferPools.Init(bt.mgr)
+		SParams.WoodpeckerCfg.QuorumAffinityMode.Init(bt.mgr)
+		SParams.WoodpeckerCfg.QuorumReplicas.Init(bt.mgr)
+		SParams.WoodpeckerCfg.QuorumStrategy.Init(bt.mgr)
+		SParams.WoodpeckerCfg.QuorumCustomPlacement.Init(bt.mgr)
+
+		// Verify the updated configuration values
+		// Buffer pools (should contain JSON string)
+		bufferPools := wpCfg.QuorumBufferPools.GetValue()
+		assert.NotEmpty(t, bufferPools)
+		assert.Contains(t, bufferPools, "region1")
+		assert.Contains(t, bufferPools, "region2")
+		assert.Contains(t, bufferPools, "node1:8080")
+		assert.Contains(t, bufferPools, "node4:8080")
+		assert.Contains(t, bufferPools, "[")
+		assert.Contains(t, bufferPools, "]")
+
+		// Selection strategy
+		assert.Equal(t, "hard", wpCfg.QuorumAffinityMode.GetValue())
+		assert.Equal(t, 5, wpCfg.QuorumReplicas.GetAsInt())
+		assert.Equal(t, "custom", wpCfg.QuorumStrategy.GetValue())
+
+		// Custom placement (should contain JSON string)
+		customPlacement := wpCfg.QuorumCustomPlacement.GetValue()
+		assert.NotEmpty(t, customPlacement)
+		assert.Contains(t, customPlacement, "replica-1")
+		assert.Contains(t, customPlacement, "replica-5")
+		assert.Contains(t, customPlacement, "region1")
+		assert.Contains(t, customPlacement, "az-1")
+		assert.Contains(t, customPlacement, "rg-1")
+		assert.Contains(t, customPlacement, "[")
+		assert.Contains(t, customPlacement, "]")
+
+		// Log the configuration values for verification
+		t.Logf("Buffer pools (JSON): %s", bufferPools)
+		t.Logf("Selection strategy - Affinity: %s, Replicas: %d, Strategy: %s",
+			wpCfg.QuorumAffinityMode.GetValue(),
+			wpCfg.QuorumReplicas.GetAsInt(),
+			wpCfg.QuorumStrategy.GetValue())
+		t.Logf("Custom placement (JSON): %s", customPlacement)
 	})
 
 	t.Run("test pulsarConfig", func(t *testing.T) {
@@ -270,7 +366,7 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, Params.UseSSL.GetAsBool(), false)
 
-		assert.NotEmpty(t, Params.SslCACert.GetValue())
+		assert.Empty(t, Params.SslCACert.GetValue())
 
 		assert.Equal(t, Params.UseIAM.GetAsBool(), false)
 
@@ -289,8 +385,6 @@ func TestServiceParam(t *testing.T) {
 		Params := &SParams.MetaStoreCfg
 
 		assert.Equal(t, util.MetaStoreTypeEtcd, Params.MetaStoreType.GetValue())
-		assert.Equal(t, 86400*time.Second, Params.SnapshotTTLSeconds.GetAsDuration(time.Second))
-		assert.Equal(t, 3600*time.Second, Params.SnapshotReserveTimeSeconds.GetAsDuration(time.Second))
 		assert.Equal(t, 100000, Params.PaginationSize.GetAsInt())
 		assert.Equal(t, 32, Params.ReadConcurrency.GetAsInt())
 	})

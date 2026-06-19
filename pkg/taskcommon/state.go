@@ -17,8 +17,8 @@
 package taskcommon
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 type State = indexpb.JobState
@@ -68,7 +68,7 @@ func FromCompactionState(s datapb.CompactionTaskState) State {
 	switch s {
 	case datapb.CompactionTaskState_pipelining:
 		return Init
-	case datapb.CompactionTaskState_executing:
+	case datapb.CompactionTaskState_executing, datapb.CompactionTaskState_analyzing:
 		return InProgress
 	case datapb.CompactionTaskState_completed, datapb.CompactionTaskState_meta_saved,
 		datapb.CompactionTaskState_statistic, datapb.CompactionTaskState_indexing, datapb.CompactionTaskState_cleaned:

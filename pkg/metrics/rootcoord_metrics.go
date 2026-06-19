@@ -3,7 +3,7 @@ package metrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -203,6 +203,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "ddl_req_latency_in_queue",
 			Help:      "latency of each DDL operations in queue",
+			Buckets:   subMsBuckets,
 		}, []string{functionLabelName})
 
 	RootCoordNumEntities = prometheus.NewGaugeVec(

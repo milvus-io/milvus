@@ -18,14 +18,12 @@ package allocator
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -61,10 +59,10 @@ func NewIDAllocator(ctx context.Context, remoteAllocator remoteInterface, peerID
 		PeerID:          peerID,
 	}
 	a.TChan = &EmptyTicker{}
-	a.CachedAllocator.SyncFunc = a.syncID
-	a.CachedAllocator.ProcessFunc = a.processFunc
-	a.CachedAllocator.CheckSyncFunc = a.checkSyncFunc
-	a.CachedAllocator.PickCanDoFunc = a.pickCanDoFunc
+	a.SyncFunc = a.syncID
+	a.ProcessFunc = a.processFunc
+	a.CheckSyncFunc = a.checkSyncFunc
+	a.PickCanDoFunc = a.pickCanDoFunc
 	a.Init()
 	return a, nil
 }
@@ -101,7 +99,7 @@ func (ia *IDAllocator) syncID() (bool, error) {
 
 	cancel()
 	if err != nil {
-		return false, fmt.Errorf("syncID Failed:%w", err)
+		return false, merr.Wrapf(err, "syncID failed")
 	}
 	ia.idStart = resp.GetID()
 	ia.idEnd = ia.idStart + int64(resp.GetCount())
@@ -148,7 +146,7 @@ func (ia *IDAllocator) AllocOne() (UniqueID, error) {
 // Alloc allocates the id of the count number.
 func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 	if ia.closed() {
-		return 0, 0, errors.New("fail to allocate ID, closed allocator")
+		return 0, 0, merr.WrapErrServiceInternalMsg("fail to allocate ID, closed allocator")
 	}
 	req := &IDRequest{BaseRequest: BaseRequest{Done: make(chan error), Valid: false}}
 

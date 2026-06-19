@@ -25,11 +25,14 @@ import (
 	"github.com/cockroachdb/errors"
 
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()
 
+// ErrFailedAllocateID is an identity sentinel returned by the test-only
+// ErrorIDAllocator; keep it a plain errors.New (not merr) so errors.Is
+// matches by identity instead of by merr error code.
 var ErrFailedAllocateID = errors.New("failed to allocate ID")
 
 // GenerateEtcdConfig returns a etcd config with a random root path,

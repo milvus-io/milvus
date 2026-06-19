@@ -49,6 +49,7 @@
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -67,7 +68,7 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
  protected:
     storage::ChunkManagerPtr cm_;
     milvus_storage::ArrowFileSystemPtr fs_;
-    std::string path_ = "/tmp/test-inverted-index-storage-v2";
+    std::string path_ = TestLocalPath;
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -78,7 +79,7 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
 TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     GTEST_SKIP() << "TODO: fix ut logic after behavior change";
     auto schema = gen_all_data_types_schema();
-    auto vec = schema->get_field_id(FieldName("embeddings"));
+    schema->get_field_id(FieldName("embeddings"));
 
     int64_t per_batch = 1000;
     int64_t n_batch = 3;
@@ -101,12 +102,10 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         ::parquet::default_writer_properties());
     EXPECT_TRUE(result.ok());
     auto writer = result.ValueOrDie();
-    int64_t total_rows = 0;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
         auto record_batch =
             ConvertToArrowRecordBatch(dataset, dim, arrow_schema);
-        total_rows += record_batch->num_rows();
 
         EXPECT_TRUE(writer->Write(record_batch).ok());
     }
@@ -167,7 +166,6 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                                 "field_name",
                                 milvus::DataType::VECTOR_FLOAT,
                                 1};
-        int64_t slice_size = milvus::FILE_SLICE_SIZE;
         FieldDataMeta field_data_meta = {
             collection_id, partition_id, segment_id, float_field.get()};
         auto file_manager =
@@ -175,7 +173,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                 storage::FileManagerContext(
                     field_data_meta, index_meta, cm_, fs_));
         auto res = file_manager->CacheRawDataToDisk<float>(config);
-        ASSERT_EQ(res, "/tmp/milvus/local_data/raw_datas/3/105/raw_data");
+        ASSERT_EQ(res, TestLocalPath + "raw_datas/3/105/raw_data");
     }
 
     {

@@ -5,19 +5,43 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "bitset/bitset.h"
+#include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/ScalarIndexSort.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
 #include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
+#include "test_utils/TmpPath.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::index;
+
+static storage::FileManagerContext
+CreateScalarSortTestFileManagerContext() {
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::Int64);
+    storage::IndexMeta index_meta{3, 101, 1000, 10000};
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+    return ctx;
+}
 
 void
 test_stlsort_for_range(
@@ -28,23 +52,27 @@ test_stlsort_for_range(
         const std::shared_ptr<ScalarIndexSort<int64_t>>&)> exec_expr,
     const std::vector<bool>& expected_result) {
     size_t nb = data.size();
-    BinarySet binary_set;
+    std::vector<std::string> index_files;
     {
         Config config;
 
-        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
+            CreateScalarSortTestFileManagerContext());
         index->Build(nb, data.data());
 
-        binary_set = index->Serialize(config);
+        auto create_index_result = index->UploadUnified({});
+        index_files = create_index_result->GetIndexFiles();
     }
     {
         Config config;
         config[milvus::index::ENABLE_MMAP] = enable_mmap;
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
+        config["index_files"] = index_files;
 
-        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
-        index->Load(binary_set, config);
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
+            CreateScalarSortTestFileManagerContext());
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
@@ -103,3 +131,41 @@ TEST(StlSortIndexTest, TestIn) {
     test_stlsort_for_range(
         data, DataType::INT64, true, exec_expr, expected_result);
 }
+
+TEST(StlSortIndexTest, MmapByteSizeCountsValidBitsetOnce) {
+    constexpr size_t kAlignment = 32;
+    constexpr uint64_t kMmapIndexPadding = 1;
+    const std::vector<int64_t> data = {
+        10, 2, 6, 5, 9, 3, 7, 8, 4, 1, 11, 12, 13};
+
+    std::vector<std::string> index_files;
+    {
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
+            CreateScalarSortTestFileManagerContext());
+        index->Build(data.size(), data.data());
+
+        auto create_index_result = index->UploadUnified({});
+        index_files = create_index_result->GetIndexFiles();
+    }
+
+    auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
+        CreateScalarSortTestFileManagerContext());
+    Config config;
+    config[milvus::index::ENABLE_MMAP] = true;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    config["index_files"] = index_files;
+    index->LoadUnified(config);
+
+    auto index_data_bytes = data.size() * sizeof(IndexStructure<int64_t>);
+    auto aligned_data_bytes =
+        ((index_data_bytes + kAlignment - 1) / kAlignment) * kAlignment;
+    TargetBitmap valid_bitset(data.size(), true);
+    auto expected_byte_size = aligned_data_bytes + kMmapIndexPadding +
+                              data.size() * sizeof(int32_t) +
+                              valid_bitset.size_in_bytes();
+
+    ASSERT_EQ(index->ByteSize(), static_cast<int64_t>(expected_byte_size));
+}
+
+// V2 compat test removed: kScalarIndexUseV3 flag deleted,
+// Upload()/Load() now always route to V3 paths.

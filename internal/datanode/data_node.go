@@ -27,13 +27,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
@@ -44,14 +43,15 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -166,9 +166,9 @@ func (node *DataNode) Register() error {
 func (node *DataNode) initSession() error {
 	node.session = sessionutil.NewSession(node.ctx)
 	if node.session == nil {
-		return errors.New("failed to initialize session")
+		return merr.WrapErrServiceInternalMsg("failed to initialize session")
 	}
-	node.session.Init(typeutil.DataNodeRole, node.address, false, true)
+	node.session.Init(typeutil.DataNodeRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.DataNodeRole, node.session.ServerID)
 	return nil
 }
@@ -200,13 +200,19 @@ func (node *DataNode) Init() error {
 
 		fileMode := fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue())
 		if fileMode == fileresource.SyncMode {
-			cm, err := node.storageFactory.NewChunkManager(node.ctx, compaction.CreateStorageConfig())
-			if err != nil {
-				log.Error("Init chunk manager for file resource manager failed", zap.Error(err))
-				initError = err
-				return
+			storageConfig := compaction.CreateStorageConfig()
+			if storageConfig.GetStorageType() != "local" && storageConfig.GetAddress() == "" {
+				log.Info("No storage address configured in yaml, file resource sync mode is disabled")
+				fileresource.InitManager(nil, fileresource.CloseMode)
+			} else {
+				cm, err := node.storageFactory.NewChunkManager(node.ctx, storageConfig)
+				if err != nil {
+					log.Error("Init chunk manager for file resource manager failed", zap.Error(err))
+					initError = err
+					return
+				}
+				fileresource.InitManager(cm, fileMode)
 			}
-			fileresource.InitManager(cm, fileMode)
 		} else {
 			fileresource.InitManager(nil, fileMode)
 		}
@@ -276,7 +282,7 @@ func (node *DataNode) isHealthy() bool {
 // ReadyToFlush tells whether DataNode is ready for flushing
 func (node *DataNode) ReadyToFlush() error {
 	if !node.isHealthy() {
-		return errors.New("DataNode not in HEALTHY state")
+		return merr.Wrap(merr.ErrServiceNotReady, "DataNode not in HEALTHY state")
 	}
 	return nil
 }
@@ -319,6 +325,8 @@ func (node *DataNode) Stop() error {
 		}
 
 		index.CloseSegcore()
+
+		metrics.CleanupDataNodeCompactionMetrics(paramtable.GetNodeID())
 
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()

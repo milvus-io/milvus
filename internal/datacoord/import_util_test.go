@@ -31,25 +31,24 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 func TestImportUtil_NewPreImportTasks(t *testing.T) {
@@ -127,13 +126,15 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
@@ -201,14 +202,16 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-	broker := broker2.NewMockBroker(t)
+	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
@@ -261,13 +264,15 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
@@ -337,13 +342,15 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
@@ -351,7 +358,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 		return id, id + n, nil
 	})
 
-	broker := broker2.NewMockBroker(t)
+	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
@@ -421,7 +428,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -429,6 +436,8 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
@@ -606,7 +615,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
@@ -617,6 +626,8 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
@@ -798,7 +809,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorting))
 	assert.NoError(t, err)
 
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             100,
 			IsImporting:    true,
@@ -808,7 +819,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{10},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             110,
 			IsImporting:    true,
@@ -818,7 +829,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{11},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             120,
 			IsImporting:    true,
@@ -833,7 +844,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             200,
 			IsImporting:    true,
@@ -843,7 +854,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{20},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             210,
 			IsImporting:    true,
@@ -853,7 +864,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{21},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             220,
 			IsImporting:    true,
@@ -866,6 +877,39 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(10+30+30+10), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
+	assert.Equal(t, "", reason)
+
+	// auto-commit jobs should not expose transient commit states to progress callers.
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), func(job ImportJob) {
+		job.(*importJob).AutoCommit = true
+	}, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(99), progress)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
+	assert.Equal(t, "", reason)
+
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Committing))
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(99), progress)
+	assert.Equal(t, internalpb.ImportJobState_Importing, state)
+	assert.Equal(t, "", reason)
+
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), func(job ImportJob) {
+		job.(*importJob).AutoCommit = false
+	}, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(99), progress)
+	assert.Equal(t, internalpb.ImportJobState_Uncommitted, state)
+	assert.Equal(t, "", reason)
+
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Committing))
+	assert.NoError(t, err)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(99), progress)
+	assert.Equal(t, internalpb.ImportJobState_Committing, state)
 	assert.Equal(t, "", reason)
 
 	// completed state

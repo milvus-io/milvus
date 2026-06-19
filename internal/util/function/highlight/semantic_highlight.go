@@ -21,11 +21,11 @@ package highlight
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type semanticHighlightProvider interface {
@@ -42,10 +42,12 @@ func (provider *baseSemanticHighlightProvider) maxBatch() int {
 }
 
 type SemanticHighlight struct {
-	fieldNames map[int64]string
-	fieldIDs   []int64
-	provider   semanticHighlightProvider
-	queries    []string
+	fieldNames        map[int64]string // schema field: FieldID -> fieldName
+	fieldIDs          []int64          // schema field IDs for highlight processing
+	dynamicFieldNames []string         // dynamic field names (fields not in schema)
+	dynamicFieldID    int64            // $meta field's FieldID
+	provider          semanticHighlightProvider
+	queries           []string
 }
 
 const (
@@ -55,46 +57,57 @@ const (
 
 func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commonpb.KeyValuePair, conf map[string]string, extraInfo *models.ModelExtraInfo) (*SemanticHighlight, error) {
 	queries := []string{}
-	inputField := []string{}
+	inputFields := []string{}
 	for _, param := range params {
 		switch param.Key {
 		case queryKeyName:
 			if err := json.Unmarshal([]byte(param.Value), &queries); err != nil {
-				return nil, fmt.Errorf("Parse queries failed, err: %v", err)
+				return nil, merr.Wrap(err, "parse queries failed")
 			}
 		case inputFieldKeyName:
-			if err := json.Unmarshal([]byte(param.Value), &inputField); err != nil {
-				return nil, fmt.Errorf("Parse input_field failed, err: %v", err)
+			if err := json.Unmarshal([]byte(param.Value), &inputFields); err != nil {
+				return nil, merr.Wrap(err, "parse input_field failed")
 			}
 		}
 	}
 
 	if len(queries) == 0 {
-		return nil, fmt.Errorf("queries is required")
+		return nil, merr.WrapErrParameterMissingMsg("queries is required")
 	}
 
-	if len(inputField) == 0 {
-		return nil, fmt.Errorf("input_field is required")
+	if len(inputFields) == 0 {
+		return nil, merr.WrapErrParameterMissingMsg("input_field is required")
 	}
 
 	fieldIDMap := make(map[string]*schemapb.FieldSchema)
 	fieldIDNameMap := make(map[int64]string)
+	var dynamicFieldID int64 = -1
 	for _, field := range collSchema.Fields {
 		fieldIDMap[field.Name] = field
 		fieldIDNameMap[field.FieldID] = field.Name
+		if field.IsDynamic {
+			dynamicFieldID = field.FieldID
+		}
 	}
 
 	fieldIDs := []int64{}
-	for _, fieldName := range inputField {
+	dynamicFieldNames := []string{}
+	for _, fieldName := range inputFields {
 		field, ok := fieldIDMap[fieldName]
-		if !ok {
-			return nil, fmt.Errorf("input_field %s not found", fieldName)
+		if ok {
+			// schema field found
+			if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
+				return nil, merr.WrapErrParameterInvalidMsg("input_field %s is not a VarChar or Text field", fieldName)
+			}
+			fieldIDs = append(fieldIDs, field.FieldID)
+		} else {
+			// field not in schema, check if dynamic field is enabled
+			if !collSchema.EnableDynamicField {
+				return nil, merr.WrapErrParameterInvalidMsg("input_field %s not found in schema", fieldName)
+			}
+			// Non-schema fields are dynamic fields
+			dynamicFieldNames = append(dynamicFieldNames, fieldName)
 		}
-		if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
-			return nil, fmt.Errorf("input_field %s is not a VarChar or Text field", fieldName)
-		}
-
-		fieldIDs = append(fieldIDs, field.FieldID)
 	}
 
 	// TODO: support other providers if have more providers
@@ -103,15 +116,50 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 		return nil, err
 	}
 
-	return &SemanticHighlight{fieldNames: fieldIDNameMap, fieldIDs: fieldIDs, provider: provider, queries: queries}, nil
+	return &SemanticHighlight{
+		fieldNames:        fieldIDNameMap,
+		fieldIDs:          fieldIDs,
+		dynamicFieldNames: dynamicFieldNames,
+		dynamicFieldID:    dynamicFieldID,
+		provider:          provider,
+		queries:           queries,
+	}, nil
 }
 
+// FieldIDs returns schema field IDs for highlight processing (not including $meta)
 func (highlight *SemanticHighlight) FieldIDs() []int64 {
+	return highlight.fieldIDs
+}
+
+// RequiredFieldIDs returns all field IDs required for highlight processing (including $meta if has dynamic fields)
+func (highlight *SemanticHighlight) RequiredFieldIDs() []int64 {
+	if highlight.HasDynamicFields() && highlight.dynamicFieldID > 0 {
+		// Create a new slice to avoid mutating the original fieldIDs slice
+		result := make([]int64, len(highlight.fieldIDs)+1)
+		copy(result, highlight.fieldIDs)
+		result[len(highlight.fieldIDs)] = highlight.dynamicFieldID
+		return result
+	}
 	return highlight.fieldIDs
 }
 
 func (highlight *SemanticHighlight) GetFieldName(id int64) string {
 	return highlight.fieldNames[id]
+}
+
+// DynamicFieldNames returns the list of dynamic field names
+func (highlight *SemanticHighlight) DynamicFieldNames() []string {
+	return highlight.dynamicFieldNames
+}
+
+// HasDynamicFields returns true if there are any dynamic fields
+func (highlight *SemanticHighlight) HasDynamicFields() bool {
+	return len(highlight.dynamicFieldNames) > 0
+}
+
+// DynamicFieldID returns the $meta field ID
+func (highlight *SemanticHighlight) DynamicFieldID() int64 {
+	return highlight.dynamicFieldID
 }
 
 func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query string, documents []string) ([][]string, [][]float32, error) {
@@ -123,7 +171,7 @@ func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query s
 		return nil, nil, err
 	}
 	if len(highlights) != len(documents) || len(scores) != len(documents) {
-		return nil, nil, fmt.Errorf("Highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(highlights), len(scores), len(documents))
+		return nil, nil, merr.WrapErrFunctionFailedMsg("highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(highlights), len(scores), len(documents))
 	}
 
 	return highlights, scores, nil
@@ -132,7 +180,7 @@ func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query s
 func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, documents []string) ([][]string, [][]float32, error) {
 	nq := len(topks)
 	if len(highlight.queries) != nq {
-		return nil, nil, fmt.Errorf("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", nq, len(highlight.queries), highlight.queries)
+		return nil, nil, merr.WrapErrParameterInvalidMsg("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", nq, len(highlight.queries), highlight.queries)
 	}
 	if len(documents) == 0 {
 		return [][]string{}, [][]float32{}, nil
@@ -143,8 +191,8 @@ func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, 
 	start := int64(0)
 
 	for i, query := range highlight.queries {
-		size := topks[i]
-		singleQueryHighlights, singleQueryScores, err := highlight.processOneQuery(ctx, query, documents[start:start+size])
+		size := topks[i]                                                                                                    //nolint:gosec // bounds checked by loop condition
+		singleQueryHighlights, singleQueryScores, err := highlight.processOneQuery(ctx, query, documents[start:start+size]) //nolint:gosec // bounds are guaranteed by topks summing to len(documents)
 		if err != nil {
 			return nil, nil, err
 		}

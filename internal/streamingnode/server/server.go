@@ -13,12 +13,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
-	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
-	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/kafka"
+	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Server is the streamingnode server.
@@ -78,6 +78,8 @@ func (s *Server) initBasicComponent() {
 
 // initService initializes the grpc service.
 func (s *Server) initService() {
+	writeBufferManager := resource.Resource().WriteBufferManager()
+	registry.RegisterLocalReleaseManualFlushPreparer(service.NewReleaseManualFlushPreparer(s.walManager, writeBufferManager))
 	s.handlerService = service.NewHandlerService(s.walManager)
 	s.managerService = service.NewManagerService(s.walManager)
 	s.registerGRPCService(s.grpcServer)

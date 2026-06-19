@@ -21,9 +21,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestParseInsertLogPath(t *testing.T) {
@@ -142,6 +142,37 @@ func TestParseInsertLogPath(t *testing.T) {
 	}
 }
 
+func TestBuildDeltaLogPathV3(t *testing.T) {
+	tests := []struct {
+		name     string
+		basePath string
+		logID    typeutil.UniqueID
+		expected string
+	}{
+		{
+			name:     "basic path",
+			basePath: "rootPath/insert_log/123/456/789",
+			logID:    1001,
+			expected: "rootPath/insert_log/123/456/789/_delta/1001",
+		},
+		{
+			name:     "absolute path",
+			basePath: "/data/insert_log/100/200/300",
+			logID:    42,
+			expected: "/data/insert_log/100/200/300/_delta/42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildDeltaLogPathV3(tt.basePath, tt.logID)
+			if result != tt.expected {
+				t.Errorf("BuildDeltaLogPathV3() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestExtractTextLogFilenames(t *testing.T) {
 	textStatsLogs := map[int64]*datapb.TextIndexStats{
 		100: {
@@ -193,5 +224,136 @@ func TestBuildTextLogPaths(t *testing.T) {
 	BuildTextLogPaths(rootPath, collectionID, partitionID, segmentID, textStatsLogs)
 	if textStatsLogs[100].Files[0] != fullPath {
 		t.Errorf("BuildTextLogPaths() should keep full path unchanged, got %v", textStatsLogs[100].Files[0])
+	}
+}
+
+func TestBuildStatsFilePaths(t *testing.T) {
+	basePath := "/root/_stats/text_index.100"
+	fullPath := path.Join(basePath, ".managed.json_0")
+
+	got := BuildStatsFilePaths(basePath, []string{".managed.json_0", "nested/file", fullPath})
+	want := []string{
+		fullPath,
+		path.Join(basePath, "nested/file"),
+		fullPath,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("BuildStatsFilePaths() = %v, want %v", got, want)
+	}
+
+	got = BuildStatsFilePaths("", []string{".managed.json_0"})
+	want = []string{".managed.json_0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("BuildStatsFilePaths() with empty basePath = %v, want %v", got, want)
+	}
+}
+
+type mockJSONStatsSegment struct {
+	collectionID int64
+	partitionID  int64
+	segmentID    int64
+	manifestPath string
+}
+
+func (m mockJSONStatsSegment) GetCollectionID() int64 { return m.collectionID }
+func (m mockJSONStatsSegment) GetPartitionID() int64  { return m.partitionID }
+func (m mockJSONStatsSegment) GetID() int64           { return m.segmentID }
+func (m mockJSONStatsSegment) GetManifestPath() string {
+	return m.manifestPath
+}
+
+func TestExtractJSONKeyStatsRelativePaths(t *testing.T) {
+	stats := map[int64]*datapb.JsonKeyStats{
+		100: {
+			FieldID: 100,
+			Files: []string{
+				"files/json_stats/3/10/2/1/2/3/100/meta.json",
+				"files/json_stats/3/10/2/1/2/3/100/shared_key_index/.managed.json_0",
+				"files/insert_log/1/2/3/_stats/json_stats.100/shredding_data/data.parquet",
+				"shared_key_index/already-relative",
+			},
+		},
+	}
+
+	ExtractJSONKeyStatsRelativePaths(stats)
+
+	wantFiles := []string{
+		"meta.json",
+		"shared_key_index/.managed.json_0",
+		"shredding_data/data.parquet",
+		"shared_key_index/already-relative",
+	}
+	if !reflect.DeepEqual(stats[100].Files, wantFiles) {
+		t.Errorf("ExtractJSONKeyStatsRelativePaths() Files = %v, want %v", stats[100].Files, wantFiles)
+	}
+}
+
+func TestBuildJSONKeyStatsPathsV2(t *testing.T) {
+	seg := mockJSONStatsSegment{collectionID: 1, partitionID: 2, segmentID: 3}
+	stats := map[int64]*datapb.JsonKeyStats{
+		100: {
+			FieldID:                100,
+			BuildID:                10,
+			Version:                2,
+			JsonKeyStatsDataFormat: 3,
+			Files:                  []string{"meta.json", "shared_key_index/.managed.json_0"},
+		},
+	}
+
+	BuildJSONKeyStatsPaths("files", seg, stats)
+
+	wantFiles := []string{
+		"files/json_stats/3/10/2/1/2/3/100/meta.json",
+		"files/json_stats/3/10/2/1/2/3/100/shared_key_index/.managed.json_0",
+	}
+	if !reflect.DeepEqual(stats[100].Files, wantFiles) {
+		t.Errorf("BuildJSONKeyStatsPaths() V2 Files = %v, want %v", stats[100].Files, wantFiles)
+	}
+}
+
+func TestBuildJSONKeyStatsPathsV3(t *testing.T) {
+	seg := mockJSONStatsSegment{
+		collectionID: 1,
+		partitionID:  2,
+		segmentID:    3,
+		manifestPath: `{"ver":7,"base_path":"files/insert_log/1/2/3"}`,
+	}
+	stats := map[int64]*datapb.JsonKeyStats{
+		100: {
+			FieldID: 100,
+			Files:   []string{"meta.json", "shared_key_index/.managed.json_0"},
+		},
+	}
+
+	BuildJSONKeyStatsPaths("files", seg, stats)
+
+	wantFiles := []string{
+		"files/insert_log/1/2/3/_stats/json_stats.100/meta.json",
+		"files/insert_log/1/2/3/_stats/json_stats.100/shared_key_index/.managed.json_0",
+	}
+	if !reflect.DeepEqual(stats[100].Files, wantFiles) {
+		t.Errorf("BuildJSONKeyStatsPaths() V3 Files = %v, want %v", stats[100].Files, wantFiles)
+	}
+}
+
+func TestBuildJSONKeyStatsPathsKeepsFullPaths(t *testing.T) {
+	seg := mockJSONStatsSegment{collectionID: 1, partitionID: 2, segmentID: 3}
+	fullV2 := "files/json_stats/3/10/2/1/2/3/100/shared_key_index/.managed.json_0"
+	fullV3 := "files/insert_log/1/2/3/_stats/json_stats.100/shared_key_index/.managed.json_1"
+	stats := map[int64]*datapb.JsonKeyStats{
+		100: {
+			FieldID:                100,
+			BuildID:                10,
+			Version:                2,
+			JsonKeyStatsDataFormat: 3,
+			Files:                  []string{fullV2, fullV3},
+		},
+	}
+
+	BuildJSONKeyStatsPaths("files", seg, stats)
+
+	wantFiles := []string{fullV2, fullV3}
+	if !reflect.DeepEqual(stats[100].Files, wantFiles) {
+		t.Errorf("BuildJSONKeyStatsPaths() full paths = %v, want %v", stats[100].Files, wantFiles)
 	}
 }

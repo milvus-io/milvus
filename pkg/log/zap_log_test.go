@@ -306,7 +306,7 @@ func (t *testLogSpy) Logf(format string, args ...interface{}) {
 	m := fmt.Sprintf(format, args...)
 	m = m[strings.IndexByte(m, '\t')+1:]
 	t.Messages = append(t.Messages, m)
-	t.TB.Log(m)
+	t.Log(m)
 }
 
 func (t *testLogSpy) assertMessages(msgs ...string) {
@@ -354,9 +354,9 @@ func fmtMsgs(messages []string) string {
 	builder.WriteString("[")
 	for i, msg := range messages {
 		if i == len(messages)-1 {
-			builder.WriteString(fmt.Sprintf("`%s]`", msg))
+			fmt.Fprintf(&builder, "`%s]`", msg)
 		} else {
-			builder.WriteString(fmt.Sprintf("`%s`, ", msg))
+			fmt.Fprintf(&builder, "`%s`, ", msg)
 		}
 	}
 	return builder.String()

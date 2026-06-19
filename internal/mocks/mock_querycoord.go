@@ -5,16 +5,16 @@ package mocks
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 
 	txnkv "github.com/tikv/client-go/v2/txnkv"
 
@@ -266,6 +266,65 @@ func (_c *MockQueryCoord_CheckQueryNodeDistribution_Call) Return(_a0 *commonpb.S
 }
 
 func (_c *MockQueryCoord_CheckQueryNodeDistribution_Call) RunAndReturn(run func(context.Context, *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error)) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ClearReadTaskQueue provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ClearReadTaskQueue(_a0 context.Context, _a1 *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ClearReadTaskQueue")
+	}
+
+	var r0 *internalpb.ClearReadTaskQueueResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ClearReadTaskQueueRequest) *internalpb.ClearReadTaskQueueResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ClearReadTaskQueueResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ClearReadTaskQueueRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ClearReadTaskQueue_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearReadTaskQueue'
+type MockQueryCoord_ClearReadTaskQueue_Call struct {
+	*mock.Call
+}
+
+// ClearReadTaskQueue is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.ClearReadTaskQueueRequest
+func (_e *MockQueryCoord_Expecter) ClearReadTaskQueue(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ClearReadTaskQueue_Call {
+	return &MockQueryCoord_ClearReadTaskQueue_Call{Call: _e.mock.On("ClearReadTaskQueue", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ClearReadTaskQueue_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ClearReadTaskQueueRequest)) *MockQueryCoord_ClearReadTaskQueue_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.ClearReadTaskQueueRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ClearReadTaskQueue_Call) Return(_a0 *internalpb.ClearReadTaskQueueResponse, _a1 error) *MockQueryCoord_ClearReadTaskQueue_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ClearReadTaskQueue_Call) RunAndReturn(run func(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)) *MockQueryCoord_ClearReadTaskQueue_Call {
 	_c.Call.Return(run)
 	return _c
 }

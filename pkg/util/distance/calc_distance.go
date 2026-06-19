@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 /**
@@ -62,7 +62,7 @@ var (
 // ValidateMetricType returns metric text or error
 func ValidateMetricType(metric string) (string, error) {
 	if metric == "" {
-		err := errors.New("metric type is empty")
+		err := merr.WrapErrParameterInvalidMsg("metric type is empty")
 		return "", err
 	}
 
@@ -71,14 +71,14 @@ func ValidateMetricType(metric string) (string, error) {
 		return m, nil
 	}
 
-	err := errors.New("invalid metric type")
+	err := merr.WrapErrParameterInvalidMsg("invalid metric type")
 	return metric, err
 }
 
 // ValidateFloatArrayLength is used validate float vector length
 func ValidateFloatArrayLength(dim int64, length int) error {
 	if length == 0 || int64(length)%dim != 0 {
-		err := errors.New("invalid float vector length")
+		err := merr.WrapErrParameterInvalidMsg("invalid float vector length")
 		return err
 	}
 
@@ -90,11 +90,12 @@ func CalcFFBatch(dim int64, left []float32, lIndex int64, right []float32, metri
 	rightNum := int64(len(right)) / dim
 	for i := int64(0); i < rightNum; i++ {
 		var distance float32 = -1.0
-		if metric == L2 {
+		switch metric {
+		case L2:
 			distance = L2Impl(left[lIndex*dim:lIndex*dim+dim], right[i*dim:i*dim+dim])
-		} else if metric == IP {
+		case IP:
 			distance = IPImpl(left[lIndex*dim:lIndex*dim+dim], right[i*dim:i*dim+dim])
-		} else if metric == COSINE {
+		case COSINE:
 			distance = CosineImpl(left[lIndex*dim:lIndex*dim+dim], right[i*dim:i*dim+dim])
 		}
 		(*result)[lIndex*rightNum+i] = distance
@@ -105,13 +106,13 @@ func CalcFFBatch(dim int64, left []float32, lIndex int64, right []float32, metri
 // it will checks input, and calculate the distance concurrently
 func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float32, error) {
 	if dim <= 0 {
-		err := errors.New("invalid dimension")
+		err := merr.WrapErrParameterInvalidMsg("invalid dimension")
 		return nil, err
 	}
 
 	metricUpper := strings.ToUpper(metric)
 	if metricUpper != L2 && metricUpper != IP && metricUpper != COSINE {
-		err := errors.New("invalid metric type")
+		err := merr.WrapErrParameterInvalidMsg("invalid metric type")
 		return nil, err
 	}
 

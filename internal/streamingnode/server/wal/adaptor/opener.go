@@ -8,7 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -20,19 +20,19 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	msgadaptor "github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	msgadaptor "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ wal.Opener = (*openerAdaptorImpl)(nil)
@@ -225,11 +225,22 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		InitialRecoverSnapshot: snapshot,
 		TxnManager:             param.TxnManager,
 	})
+	// Load salvage checkpoints from etcd (one per source cluster that was force-promoted from).
+	var salvageCheckpoints []*utility.ReplicateCheckpoint
+	if salvageCPProtos, err := resource.Resource().StreamingNodeCatalog().GetSalvageCheckpoint(ctx, param.ChannelInfo.Name); err != nil {
+		log.Ctx(ctx).Info("failed to load salvage checkpoints", zap.Error(err))
+	} else {
+		for _, proto := range salvageCPProtos {
+			salvageCheckpoints = append(salvageCheckpoints, utility.NewReplicateCheckpointFromProto(proto))
+		}
+	}
+
 	if param.ReplicateManager, err = replicates.RecoverReplicateManager(
 		&replicates.ReplicateManagerRecoverParam{
 			ChannelInfo:            param.ChannelInfo,
 			CurrentClusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 			InitialRecoverSnapshot: snapshot,
+			SalvageCheckpoints:     salvageCheckpoints,
 		},
 	); err != nil {
 		return nil, err
@@ -239,10 +250,11 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	var flusher *flusherimpl.WALFlusherImpl
 	if !opt.DisableFlusher {
 		flusher = flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
-			WAL:              param.WAL,
-			RecoveryStorage:  rs,
-			ChannelInfo:      l.Channel(),
-			RecoverySnapshot: snapshot,
+			WAL:                param.WAL,
+			RecoveryStorage:    rs,
+			ChannelInfo:        l.Channel(),
+			RecoverySnapshot:   snapshot,
+			RateLimitComponent: roWAL.WALRateLimitComponent,
 		})
 	}
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param, flusher)
@@ -294,7 +306,7 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, l walimpls.WALIm
 	}
 
 	targetWALName := snapshot.AlterWALInfo.TargetWALName
-	return nil, errors.Errorf("WAL switch success: %s switch to %s finish, re-opening required", opt.Channel.Name, targetWALName)
+	return nil, status.NewInner("WAL switch success: %s switch to %s finish, re-opening required", opt.Channel.Name, targetWALName)
 }
 
 func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt *wal.OpenOption, roWAL *roWALAdaptorImpl,
@@ -307,10 +319,11 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 		f.Set(roWAL)
 		roWAL.ForceRecovery(true)
 		flusher = flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
-			WAL:              f,
-			RecoveryStorage:  rs,
-			ChannelInfo:      roWAL.Channel(),
-			RecoverySnapshot: snapshot,
+			WAL:                f,
+			RecoveryStorage:    rs,
+			ChannelInfo:        roWAL.Channel(),
+			RecoverySnapshot:   snapshot,
+			RateLimitComponent: roWAL.WALRateLimitComponent,
 		})
 	}
 
@@ -354,7 +367,7 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 			log.Ctx(ctx).Warn("timeout waiting for flush completion",
 				zap.String("channel", opt.Channel.Name),
 				zap.Duration("timeout", defaultWALSwitchFlushTimeout))
-			return errors.Newf("timeout waiting for flush completion during WAL switch")
+			return status.NewInner("timeout waiting for flush completion during WAL switch")
 		case <-ctx.Done():
 			log.Ctx(ctx).Warn("context canceled while waiting for flush completion",
 				zap.String("channel", opt.Channel.Name),

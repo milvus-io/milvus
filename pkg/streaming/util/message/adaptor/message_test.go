@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
 func TestNewMsgPackFromInsertMessage(t *testing.T) {
@@ -83,6 +83,24 @@ func TestNewMsgPackFromCreateSegmentMessage(t *testing.T) {
 	assert.NoError(t, err)
 	immutableCreateSegmentMsg := mutableMsg.WithTimeTick(tt).WithLastConfirmedUseMessageID().IntoImmutableMessage(id)
 	pack, err := NewMsgPackFromMessage(immutableCreateSegmentMsg)
+	assert.NoError(t, err)
+	assert.NotNil(t, pack)
+	assert.Equal(t, tt, pack.BeginTs)
+	assert.Equal(t, tt, pack.EndTs)
+}
+
+func TestNewMsgPackFromCreateIndexMessage(t *testing.T) {
+	id := rmq.NewRmqID(1)
+
+	tt := uint64(time.Now().UnixNano())
+	mutableMsg, err := message.NewCreateIndexMessageBuilderV2().
+		WithHeader(&message.CreateIndexMessageHeader{}).
+		WithBody(&message.CreateIndexMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	immutableCreateIndexMsg := mutableMsg.WithTimeTick(tt).WithLastConfirmedUseMessageID().IntoImmutableMessage(id)
+	pack, err := NewMsgPackFromMessage(immutableCreateIndexMsg)
 	assert.NoError(t, err)
 	assert.NotNil(t, pack)
 	assert.Equal(t, tt, pack.BeginTs)

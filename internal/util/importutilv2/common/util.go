@@ -21,22 +21,24 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func CheckVarcharLength(str string, maxLength int64, field *schemapb.FieldSchema) error {
 	if (int64)(len(str)) > maxLength {
-		return fmt.Errorf("value length(%d) for field %s exceeds max_length(%d)", len(str), field.GetName(), maxLength)
+		return merr.WrapErrParameterInvalidMsg("value length(%d) for field %s exceeds max_length(%d)", len(str), field.GetName(), maxLength)
 	}
 	return nil
 }
 
 func CheckArrayCapacity(arrLength int, maxCapacity int64, field *schemapb.FieldSchema) error {
 	if (int64)(arrLength) > maxCapacity {
-		return fmt.Errorf("array capacity(%d) for field %s exceeds max_capacity(%d)", arrLength, field.GetName(), maxCapacity)
+		return merr.WrapErrParameterInvalidMsg("array capacity(%d) for field %s exceeds max_capacity(%d)", arrLength, field.GetName(), maxCapacity)
 	}
 	return nil
 }
@@ -47,7 +49,7 @@ func EstimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema
 		return 0, err
 	}
 	if sizePerRecord <= 0 || bufferSize <= 0 {
-		return 0, fmt.Errorf("invalid size, sizePerRecord=%d, bufferSize=%d", sizePerRecord, bufferSize)
+		return 0, merr.WrapErrParameterInvalidMsg("invalid size, sizePerRecord=%d, bufferSize=%d", sizePerRecord, bufferSize)
 	}
 	if 1000*sizePerRecord <= bufferSize {
 		return 1000, nil
@@ -71,7 +73,7 @@ func SafeStringForError(s string) string {
 	for i, r := range s {
 		if r == utf8.RuneError {
 			// Invalid UTF-8 sequence, encode as hex
-			result.WriteString(fmt.Sprintf("\\x%02x", s[i]))
+			fmt.Fprintf(&result, "\\x%02x", s[i])
 		} else {
 			result.WriteRune(r)
 		}
@@ -93,7 +95,7 @@ func CheckValidUTF8(s string, field *schemapb.FieldSchema) error {
 	if !typeutil.IsUTF8(s) {
 		// Use safe string representation to avoid gRPC serialization errors
 		safeValue := SafeStringForErrorWithLimit(s, 100)
-		return fmt.Errorf("field '%s' contains invalid UTF-8 data, value=%s", field.GetName(), safeValue)
+		return merr.WrapErrParameterInvalidMsg("field '%s' contains invalid UTF-8 data, value=%s", field.GetName(), safeValue)
 	}
 	return nil
 }
@@ -106,6 +108,19 @@ func CheckValidString(s string, maxLength int64, field *schemapb.FieldSchema) er
 		return err
 	}
 	return nil
+}
+
+// RemoveUnpopulatedFunctionOutputFields removes function output fields that have no data
+// from the InsertData. These fields are computed downstream (e.g., BM25 sparse vectors),
+// not from the data source.
+func RemoveUnpopulatedFunctionOutputFields(schema *schemapb.CollectionSchema, insertData *storage.InsertData) {
+	for _, field := range schema.GetFields() {
+		if field.GetIsFunctionOutput() {
+			if data, ok := insertData.Data[field.GetFieldID()]; ok && data.RowNum() == 0 {
+				delete(insertData.Data, field.GetFieldID())
+			}
+		}
+	}
 }
 
 // GetSchemaTimezone retrieves the timezone string from the CollectionSchema's properties.

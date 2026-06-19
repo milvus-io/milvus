@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <assert.h>
+#include <boost/filesystem/path.hpp>
 #include <folly/FBVector.h>
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
@@ -31,6 +32,7 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
+#include "index/VectorMemIndex.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
 #include "indexbuilder/VecIndexCreator.h"
@@ -54,9 +56,25 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-using namespace milvus::proto;
 
 using Param = std::pair<knowhere::IndexType, knowhere::MetricType>;
+
+namespace {
+
+struct FileSliceSizeGuard {
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(milvus::FILE_SLICE_SIZE.load()) {
+        milvus::FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        milvus::FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+    int64_t old_slice_size_;
+};
+
+}  // namespace
 
 class IndexWrapperTest : public ::testing::TestWithParam<Param> {
  protected:
@@ -84,10 +102,10 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
         bool ok;
         ok = google::protobuf::TextFormat::PrintToString(type_params,
                                                          &type_params_str);
-        assert(ok);
+        ASSERT_TRUE(ok);
         ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                          &index_params_str);
-        assert(ok);
+        ASSERT_TRUE(ok);
 
         search_conf = generate_search_conf(index_type, metric_type);
 
@@ -249,5 +267,88 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
     EXPECT_EQ(result->seg_offsets_.size(), NQ * K);
     if (vec_field_data_type == DataType::VECTOR_FLOAT) {
         EXPECT_EQ(result->seg_offsets_[0], query_offset);
+    }
+}
+
+TEST(VectorMemIndexTest, LoadMmapSlicedValidData) {
+    FileSliceSizeGuard slice_size_guard(64);
+
+    constexpr int64_t kRows = 600;
+    constexpr int64_t kDim = 4;
+    std::vector<float> data(kRows * kDim);
+    for (int64_t i = 0; i < kRows; ++i) {
+        for (int64_t d = 0; d < kDim; ++d) {
+            data[i * kDim + d] = static_cast<float>(i + d);
+        }
+    }
+
+    Config config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                  {knowhere::meta::DIM, std::to_string(kDim)}};
+
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
+    storage::IndexMeta index_meta{3, 100, 50150, 1};
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+
+    index::VectorMemIndex<float> index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        true,
+        file_manager_context);
+
+    auto dataset = knowhere::GenDataSet(kRows, kDim, data.data());
+    index.BuildWithDataset(dataset, config);
+
+    std::unique_ptr<bool[]> valid_data(new bool[kRows]);
+    int64_t valid_count = 0;
+    for (int64_t i = 0; i < kRows; ++i) {
+        valid_data[i] = i % 3 != 0;
+        valid_count += valid_data[i] ? 1 : 0;
+    }
+    index.BuildValidData(valid_data.get(), kRows);
+
+    auto stats = index.Upload();
+    auto index_files = stats->GetIndexFiles();
+    auto has_file = [&](const std::string& target) {
+        return std::any_of(
+            index_files.begin(),
+            index_files.end(),
+            [&](const std::string& file) {
+                return boost::filesystem::path(file).filename().string() ==
+                       target;
+            });
+    };
+    ASSERT_TRUE(has_file(milvus::INDEX_FILE_SLICE_META));
+    ASSERT_TRUE(has_file("valid_data_1"));
+
+    storage::FileManagerContext load_file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+    load_file_manager_context.set_for_loading_index(true);
+    index::VectorMemIndex<float> loaded_index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        true,
+        load_file_manager_context);
+
+    auto load_config = config;
+    load_config["index_files"] = index_files;
+    load_config[index::MMAP_FILE_PATH] =
+        TestLocalPath + "vector_sliced_valid_data_mmap";
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+
+    loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
+
+    ASSERT_EQ(loaded_index.Count(), kRows);
+    EXPECT_EQ(loaded_index.GetValidCount(), valid_count);
+    for (int64_t i = 0; i < kRows; ++i) {
+        EXPECT_EQ(loaded_index.IsRowValid(i), valid_data[i]) << i;
     }
 }

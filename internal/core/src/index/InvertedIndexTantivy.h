@@ -21,10 +21,13 @@
 #include <string_view>
 #include <vector>
 
+#include "nlohmann/json_fwd.hpp"
+
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/RegexQuery.h"
+#include "common/Utils.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
@@ -67,6 +70,10 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar: {
             return TantivyDataType::Keyword;
+        }
+
+        case proto::schema::DataType::Text: {
+            return TantivyDataType::Text;
         }
 
         case proto::schema::DataType::JSON: {
@@ -185,12 +192,12 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     NotIn(size_t n, const T* values) override;
 
     const TargetBitmap
-    Range(T value, OpType op) override;
+    Range(const T& value, OpType op) override;
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override;
 
     const bool
@@ -241,19 +248,31 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 return PrefixMatch(pattern);
             }
             case proto::plan::OpType::PostfixMatch: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(fmt::format("%{}", pattern));
-                return RegexQuery(regex_pattern);
+                return PatternQuery(
+                    fmt::format("%{}", EscapeLikePattern(pattern)));
             }
             case proto::plan::OpType::InnerMatch: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(fmt::format("%{}%", pattern));
-                return RegexQuery(regex_pattern);
+                return PatternQuery(
+                    fmt::format("%{}%", EscapeLikePattern(pattern)));
             }
             case proto::plan::OpType::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(pattern);
-                return RegexQuery(regex_pattern);
+                return PatternQuery(pattern);
+            }
+            case proto::plan::OpType::RegexMatch: {
+                TargetBitmap bitset(Count());
+                PartialRegexMatcher matcher(pattern);
+                wrapper_->regex_match_query(
+                    &matcher,
+                    [](void* ctx,
+                       const uint8_t* term,
+                       uintptr_t term_len) -> bool {
+                        auto* matcher = static_cast<PartialRegexMatcher*>(ctx);
+                        std::string_view term_view(
+                            reinterpret_cast<const char*>(term), term_len);
+                        return (*matcher)(term_view);
+                    },
+                    &bitset);
+                return bitset;
             }
             default:
                 ThrowInfo(
@@ -265,22 +284,26 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     bool
     SupportPatternMatch() const override {
-        return SupportRegexQuery();
-    }
-
-    bool
-    SupportRegexQuery() const override {
         return std::is_same_v<T, std::string>;
     }
 
     bool
-    TryUseRegexQuery() const override {
-        // for inverted index, not use regex query to implement match
-        return false;
+    ShouldUseOp(proto::plan::OpType op) const override {
+        // Suffix/contains LIKE and regex can be executed correctly over indexed
+        // terms, but for short varchar values they are often slower than raw
+        // scan. Keep only prefix/LIKE Match on the inverted-index path.
+        switch (op) {
+            case proto::plan::OpType::Match:
+            case proto::plan::OpType::PrefixMatch:
+                return SupportPatternMatch() || HasRawData();
+            case proto::plan::OpType::RegexMatch:
+            case proto::plan::OpType::PostfixMatch:
+            case proto::plan::OpType::InnerMatch:
+                return false;
+            default:
+                return true;
+        }
     }
-
-    const TargetBitmap
-    RegexQuery(const std::string& regex_pattern) override;
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
@@ -290,7 +313,17 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         is_growing_ = is_growing;
     }
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  protected:
+    const TargetBitmap
+    PatternQuery(const std::string& pattern) override;
+
     void
     finish();
 
@@ -321,6 +354,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual void
     RetainTantivyIndexFiles(std::vector<std::string>& index_files);
 
+    // Builds the TANTIVY_META JSON object. Override in subclasses to add
+    // additional fields (e.g., has_non_exist in JsonInvertedIndex).
+    virtual nlohmann::json
+    BuildTantivyMeta(const std::vector<std::string>& file_names, bool has_null);
+
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
@@ -334,7 +372,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      * 3, load phase, we need the index on the disk instead of memory, we use DiskFileManager.CacheIndexToDisk;
      * Btw, this approach can be applied to DiskANN also.
      */
-    MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
 
     folly::SharedMutexWritePriority mutex_{};

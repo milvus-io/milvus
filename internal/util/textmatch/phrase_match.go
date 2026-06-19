@@ -12,14 +12,8 @@ import (
 	"unsafe"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-)
-
-// Error codes from C++ segcore (internal/core/output/include/common/EasyAssert.h)
-const (
-	errCodeUnsupported = 2003 // Unsupported operation
-	errCodeClusterSkip = 2033 // ClusterSkip - pretend finished
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ComputePhraseMatchSlop computes the minimum slop required for a phrase match
@@ -56,12 +50,10 @@ func handleCStatus(status *C.CStatus, extraInfo string) error {
 
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, errorMsg)
 	log.Warn(logMsg)
-	if errorCode == 2003 {
-		return merr.WrapErrSegcoreUnsupported(int32(errorCode), logMsg)
-	}
-	if errorCode == 2033 {
+	if merr.IsSegcoreSignal(int32(errorCode)) {
 		log.Info("fake finished the task")
-		return merr.ErrSegcorePretendFinished
 	}
-	return merr.WrapErrSegcore(int32(errorCode), logMsg)
+	// Pass the raw errorMsg (not the polluted logMsg) so the merr reason stays
+	// clean; the extraInfo breadcrumb lives in the log above.
+	return merr.SegcoreError(int32(errorCode), errorMsg)
 }

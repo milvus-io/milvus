@@ -2,17 +2,17 @@ package idalloc
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 var (
@@ -87,18 +87,18 @@ func (ta *tsoAllocator) batchAllocate(ctx context.Context, count uint32) (uint64
 
 	mixc, err := ta.mix.GetWithContext(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("get root coordinator client timeout: %w", err)
+		return 0, 0, merr.Wrap(err, "get root coordinator client timeout")
 	}
 
 	resp, err := mixc.AllocTimestamp(ctx, req)
 	if err != nil {
-		return 0, 0, fmt.Errorf("syncTimestamp Failed:%w", err)
+		return 0, 0, merr.Wrap(err, "syncTimestamp Failed")
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return 0, 0, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
+		return 0, 0, merr.Wrap(merr.Error(resp.GetStatus()), "syncTimeStamp Failed")
 	}
 	if resp == nil {
-		return 0, 0, errors.New("empty AllocTimestampResponse")
+		return 0, 0, merr.WrapErrServiceInternalMsg("empty AllocTimestampResponse")
 	}
 	return resp.GetTimestamp(), int(resp.GetCount()), nil
 }
@@ -132,18 +132,18 @@ func (ta *idAllocator) batchAllocate(ctx context.Context, count uint32) (uint64,
 
 	mix, err := ta.mix.GetWithContext(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("get root coordinator client timeout: %w", err)
+		return 0, 0, merr.Wrap(err, "get root coordinator client timeout")
 	}
 
 	resp, err := mix.AllocID(ctx, req)
 	if err != nil {
-		return 0, 0, fmt.Errorf("AllocID Failed:%w", err)
+		return 0, 0, merr.Wrap(err, "AllocID Failed")
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return 0, 0, fmt.Errorf("AllocID Failed:%s", resp.GetStatus().GetReason())
+		return 0, 0, merr.Wrap(merr.Error(resp.GetStatus()), "AllocID Failed")
 	}
 	if resp == nil {
-		return 0, 0, errors.New("empty AllocID")
+		return 0, 0, merr.WrapErrServiceInternalMsg("empty AllocID")
 	}
 	if resp.GetID() < 0 {
 		panic("get unexpected negative id")

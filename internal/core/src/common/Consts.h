@@ -33,6 +33,10 @@ const char MAX_LENGTH[] = "max_length";
 const milvus::FieldId RowFieldID = milvus::FieldId(0);
 const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
 
+// Virtual field ID for two-project mode: carries segment offsets through
+// the pipeline so that deferred fields can be fetched after TopK.
+const milvus::FieldId SegmentOffsetFieldID = milvus::FieldId(-100);
+
 // fill followed extra info to binlog file
 const char ORIGIN_SIZE_KEY[] = "original_size";
 const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
@@ -41,6 +45,7 @@ const char EDEK[] = "edek";
 const char EZID[] = "encryption_zone";
 
 const char INDEX_ROOT_PATH[] = "index_files";
+const char INDEX_ROOT_PATH_V1[] = "index_v1";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
 const char ANALYZE_ROOT_PATH[] = "analyze_stats";
 const char CENTROIDS_NAME[] = "centroids";
@@ -106,6 +111,7 @@ const std::string JSON_CAST_FUNCTION = "json_cast_function";
 const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;
 const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
 const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
+const bool DEFAULT_JSON_KEY_STATS_ENABLED = true;
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
 const bool DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX = false;
@@ -125,6 +131,7 @@ const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 const std::string SEGMENT_MANIFEST_KEY = "segment_manifest";
 const std::string LOON_FFI_PROPERTIES_KEY = "loon_ffi_properties";
+const std::string STATS_BASE_PATH_KEY = "stats_base_path";
 
 // storage version
 const int64_t STORAGE_V1 = 1;
@@ -156,4 +163,6 @@ const std::string WARMUP_VECTOR_FIELD_KEY = "warmup.vectorField";
 // Version 3 introduces hybrid index configuration support
 constexpr int32_t kHybridIndexConfigVersion = 3;
 // The last version before hybrid index config support was added
+
 constexpr int32_t kLastVersionWithoutHybridIndexConfig = 2;
+

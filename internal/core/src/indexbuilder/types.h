@@ -37,7 +37,6 @@ struct BuildIndexInfo {
     std::string field_name;
     std::string data_store_path;
     int64_t data_store_version;
-    std::string index_store_path;
     int64_t dim;
     int32_t index_engine_version;
     milvus::OptFieldT opt_fields;

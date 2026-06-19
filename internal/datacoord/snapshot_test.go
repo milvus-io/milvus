@@ -19,24 +19,26 @@ package datacoord
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
+	"path"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/hamba/avro/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // =========================== Test Helper Functions ===========================
@@ -386,7 +388,7 @@ func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
 		StatslogFiles:     []AvroFieldBinlog{},
 		Bm25StatslogFiles: []AvroFieldBinlog{},
 		TextIndexFiles:    []AvroTextIndexEntry{},
-		JsonKeyIndexFiles: []AvroJsonKeyIndexEntry{},
+		JSONKeyIndexFiles: []AvroJSONKeyIndexEntry{},
 		IndexFiles:        []AvroIndexFilePathInfo{},
 		StartPosition:     &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
 		DmlPosition:       &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
@@ -522,7 +524,9 @@ func TestSnapshotReader_ListSnapshots_Success(t *testing.T) {
 
 func TestFieldBinlog_RoundtripConversion(t *testing.T) {
 	originalFieldBinlog := &datapb.FieldBinlog{
-		FieldID: 123,
+		FieldID:     123,
+		ChildFields: []int64{123, 124, 125},
+		Format:      "parquet",
 		Binlogs: []*datapb.Binlog{
 			{
 				EntriesNum:    1000,
@@ -549,6 +553,8 @@ func TestFieldBinlog_RoundtripConversion(t *testing.T) {
 	resultFieldBinlog := convertAvroToFieldBinlog(avroFieldBinlog)
 
 	assert.Equal(t, originalFieldBinlog.FieldID, resultFieldBinlog.FieldID)
+	assert.Equal(t, originalFieldBinlog.ChildFields, resultFieldBinlog.ChildFields)
+	assert.Equal(t, originalFieldBinlog.Format, resultFieldBinlog.Format)
 	assert.Len(t, resultFieldBinlog.Binlogs, len(originalFieldBinlog.Binlogs))
 
 	for i, originalBinlog := range originalFieldBinlog.Binlogs {
@@ -575,12 +581,13 @@ func TestIndexFilePathInfo_RoundtripConversion(t *testing.T) {
 			{Key: "index_type", Value: "IVF_FLAT"},
 			{Key: "nlist", Value: "1024"},
 		},
-		IndexFilePaths:      []string{"/idx/path1", "/idx/path2", "/idx/path3"},
-		SerializedSize:      16384,
-		IndexVersion:        5,
-		NumRows:             50000,
-		CurrentIndexVersion: 5,
-		MemSize:             32768,
+		IndexFilePaths:        []string{"/idx/path1", "/idx/path2", "/idx/path3"},
+		SerializedSize:        16384,
+		IndexVersion:          5,
+		NumRows:               50000,
+		CurrentIndexVersion:   5,
+		MemSize:               32768,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}
 
 	avroIndexInfo := convertIndexFilePathInfoToAvro(originalIndexInfo)
@@ -596,6 +603,7 @@ func TestIndexFilePathInfo_RoundtripConversion(t *testing.T) {
 	assert.Equal(t, originalIndexInfo.NumRows, resultIndexInfo.NumRows)
 	assert.Equal(t, originalIndexInfo.CurrentIndexVersion, resultIndexInfo.CurrentIndexVersion)
 	assert.Equal(t, originalIndexInfo.MemSize, resultIndexInfo.MemSize)
+	assert.Equal(t, originalIndexInfo.IndexStorePathVersion, resultIndexInfo.IndexStorePathVersion)
 
 	// Verify IndexParams
 	assert.Len(t, resultIndexInfo.IndexParams, len(originalIndexInfo.IndexParams))
@@ -607,6 +615,229 @@ func TestIndexFilePathInfo_RoundtripConversion(t *testing.T) {
 
 	// Verify IndexFilePaths
 	assert.Equal(t, originalIndexInfo.IndexFilePaths, resultIndexInfo.IndexFilePaths)
+}
+
+func TestSnapshotReader_ReadManifestLegacyIndexFilePathInfoDefaultsBuildRooted(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				SegmentID:      1001,
+				FieldID:        101,
+				IndexID:        201,
+				BuildID:        301,
+				IndexName:      "vec_idx",
+				IndexFilePaths: []string{"files/index_files/301/1/2001/1001/index_data"},
+			},
+		},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.NotContains(t, getAvroSchemaV1(), "index_store_path_version")
+	oldSchema, err := getManifestSchemaByVersion(1)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(oldSchema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "legacy_manifest.avro")
+	err = cm.Write(context.Background(), manifestPath, binaryData)
+	require.NoError(t, err)
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 1)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetIndexFiles(), 1)
+	assert.Equal(t,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		segments[0].GetIndexFiles()[0].GetIndexStorePathVersion())
+}
+
+// TestSnapshotManifest_CommitTimestampRoundtripV3 verifies that CommitTimestamp
+// survives a Marshal/Unmarshal cycle with the current (V3) schema. This is the
+// invariant the snapshot.go field comment promises ("preserved so that GC, TTL,
+// and MVCC protections survive snapshot/restore").
+func TestSnapshotManifest_CommitTimestampRoundtripV3(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	const wantCommitTs = uint64(1234567890)
+	segment := &datapb.SegmentDescription{
+		SegmentId:       1001,
+		PartitionId:     2001,
+		ChannelName:     "ch-0",
+		CommitTimestamp: wantCommitTs,
+	}
+	entry := convertSegmentToManifestEntry(segment)
+	require.Equal(t, int64(wantCommitTs), entry.CommitTimestamp)
+
+	assert.Contains(t, getAvroSchemaV3(), "commit_timestamp")
+	schema, err := getManifestSchemaByVersion(3)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v3_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 3)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	assert.Equal(t, wantCommitTs, segments[0].GetCommitTimestamp())
+}
+
+// TestSnapshotManifest_LegacyV2NoCommitTimestamp verifies that a manifest
+// written with the V2 schema (no commit_timestamp field) still decodes cleanly
+// under the V2 reader and surfaces CommitTimestamp=0. This guarantees that
+// pre-existing on-disk snapshots remain readable after the V3 bump.
+func TestSnapshotManifest_LegacyV2NoCommitTimestamp(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:       1001,
+		PartitionId:     2001,
+		ChannelName:     "ch-0",
+		CommitTimestamp: 999, // set on the struct; V2 schema must drop it
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.NotContains(t, getAvroSchemaV2(), "commit_timestamp")
+	v2Schema, err := getManifestSchemaByVersion(2)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(v2Schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v2_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 2)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	assert.Equal(t, uint64(0), segments[0].GetCommitTimestamp(),
+		"V2 manifest must decode with CommitTimestamp=0 (field absent in schema)")
+}
+
+func TestSnapshotManifest_FieldBinlogChildFieldsAndFormatRoundtripV4(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		Binlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     900,
+				ChildFields: []int64{100, 101},
+				Format:      "parquet",
+				Binlogs: []*datapb.Binlog{{
+					EntriesNum: 10,
+					LogPath:    "files/insert_log/1/2/3/900/1",
+				}},
+			},
+		},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.Contains(t, getAvroSchemaV4(), "child_fields")
+	assert.Contains(t, getAvroSchemaV4(), `"format"`)
+	v4Schema, err := getManifestSchemaByVersion(4)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(v4Schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v4_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 4)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetBinlogs(), 1)
+	assert.Equal(t, []int64{100, 101}, segments[0].GetBinlogs()[0].GetChildFields())
+	assert.Equal(t, "parquet", segments[0].GetBinlogs()[0].GetFormat())
+}
+
+func TestSnapshotManifest_LegacyV3NoChildFieldsOrFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     900,
+			ChildFields: []int64{100, 101},
+			Format:      "parquet",
+			Binlogs: []*datapb.Binlog{{
+				EntriesNum: 10,
+				LogPath:    "files/insert_log/1/2/3/900/1",
+			}},
+		}},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.NotContains(t, getAvroSchemaV3(), "child_fields")
+	assert.NotContains(t, getAvroSchemaV3(), `"format"`)
+	v3Schema, err := getManifestSchemaByVersion(3)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(v3Schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v3_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 3)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetBinlogs(), 1)
+	assert.Empty(t, segments[0].GetBinlogs()[0].GetChildFields())
+	assert.Equal(t, "", segments[0].GetBinlogs()[0].GetFormat())
+}
+
+func TestSnapshotManifest_LegacyV2NoChildFieldsOrFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     900,
+			ChildFields: []int64{100, 101},
+			Format:      "parquet",
+			Binlogs: []*datapb.Binlog{{
+				EntriesNum: 10,
+				LogPath:    "files/insert_log/1/2/3/900/1",
+			}},
+		}},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.NotContains(t, getAvroSchemaV2(), "child_fields")
+	assert.NotContains(t, getAvroSchemaV2(), `"format"`)
+	v2Schema, err := getManifestSchemaByVersion(2)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(v2Schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v2_no_child_fields.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 2)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetBinlogs(), 1)
+	assert.Empty(t, segments[0].GetBinlogs()[0].GetChildFields())
+	assert.Equal(t, "", segments[0].GetBinlogs()[0].GetFormat())
 }
 
 // =========================== Integration Tests ===========================
@@ -654,6 +885,11 @@ func TestSnapshot_CompleteWorkflow(t *testing.T) {
 	if len(readSnapshot.Segments) > 0 {
 		assert.Equal(t, snapshotData.Segments[0].SegmentId, readSnapshot.Segments[0].SegmentId)
 		assert.Equal(t, snapshotData.Segments[0].PartitionId, readSnapshot.Segments[0].PartitionId)
+		if len(snapshotData.Segments[0].GetBinlogs()) > 0 {
+			require.Len(t, readSnapshot.Segments[0].GetBinlogs(), len(snapshotData.Segments[0].GetBinlogs()))
+			assert.Equal(t, snapshotData.Segments[0].GetBinlogs()[0].GetChildFields(), readSnapshot.Segments[0].GetBinlogs()[0].GetChildFields())
+			assert.Equal(t, snapshotData.Segments[0].GetBinlogs()[0].GetFormat(), readSnapshot.Segments[0].GetBinlogs()[0].GetFormat())
+		}
 	}
 
 	// 7. Verify indexes information
@@ -666,6 +902,54 @@ func TestSnapshot_CompleteWorkflow(t *testing.T) {
 	// 8. Cleanup - use the metadata path returned from Save
 	err = writer.Drop(context.Background(), metadataPath)
 	assert.NoError(t, err)
+}
+
+func TestSnapshot_JSONStatsPaths_RoundTripPreservesSnapshotRestorePaths(t *testing.T) {
+	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	writer := NewSnapshotWriter(cm)
+	reader := NewSnapshotReader(cm)
+
+	snapshotData := createTestSnapshotData()
+	snapshotData.Segments[0].ManifestPath = `{"ver":7,"base_path":"files/insert_log/1/2/1001"}`
+	snapshotData.Segments[0].JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
+		200: {
+			FieldID:                200,
+			Version:                2,
+			Files:                  []string{"files/json_stats/3/6000/2/100/1/1001/200/shared_key_index/.managed.json_0"},
+			LogSize:                1024,
+			MemorySize:             2048,
+			BuildID:                6000,
+			JsonKeyStatsDataFormat: 3,
+		},
+		201: {
+			FieldID: 201,
+			Version: 3,
+			Files: []string{
+				"files/insert_log/1/2/1001/_stats/json_stats.201/shared_key_index/.managed.json_1",
+				"files/insert_log/1/2/1001/_stats/json_stats.201/shredding_data/data.parquet",
+			},
+			LogSize:                2048,
+			MemorySize:             4096,
+			BuildID:                6001,
+			JsonKeyStatsDataFormat: 3,
+		},
+	}
+
+	metadataPath, err := writer.Save(context.Background(), snapshotData)
+	assert.NoError(t, err)
+
+	readSnapshot, err := reader.ReadSnapshot(context.Background(), metadataPath, true)
+	assert.NoError(t, err)
+	assert.Len(t, readSnapshot.Segments, 1)
+
+	got := readSnapshot.Segments[0].GetJsonKeyIndexFiles()
+	assert.Equal(t, snapshotData.Segments[0].GetJsonKeyIndexFiles()[200].GetFiles(), got[200].GetFiles())
+	assert.Equal(t, snapshotData.Segments[0].GetJsonKeyIndexFiles()[201].GetFiles(), got[201].GetFiles())
+	assert.Equal(t, snapshotData.Segments[0].GetManifestPath(), readSnapshot.Segments[0].GetManifestPath())
 }
 
 // =========================== New Fields Tests ===========================
@@ -700,12 +984,27 @@ func TestSnapshot_NewFields_Serialization(t *testing.T) {
 	assert.Equal(t, len(original.Bm25Statslogs), len(restored.Bm25Statslogs), "Bm25Statslogs count should match")
 	if len(original.Bm25Statslogs) > 0 {
 		assert.Equal(t, original.Bm25Statslogs[0].FieldID, restored.Bm25Statslogs[0].FieldID)
+		assert.Equal(t, original.Bm25Statslogs[0].ChildFields, restored.Bm25Statslogs[0].ChildFields)
+		assert.Equal(t, original.Bm25Statslogs[0].Format, restored.Bm25Statslogs[0].Format)
 		assert.Equal(t, len(original.Bm25Statslogs[0].Binlogs), len(restored.Bm25Statslogs[0].Binlogs))
 		if len(original.Bm25Statslogs[0].Binlogs) > 0 {
 			assert.Equal(t, original.Bm25Statslogs[0].Binlogs[0].LogPath, restored.Bm25Statslogs[0].Binlogs[0].LogPath)
 			assert.Equal(t, original.Bm25Statslogs[0].Binlogs[0].LogSize, restored.Bm25Statslogs[0].Binlogs[0].LogSize)
 		}
 	}
+
+	// 3.5 Verify insert binlog metadata fields
+	require.NotEmpty(t, restored.Binlogs)
+	assert.Equal(t, original.Binlogs[0].ChildFields, restored.Binlogs[0].ChildFields)
+	assert.Equal(t, original.Binlogs[0].Format, restored.Binlogs[0].Format)
+
+	// 3.6 Verify stats/delta binlog metadata fields
+	require.NotEmpty(t, restored.Statslogs)
+	require.NotEmpty(t, restored.Deltalogs)
+	assert.Equal(t, original.Statslogs[0].ChildFields, restored.Statslogs[0].ChildFields)
+	assert.Equal(t, original.Statslogs[0].Format, restored.Statslogs[0].Format)
+	assert.Equal(t, original.Deltalogs[0].ChildFields, restored.Deltalogs[0].ChildFields)
+	assert.Equal(t, original.Deltalogs[0].Format, restored.Deltalogs[0].Format)
 
 	// 4. Verify TextIndexFiles field (map type)
 	assert.Equal(t, len(original.TextIndexFiles), len(restored.TextIndexFiles), "TextIndexFiles count should match")
@@ -822,8 +1121,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			BuildID:                6000,
 			JsonKeyStatsDataFormat: 1,
 		}
-		avro := convertJsonKeyStatsToAvro(original)
-		restored := convertAvroToJsonKeyStats(avro)
+		avro := convertJSONKeyStatsToAvro(original)
+		restored := convertAvroToJSONKeyStats(avro)
 
 		assert.Equal(t, original.FieldID, restored.FieldID)
 		assert.Equal(t, original.Version, restored.Version)
@@ -859,8 +1158,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			100: {FieldID: 100, Version: 1, Files: []string{"/json1"}, JsonKeyStatsDataFormat: 1},
 			200: {FieldID: 200, Version: 2, Files: []string{"/json2"}, JsonKeyStatsDataFormat: 2},
 		}
-		avroArray := convertJsonKeyIndexMapToAvro(originalMap)
-		restoredMap := convertAvroToJsonKeyIndexMap(avroArray)
+		avroArray := convertJSONKeyIndexMapToAvro(originalMap)
+		restoredMap := convertAvroToJSONKeyIndexMap(avroArray)
 
 		assert.Equal(t, len(originalMap), len(restoredMap))
 		for fieldID, origStats := range originalMap {
@@ -981,10 +1280,19 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_2_future",
-			version:     2,
-			wantErr:     true,
-			errContains: "too new",
+			name:    "version_2_legacy",
+			version: 2,
+			wantErr: false,
+		},
+		{
+			name:    "version_3_current",
+			version: 3,
+			wantErr: false,
+		},
+		{
+			name:    "version_4_current",
+			version: 4,
+			wantErr: false,
 		},
 		{
 			name:        "version_100_future",
@@ -1025,10 +1333,19 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_2_unsupported",
-			version:     2,
-			wantErr:     true,
-			errContains: "unsupported manifest schema version",
+			name:    "version_2_legacy",
+			version: 2,
+			wantErr: false,
+		},
+		{
+			name:    "version_3_current",
+			version: 3,
+			wantErr: false,
+		},
+		{
+			name:    "version_4_current",
+			version: 4,
+			wantErr: false,
 		},
 		{
 			name:        "version_99_unsupported",

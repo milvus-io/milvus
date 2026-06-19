@@ -18,7 +18,6 @@ package proxyutil
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"sync"
 	"time"
@@ -31,10 +30,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ProxyWatcherInterface interface {
@@ -86,7 +86,7 @@ func (p *ProxyWatcher) DelSessionFunc(fns ...func(*sessionutil.Session)) {
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
 func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
-	childCtx, cancel := context.WithTimeout(ctx, paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	childCtx, cancel := context.WithTimeout(ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
 	sessions, rev, err := p.getSessionsOnEtcd(childCtx)
@@ -202,7 +202,7 @@ func (p *ProxyWatcher) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("proxy manager failed to watch proxy with error %w", err)
+		return nil, 0, merr.Wrapf(err, "proxy manager failed to watch proxy")
 	}
 
 	var sessions []*sessionutil.Session

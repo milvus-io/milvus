@@ -65,6 +65,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
             munmap(mmap_data_, mmap_size_);
             unlink(mmap_filepath_.c_str());
         }
+        if (mmap_meta_data_ != nullptr && mmap_meta_data_ != MAP_FAILED) {
+            munmap(mmap_meta_data_, mmap_meta_size_);
+            unlink(mmap_meta_filepath_.c_str());
+        }
     }
 
     BinarySet
@@ -110,12 +114,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
     IsNotNull() override;
 
     const TargetBitmap
-    Range(T value, OpType op) override;
+    Range(const T& value, OpType op) override;
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override;
 
     std::optional<T>
@@ -136,8 +140,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
         ScalarIndex<T>::ComputeByteSize();
         int64_t total = this->cached_byte_size_;
 
-        // idx_to_offsets_: vector<int32_t>
-        total += idx_to_offsets_.capacity() * sizeof(int32_t);
+        // idx_to_offsets
+        if (mmap_meta_data_ != nullptr) {
+            total += mmap_meta_size_;
+        } else {
+            total += idx_to_offsets_.capacity() * sizeof(int32_t);
+        }
 
         // valid_bitset_: TargetBitmap
         total += valid_bitset_.size_in_bytes();
@@ -186,6 +194,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  public:
     // zero-cost data acess api
     ALWAYS_INLINE const IndexStructure<T>&
@@ -213,6 +228,15 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
  private:
+    /**
+     * Write data to mmap file and setup mmap pointers.
+     * Sets mmap_data_, mmap_size_, data_size_.
+     */
+    void
+    SetupMmapFromData(const uint8_t* data,
+                      size_t size,
+                      milvus::proto::common::LoadPriority priority);
+
     void
     setup_data_pointers() const {
         if (is_mmap_) {
@@ -231,8 +255,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
     bool is_nested_index_ = false;
     bool is_built_ = false;
     Config config_;
-    std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    // idx_to_offsets: maps row_id → sorted offset.
+    // Build/memory-load paths use the vector; mmap-load points into mmap_meta_data_.
+    std::vector<int32_t> idx_to_offsets_;  // memory mode owner
+    const int32_t* idx_to_offsets_ptr_ =
+        nullptr;  // read accessor (vec or mmap)
+    size_t idx_to_offsets_size_ = 0;
+
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     size_t total_num_rows_{0};
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
@@ -242,13 +271,18 @@ class ScalarIndexSort : public ScalarIndex<T> {
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     std::vector<IndexStructure<T>> data_;
 
-    // for mmap
+    // for mmap: index_data
     bool is_mmap_{false};
     int64_t mmap_size_ = 0;
     int64_t data_size_ = 0;
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     char* mmap_data_ = nullptr;
     std::string mmap_filepath_;
+
+    // for mmap: idx_to_offsets
+    char* mmap_meta_data_ = nullptr;
+    int64_t mmap_meta_size_ = 0;
+    std::string mmap_meta_filepath_;
 
     mutable const IndexStructure<T>* data_ptr_ = nullptr;
     mutable const IndexStructure<T>* end_ptr_ = nullptr;

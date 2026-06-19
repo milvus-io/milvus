@@ -26,16 +26,15 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"time"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/cgopb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
@@ -96,7 +95,7 @@ func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
+				paramtable.GetStringNodeID(),
 				"AppendIndexV2",
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))

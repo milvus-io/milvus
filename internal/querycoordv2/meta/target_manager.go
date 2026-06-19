@@ -27,17 +27,18 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type TargetScope = int32
@@ -114,7 +115,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 	for channelName, dmlChannel := range newTarget.dmChannels {
 		ts, _ := tsoutil.ParseTS(dmlChannel.GetSeekPosition().GetTimestamp())
 		metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.WithLabelValues(
-			fmt.Sprint(paramtable.GetNodeID()),
+			paramtable.GetStringNodeID(),
 			channelName,
 		).Set(float64(ts.Unix()))
 		partStatsVersionInfo += fmt.Sprintf("%s:[", channelName)
@@ -153,15 +154,30 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return err
 	}
 
-	partitions := mgr.meta.GetPartitionsByCollection(ctx, collectionID)
-	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
-		return partition.PartitionID
-	})
+	// A dropped checkpoint sentinel is not a valid seek position; do not
+	// build a next target that could dispatch WatchDmChannels with it.
+	for _, channelInfo := range vChannelInfos {
+		if funcutil.IsDroppedChannelCheckpoint(channelInfo.GetSeekPosition()) {
+			log.Warn("refuse to build next target: channel checkpoint is a dropped sentinel; sticky until collection meta is fully dropped",
+				zap.Int64("collectionID", collectionID),
+				zap.String("channel", channelInfo.GetChannelName()),
+				zap.Uint64("seekTs", channelInfo.GetSeekPosition().GetTimestamp()),
+			)
+			return merr.WrapErrChannelDroppedSentinel(
+				channelInfo.GetChannelName(),
+				"refuse to build next target",
+			)
+		}
+	}
 
-	segments := make(map[int64]*datapb.SegmentInfo, 0)
-	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
+	partitionIDs := mgr.meta.GetPartitionIDsByCollection(ctx, collectionID)
+	segments := make(map[int64]*datapb.SegmentInfo, len(segmentInfos))
+	partitionSet := make(map[int64]struct{}, len(partitionIDs))
+	for _, partitionID := range partitionIDs {
+		partitionSet[partitionID] = struct{}{}
+	}
 	for _, segmentInfo := range segmentInfos {
-		if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
+		if _, ok := partitionSet[segmentInfo.GetPartitionID()]; ok || segmentInfo.GetPartitionID() == common.AllPartitionsID {
 			segments[segmentInfo.GetID()] = segmentInfo
 		}
 	}
@@ -216,7 +232,11 @@ func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int
 	if current != nil {
 		for channelName := range current.GetAllDmChannels() {
 			metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.DeleteLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
+				paramtable.GetStringNodeID(),
+				channelName,
+			)
+			metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.DeleteLabelValues(
+				paramtable.GetStringNodeID(),
 				channelName,
 			)
 		}
@@ -571,11 +591,13 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 			zap.Int("segmentNum", len(newTarget.GetAllSegmentIDs())),
 			zap.Int64("version", newTarget.GetTargetVersion()),
 		)
+	}
 
-		// clear target info in meta store
-		err := catalog.RemoveCollectionTarget(ctx, t.GetCollectionID())
-		if err != nil {
-			log.Warn("failed to clear collection target from etcd", zap.Error(err))
+	// Remove all target keys from etcd after in-memory recovery is done.
+	// Uses RemoveWithPrefix which is a single etcd call.
+	if len(targets) > 0 {
+		if err := catalog.RemoveCollectionTargets(ctx); err != nil {
+			log.Warn("failed to remove collection targets from etcd", zap.Error(err))
 		}
 	}
 

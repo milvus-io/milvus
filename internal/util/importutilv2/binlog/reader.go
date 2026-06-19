@@ -18,33 +18,40 @@ package binlog
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math"
+	"strings"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type reader struct {
 	ctx            context.Context
 	cm             storage.ChunkManager
+	storageConfig  *indexpb.StorageConfig
 	schema         *schemapb.CollectionSchema
 	storageVersion int64
+	importEz       string
 
-	fileSize   *atomic.Int64
-	bufferSize int
-	deleteData map[any]typeutil.Timestamp // pk2ts
-	insertLogs map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
+	fileSize      *atomic.Int64
+	bufferSize    int
+	retryAttempts uint
+	deleteData    map[any]typeutil.Timestamp // pk2ts
+	insertLogs    map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
 
 	filters []Filter
 	dr      storage.DeserializeReader[*storage.Value]
@@ -78,15 +85,18 @@ func NewReader(ctx context.Context,
 		storageVersion: storageVersion,
 		fileSize:       atomic.NewInt64(0),
 		bufferSize:     bufferSize,
+		storageConfig:  storageConfig,
+		importEz:       importEz,
+		retryAttempts:  paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
 	}
-	err := r.init(paths, tsStart, tsEnd, storageConfig, importEz)
+	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *indexpb.StorageConfig, importEZ string) error {
+func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
@@ -96,10 +106,10 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 	// the "paths" has one or two paths, the first is the binlog path of a segment
 	// the other is optional, is the delta path of a segment
 	if len(paths) > 2 {
-		return merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
-			"Valid paths length should be one or two, but got paths:%s", paths))
+		return merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", paths)
 	}
-	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0])
+	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0], r.retryAttempts)
 	if err != nil {
 		return err
 	}
@@ -119,13 +129,13 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 		storage.WithVersion(r.storageVersion),
 		storage.WithBufferSize(32 * 1024 * 1024),
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-			return r.cm.MultiRead(ctx, paths)
+			return r.multiReadWithRetry(ctx, paths)
 		}),
-		storage.WithStorageConfig(storageConfig),
+		storage.WithStorageConfig(r.storageConfig),
 	}
 
-	if len(importEZ) > 0 {
-		ezID, err := hookutil.GetEzIDByImportEzk(importEZ)
+	if len(r.importEz) > 0 {
+		ezID, err := hookutil.GetEzIDByImportEzk(r.importEz)
 		if err != nil {
 			return err
 		}
@@ -135,6 +145,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 		}
 		rwOptions = append(rwOptions, storage.WithPluginContext(pluginContext))
 	}
+
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
 	if err != nil {
 		return err
@@ -147,7 +158,15 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 	if len(paths) < 2 {
 		return nil
 	}
-	deltaLogs, _, err := storage.ListAllChunkWithPrefix(context.Background(), r.cm, paths[1], true)
+	var deltaLogs []string
+	err = importcommon.WalkWithPrefixRetry(r.ctx, r.cm, paths[1], true, r.retryAttempts,
+		func() {
+			deltaLogs = nil
+		},
+		func(chunkInfo *storage.ChunkObjectInfo) bool {
+			deltaLogs = append(deltaLogs, chunkInfo.FilePath)
+			return true
+		})
 	if err != nil {
 		return err
 	}
@@ -173,37 +192,114 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 }
 
 func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]typeutil.Timestamp, error) {
+	v1opts := []storage.RwOption{
+		storage.WithVersion(storage.StorageV1),
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return r.multiReadWithRetry(ctx, paths)
+		}),
+	}
+	v2opts := []storage.RwOption{
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(r.storageConfig),
+	}
+
 	deleteData := make(map[any]typeutil.Timestamp)
-	for _, path := range deltaLogs {
-		reader, err := newBinlogReader(r.ctx, r.cm, path)
+
+	readInternal := func(path string, opts []storage.RwOption) (map[any]typeutil.Timestamp, error) {
+		tempData := make(map[any]typeutil.Timestamp)
+		pkField, err := typeutil.GetPrimaryFieldSchema(r.schema)
 		if err != nil {
 			return nil, err
 		}
-		// no need to read nulls in DeleteEventType
-		rowsSet, _, err := readData(reader, storage.DeleteEventType)
+		reader, err := storage.NewDeltalogReader(pkField.DataType, []string{path}, opts...)
 		if err != nil {
-			reader.Close()
 			return nil, err
 		}
-		for _, rows := range rowsSet {
-			for _, row := range rows.([]string) {
-				dl := &storage.DeleteLog{}
-				err = dl.Parse(row)
-				if err != nil {
-					reader.Close()
-					return nil, err
+		defer reader.Close()
+
+		for {
+			rec, err := reader.Next()
+			if err != nil {
+				if err == io.EOF {
+					break
 				}
-				if dl.Ts >= tsStart && dl.Ts <= tsEnd {
-					pk := dl.Pk.GetValue()
-					if ts, ok := deleteData[pk]; !ok || ts < dl.Ts {
-						deleteData[pk] = dl.Ts
-					}
+				log.Error("compose delete wrong, failed to read deltalogs", zap.Error(err))
+				return nil, err
+			}
+
+			for i := 0; i < rec.Len(); i++ {
+				ts := typeutil.Timestamp(rec.Column(1).(*array.Int64).Value(i))
+				if ts < tsStart || ts > tsEnd {
+					continue
 				}
+				var pk any
+				switch pkField.DataType {
+				case schemapb.DataType_Int64:
+					pk = rec.Column(0).(*array.Int64).Value(i)
+				case schemapb.DataType_VarChar:
+					pk = strings.Clone(rec.Column(0).(*array.String).Value(i))
+				}
+				if tsExisting, ok := tempData[pk]; ok && tsExisting > ts {
+					// skip if existing entry is newer
+					continue
+				}
+				tempData[pk] = ts
 			}
 		}
-		reader.Close()
+		return tempData, nil
+	}
+
+	for _, path := range deltaLogs {
+		// try v1 first
+		tempData, errv1 := readInternal(path, v1opts)
+		if errv1 != nil {
+			// try v2 if v1 failed
+			tempData, errv2 := readInternal(path, v2opts)
+			if errv2 != nil {
+				return nil, errv2
+			}
+			// Merge v2 results into deleteData
+			for pk, ts := range tempData {
+				if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
+					continue
+				}
+				deleteData[pk] = ts
+			}
+		} else {
+			// Merge v1 results into deleteData
+			for pk, ts := range tempData {
+				if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
+					continue
+				}
+				deleteData[pk] = ts
+			}
+		}
 	}
 	return deleteData, nil
+}
+
+// multiReadWithRetry wraps MultiRead with denylist retry: retries all errors
+// except permanent/validation ones (permission denied, bucket not found, etc.),
+// matching the strategy used by parquet/json/csv imports via RetryableReader.
+func (r *reader) multiReadWithRetry(ctx context.Context, paths []string) ([][]byte, error) {
+	var result [][]byte
+	representative := ""
+	if len(paths) > 0 {
+		representative = paths[0]
+	}
+	err := retry.Handle(ctx, func() (bool, error) {
+		var e error
+		result, e = r.cm.MultiRead(ctx, paths)
+		if e == nil {
+			return false, nil
+		}
+		e = storage.ToMilvusIoError(representative, e)
+		if merr.IsNonRetryableErr(e) {
+			return false, e
+		}
+		return true, e
+	}, retry.Attempts(r.retryAttempts))
+	return result, err
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
@@ -282,7 +378,7 @@ OUTER:
 		row := insertData.GetRow(i)
 		err = result.Append(row)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
+			return nil, merr.WrapErrImportFailedMsg("failed to append row, err=%s", err.Error())
 		}
 	}
 	return result, nil

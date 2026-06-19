@@ -31,6 +31,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "arrow/type_fwd.h"
 #include "common/ArrowDataWrapper.h"
@@ -55,21 +56,16 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/memory_planner.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
-namespace pb = milvus::proto;
 
 class TestGrowingStorageV2 : public ::testing::Test {
     void
     SetUp() override {
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = path_;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
-        fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+        fs_ = milvus::segcore::GetDefaultArrowFileSystem();
         SetUpCommonData();
     }
 
@@ -144,7 +140,7 @@ class TestGrowingStorageV2 : public ::testing::Test {
     std::shared_ptr<arrow::Schema> schema_;
     std::shared_ptr<arrow::RecordBatch> record_batch_;
     std::shared_ptr<arrow::Table> table_;
-    std::string path_ = "/tmp";
+    std::string path_ = TestLocalPath;
 
     std::vector<int64_t> ts_values;
     std::vector<int64_t> pk_values;
@@ -175,10 +171,9 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
     EXPECT_TRUE(writer->Close().ok());
 
     auto schema = std::make_shared<milvus::Schema>();
-    auto ts_fid = schema->AddDebugField("ts", milvus::DataType::INT64, true);
+    schema->AddDebugField("ts", milvus::DataType::INT64, true);
     auto pk_fid = schema->AddDebugField("pk", milvus::DataType::INT64, false);
-    auto str_fid =
-        schema->AddDebugField("str", milvus::DataType::VARCHAR, true);
+    schema->AddDebugField("str", milvus::DataType::VARCHAR, true);
     schema->set_primary_field_id(pk_fid);
     auto segment =
         milvus::segcore::CreateGrowingSegment(schema, milvus::empty_index_meta);

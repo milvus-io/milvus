@@ -10,13 +10,13 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // isDirty checks if the recovery storage mem state is not consistent with the persisted recovery storage.
@@ -27,7 +27,7 @@ func (rs *recoveryStorageImpl) isDirty() bool {
 
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	return rs.dirtyCounter > 0
+	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil
 }
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
@@ -131,6 +131,16 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zap
 	}
 	if err := conc.BlockOnAll(futures...); err != nil {
 		return err
+	}
+
+	// Salvage checkpoint must be persisted before the consume checkpoint to guarantee ordering:
+	// if the node crashes between these two writes, the next snapshot retry will re-persist both.
+	if snapshot.SalvageCheckpoint != nil {
+		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "persistSalvageCheckpoint")), func(ctx context.Context) error {
+			return resource.Resource().StreamingNodeCatalog().SaveSalvageCheckpoint(ctx, rs.channel.Name, snapshot.SalvageCheckpoint.IntoProto())
+		}); err != nil {
+			return err
+		}
 	}
 
 	// checkpoint updates should always be persisted after other updates success.

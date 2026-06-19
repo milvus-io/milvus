@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_assignment"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
@@ -19,14 +20,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_types"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestHandlerClient(t *testing.T) {
@@ -57,6 +58,7 @@ func TestHandlerClient(t *testing.T) {
 	w.EXPECT().Close().Run(func() {})
 
 	p := mock_producer.NewMockProducer(t)
+	p.EXPECT().Register(mock.Anything).Return()
 	p.EXPECT().Close().RunAndReturn(func() {})
 	c := mock_consumer.NewMockConsumer(t)
 	c.EXPECT().Close().RunAndReturn(func() error { return nil })
@@ -150,6 +152,115 @@ func TestHandlerClient(t *testing.T) {
 	assert.Nil(t, consumer)
 
 	handler.GetLatestMVCCTimestampIfLocal(ctx, "pchannel")
+}
+
+func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	rb := mock_resolver.NewMockBuilder(t)
+	rb.EXPECT().Close().Run(func() {})
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Close().Run(func() {})
+	// Always return the assignment so the create func is invoked.
+	w.EXPECT().Get(mock.Anything, mock.Anything).Return(assignment)
+	// Watch returns context.Canceled to break the backoff retry loop.
+	w.EXPECT().Watch(mock.Anything, mock.Anything, mock.Anything).Return(context.Canceled)
+	rebalanceTrigger := mock_types.NewMockAssignmentRebalanceTrigger(t)
+
+	handler := &handlerClientImpl{
+		lifetime:         typeutil.NewLifetime(),
+		service:          service,
+		rb:               rb,
+		watcher:          w,
+		rebalanceTrigger: rebalanceTrigger,
+	}
+	ctx := context.Background()
+
+	// Remote WAL returns "not implemented"; Watch returns Canceled to exit the loop.
+	service.EXPECT().GetService(mock.Anything).Return(nil, errors.New("not implemented"))
+	cps, err := handler.GetSalvageCheckpoint(ctx, "pchannel")
+	assert.Error(t, err)
+	assert.Nil(t, cps)
+
+	// After close, GetSalvageCheckpoint returns ErrClientClosed immediately.
+	service.EXPECT().Close().Return()
+	handler.Close()
+	cps, err = handler.GetSalvageCheckpoint(ctx, "pchannel")
+	assert.ErrorIs(t, err, ErrClientClosed)
+	assert.Nil(t, cps)
+}
+
+func TestHandlerClient_PrepareReleaseManualFlush(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+	vchannel := "pchannel_100v0"
+	releaseSegmentIDs := []int64{1001}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	service.EXPECT().Close().Return()
+
+	rb := mock_resolver.NewMockBuilder(t)
+	rb.EXPECT().Close().Run(func() {})
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+	w.EXPECT().Close().Run(func() {})
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		service:  service,
+		rb:       rb,
+		watcher:  w,
+	}
+
+	prepared, err := handler.PrepareReleaseManualFlush(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.NoError(t, err)
+	assert.False(t, prepared)
+
+	handler.Close()
+	prepared, err = handler.PrepareReleaseManualFlush(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.ErrorIs(t, err, ErrClientClosed)
+	assert.False(t, prepared)
+}
+
+func TestHandlerClient_GetReplicateCheckpointReplicateViolation(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	handlerServiceClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
+	// Remote WAL reports a replicate violation: the target is no longer a secondary
+	// cluster (e.g. after force_promote). This is unrecoverable for the current WAL
+	// role, so it must be returned immediately rather than retried to the deadline.
+	handlerServiceClient.EXPECT().GetReplicateCheckpoint(mock.Anything, mock.Anything).Return(
+		nil, status.NewReplicateViolation("wal is not a secondary cluster in replicating topology"))
+	service.EXPECT().GetService(mock.Anything).Return(handlerServiceClient, nil)
+
+	w := mock_assignment.NewMockWatcher(t)
+	// Always return the assignment so the create func is invoked.
+	w.EXPECT().Get(mock.Anything, mock.Anything).Return(assignment)
+	// Watch is intentionally NOT expected: an immediate return must not enter the
+	// backoff retry loop. If it did, the mock would fail on an unexpected Watch call.
+	rebalanceTrigger := mock_types.NewMockAssignmentRebalanceTrigger(t)
+
+	handler := &handlerClientImpl{
+		lifetime:         typeutil.NewLifetime(),
+		service:          service,
+		watcher:          w,
+		rebalanceTrigger: rebalanceTrigger,
+	}
+
+	cp, err := handler.GetReplicateCheckpoint(context.Background(), "pchannel")
+	assert.Error(t, err)
+	assert.Nil(t, cp)
+	assert.True(t, status.AsStreamingError(err).IsReplicateViolation())
 }
 
 func TestDial(t *testing.T) {

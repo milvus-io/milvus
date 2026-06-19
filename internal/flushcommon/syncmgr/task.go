@@ -24,25 +24,26 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SyncTask struct {
@@ -106,9 +107,9 @@ func (t *SyncTask) HandleError(err error) {
 		t.failureCallback(err)
 	}
 
-	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, t.level.String()).Inc()
+	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
 	if !t.pack.isFlush {
-		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, t.level.String()).Inc()
+		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
 	}
 }
 
@@ -145,7 +146,10 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
 	default:
-		writer := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
+		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
+		if writerErr != nil {
+			return writerErr
+		}
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
 	}
 
@@ -163,13 +167,13 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		}
 		return count
 	}
-	metrics.DataNodeWriteDataCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
-	metrics.DataNodeWriteDataCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
-	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
+	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
+	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
+	metrics.DataNodeFlushedSize.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
 
-	metrics.DataNodeFlushedRows.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource).Add(float64(t.batchRows))
+	metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource).Add(float64(t.batchRows))
 
-	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
+	metrics.DataNodeSave2StorageLatency.WithLabelValues(paramtable.GetStringNodeID(), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	if t.metaWriter != nil {
 		err = t.writeMeta(ctx)
@@ -199,9 +203,12 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	log.Info("task done", zap.Int64("flushedSize", t.flushedSize), zap.Duration("timeTaken", t.execTime))
 
 	if !t.pack.isFlush {
-		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
+		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
 	}
-	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
+	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
+
+	// Publish filesystem metrics after sync task completion
+	storagev2.PublishFilesystemMetricsWithConfig(t.storageConfig)
 
 	return nil
 }
@@ -225,6 +232,7 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 			// legacy split found, use legacy policy
 			if len(cg.Fields) == 0 {
 				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+				result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 				log.Info("use legacy split policy", zap.Int64("segmentID", t.segmentID), zap.Stringers("columnGroups", result))
 				return result
 			}
@@ -239,11 +247,15 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 			})
 			currentSplit[idx] = cg
 		}
-		return currentSplit
+		if segmentInfo.GetStorageVersion() == storage.StorageV3 && segmentInfo.ManifestPath() != "" {
+			return currentSplit
+		}
+		return storagecommon.FillColumnGroupFormats(currentSplit, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 	}
 
 	policies := storagecommon.DefaultPolicies()
 	result := storagecommon.SplitColumns(allFields, t.calcColumnStats(), policies...)
+	result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 	log.Info("sync new split columns", zap.Int64("segmentID", t.segmentID), zap.Stringers("columnGroups", result))
 	return result
 }
@@ -292,6 +304,10 @@ func (t *SyncTask) ChannelName() string {
 
 func (t *SyncTask) IsFlush() bool {
 	return t.pack.isFlush
+}
+
+func (t *SyncTask) IsDrop() bool {
+	return t.pack.isDrop
 }
 
 func (t *SyncTask) Binlogs() (map[int64]*datapb.FieldBinlog, map[int64]*datapb.FieldBinlog, *datapb.FieldBinlog, map[int64]*datapb.FieldBinlog) {

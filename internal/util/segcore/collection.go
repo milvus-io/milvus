@@ -12,15 +12,14 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // CreateCCollectionRequest is a request to create a CCollection.
@@ -35,13 +34,13 @@ type CreateCCollectionRequest struct {
 func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 	schemaBlob, err := proto.Marshal(req.Schema)
 	if err != nil {
-		return nil, errors.New("marshal schema failed")
+		return nil, merr.WrapErrSegcoreMsg("marshal schema failed")
 	}
 	var indexMetaBlob []byte
 	if req.IndexMeta != nil {
 		indexMetaBlob, err = proto.Marshal(req.IndexMeta)
 		if err != nil {
-			return nil, errors.New("marshal index meta failed")
+			return nil, merr.WrapErrSegcoreMsg("marshal index meta failed")
 		}
 	}
 	var ptr C.CCollection
@@ -97,6 +96,24 @@ func (c *CCollection) Schema() *schemapb.CollectionSchema {
 
 func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
 	return c.indexMeta
+}
+
+func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+	if meta == nil {
+		return nil
+	}
+
+	indexMetaBlob, err := proto.Marshal(meta)
+	if err != nil {
+		return err
+	}
+
+	status := C.SetIndexMeta(c.ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
+	c.indexMeta = meta
+	return nil
 }
 
 func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint64) error {

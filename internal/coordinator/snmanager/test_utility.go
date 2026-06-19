@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 func ResetStreamingNodeManager() {
@@ -28,6 +28,7 @@ func ResetDoNothingStreamingNodeManager(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}).Maybe()
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil).Maybe()
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil).Maybe()
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil).Maybe()
 	balance.Register(b)
 }

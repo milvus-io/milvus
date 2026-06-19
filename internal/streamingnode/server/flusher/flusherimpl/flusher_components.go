@@ -5,8 +5,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -18,14 +18,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // flusherComponents is the components of the flusher.
@@ -116,8 +115,12 @@ func (impl *flusherComponents) WhenDropCollection(vchannel string) {
 
 // HandleMessage handles the plain message.
 func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
+	// AlterReplicateConfig is a coordinator-only message, skip it in flusher.
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+		return nil
+	}
 	vchannel := msg.VChannel()
-	if vchannel == "" || msg.MessageType().IsBroadcastToAll() || funcutil.IsPhysicalChannel(vchannel) {
+	if vchannel == "" || msg.IsPChannelLevel() {
 		return impl.broadcastToAllDataSyncService(ctx, msg)
 	}
 	if _, ok := impl.dataServices[vchannel]; !ok {
@@ -220,7 +223,7 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 			}
 			logger.Info("append flush message for segments that not created by streaming service into wal", zap.Stringer("msgID", appendResult.MessageID), zap.Uint64("timeTick", appendResult.TimeTick))
 			return nil
-		}, retry.AttemptAlways()); err != nil {
+		}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true })); err != nil {
 			return nil, err
 		}
 	}
@@ -230,7 +233,7 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 		var err error
 		ds, err = impl.buildDataSyncService(ctx, recoverInfo)
 		return err
-	}, retry.AttemptAlways())
+	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 	if err != nil {
 		return nil, err
 	}

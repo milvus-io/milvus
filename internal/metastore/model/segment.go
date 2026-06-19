@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 type Segment struct {

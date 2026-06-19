@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 )
 
 func TestAppendToIncomingContext(t *testing.T) {
@@ -102,4 +102,18 @@ func GetContext(ctx context.Context, originValue string) context.Context {
 	}
 	md := metadata.New(contextMap)
 	return metadata.NewIncomingContext(ctx, md)
+}
+
+func TestQueryLabel(t *testing.T) {
+	ctx := context.Background()
+	// default should be "query"
+	assert.Equal(t, "query", GetQueryLabel(ctx))
+
+	// set upsert_query
+	ctx = WithQueryLabel(ctx, "upsert_query")
+	assert.Equal(t, "upsert_query", GetQueryLabel(ctx))
+
+	// empty string should fallback to default
+	ctx2 := WithQueryLabel(context.Background(), "")
+	assert.Equal(t, "query", GetQueryLabel(ctx2))
 }

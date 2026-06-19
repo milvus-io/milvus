@@ -18,14 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     apt-get update && apt-get install -y --no-install-recommends \
     g++ gcc gfortran git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
-    pkg-config uuid-dev libaio-dev libgoogle-perftools-dev libopenblas-dev && \
+    pkg-config uuid-dev libaio-dev libgoogle-perftools-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install conan==1.64.1
+RUN pip3 install conan==2.25.1
 
 # Install openblas
 # RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.21.tar.gz && \
@@ -44,9 +44,9 @@ ENV GOPATH /go
 ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.11.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.4.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOROOT}/bin v1.46.2 && \
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOROOT}/bin v2.11.3 && \
     # export GO111MODULE=on && go get github.com/quasilyte/go-ruleguard/cmd/ruleguard@v0.2.1 && \
     go install github.com/ramya-rao-a/go-outline@latest && \
     go install golang.org/x/tools/gopls@latest && \
@@ -80,7 +80,7 @@ RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini
     chmod +x /tini
 
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.89 -y
+    sh -s -- --default-toolchain=1.92 -y
 
 ENV PATH=/root/.cargo/bin:$PATH
 

@@ -17,16 +17,15 @@
 package storage
 
 import (
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // FieldStats contains statistics data for any column
@@ -67,7 +66,7 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	} else {
-		return errors.New("invalid fieldStats, no fieldID")
+		return merr.WrapErrServiceInternalMsg("invalid fieldStats, no fieldID")
 	}
 
 	stats.Type = schemapb.DataType_Int64
@@ -471,7 +470,7 @@ func (sr *FieldStatsReader) GetFieldStatsList() ([]*FieldStats, error) {
 		stats := &FieldStats{}
 		errNew := json.Unmarshal(sr.buffer, &stats)
 		if errNew != nil {
-			return nil, merr.WrapErrParameterInvalid("valid JSON", string(sr.buffer), err.Error())
+			return nil, merr.WrapErrDataIntegrity(err, "FieldStats list unmarshal failed")
 		}
 		return []*FieldStats{stats}, nil
 	}

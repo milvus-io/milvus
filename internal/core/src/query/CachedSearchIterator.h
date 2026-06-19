@@ -94,6 +94,11 @@ class CachedSearchIterator {
 
     // used only for sealed segment with chunked data
     std::vector<milvus::cachinglayer::PinWrapper<const void*>> pin_wrappers_;
+    // used only for growing segment with VECTOR_ARRAY element-level search:
+    // knowhere needs a contiguous flat buffer, but growing stores each row as
+    // a separate VectorArray with its own backing allocation, so we flatten
+    // per-chunk here and keep the buffers alive alongside the iterators.
+    std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_;
     int64_t batch_size_ = 0;
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
     int8_t sign_ = 1;

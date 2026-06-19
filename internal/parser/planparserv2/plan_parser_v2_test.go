@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
@@ -279,6 +279,289 @@ func TestExpr_Like(t *testing.T) {
 	fmt.Println(plan)
 	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
 	assert.Equal(t, `8%-0`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	expr = `A like "abc"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_Equal, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+}
+
+func TestExpr_RegexMatch(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// --- Regex-to-LIKE optimization tests ---
+
+	// Pure literal "abc" stays RegexMatch. RE2's literal PartialMatch path is
+	// faster than Milvus InnerMatch in current growing-segment benchmarks.
+	expr := `A =~ "abc"`
+	plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// "^abc" → PrefixMatch
+	expr = `A =~ "^abc"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// "abc$" → PostfixMatch
+	expr = `A =~ "abc$"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_PostfixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// "^abc$" → Equal
+	expr = `A =~ "^abc$"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_Equal, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// Escaped metacharacter without anchors stays RegexMatch
+	expr = `A =~ "file\\.txt"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, `file\.txt`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// --- Patterns that stay as RegexMatch ---
+
+	// Regex with metacharacters → stays RegexMatch
+	expr = `A =~ "a.*b"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "a.*b", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// Character class → stays RegexMatch
+	expr = `A =~ "[0-9]+"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// Empty pattern → stays RegexMatch (matches everything)
+	expr = `A =~ ""`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// --- Patterns that MUST stay RegexMatch (never downgrade to LIKE) ---
+
+	// Unicode property \p{...}
+	expr = `A =~ "\\p{Han}+"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// Named group (?P<name>...)
+	expr = `A =~ "(?P<user>[a-z]+)@host"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// Inline flag (?m)
+	expr = `A =~ "(?m)^start"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// Shorthand class \d
+	expr = `A =~ "\\d{3}-\\d{4}"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// --- Error cases ---
+
+	// Invalid regex pattern — unclosed bracket
+	expr = `A =~ "[unclosed"`
+	assertInvalidExpr(t, helper, expr)
+
+	// Non-string field — should error
+	expr = `Int64Field =~ "abc"`
+	assertInvalidExpr(t, helper, expr)
+
+	// --- Negation ---
+
+	// !~ with pure literal → NOT(RegexMatch)
+	expr = `A !~ "abc"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	predicates := plan.GetVectorAnns().GetPredicates()
+	assert.Equal(t, planpb.UnaryExpr_Not, predicates.GetUnaryExpr().GetOp())
+	assert.Equal(t, planpb.OpType_RegexMatch, predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// !~ with metacharacters → NOT(RegexMatch)
+	expr = `A !~ "a.*b"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	predicates = plan.GetVectorAnns().GetPredicates()
+	assert.Equal(t, planpb.UnaryExpr_Not, predicates.GetUnaryExpr().GetOp())
+	assert.Equal(t, planpb.OpType_RegexMatch, predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetOp())
+
+	// --- JSON and other field types ---
+	validExprs := []string{
+		`JSONField["A"] =~ "abc"`,
+		`VarCharField =~ "^prefix"`,
+	}
+	for _, exprStr := range validExprs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	// --- Comprehensive tryOptimizeRegexToLike edge cases ---
+
+	// Helper to check op type for =~ expressions
+	checkOp := func(t *testing.T, exprStr string, expectedOp planpb.OpType) {
+		t.Helper()
+		p, e := CreateSearchPlan(helper, exprStr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, e, exprStr)
+		assert.NotNil(t, p, exprStr)
+		assert.Equal(t, expectedOp,
+			p.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp(),
+			"wrong OpType for: %s", exprStr)
+	}
+	checkVal := func(t *testing.T, exprStr string, expectedOp planpb.OpType, expectedVal string) {
+		t.Helper()
+		p, e := CreateSearchPlan(helper, exprStr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, e, exprStr)
+		assert.NotNil(t, p, exprStr)
+		ure := p.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.Equal(t, expectedOp, ure.GetOp(), "wrong OpType for: %s", exprStr)
+		assert.Equal(t, expectedVal, ure.GetValue().GetStringVal(), "wrong value for: %s", exprStr)
+	}
+
+	// Optimizable patterns
+	checkVal(t, `A =~ "hello"`, planpb.OpType_RegexMatch, "hello")
+	checkVal(t, `A =~ "^hello"`, planpb.OpType_PrefixMatch, "hello")
+	checkVal(t, `A =~ "hello$"`, planpb.OpType_PostfixMatch, "hello")
+	checkVal(t, `A =~ "^hello$"`, planpb.OpType_Equal, "hello")
+	checkVal(t, `A =~ "^$"`, planpb.OpType_Equal, "")
+	checkVal(t, `A =~ "hello world"`, planpb.OpType_RegexMatch, "hello world")
+	checkVal(t, `A =~ "file\\.txt"`, planpb.OpType_RegexMatch, `file\.txt`)
+	checkVal(t, `A =~ "^file\\.txt$"`, planpb.OpType_Equal, "file.txt")
+	checkVal(t, `A =~ "a\\(b\\)"`, planpb.OpType_RegexMatch, `a\(b\)`)
+	checkVal(t, `A =~ "price\\$10"`, planpb.OpType_RegexMatch, `price\$10`)
+	checkVal(t, `A =~ "back\\\\slash"`, planpb.OpType_RegexMatch, `back\\slash`)
+
+	// Non-optimizable: metacharacters → stay RegexMatch
+	checkOp(t, `A =~ "a.*b"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a.b"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "[a-z]"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a+"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a?"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a{2}"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(abc)"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a|b"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ ""`, planpb.OpType_RegexMatch)
+
+	// Non-optimizable: shorthand classes, control chars, special escapes
+	checkOp(t, `A =~ "\\d+"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\w+"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\s"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\b"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\n"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\t"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\x41"`, planpb.OpType_RegexMatch)
+
+	// Non-optimizable: Unicode property, named groups, inline flags
+	checkOp(t, `A =~ "\\p{Han}"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(?P<name>[a-z]+)"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(?i)hello"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(?m)^start"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(?s)a.b"`, planpb.OpType_RegexMatch)
+
+	// Edge: escaped $ at end should NOT be treated as anchor
+	checkVal(t, `A =~ "price\\$"`, planpb.OpType_RegexMatch, `price\$`)
+	checkVal(t, `A =~ "^price\\$"`, planpb.OpType_PrefixMatch, "price$")
 }
 
 func TestExpr_TextMatch(t *testing.T) {
@@ -288,6 +571,7 @@ func TestExpr_TextMatch(t *testing.T) {
 
 	exprStrs := []string{
 		`text_match(VarCharField, "query")`,
+		`text_match(TextField, "query")`,
 	}
 	for _, exprStr := range exprStrs {
 		assertInvalidExpr(t, helper, exprStr)
@@ -581,6 +865,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 
 	exprStrs := []string{
 		`phrase_match(VarCharField, "phrase")`,
+		`phrase_match(TextField, "phrase")`,
 		`phrase_match(StringField, "phrase")`,
 		`phrase_match(StringField, "phrase", 1)`,
 		`phrase_match(VarCharField, "phrase", 11223)`,
@@ -624,7 +909,6 @@ func TestExpr_TextField(t *testing.T) {
 
 	invalidExprs := []string{
 		`TextField == "query"`,
-		`text_match(TextField, "query")`,
 	}
 
 	for _, exprStr := range invalidExprs {
@@ -641,6 +925,8 @@ func TestExpr_IsNull(t *testing.T) {
 	exprStrs := []string{
 		`VarCharField is null`,
 		`VarCharField IS NULL`,
+		`ArrayField is null`,
+		`StringArrayField IS NULL`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -654,9 +940,81 @@ func TestExpr_IsNull(t *testing.T) {
 		`BFloat16VectorField is null`,
 		`SparseFloatVectorField is null`,
 		`Int8VectorField is null`,
+		// issue #48904: array element access with IS NULL should be
+		// rejected at parse time rather than raising an internal error
+		// at execution time.
+		`ArrayField[0] is null`,
+		`ArrayField[1] IS NULL`,
+		`StringArrayField[0] is null`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+func TestExpr_StructArrayParentIsNull(t *testing.T) {
+	schema := newTestSchema(true)
+	schema.StructArrayFields[0].Nullable = true
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	expr, err := ParseExpr(helper, `struct_array is null`, nil)
+	require.NoError(t, err)
+	nullExpr := expr.GetNullExpr()
+	require.NotNil(t, nullExpr)
+	assert.Equal(t, planpb.NullExpr_IsNull, nullExpr.GetOp())
+	assert.Equal(t, int64(133), nullExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
+	assert.Equal(t, schemapb.DataType_VarChar, nullExpr.GetColumnInfo().GetElementType())
+	assert.True(t, nullExpr.GetColumnInfo().GetNullable())
+
+	expr, err = ParseExpr(helper, `struct_array is not null`, nil)
+	require.NoError(t, err)
+	nullExpr = expr.GetNullExpr()
+	require.NotNil(t, nullExpr)
+	assert.Equal(t, planpb.NullExpr_IsNotNull, nullExpr.GetOp())
+	assert.Equal(t, int64(133), nullExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, nullExpr.GetColumnInfo().GetDataType())
+	assert.True(t, nullExpr.GetColumnInfo().GetNullable())
+}
+
+func TestExpr_VectorArrayOnlyStructParentIsNull(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.StructArrayFields = append(schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
+		FieldID:  10000,
+		Name:     "vector_struct",
+		Nullable: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     10001,
+				Name:        "vector_struct[embeddings]",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				},
+			},
+		},
+	})
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for _, testcase := range []struct {
+		expr string
+		op   planpb.NullExpr_NullOp
+	}{
+		{expr: `vector_struct is null`, op: planpb.NullExpr_IsNull},
+		{expr: `vector_struct is not null`, op: planpb.NullExpr_IsNotNull},
+	} {
+		expr, err := ParseExpr(helper, testcase.expr, nil)
+		require.NoError(t, err, testcase.expr)
+		nullExpr := expr.GetNullExpr()
+		require.NotNil(t, nullExpr, testcase.expr)
+		assert.Equal(t, testcase.op, nullExpr.GetOp(), testcase.expr)
+		assert.Equal(t, int64(10001), nullExpr.GetColumnInfo().GetFieldId(), testcase.expr)
+		assert.Equal(t, schemapb.DataType_ArrayOfVector, nullExpr.GetColumnInfo().GetDataType(), testcase.expr)
+		assert.Equal(t, schemapb.DataType_FloatVector, nullExpr.GetColumnInfo().GetElementType(), testcase.expr)
+		assert.True(t, nullExpr.GetColumnInfo().GetNullable(), testcase.expr)
 	}
 }
 
@@ -668,6 +1026,8 @@ func TestExpr_IsNotNull(t *testing.T) {
 	exprStrs := []string{
 		`VarCharField is not null`,
 		`VarCharField IS NOT NULL`,
+		`ArrayField is not null`,
+		`StringArrayField IS NOT NULL`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -681,6 +1041,12 @@ func TestExpr_IsNotNull(t *testing.T) {
 		`BFloat16VectorField is not null`,
 		`SparseFloatVectorField is not null`,
 		`Int8VectorField is not null`,
+		// issue #48904: array element access with IS NOT NULL should be
+		// rejected at parse time rather than raising an internal error
+		// at execution time.
+		`ArrayField[0] is not null`,
+		`ArrayField[1] IS NOT NULL`,
+		`StringArrayField[0] is not null`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -1096,15 +1462,12 @@ func TestExpr_Invalid(t *testing.T) {
 		`-Int32Field`,
 		`!(Int32Field)`,
 		// ----------------------- or/and ------------------------
-		`not_in_schema or true`,
 		`false or not_in_schema`,
 		`"str" or false`,
 		`BoolField OR false`,
 		`Int32Field OR Int64Field`,
 		`not_in_schema and true`,
-		`false AND not_in_schema`,
 		`"str" and false`,
-		`BoolField and false`,
 		`Int32Field AND Int64Field`,
 		// -------------------- unsupported ----------------------
 		`1 ^ 2`,
@@ -1114,10 +1477,7 @@ func TestExpr_Invalid(t *testing.T) {
 		`1 | 2`,
 		// -------------------- cannot be independent ----------------------
 		`BoolField`,
-		`true`,
-		`false`,
 		`Int64Field > 100 and BoolField`,
-		`Int64Field < 100 or false`, // maybe this can be optimized.
 		`!BoolField`,
 		// -------------------- array ----------------------
 		//`A == [1, 2, 3]`,
@@ -1788,6 +2148,10 @@ func Test_ArrayLength(t *testing.T) {
 		`array_length(StringArrayField) <= 1`,
 		`array_length(StringArrayField) > 5`,
 		`array_length(StringArrayField) >= 5`,
+		// struct array sub-field
+		`array_length(struct_array[sub_str]) == 3`,
+		`array_length(struct_array[sub_int]) > 1`,
+		`array_length(struct_array[sub_int]) <= 10`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1925,7 +2289,7 @@ func Test_SegmentScorers(t *testing.T) {
 
 	t.Run("error - not segment scorer flag", func(t *testing.T) {
 		fs := &schemapb.FunctionScore{
-			Functions: []*schemapb.FunctionSchema{{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: rerank.WeightedName}}}},
+			Functions: []*schemapb.FunctionSchema{{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "weighted"}}}},
 		}
 		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
 		assert.NoError(t, err)
@@ -2563,6 +2927,9 @@ func TestExpr_ElementFilter(t *testing.T) {
 
 		`element_filter(struct_array, $[sub_int] > 1) || element_filter(struct_array, $[sub_str] == "test")`,
 		`element_filter(struct_array, $[sub_int] > 1) && Int64Field > 0`,
+
+		`not element_filter(struct_array, $[sub_int] > 1)`,
+		`!element_filter(struct_array, $[sub_int] > 1)`,
 	}
 
 	for _, expr := range invalidExprs {
@@ -2714,6 +3081,210 @@ func TestExpr_Match(t *testing.T) {
 
 	for _, expr := range invalidExprs {
 		assertInvalidExpr(t, helper, expr)
+	}
+}
+
+func TestExpr_ArrayContains(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Valid ArrayContains expressions
+	validExprs := []string{
+		`array_contains(struct_array[sub_int], 1)`,
+		`array_contains(struct_array[sub_int], 1) && array_contains(struct_array[sub_int], 2)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+}
+
+func TestExpr_StructIndexField(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Valid struct_arr[index][sub_field] expressions
+	validExprs := []string{
+		// comparison
+		`struct_array[0][sub_int] > 50`,
+		`struct_array[0][sub_int] == 100`,
+		`struct_array[1][sub_str] == "apple"`,
+		`struct_array[0][sub_str] != "banana"`,
+		// range via &&
+		`struct_array[0][sub_int] >= 30 && struct_array[0][sub_int] <= 70`,
+		// IN / NOT IN
+		`struct_array[0][sub_int] in [10, 20, 30, 40, 50]`,
+		`struct_array[0][sub_int] not in [0, 1, 2, 3]`,
+		`struct_array[0][sub_str] in ["apple", "banana"]`,
+		`struct_array[0][sub_str] not in ["apple", "banana"]`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+
+	// Invalid expressions
+	invalidExprs := []string{
+		// non-existent parent or sub-field
+		`non_existent[0][sub_int] > 50`,
+		`struct_array[0][non_existent] > 50`,
+		// unsupported form: sub-field first then index
+		`struct_array[sub_int][0] > 50`,
+		`struct_array[sub_str][0] == "apple"`,
+		`struct_array[sub_int][0] in [10, 20, 30]`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, helper, expr)
+	}
+}
+
+func TestExpr_StructIndexField_PlanShape(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	plan, err := CreateSearchPlan(schema, `struct_array[0][sub_int] == 100`, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	require.NoError(t, err)
+
+	predicates := plan.GetVectorAnns().GetPredicates()
+	require.NotNil(t, predicates)
+
+	ure := predicates.GetUnaryRangeExpr()
+	require.NotNil(t, ure)
+	assert.Equal(t, planpb.OpType_Equal, ure.GetOp())
+	assert.Equal(t, int64(100), ure.GetValue().GetInt64Val())
+
+	columnInfo := ure.GetColumnInfo()
+	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(134), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
+	assert.Equal(t, []string{"0"}, columnInfo.GetNestedPath())
+
+	ret := handleExpr(schema, `struct_array[1][sub_str] in ["apple", "banana"]`)
+	ewt, ok := ret.(*ExprWithType)
+	require.True(t, ok, "handleExpr should return *ExprWithType for term expression")
+
+	te := ewt.expr.GetTermExpr()
+	require.NotNil(t, te)
+	assert.Len(t, te.GetValues(), 2)
+	assert.Equal(t, "apple", te.GetValues()[0].GetStringVal())
+	assert.Equal(t, "banana", te.GetValues()[1].GetStringVal())
+
+	columnInfo = te.GetColumnInfo()
+	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(133), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
+	assert.Equal(t, []string{"1"}, columnInfo.GetNestedPath())
+}
+
+func TestExpr_StructFieldArrayLength(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	ret := handleExpr(schema, `array_length(struct_array[sub_int])`)
+	ewt, ok := ret.(*ExprWithType)
+	require.True(t, ok, "handleExpr should return *ExprWithType")
+	assert.Equal(t, schemapb.DataType_Int64, ewt.dataType)
+
+	bae := ewt.expr.GetBinaryArithExpr()
+	require.NotNil(t, bae)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, bae.GetOp())
+	require.Nil(t, bae.GetRight())
+
+	columnInfo := bae.GetLeft().GetColumnExpr().GetInfo()
+	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(134), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
+	assert.Empty(t, columnInfo.GetNestedPath())
+
+	validExprs := []string{
+		`array_length(struct_array[sub_int]) == 10`,
+		`array_length(struct_array[sub_str]) > 0`,
+	}
+	for _, expr := range validExprs {
+		_, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+	}
+}
+
+func TestExpr_StructIndexField_RangeForms(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	testCases := []struct {
+		expr           string
+		lower          int64
+		upper          int64
+		lowerInclusive bool
+		upperInclusive bool
+	}{
+		{
+			expr:           `1 < struct_array[0][sub_int] < 3`,
+			lower:          1,
+			upper:          3,
+			lowerInclusive: false,
+			upperInclusive: false,
+		},
+		{
+			expr:           `0 <= struct_array[0][sub_int] <= 100`,
+			lower:          0,
+			upper:          100,
+			lowerInclusive: true,
+			upperInclusive: true,
+		},
+		{
+			expr:           `100 > struct_array[0][sub_int] > 0`,
+			lower:          0,
+			upper:          100,
+			lowerInclusive: false,
+			upperInclusive: false,
+		},
+		{
+			expr:           `100 >= struct_array[0][sub_int] >= 0`,
+			lower:          0,
+			upper:          100,
+			lowerInclusive: true,
+			upperInclusive: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		plan, err := CreateSearchPlan(schema, tc.expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		require.NoError(t, err, tc.expr)
+
+		predicates := plan.GetVectorAnns().GetPredicates()
+		require.NotNil(t, predicates, tc.expr)
+
+		bre := predicates.GetBinaryRangeExpr()
+		require.NotNil(t, bre, tc.expr)
+		assert.Equal(t, tc.lower, bre.GetLowerValue().GetInt64Val(), tc.expr)
+		assert.Equal(t, tc.upper, bre.GetUpperValue().GetInt64Val(), tc.expr)
+		assert.Equal(t, tc.lowerInclusive, bre.GetLowerInclusive(), tc.expr)
+		assert.Equal(t, tc.upperInclusive, bre.GetUpperInclusive(), tc.expr)
+
+		columnInfo := bre.GetColumnInfo()
+		require.NotNil(t, columnInfo, tc.expr)
+		assert.Equal(t, int64(134), columnInfo.GetFieldId(), tc.expr)
+		assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType(), tc.expr)
+		assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType(), tc.expr)
+		assert.Equal(t, []string{"0"}, columnInfo.GetNestedPath(), tc.expr)
 	}
 }
 
@@ -3110,36 +3681,34 @@ func TestExpr_ConstantFolding(t *testing.T) {
 // are parsed by the proxy expression parser.
 //
 // Key behavior:
-//   - Standalone "true"/"false" are parsed into ValueExpr(BoolVal) with nodeDependent=true
-//   - Because nodeDependent=true, canBeExecuted() returns false
-//   - Therefore ParseExpr rejects them with "predicate is not a boolean expression"
-//   - But combined expressions like "BoolField == true" or "1==1" work fine
+//   - Standalone "true" is converted to AlwaysTrueExpr
+//   - Standalone "false" is converted to AlwaysFalseExpr (UnaryExpr(Not, AlwaysTrueExpr))
+//   - Combined expressions like "BoolField == true" or "1==1" work fine
 //   - After rewriting, "1==1" becomes AlwaysTrueExpr, "1==2" becomes AlwaysFalseExpr
 func TestExpr_BooleanLiteral(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
 
-	// Case 1: standalone "true" / "false" should fail ParseExpr
-	// because VisitBoolean sets nodeDependent=true, and canBeExecuted requires nodeDependent=false
-	standaloneBoolExprs := []string{
-		"true",
-		"false",
-		"True",
-		"False",
-		"TRUE",
-		"FALSE",
-	}
-	for _, exprStr := range standaloneBoolExprs {
+	// Case 1: standalone "true" variants → AlwaysTrueExpr
+	for _, exprStr := range []string{"true", "True", "TRUE"} {
 		expr, err := ParseExpr(helper, exprStr, nil)
-		assert.Error(t, err, "standalone %q should fail", exprStr)
-		assert.Nil(t, expr, "standalone %q should return nil expr", exprStr)
-		assert.Contains(t, err.Error(), "predicate is not a boolean expression",
-			"standalone %q error message mismatch", exprStr)
+		require.NoError(t, err, "standalone %q should succeed", exprStr)
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"standalone %q should become AlwaysTrueExpr", exprStr)
 	}
 
-	// Case 2: verify that handleExpr (internal) does parse them into ValueExpr with Bool
-	// This shows the ANTLR + visitor layer works, but the outer canBeExecuted gate blocks it
+	// Case 1b: standalone "false" variants → AlwaysFalseExpr
+	for _, exprStr := range []string{"false", "False", "FALSE"} {
+		expr, err := ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, "standalone %q should succeed", exprStr)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "standalone %q should be AlwaysFalseExpr", exprStr)
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	}
+
+	// Case 2: verify that handleExpr (internal) parses them into ValueExpr with Bool
 	for _, exprStr := range []string{"true", "false"} {
 		ret := handleExpr(helper, exprStr)
 		ewt, ok := ret.(*ExprWithType)
@@ -3239,5 +3808,77 @@ func TestExpr_BooleanLiteral(t *testing.T) {
 		require.NotNil(t, ue, "should be AlwaysFalseExpr")
 		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
 		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	// Case 7: boolean literal mixed with expression (issue #48443)
+	t.Run("true_or_expr", func(t *testing.T) {
+		// true or (Int64Field > 50) → AlwaysTrueExpr (short-circuit)
+		expr, err := ParseExpr(helper, "true or (Int64Field > 50)", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"\"true or expr\" should become AlwaysTrueExpr")
+	})
+
+	t.Run("expr_or_true", func(t *testing.T) {
+		// (Int64Field > 50) or true → AlwaysTrueExpr (short-circuit)
+		expr, err := ParseExpr(helper, "(Int64Field > 50) or true", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"\"expr or true\" should become AlwaysTrueExpr")
+	})
+
+	t.Run("false_or_expr", func(t *testing.T) {
+		// false or (Int64Field > 50) → Int64Field > 50
+		expr, err := ParseExpr(helper, "false or (Int64Field > 50)", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetUnaryRangeExpr(),
+			"\"false or expr\" should return the expr itself")
+	})
+
+	t.Run("true_and_expr", func(t *testing.T) {
+		// true and (Int64Field > 50) → Int64Field > 50
+		expr, err := ParseExpr(helper, "true and (Int64Field > 50)", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetUnaryRangeExpr(),
+			"\"true and expr\" should return the expr itself")
+	})
+
+	t.Run("expr_and_true", func(t *testing.T) {
+		// (Int64Field > 50) and true → Int64Field > 50
+		expr, err := ParseExpr(helper, "(Int64Field > 50) and true", nil)
+		require.NoError(t, err)
+		assert.NotNil(t, expr.GetUnaryRangeExpr(),
+			"\"expr and true\" should return the expr itself")
+	})
+
+	t.Run("false_and_expr", func(t *testing.T) {
+		// false and (Int64Field > 50) → AlwaysFalseExpr (short-circuit)
+		expr, err := ParseExpr(helper, "false and (Int64Field > 50)", nil)
+		require.NoError(t, err)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "\"false and expr\" should become AlwaysFalseExpr")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	t.Run("expr_and_false", func(t *testing.T) {
+		// (Int64Field > 50) and false → AlwaysFalseExpr (short-circuit)
+		expr, err := ParseExpr(helper, "(Int64Field > 50) and false", nil)
+		require.NoError(t, err)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "\"expr and false\" should become AlwaysFalseExpr")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	// Case 8: non-boolean literal with logical operators should still fail
+	t.Run("int_or_expr", func(t *testing.T) {
+		_, err := ParseExpr(helper, "1 or (Int64Field > 50)", nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("string_and_expr", func(t *testing.T) {
+		_, err := ParseExpr(helper, "\"hello\" and (Int64Field > 50)", nil)
+		assert.Error(t, err)
 	})
 }

@@ -18,18 +18,16 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 // timestampAllocator implements tsoAllocator.
@@ -61,17 +59,17 @@ func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timest
 
 	resp, err := ta.tso.AllocTimestamp(ctx, req)
 	defer func() {
-		metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	}()
 
 	if err != nil {
-		return nil, fmt.Errorf("syncTimestamp Failed:%w", err)
+		return nil, merr.Wrap(err, "syncTimestamp Failed")
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
+		return nil, merr.Error(resp.GetStatus())
 	}
 	if resp == nil {
-		return nil, errors.New("empty AllocTimestampResponse")
+		return nil, merr.WrapErrServiceInternalMsg("empty AllocTimestampResponse")
 	}
 	start, cnt := resp.GetTimestamp(), resp.GetCount()
 	ret := make([]Timestamp, cnt)

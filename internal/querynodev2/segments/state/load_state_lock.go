@@ -5,12 +5,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type loadStateEnum int
@@ -117,7 +117,7 @@ func (ls *LoadStateLock) StartLoadData() (LoadStateLockGuard, error) {
 		return nil, nil
 	}
 	if ls.state != LoadStateOnlyMeta {
-		return nil, errors.New("segment is not in LoadStateOnlyMeta, cannot start to loading data")
+		return nil, merr.WrapErrServiceInternalMsg("segment is not in LoadStateOnlyMeta, cannot start to loading data")
 	}
 	ls.state = LoadStateDataLoading
 	ls.cv.Broadcast()

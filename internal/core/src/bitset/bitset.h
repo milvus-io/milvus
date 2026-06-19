@@ -1074,7 +1074,8 @@ class Bitset
     // Allocate the given number of bits, initialize with a given value.
     Bitset(const size_t size, const bool init)
         : Data(get_required_size_in_container_elements(size),
-               init ? data_type(-1) : 0),
+               init ? static_cast<container_data_type>(data_type(-1))
+                    : container_data_type(0)),
           Size{size} {
     }
     // Do not allow implicit copies (Rust style).

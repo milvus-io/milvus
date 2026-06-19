@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -29,15 +29,15 @@ import (
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 const testVChannel = "v1"
@@ -54,6 +54,7 @@ func TestFencedError(t *testing.T) {
 }
 
 func TestWAL(t *testing.T) {
+	walimplstest.Reset()
 	initResourceForTest(t)
 	b := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(),
@@ -87,6 +88,8 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveSalvageCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixCoordClient.Set(rc)
 	resource.InitForTest(
@@ -171,14 +174,16 @@ func (f *testOneWALFramework) Run() {
 				CollectionId: 100,
 				PartitionIds: []int64{200},
 			}).
-			WithBody(&msgpb.CreateCollectionRequest{}).
+			WithBody(&msgpb.CreateCollectionRequest{
+				CollectionSchema: &schemapb.CollectionSchema{Name: "test_collection_100"},
+			}).
 			WithVChannel(testVChannel).
 			MustBuildMutable()
 
 		result, err := rwWAL.Append(ctx, createMsg)
+		walimplstest.DisableFenced(pChannel.Name)
 		require.Nil(f.t, result)
 		require.True(f.t, status.AsStreamingError(err).IsFenced())
-		walimplstest.DisableFenced(pChannel.Name)
 		rwWAL.Close()
 	}
 }
@@ -187,6 +192,10 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, rwWAL wal.WA
 	cp, err := rwWAL.GetReplicateCheckpoint()
 	require.True(f.t, status.AsStreamingError(err).IsReplicateViolation())
 	require.Nil(f.t, cp)
+
+	// No force promote has occurred, so salvage checkpoints should be empty.
+	salvageCPs := rwWAL.GetSalvageCheckpoint()
+	require.Nil(f.t, salvageCPs)
 
 	f.testSendCreateCollection(ctx, rwWAL)
 	defer f.testSendDropCollection(ctx, rwWAL)
@@ -198,7 +207,7 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, rwWAL wal.WA
 	var newWritten []message.ImmutableMessage
 	var read1, read2, read3 []message.ImmutableMessage
 	appendDone := make(chan struct{})
-	go func() {
+	go func() { //nolint:gosec // context.Background is intentional in test goroutine
 		defer wg.Done()
 		lastMVCC, err := rwWAL.GetLatestMVCCTimestamp(context.Background(), testVChannel)
 		require.NoError(f.t, err)
@@ -278,7 +287,9 @@ func (f *testOneWALFramework) testSendCreateCollection(ctx context.Context, w wa
 			CollectionId: 1,
 			PartitionIds: []int64{2},
 		}).
-		WithBody(&msgpb.CreateCollectionRequest{}).
+		WithBody(&msgpb.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "test_collection"},
+		}).
 		WithVChannel(testVChannel).
 		BuildMutable()
 	require.NoError(f.t, err)
@@ -313,11 +324,13 @@ func (f *testOneWALFramework) testSendDropCollection(ctx context.Context, w wal.
 
 func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]message.ImmutableMessage, error) {
 	messages := make([]message.ImmutableMessage, f.messageCount)
-	swg := sizedwaitgroup.New(10)
+	sem := make(chan struct{}, 10)
+	var wg sync.WaitGroup
 	for i := 0; i < f.messageCount-1; i++ {
-		swg.Add()
+		sem <- struct{}{}
+		wg.Add(1)
 		go func(i int) {
-			defer swg.Done()
+			defer func() { <-sem; wg.Done() }()
 			time.Sleep(time.Duration(5+rand.Int31n(10)) * time.Millisecond)
 
 			createPartOfTxn := func() (*message.ImmutableTxnMessageBuilder, *message.TxnContext) {
@@ -405,7 +418,7 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 			}
 		}(i)
 	}
-	swg.Wait()
+	wg.Wait()
 
 	msg := message.CreateTestEmptyInsertMesage(int64(f.messageCount-1), map[string]string{
 		"id":    fmt.Sprintf("%d", f.messageCount-1),

@@ -10,9 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <common/ChunkTarget.h>
+#include "common/FastMem.h"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 
@@ -24,7 +26,7 @@ namespace milvus {
 void
 MemChunkTarget::write(const void* data, size_t size) {
     AssertInfo(size + size_ <= cap_, "can not exceed target capacity");
-    std::memcpy(data_ + size_, data, size);
+    milvus::fastmem::FastMemcpy(data_ + size_, data, size);
     size_ += size;
 }
 
@@ -41,8 +43,14 @@ MemChunkTarget::tell() {
 void
 MmapChunkTarget::flush() {
     if (cap_ > size_) {
-        std::string padding(cap_ - size_, 0);
-        file_writer_->Write(padding.data(), cap_ - size_);
+        static constexpr size_t kBufSize = 4096;
+        char zeros[kBufSize] = {};
+        auto remaining = cap_ - size_;
+        while (remaining > 0) {
+            auto to_write = std::min(remaining, kBufSize);
+            file_writer_->Write(zeros, to_write);
+            remaining -= to_write;
+        }
         size_ = cap_;
     }
     file_writer_->Finish();

@@ -21,8 +21,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 )
@@ -120,6 +120,15 @@ func (opt *createCollectionOption) WithVectorFieldName(name string) *createColle
 func (opt *createCollectionOption) WithNumPartitions(numPartitions int64) *createCollectionOption {
 	opt.numPartitions = numPartitions
 	return opt
+}
+
+// Validate runs client-side sanity checks against the user-provided schema. Invoked automatically
+// from Client.CreateCollection via interface assertion.
+func (opt *createCollectionOption) Validate() error {
+	if opt.schema == nil {
+		return nil
+	}
+	return opt.schema.Validate()
 }
 
 func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
@@ -385,6 +394,25 @@ func NewAlterCollectionFieldPropertiesOption(collectionName string, fieldName st
 	}
 }
 
+// TruncateCollectionOption is the interface builds TruncateCollectionRequest.
+type TruncateCollectionOption interface {
+	Request() *milvuspb.TruncateCollectionRequest
+}
+
+type truncateCollectionOption struct {
+	name string
+}
+
+func (opt *truncateCollectionOption) Request() *milvuspb.TruncateCollectionRequest {
+	return &milvuspb.TruncateCollectionRequest{
+		CollectionName: opt.name,
+	}
+}
+
+func NewTruncateCollectionOption(name string) *truncateCollectionOption {
+	return &truncateCollectionOption{name: name}
+}
+
 type GetCollectionOption interface {
 	Request() *milvuspb.GetCollectionStatisticsRequest
 }
@@ -433,6 +461,49 @@ func (c *addCollectionFieldOption) Validate() error {
 
 func NewAddCollectionFieldOption(collectionName string, field *entity.Field) *addCollectionFieldOption {
 	return &addCollectionFieldOption{
+		collectionName: collectionName,
+		fieldSch:       field,
+	}
+}
+
+type AddCollectionStructFieldOption interface {
+	Request() *milvuspb.AddCollectionStructFieldRequest
+	// Validate validates the option before sending request
+	Validate() error
+}
+
+type addCollectionStructFieldOption struct {
+	collectionName string
+	fieldSch       *entity.Field
+}
+
+func (c *addCollectionStructFieldOption) Request() *milvuspb.AddCollectionStructFieldRequest {
+	collSchema := entity.NewSchema().WithField(c.fieldSch).ProtoMessage()
+	return &milvuspb.AddCollectionStructFieldRequest{
+		CollectionName:         c.collectionName,
+		StructArrayFieldSchema: collSchema.GetStructArrayFields()[0],
+	}
+}
+
+// Validate validates the option before sending request
+func (c *addCollectionStructFieldOption) Validate() error {
+	if c == nil {
+		return fmt.Errorf("add collection struct field option is nil")
+	}
+	if c.fieldSch == nil {
+		return fmt.Errorf("struct array field schema is required")
+	}
+	if c.fieldSch.DataType != entity.FieldTypeArray || c.fieldSch.ElementType != entity.FieldTypeStruct {
+		return fmt.Errorf("adding struct array field requires data type Array and element type Struct, field name = %s", c.fieldSch.Name)
+	}
+	if c.fieldSch.StructSchema == nil {
+		return fmt.Errorf("struct schema is required for struct array field %s", c.fieldSch.Name)
+	}
+	return c.fieldSch.StructSchema.Validate(c.fieldSch.Name)
+}
+
+func NewAddCollectionStructFieldOption(collectionName string, field *entity.Field) *addCollectionStructFieldOption {
+	return &addCollectionStructFieldOption{
 		collectionName: collectionName,
 		fieldSch:       field,
 	}

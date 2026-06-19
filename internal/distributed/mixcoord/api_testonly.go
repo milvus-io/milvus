@@ -23,7 +23,7 @@ import (
 	"log"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 func (s *Server) StopCheckerForTestOnly() {

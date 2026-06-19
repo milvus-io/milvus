@@ -32,17 +32,18 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // DataSyncService controls a flowgraph for a specific collection
@@ -159,9 +160,16 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			)
 			segment := item
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
-				var stats []*storage.PkStatistics
-				var err error
-				stats, err = compaction.LoadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
+				pkField, err := typeutil.GetPrimaryFieldSchema(info.GetSchema())
+				if err != nil {
+					return nil, err
+				}
+				resolver := packed.NewStatsResolverFromSegmentInfo(segment)
+				bfPaths, err := resolver.BloomFilterPaths(pkField.GetFieldID())
+				if err != nil {
+					return nil, err
+				}
+				stats, err := compaction.LoadStatsFromPaths(initCtx, chunkManager, segment.GetID(), bfPaths)
 				if err != nil {
 					return nil, err
 				}
@@ -170,12 +178,18 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 					tickler.Inc()
 				}
 
-				if segType == "growing" && len(segment.GetBm25Statslogs()) > 0 {
-					bm25stats, err := compaction.LoadBM25Stats(initCtx, chunkManager, segment.GetID(), segment.GetBm25Statslogs())
+				if segType == "growing" {
+					bm25Paths, err := resolver.BM25StatsPaths()
 					if err != nil {
 						return nil, err
 					}
-					segmentBm25.Insert(segment.GetID(), bm25stats)
+					if len(bm25Paths) > 0 {
+						bm25stats, err := compaction.LoadBM25StatsFromPaths(initCtx, chunkManager, segment.GetID(), bm25Paths)
+						if err != nil {
+							return nil, err
+						}
+						segmentBm25.Insert(segment.GetID(), bm25stats)
+					}
 				}
 
 				return struct{}{}, nil
@@ -187,7 +201,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 
 	// growing segments's stats should always be loaded, for generating merged pk bf.
 	loadSegmentStats("growing", unflushed)
-	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
+	if !streamingutil.IsStreamingServiceEnabled() && !paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
 		loadSegmentStats("sealed", flushed)
 	}
 
@@ -243,7 +257,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		dropCallback: dropCallback,
 	}
 
-	ctx, cancel := context.WithCancel(params.Ctx)
+	ctx, cancel := context.WithCancel(params.Ctx) //nolint:gosec // cancel is stored in cancelFn and called in Close()
 	ds := &DataSyncService{
 		ctx:      ctx,
 		cancelFn: cancel,
@@ -271,6 +285,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	dmStreamNode := newDmInputNode(config, input)
 	nodeList = append(nodeList, dmStreamNode)
 
+	// 1.ddNode
 	ddNode := newDDNode(
 		params.Ctx,
 		collectionID,
@@ -282,20 +297,14 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	)
 	nodeList = append(nodeList, ddNode)
 
-	if len(info.GetSchema().GetFunctions()) > 0 {
-		emNode, err := newEmbeddingNode(channelName, config.metacache)
-		if err != nil {
-			return nil, err
-		}
-		nodeList = append(nodeList, emNode)
-	}
-
+	// 2.writeNode
 	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}
 	nodeList = append(nodeList, writeNode)
 
+	// 3.ttNode
 	ttNode := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	nodeList = append(nodeList, ttNode)
 

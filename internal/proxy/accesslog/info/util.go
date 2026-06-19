@@ -19,18 +19,17 @@ package info
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var ClusterPrefix atomic.String
@@ -38,20 +37,20 @@ var ClusterPrefix atomic.String
 func getCurUserFromContext(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", errors.New("fail to get md from the context")
+		return "", merr.WrapErrParameterInvalidMsg("fail to get md from the context")
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {
-		return "", fmt.Errorf("fail to get authorization from the md, authorize:[%s]", util.HeaderAuthorize)
+		return "", merr.WrapErrParameterInvalidMsg("fail to get authorization from the md, authorize:[%s]", util.HeaderAuthorize)
 	}
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)
 	if err != nil {
-		return "", fmt.Errorf("fail to decode the token, token: %s", token)
+		return "", merr.WrapErrParameterInvalidMsg("fail to decode the token, token: %s", token)
 	}
 	secrets := strings.SplitN(rawToken, util.CredentialSeparator, 2)
 	if len(secrets) < 2 {
-		return "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
+		return "", merr.WrapErrParameterInvalidMsg("fail to get user info from the raw token, raw token: %s", rawToken)
 	}
 	username := secrets[0]
 	return username, nil
@@ -127,14 +126,21 @@ func getLengthFromTemplateValue(tv *schemapb.TemplateValue) int {
 }
 
 func listToString(strs []string) string {
-	result := "["
+	if len(strs) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteByte('[')
 	for i, str := range strs {
 		if i != 0 {
-			result += ", "
+			b.WriteString(", ")
 		}
-		result += "\"" + str + "\""
+		b.WriteByte('"')
+		b.WriteString(str)
+		b.WriteByte('"')
 	}
-	return result + "]"
+	b.WriteByte(']')
+	return b.String()
 }
 
 func kvsToString(kvs []*commonpb.KeyValuePair) string {

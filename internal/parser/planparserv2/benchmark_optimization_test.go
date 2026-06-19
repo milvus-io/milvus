@@ -7,7 +7,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Benchmark test cases covering various expression patterns

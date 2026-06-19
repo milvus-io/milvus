@@ -26,7 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/zilliz"
 )
@@ -110,7 +110,7 @@ func (s *ZillizHighlightProviderSuite) TestNewZillizHighlightProvider_Success() 
 			// but we can verify that the parameters were parsed correctly by checking the error doesn't relate to parameter parsing
 			if err != nil {
 				// Connection errors are expected in unit tests
-				s.Contains(err.Error(), "Connect model serving failed", "Expected connection error, got: %v", err)
+				s.Contains(err.Error(), "connect model serving failed", "Expected connection error, got: %v", err)
 			} else {
 				// If somehow the connection succeeds, verify the provider was created correctly
 				s.NotNil(provider)
@@ -183,7 +183,7 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Suc
 		{0.7, 0.6},
 	}
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -216,7 +216,7 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Err
 	texts := []string{"doc1", "doc2", "doc3"}
 	expectedError := errors.New("highlight service error")
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()

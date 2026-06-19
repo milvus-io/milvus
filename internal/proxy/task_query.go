@@ -12,9 +12,9 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
@@ -22,22 +22,24 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/shallowcopy"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -76,6 +78,7 @@ type queryTask struct {
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
 	channelsMvcc     map[string]Timestamp
+	preferredNodes   map[string]int64
 	fastSkip         bool
 
 	reQuery              bool
@@ -87,15 +90,24 @@ type queryTask struct {
 	aggregationFieldMap  *agg.AggregationFieldMap
 }
 
+func (t *queryTask) getQueryLabel() string {
+	if label := t.GetQueryLabel(); label != "" {
+		return label
+	}
+	return metrics.QueryLabel
+}
+
 type queryParams struct {
-	limit             int64
-	offset            int64
-	reduceType        reduce.IReduceType
-	isIterator        bool
-	collectionID      int64
-	groupByFields     []string
-	timezone          string
-	extractTimeFields []string
+	limit               int64
+	offset              int64
+	reduceType          reduce.IReduceType
+	isIterator          bool
+	collectionID        int64
+	groupByFields       []string
+	orderByFields       []string // NEW: ORDER BY field specifications (e.g., "price:desc")
+	timezone            string
+	extractTimeFields   []string
+	queryIteratorCursor *planpb.QueryIteratorCursor
 }
 
 func isSupportedGroupByFieldType(dt schemapb.DataType) bool {
@@ -114,12 +126,12 @@ func isSupportedGroupByFieldType(dt schemapb.DataType) bool {
 
 func validateGroupByFieldSchema(field *schemapb.FieldSchema) error {
 	if field == nil {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("group by field schema is nil"))
+		return merr.WrapErrParameterInvalidMsg("group by field schema is nil")
 	}
 	if !isSupportedGroupByFieldType(field.GetDataType()) {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+		return merr.WrapErrParameterInvalidMsg(
 			"group by field %s has unsupported data type %s", field.GetName(), field.GetDataType().String(),
-		))
+		)
 	}
 	return nil
 }
@@ -139,7 +151,7 @@ func translateGroupByFieldIds(groupByFieldNames []string, schema *schemapb.Colle
 		groupByField = strings.TrimSpace(groupByField)
 		fieldSchema, found := fieldNameToSchema[groupByField]
 		if !found {
-			return nil, fmt.Errorf("field %s not exist", groupByField)
+			return nil, merr.WrapErrParameterInvalidMsg("field %s not exist", groupByField)
 		}
 		if err := validateGroupByFieldSchema(fieldSchema); err != nil {
 			return nil, err
@@ -147,6 +159,100 @@ func translateGroupByFieldIds(groupByFieldNames []string, schema *schemapb.Colle
 		groupByFieldIds = append(groupByFieldIds, fieldSchema.GetFieldID())
 	}
 	return groupByFieldIds, nil
+}
+
+// validateOrderByFieldsWithGroupBy validates that ORDER BY fields are compatible with GROUP BY.
+// When GROUP BY is used, ORDER BY can only reference columns in the GROUP BY clause.
+// ORDER BY on aggregate expressions (e.g., count(*)) is not yet supported and is
+// explicitly rejected. This restriction may be lifted in a future release.
+func validateOrderByFieldsWithGroupBy(
+	orderByFieldSpecs []string,
+	groupByFields []string,
+	aggregates []agg.AggregateBase,
+) error {
+	if len(orderByFieldSpecs) == 0 {
+		return nil
+	}
+
+	// If no GROUP BY and no aggregates, any field is valid for ORDER BY
+	hasGroupBy := len(groupByFields) > 0 || len(aggregates) > 0
+	if !hasGroupBy {
+		return nil
+	}
+
+	// Build set of valid ORDER BY targets (GROUP BY columns only)
+	validTargets := make(map[string]bool)
+
+	// Add GROUP BY fields as valid targets
+	for _, field := range groupByFields {
+		validTargets[strings.ToLower(strings.TrimSpace(field))] = true
+	}
+
+	// Validate each ORDER BY field
+	for _, spec := range orderByFieldSpecs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+
+		// Extract field name (remove direction suffix like ":desc").
+		// Only colon-separated format is supported (e.g., "price:desc").
+		// Space-separated format (e.g., "price desc") is NOT supported.
+		parts := strings.Split(spec, ":")
+		fieldName := strings.ToLower(strings.TrimSpace(parts[0]))
+
+		// Reject aggregate expressions — not yet supported
+		if isAgg, _, _ := agg.MatchAggregationExpression(fieldName); isAgg {
+			return merr.WrapErrParameterInvalidMsg(
+				"ORDER BY on aggregate expression '%s' is not yet supported",
+				fieldName,
+			)
+		}
+
+		if !validTargets[fieldName] {
+			return merr.WrapErrParameterInvalidMsg(
+				"ORDER BY field '%s' is not valid: when using GROUP BY or aggregates, "+
+					"ORDER BY can only reference GROUP BY columns. "+
+					"Valid targets are: %v",
+				fieldName, getValidTargetList(groupByFields, aggregates),
+			)
+		}
+	}
+
+	return nil
+}
+
+// getValidTargetList returns a formatted list of valid ORDER BY targets for error messages.
+// The aggregates parameter is currently unused because ORDER BY on aggregate expressions
+// (e.g., count(*)) is not yet supported. When enabled in the future, aggregate original
+// names should be appended to the target list.
+func getValidTargetList(groupByFields []string, _ []agg.AggregateBase) []string {
+	targets := make([]string, 0, len(groupByFields))
+	targets = append(targets, groupByFields...)
+	return targets
+}
+
+// translateOrderByFields converts ORDER BY field specifications to planpb.OrderByField messages.
+// Delegates parsing to orderby.ParseOrderByFields to ensure consistent behavior
+// (direction validation, nullsFirst defaults) between C++ segcore and Go proxy pipeline.
+func translateOrderByFields(orderByFieldSpecs []string, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
+	parsed, err := orderby.ParseOrderByFields(orderByFieldSpecs, schema)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
+	}
+	if len(parsed) == 0 {
+		return nil, nil
+	}
+
+	result := make([]*planpb.OrderByField, len(parsed))
+	for i, f := range parsed {
+		result[i] = &planpb.OrderByField{
+			FieldId:    f.FieldID,
+			Ascending:  f.Ascending,
+			NullsFirst: f.NullsFirst,
+		}
+	}
+	return result, nil
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -190,7 +296,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 			}
 
 			if !fieldFound {
-				return nil, fmt.Errorf("field %s not exist", reqField)
+				return nil, merr.WrapErrParameterInvalidMsg("field %s not exist", reqField)
 			}
 		}
 
@@ -221,7 +327,7 @@ func filterSystemFields(outputFieldIDs []UniqueID) []UniqueID {
 }
 
 // parseQueryParams get limit and offset from queryParamsPair, both are optional.
-func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, error) {
+func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled bool, pkDataType schemapb.DataType) (*queryParams, error) {
 	var (
 		limit             int64
 		offset            int64
@@ -278,7 +384,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		isLimitProvided = true
 		limit, err = strconv.ParseInt(limitStr, 0, 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+			return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", LimitKey, limitStr)
 		}
 	}
 	if isLimitProvided {
@@ -287,12 +393,12 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
 			if err != nil {
-				return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+				return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", OffsetKey, offsetStr)
 			}
 		}
 		// validate max result window.
-		if err = validateMaxQueryResultWindow(offset, limit); err != nil {
-			return nil, fmt.Errorf("invalid max query result window, %w", err)
+		if err = validateMaxQueryResultWindow(offset, limit, largeTopKEnabled); err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid max query result window, %v", err)
 		}
 	}
 
@@ -309,7 +415,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	}
 
 	// parse group by fields
-	groupByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(QueryGroupByFieldsKey, queryParamsPair)
+	groupByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, queryParamsPair)
 	var groupByFields []string
 	if err == nil {
 		splitFields := strings.Split(groupByFieldsStr, ",")
@@ -321,16 +427,87 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
+	// parse order by fields (e.g., "price:desc,rating:asc"). Only colon-separated format is supported.
+	orderByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OrderByFieldsKey, queryParamsPair)
+	var orderByFields []string
+	if err == nil {
+		splitFields := strings.Split(orderByFieldsStr, ",")
+		for _, field := range splitFields {
+			trimmed := strings.TrimSpace(field)
+			if trimmed != "" {
+				orderByFields = append(orderByFields, trimmed)
+			}
+		}
+	}
+
+	queryIteratorCursor, err := parseQueryIteratorCursor(queryParamsPair, isIterator, pkDataType)
+	if err != nil {
+		return nil, err
+	}
+
 	return &queryParams{
-		limit:             limit,
-		offset:            offset,
-		reduceType:        reduceType,
-		isIterator:        isIterator,
-		collectionID:      collectionID,
-		groupByFields:     groupByFields,
-		timezone:          timezone,
-		extractTimeFields: extractTimeFields,
+		limit:               limit,
+		offset:              offset,
+		reduceType:          reduceType,
+		isIterator:          isIterator,
+		collectionID:        collectionID,
+		groupByFields:       groupByFields,
+		orderByFields:       orderByFields,
+		queryIteratorCursor: queryIteratorCursor,
+		timezone:            timezone,
+		extractTimeFields:   extractTimeFields,
 	}, nil
+}
+
+func parseQueryIteratorCursor(queryParamsPair []*commonpb.KeyValuePair, isIterator bool, pkDataType schemapb.DataType) (*planpb.QueryIteratorCursor, error) {
+	lastPK, hasLastPK := funcutil.TryGetAttrByKeyFromRepeatedKV(QueryIterLastPKKey, queryParamsPair)
+	lastOffsetStr, hasLastOffset := funcutil.TryGetAttrByKeyFromRepeatedKV(QueryIterLastOffsetKey, queryParamsPair)
+	if !hasLastPK && !hasLastOffset {
+		return nil, nil
+	}
+	if !isIterator {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"invalid query iterator cursor params: %s and %s can only be used when iterator=true",
+			QueryIterLastPKKey, QueryIterLastOffsetKey)
+	}
+	if !hasLastPK || !hasLastOffset {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"incomplete query iterator cursor params: %s and %s must be provided together, has_last_pk=%t, has_last_element_offset=%t",
+			QueryIterLastPKKey, QueryIterLastOffsetKey, hasLastPK, hasLastOffset)
+	}
+
+	lastOffset, err := strconv.ParseInt(lastOffsetStr, 0, 64)
+	if err != nil || lastOffset < 0 {
+		return nil, merr.WrapErrParameterInvalid("non-negative int value", lastOffsetStr,
+			"value for query iterator last element offset is invalid")
+	}
+
+	cursor := &planpb.QueryIteratorCursor{
+		LastElementOffset: lastOffset,
+	}
+	switch pkDataType {
+	case schemapb.DataType_Int64:
+		lastIntPK, err := strconv.ParseInt(lastPK, 0, 64)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("int64 primary key", lastPK,
+				"value for query iterator last primary key is invalid")
+		}
+		cursor.LastIntPk = &lastIntPK
+	case schemapb.DataType_VarChar:
+		cursor.LastStrPk = &lastPK
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported primary key type %s for query iterator cursor", pkDataType.String())
+	}
+	return cursor, nil
+}
+
+func getPrimaryKeyDataType(schema *schemapb.CollectionSchema) schemapb.DataType {
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field.GetDataType()
+		}
+	}
+	return schemapb.DataType_None
 }
 
 func matchCountRule(outputs []string) bool {
@@ -351,10 +528,10 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper, exprTemplat
 	start := time.Now()
 	plan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, exprTemplateValues)
 	if err != nil {
-		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "query", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
-		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+		return nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 	}
-	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "query", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
+	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
 
 	return plan, nil
@@ -371,10 +548,10 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		start := time.Now()
 		t.plan, err = planparserv2.CreateRetrievePlanArgs(schema.schemaHelper, t.request.Expr, t.request.GetExprTemplateValues(), visitorArgs)
 		if err != nil {
-			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "query", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
-			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
+			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 		}
-		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "query", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
 	// parse output fields names
 	originalOuputFields := t.request.GetOutputFields()
@@ -385,36 +562,60 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 
 	// parse aggregates
 	t.plan.GetQuery().Aggregates = agg.AggregatesToPB(t.userAggregates)
-	t.RetrieveRequest.Aggregates = t.plan.GetQuery().GetAggregates()
+	t.Aggregates = t.plan.GetQuery().GetAggregates()
 	// parse group by field ids
 	groupByFieldsIDs, err := translateGroupByFieldIds(t.queryParams.groupByFields, t.schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
 	t.plan.GetQuery().GroupByFieldIds = groupByFieldsIDs
-	t.RetrieveRequest.GroupByFieldIds = groupByFieldsIDs
+	t.GroupByFieldIds = groupByFieldsIDs
 
-	hasAgg := len(t.RetrieveRequest.GroupByFieldIds) > 0 || len(t.RetrieveRequest.Aggregates) > 0
+	// Validate ORDER BY fields compatibility with GROUP BY
+	// When GROUP BY is used, ORDER BY can only reference groupBy columns or aggregate results
+	if err := validateOrderByFieldsWithGroupBy(
+		t.queryParams.orderByFields,
+		t.queryParams.groupByFields,
+		t.userAggregates,
+	); err != nil {
+		return err
+	}
+
+	// parse order by fields
+	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+	if err != nil {
+		return err
+	}
+	t.plan.GetQuery().OrderByFields = orderByFields
+	// Also populate on RetrieveRequest so QN/Delegator can read directly
+	// without re-parsing serialized_expr_plan.
+	t.OrderByFields = orderByFields
+
+	hasAgg := len(t.GroupByFieldIds) > 0 || len(t.Aggregates) > 0
 	// parse output field ids
 	if hasAgg {
 		emptyOutputFields := make([]UniqueID, 0)
-		t.RetrieveRequest.OutputFieldsId = emptyOutputFields
+		t.OutputFieldsId = emptyOutputFields
 		t.plan.OutputFieldIds = emptyOutputFields
-		t.aggregationFieldMap = agg.NewAggregationFieldMap(originalOuputFields, t.queryParams.groupByFields, t.userAggregates)
+		aggFieldMap, err := agg.NewAggregationFieldMap(originalOuputFields, t.queryParams.groupByFields, t.userAggregates)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg(err.Error())
+		}
+		t.aggregationFieldMap = aggFieldMap
 	} else {
 		outputFieldIDs, err := translateToOutputFieldIDs(t.translatedOutputFields, schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
 		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
-		t.RetrieveRequest.OutputFieldsId = outputFieldIDs
+		t.OutputFieldsId = outputFieldIDs
 		t.plan.OutputFieldIds = outputFieldIDs
 		t.plan.DynamicFields = t.userDynamicFields
 	}
 
 	log.Ctx(ctx).Debug("translate output fields to field ids",
 		zap.Int64s("OutputFieldsID", t.OutputFieldsId),
-		zap.String("requestType", "query"))
+		zap.String("requestType", t.getQueryLabel()))
 	return nil
 }
 
@@ -464,7 +665,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName),
 		zap.Strings("partitionNames", t.request.GetPartitionNames()),
-		zap.String("requestType", "query"))
+		zap.String("requestType", t.getQueryLabel()))
 
 	if err := validateCollectionName(collectionName); err != nil {
 		log.Warn("Invalid collectionName.")
@@ -475,7 +676,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 	t.CollectionID = collID
 
@@ -483,7 +684,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("Failed to get collection info.", zap.String("collectionName", collectionName),
 			zap.Int64("collectionID", t.CollectionID), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		// The name was already resolved above (GetCollectionID succeeded), so a
+		// not-found here means the collection was concurrently dropped between the
+		// two lookups — a TOCTOU race, not the caller's input error. Leave it as the
+		// default SystemError; do not stamp InputError.
+		return err
 	}
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
@@ -493,6 +698,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.schema = schema
+	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
+		return err
+	}
 	err = common.CheckNamespace(t.schema.CollectionSchema, t.request.Namespace)
 	if err != nil {
 		return err
@@ -504,11 +712,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used"))
+		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
 	if t.mustUsePartitionKey && !t.partitionKeyMode {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
-			"because the mustUsePartitionKey config is true"))
+		return merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
+			"because the mustUsePartitionKey config is true")
 	}
 
 	for _, tag := range t.request.PartitionNames {
@@ -520,24 +728,40 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	log.Debug("Validate partition names.")
 
 	// fetch search_growing from query param
-	if t.RetrieveRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
+	if t.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
 		return err
 	}
-	queryParams, err := parseQueryParams(t.request.GetQueryParams())
+	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.queryMode == common.QueryModeLargeTopK, getPrimaryKeyDataType(schema.CollectionSchema))
 	if err != nil {
 		return err
 	}
 	if queryParams.collectionID > 0 && queryParams.collectionID != t.GetCollectionID() {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
-			"alias or database may have changed"))
+		return merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
+			"alias or database may have changed")
 	}
 	if queryParams.reduceType == reduce.IReduceInOrderForBest {
-		t.RetrieveRequest.ReduceStopForBest = true
+		t.ReduceStopForBest = true
 	}
-	t.RetrieveRequest.ReduceType = int32(queryParams.reduceType)
+	t.ReduceType = int32(queryParams.reduceType)
 
 	t.queryParams = queryParams
-	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
+
+	// ORDER BY requires explicit limit to prevent segment-level OOM.
+	// SortBuffer loads all matching rows into memory for sorting;
+	// MaxOutputSize only guards proxy reduce, not segment sorting.
+	if len(queryParams.orderByFields) > 0 && queryParams.limit == typeutil.Unlimited {
+		return merr.WrapErrParameterInvalidMsg("ORDER BY requires explicit limit")
+	}
+
+	// ORDER BY with iterator is not yet supported. Current iterator relies on
+	// PK-ordered pagination (plain query pipeline), while ORDER BY uses a
+	// different pipeline that sorts by arbitrary fields. Future work will
+	// enable iterator with user-specified ORDER BY fields.
+	if len(queryParams.orderByFields) > 0 && queryParams.isIterator {
+		return merr.WrapErrParameterInvalidMsg("ORDER BY with iterator is not supported")
+	}
+
+	t.Limit = queryParams.limit + queryParams.offset
 
 	if t.ids != nil {
 		pkField := ""
@@ -561,13 +785,19 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
 		return err
 	}
-	t.plan.GetQuery().Limit = t.RetrieveRequest.Limit
+	t.plan.GetQuery().Limit = t.Limit
+	if t.queryParams.queryIteratorCursor != nil {
+		t.plan.GetQuery().QueryIteratorCursor = t.queryParams.queryIteratorCursor
+	}
 
-	// global agg only return one line as result which will not incur memory risks
-	globalAgg := len(t.userAggregates) > 0 && len(t.GetGroupByFieldIds()) == 0
+	// Aggregation queries have bounded result sizes:
+	// - global aggregation (no GROUP BY) returns exactly one row
+	// - GROUP BY aggregation returns at most one row per distinct group value
+	// Both are safe without a limit, so exempt them from the limit requirement.
+	hasAgg := len(t.userAggregates) > 0
 
-	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited && !globalAgg {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
+	if planparserv2.IsAlwaysTruePlan(t.plan) && t.Limit == typeutil.Unlimited && !hasAgg {
+		return merr.WrapErrParameterInvalidMsg("empty expression should be used with limit")
 	}
 
 	// convert partition names only when requery is false
@@ -586,26 +816,27 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 			partitionNames = append(partitionNames, hashedPartitionNames...)
 		}
-		t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
 		if err != nil {
 			return err
 		}
 	}
 
-	// count with pagination
-	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed"))
+	// count(*) without GROUP BY is a single-value result, pagination is meaningless.
+	// But count(*) with GROUP BY + limit is valid (limits the number of groups returned).
+	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
+		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
 	t.plan.Namespace = t.request.Namespace
 
-	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(t.plan)
+	t.SerializedExprPlan, err = proto.Marshal(t.plan)
 	if err != nil {
 		return err
 	}
-
+	t.PkFilter = checkSegmentFilter(t.plan)
 	// Set username for this query request,
 	if username, _ := GetCurUserFromContext(ctx); username != "" {
-		t.RetrieveRequest.Username = username
+		t.Username = username
 	}
 
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
@@ -619,7 +850,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
-	t.RetrieveRequest.ConsistencyLevel = t.request.GetConsistencyLevel()
+	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.consistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
@@ -645,12 +876,15 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
+	// Extract physical time for entity-level TTL (issue #47413)
+	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
+	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
-	t.RetrieveRequest.IsIterator = queryParams.isIterator
+	t.IsIterator = queryParams.isIterator
 
 	if collectionInfo.collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
@@ -658,7 +892,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL))
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()
@@ -680,7 +914,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
-		zap.String("requestType", "query"))
+		zap.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
@@ -689,6 +923,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		CollectionName: t.collectionName,
 		Nq:             1,
 		Exec:           t.queryShard,
+		PreferredNodes: t.preferredNodes,
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))
@@ -707,7 +942,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
-		zap.String("requestType", "query"))
+		zap.String("requestType", t.getQueryLabel()))
 
 	var err error
 
@@ -718,7 +953,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
-		return nil
+		return merr.Wrapf(t.TraceCtx().Err(), "Query wait to finish timeout, msgID=%d", t.ID())
 	default:
 		log.Debug("all queries are finished or canceled")
 		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
@@ -732,16 +967,49 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		})
 	}
 
-	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
+	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
 
-	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema.CollectionSchema, t.plan, t.collectionName, t.aggregationFieldMap)
+	// Parse ORDER BY fields if present
+	var orderByFields []*orderby.OrderByField
+	if len(t.queryParams.orderByFields) > 0 {
+		orderByFields, err = orderby.ParseOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+		if err != nil {
+			log.Warn("fail to parse order by fields", zap.Error(err))
+			return err
+		}
+	}
 
-	t.result, err = reducer.Reduce(toReduceResults)
+	primaryFieldSchema, err := t.schema.GetPkField()
+	if err != nil {
+		log.Warn("failed to get primary field schema", zap.Error(err))
+		return err
+	}
+
+	pipeline, err := NewQueryPipeline(
+		t.schema.CollectionSchema,
+		t.queryParams.limit,
+		t.queryParams.offset,
+		t.queryParams.reduceType,
+		orderByFields,
+		t.GetGroupByFieldIds(),
+		t.GetAggregates(),
+		t.aggregationFieldMap,
+		filterSystemFields(t.GetOutputFieldsId()),
+	)
+	if err != nil {
+		log.Warn("fail to create query pipeline", zap.Error(err))
+		return err
+	}
+	t.result, err = pipeline.Execute(ctx, toReduceResults)
 	if err != nil {
 		log.Warn("fail to reduce query result", zap.Error(err))
 		return err
 	}
+
+	// FieldName/Type/IsDynamic setting and timestamp column removal are now
+	// handled by complementFieldOperator in the pipeline (for non-aggregation queries).
+	// Only geometry WKB→WKT conversion still needs to happen here.
 	for i, fieldData := range t.result.FieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
 			if err := validateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
@@ -755,13 +1023,9 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		reconstructStructFieldDataForQuery(t.result, t.schema.CollectionSchema)
 	}
 
-	primaryFieldSchema, err := t.schema.GetPkField()
-	if err != nil {
-		log.Warn("failed to get primary field schema", zap.Error(err))
-		return err
-	}
+	t.result.CollectionName = t.collectionName
 	t.result.PrimaryFieldName = primaryFieldSchema.GetName()
-	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
 
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
@@ -793,6 +1057,7 @@ func (t *queryTask) IsSubTask() bool {
 }
 
 func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	ctx = retry.WithMaxAttemptsContext(ctx, 1)
 	needOverrideMvcc := false
 	mvccTs := t.MvccTimestamp
 	if len(t.channelsMvcc) > 0 {
@@ -803,8 +1068,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		}
 	}
 
-	retrieveReq := typeutil.Clone(t.RetrieveRequest)
-	retrieveReq.GetBase().TargetID = nodeID
+	retrieveReq := shallowcopy.ShallowCopyRetrieveRequest(t.RetrieveRequest, nodeID)
 	if needOverrideMvcc && mvccTs > 0 {
 		retrieveReq.MvccTimestamp = mvccTs
 		retrieveReq.GuaranteeTimestamp = mvccTs
@@ -866,11 +1130,24 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		loopEnd int
 	)
 
+	// Detect if this is an element-level query
+	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
+
 	validRetrieveResults := []*internalpb.RetrieveResults{}
 	for _, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
 			continue
+		}
+		// Validate element-level consistency: if any result is element-level, all
+		// must be. The flag and element_indices come from querynode results, never
+		// from the request, so a mismatch is an internal contract violation.
+		if isElementLevel && !r.GetElementLevel() {
+			return nil, merr.WrapErrServiceInternalMsg("inconsistent element-level flag: expected all results to be element-level")
+		}
+		// Validate element_indices length matches ids length for element-level
+		if isElementLevel && len(r.GetElementIndices()) != size {
+			return nil, merr.WrapErrServiceInternalMsg("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
 		}
 		validRetrieveResults = append(validRetrieveResults, r)
 		loopEnd += size
@@ -886,21 +1163,39 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.GetFieldsData())
 	}
 
+	// Used in element-level query to limit the number of elements returned
+	elementLimit := -1
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
 		// IReduceInOrderForBest will try to get as many results as possible
 		// so loopEnd in this case will be set to the sum of all results' size
 		// to get as many qualified results as possible
 		if reduce.ShouldUseInputLimit(queryParams.reduceType) {
-			loopEnd = int(queryParams.limit)
+			if !isElementLevel {
+				loopEnd = int(queryParams.limit)
+			}
+			elementLimit = int(queryParams.limit)
 		}
 	}
 
 	// handle offset
 	if queryParams != nil && queryParams.offset > 0 {
-		for i := int64(0); i < queryParams.offset; i++ {
+		var skipped int64
+		for skipped < queryParams.offset {
 			sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 			if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 				return ret, nil
+			}
+			if isElementLevel {
+				elemIndices := validRetrieveResults[sel].GetElementIndices()[cursors[sel]]
+				indicesCount := int64(len(elemIndices.GetIndices()))
+				if skipped+indicesCount > queryParams.offset {
+					elemIndices.Indices = elemIndices.Indices[queryParams.offset-skipped:]
+					break
+				} else {
+					skipped += indicesCount
+				}
+			} else {
+				skipped++
 			}
 			cursors[sel]++
 		}
@@ -908,18 +1203,29 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].GetFieldsData(), int64(loopEnd))
 	var retSize int64
+	var availableCount int // for element-level: element count; for doc-level: doc count
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; j++ {
+	for j := 0; j < loopEnd && (elementLimit == -1 || availableCount < elementLimit); j++ {
 		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 			break
 		}
+
+		// Get element indices for element-level query
+		elemCount := 1 // default for doc-level
+		if isElementLevel {
+			elemIndices := validRetrieveResults[sel].GetElementIndices()[cursors[sel]]
+			elemCount = len(elemIndices.GetIndices())
+			ret.ElementIndices = append(ret.ElementIndices, convertInternalElementIndicesToMilvus(elemIndices))
+		}
+
 		fieldIdxs := idxComputers[sel].Compute(cursors[sel])
 		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel], fieldIdxs...)
+		availableCount += elemCount
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 
 		cursors[sel]++
@@ -928,19 +1234,19 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	return ret, nil
 }
 
-func reduceRetrieveResultsAndFillIfEmpty(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams, outputFieldsID []int64, schema *schemapb.CollectionSchema) (*milvuspb.QueryResults, error) {
-	result, err := reduceRetrieveResults(ctx, retrieveResults, queryParams)
-	if err != nil {
-		return nil, err
+// convertInternalElementIndicesToMilvus converts internalpb.ElementIndices (int32) to milvuspb.ElementIndices (int64)
+func convertInternalElementIndicesToMilvus(src *internalpb.ElementIndices) *milvuspb.ElementIndices {
+	if src == nil {
+		return nil
 	}
-
-	// filter system fields.
-	filtered := filterSystemFields(outputFieldsID)
-	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewMilvusResult(result), filtered, schema); err != nil {
-		return nil, fmt.Errorf("failed to fill retrieve results: %s", err.Error())
+	indices := src.GetIndices()
+	data := make([]int64, len(indices))
+	for i, v := range indices {
+		data[i] = int64(v)
 	}
-
-	return result, nil
+	return &milvuspb.ElementIndices{
+		Indices: &schemapb.LongArray{Data: data},
+	}
 }
 
 func (t *queryTask) TraceCtx() context.Context {

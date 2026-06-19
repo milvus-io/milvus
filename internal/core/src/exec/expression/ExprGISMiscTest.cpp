@@ -72,9 +72,9 @@ TEST_P(ExprTest, TestGISFunction) {
     // Create schema with geometry field
     auto schema = std::make_shared<Schema>();
     auto int_fid = schema->AddDebugField("int", DataType::INT64);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-    auto geom_fid = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->set_primary_field_id(int_fid);
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
@@ -91,8 +91,6 @@ TEST_P(ExprTest, TestGISFunction) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
-    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     // Define GIS test cases: {expression, description}
     std::vector<std::pair<std::string, std::string>> testcases = {
@@ -132,8 +130,8 @@ TEST(ExprTest, SealedSegmentAllOperators) {
     // 1. Build schema with geometry field and primary key
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto geo_fid = schema->AddDebugField("geo", DataType::GEOMETRY);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField(
         "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->set_primary_field_id(pk_fid);
 
@@ -182,7 +180,7 @@ TEST_P(ExprTest, TestGISFunctionWithControlledData) {
     // Create schema with geometry field
     auto schema = std::make_shared<Schema>();
     auto int_fid = schema->AddDebugField("int", DataType::INT64);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto geom_fid = schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->set_primary_field_id(int_fid);
@@ -304,7 +302,7 @@ TEST_P(ExprTest, TestSTIsValidFunction) {
 
     auto schema = std::make_shared<Schema>();
     auto int_fid = schema->AddDebugField("int", DataType::INT64);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto geom_fid = schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->set_primary_field_id(int_fid);
@@ -386,7 +384,7 @@ TEST_P(ExprTest, TestSTDWithinFunction) {
     // Create schema with geometry field
     auto schema = std::make_shared<Schema>();
     auto int_fid = schema->AddDebugField("int", DataType::INT64);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto geom_fid = schema->AddDebugField("geometry", DataType::GEOMETRY);
     schema->set_primary_field_id(int_fid);
@@ -530,9 +528,9 @@ TEST(ExprTest, ParseGISFunctionFilterExprs) {
     // Build Schema
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
-    auto vec_id = schema->AddDebugField(
+    schema->AddDebugField(
         "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField("geo", DataType::GEOMETRY);
     auto pk_id = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_id);
     // Generate data and load
@@ -562,9 +560,9 @@ TEST(ExprTest, ParseGISFunctionFilterExprsMultipleOps) {
     // Build Schema
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
-    auto vec_id = schema->AddDebugField(
+    schema->AddDebugField(
         "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField("geo", DataType::GEOMETRY);
     auto pk_id = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_id);
 
@@ -607,8 +605,8 @@ TEST(ExprTest, ParseGISFunctionFilterExprsMultipleOps) {
 TEST_P(ExprTest, TestCancellationInExprEval) {
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
-    auto int64_fid = schema->AddDebugField("counter", DataType::INT64);
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("counter", DataType::INT64);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     schema->set_primary_field_id(i64_fid);
     SetSchema(schema);
 

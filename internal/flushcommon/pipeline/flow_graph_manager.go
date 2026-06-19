@@ -18,18 +18,17 @@ package pipeline
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type FlowgraphManager interface {
@@ -67,7 +66,7 @@ func NewFlowgraphManager() *fgManagerImpl {
 
 func (fm *fgManagerImpl) AddFlowgraph(ds *DataSyncService) {
 	fm.flowgraphs.Insert(ds.vchannelName, ds)
-	metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+	metrics.DataNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 }
 
 func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
@@ -75,7 +74,7 @@ func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
 		fg.close()
 		fm.flowgraphs.Remove(channel)
 
-		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+		metrics.DataNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Dec()
 		util.GetRateCollector().RemoveFlowGraphChannel(channel)
 	}
 }

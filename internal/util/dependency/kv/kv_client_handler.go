@@ -6,8 +6,8 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var clientCreator = &etcdClientCreator{}
@@ -53,7 +53,7 @@ func getEtcdAndPath() (*clientv3.Client, string) {
 		if err != nil {
 			panic(fmt.Errorf("failed to create etcd client: %w", err))
 		}
-		path := paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue()
+		path := paramtable.Get().EtcdCfg.MetaRootPath.GetValue()
 		clientCreator.rootpath = &path
 	}
 	return clientCreator.client, *clientCreator.rootpath

@@ -29,13 +29,11 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // SearchPlan is a wrapper of the underlying C-structure C.CSearchPlan
@@ -43,11 +41,18 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
+func deletePlaceholderGroup(group unsafe.Pointer) {
+	C.DeletePlaceholderGroup(C.CPlaceholderGroup(group))
+}
+
 func createSearchPlanByExpr(col *CCollection, expr []byte) (*SearchPlan, error) {
+	if len(expr) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("empty expression plan")
+	}
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "Create Plan by expr failed")
+		return nil, merr.Wrap(err, "Create Plan by expr failed")
 	}
 	return &SearchPlan{cSearchPlan: cPlan}, nil
 }
@@ -75,13 +80,16 @@ func (plan *SearchPlan) delete() {
 }
 
 type SearchRequest struct {
-	plan              *SearchPlan
-	cPlaceholderGroup C.CPlaceholderGroup
-	msgID             int64
-	searchFieldID     int64
-	mvccTimestamp     typeutil.Timestamp
-	consistencyLevel  commonpb.ConsistencyLevel
-	collectionTTL     typeutil.Timestamp
+	plan                  *SearchPlan
+	cPlaceholderGroup     C.CPlaceholderGroup
+	msgID                 int64
+	searchFieldID         int64
+	mvccTimestamp         typeutil.Timestamp
+	consistencyLevel      commonpb.ConsistencyLevel
+	collectionTTL         typeutil.Timestamp
+	entityTTLPhysicalTime typeutil.Timestamp
+	filterOnly            bool // If true, only execute filter and return valid count (for two-stage search Stage 1)
+	enableExprCache       bool // If true, enable expression filter cache for two-stage search
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
@@ -94,16 +102,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 
 	if len(placeholderGrp) == 0 {
 		plan.delete()
-		return nil, errors.New("empty search request")
-	}
-
-	blobPtr := unsafe.Pointer(&placeholderGrp[0])
-	blobSize := C.int64_t(len(placeholderGrp))
-	var cPlaceholderGroup C.CPlaceholderGroup
-	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		plan.delete()
-		return nil, errors.Wrap(err, "parser searchRequest failed")
+		return nil, merr.WrapErrParameterInvalidMsg("empty search request")
 	}
 
 	metricTypeInPlan := plan.GetMetricType()
@@ -113,20 +112,34 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 	}
 
 	var fieldID C.int64_t
-	status = C.GetFieldID(plan.cSearchPlan, &fieldID)
+	status := C.GetFieldID(plan.cSearchPlan, &fieldID)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		plan.delete()
-		return nil, errors.Wrap(err, "get fieldID from plan failed")
+		return nil, merr.Wrap(err, "get fieldID from plan failed")
 	}
 
+	blobPtr := unsafe.Pointer(&placeholderGrp[0])
+	blobSize := C.int64_t(len(placeholderGrp))
+	var cPlaceholderGroup C.CPlaceholderGroup
+	status = C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		plan.delete()
+		return nil, merr.Wrap(err, "parser searchRequest failed")
+	}
+
+	cl := req.GetReq().GetConsistencyLevel()
+
 	return &SearchRequest{
-		plan:              plan,
-		cPlaceholderGroup: cPlaceholderGroup,
-		msgID:             req.GetReq().GetBase().GetMsgID(),
-		searchFieldID:     int64(fieldID),
-		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
-		consistencyLevel:  req.GetReq().GetConsistencyLevel(),
-		collectionTTL:     req.GetReq().GetCollectionTtlTimestamps(),
+		plan:                  plan,
+		cPlaceholderGroup:     cPlaceholderGroup,
+		msgID:                 req.GetReq().GetBase().GetMsgID(),
+		searchFieldID:         int64(fieldID),
+		mvccTimestamp:         req.GetReq().GetMvccTimestamp(),
+		consistencyLevel:      cl,
+		collectionTTL:         req.GetReq().GetCollectionTtlTimestamps(),
+		entityTTLPhysicalTime: req.GetReq().GetEntityTtlPhysicalTime(),
+		filterOnly:            req.GetFilterOnly(),
+		enableExprCache:       req.GetEnableExprCache(),
 	}, nil
 }
 
@@ -143,45 +156,66 @@ func (req *SearchRequest) Plan() *SearchPlan {
 	return req.plan
 }
 
+func (req *SearchRequest) PlaceholderGroup() unsafe.Pointer {
+	return unsafe.Pointer(req.cPlaceholderGroup)
+}
+
 func (req *SearchRequest) SearchFieldID() int64 {
 	return req.searchFieldID
+}
+
+func (req *SearchRequest) FilterOnly() bool {
+	return req.filterOnly
+}
+
+func (req *SearchRequest) EnableExprCache() bool {
+	return req.enableExprCache
 }
 
 func (req *SearchRequest) Delete() {
 	if req.plan != nil {
 		req.plan.delete()
 	}
-	C.DeletePlaceholderGroup(req.cPlaceholderGroup)
+	deletePlaceholderGroup(unsafe.Pointer(req.cPlaceholderGroup))
 }
 
 // RetrievePlan is a wrapper of the underlying C-structure C.CRetrievePlan
 type RetrievePlan struct {
-	cRetrievePlan    C.CRetrievePlan
-	Timestamp        typeutil.Timestamp
-	msgID            int64 // only used to debug.
-	maxLimitSize     int64
-	ignoreNonPk      bool
-	consistencyLevel commonpb.ConsistencyLevel
-	collectionTTL    typeutil.Timestamp
+	cRetrievePlan         C.CRetrievePlan
+	Timestamp             typeutil.Timestamp
+	msgID                 int64 // only used to debug.
+	maxLimitSize          int64
+	ignoreNonPk           bool
+	consistencyLevel      commonpb.ConsistencyLevel
+	collectionTTL         typeutil.Timestamp
+	entityTTLPhysicalTime typeutil.Timestamp
 }
 
-func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64, consistencylevel commonpb.ConsistencyLevel, collectionTTL typeutil.Timestamp) (*RetrievePlan, error) {
+func NewRetrievePlan(col *CCollection,
+	expr []byte,
+	timestamp typeutil.Timestamp,
+	msgID int64,
+	consistencylevel commonpb.ConsistencyLevel,
+	collectionTTL typeutil.Timestamp,
+	entityTTLPhysicalTime typeutil.Timestamp,
+) (*RetrievePlan, error) {
 	if col.rawPointer() == nil {
-		return nil, errors.New("collection is released")
+		return nil, merr.WrapErrServiceInternalMsg("collection is released")
 	}
 	var cPlan C.CRetrievePlan
 	status := C.CreateRetrievePlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "Create retrieve plan by expr failed")
+		return nil, merr.Wrap(err, "Create retrieve plan by expr failed")
 	}
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	return &RetrievePlan{
-		cRetrievePlan:    cPlan,
-		Timestamp:        timestamp,
-		msgID:            msgID,
-		maxLimitSize:     maxLimitSize,
-		consistencyLevel: consistencylevel,
-		collectionTTL:    collectionTTL,
+		cRetrievePlan:         cPlan,
+		Timestamp:             timestamp,
+		msgID:                 msgID,
+		maxLimitSize:          maxLimitSize,
+		consistencyLevel:      consistencylevel,
+		collectionTTL:         collectionTTL,
+		entityTTLPhysicalTime: entityTTLPhysicalTime,
 	}, nil
 }
 

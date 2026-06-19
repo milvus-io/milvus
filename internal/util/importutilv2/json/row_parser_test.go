@@ -23,11 +23,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type RowParserSuite struct {
@@ -656,6 +656,43 @@ func (suite *RowParserSuite) TestValid() {
 	suite.runValid(&testCase{name: "_ valid parse 2", content: suite.genAllTypesRowData("x", 2, "function_sparse_vector")})
 }
 
+func (suite *RowParserSuite) TestNullableStructArrayNullRow() {
+	suite.setSchema(true, true, true)
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+	structArray.Nullable = true
+	for _, subField := range structArray.GetFields() {
+		subField.Nullable = true
+	}
+
+	parser, err := NewRowParser(schema)
+	suite.NoError(err)
+
+	row, err := parser.Parse(map[string]any{
+		structArray.GetName(): nil,
+	})
+	suite.NoError(err)
+	for _, subField := range structArray.GetFields() {
+		value, ok := row[subField.GetFieldID()]
+		suite.True(ok)
+		suite.Nil(value)
+	}
+}
+
+func (suite *RowParserSuite) TestNonNullableStructArrayNullRow() {
+	suite.setSchema(true, true, true)
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+
+	parser, err := NewRowParser(schema)
+	suite.NoError(err)
+
+	_, err = parser.Parse(map[string]any{
+		structArray.GetName(): nil,
+	})
+	suite.Error(err)
+}
+
 func (suite *RowParserSuite) runParseError(c *testCase) {
 	t := suite.T()
 	t.Helper()
@@ -730,7 +767,7 @@ func (suite *RowParserSuite) TestParseError() {
 			{name: "dim error bf16_vector", content: suite.genAllTypesRowData("bf16_vector", []any{json.Number("0.3")})},
 			{name: "dim error int8_vector", content: suite.genAllTypesRowData("int8_vector", []any{json.Number("1")})},
 			{name: "format error sparse_vector", content: suite.genAllTypesRowData("sparse_vector", map[string]any{"indices": []int64{}})},
-			{name: "function output no need provide", content: suite.genAllTypesRowData("function_sparse_vector", map[string]float64{"1": 0.1, "2": 0.2})},
+			{name: "function output not allowed", content: suite.genAllTypesRowData("function_sparse_vector", map[string]float64{"1": 0.1, "2": 0.2})},
 		}
 	}
 
@@ -752,6 +789,129 @@ func (suite *RowParserSuite) TestParseError() {
 	}
 }
 
+func TestReconstructArrayForStructArray_InconsistentFields(t *testing.T) {
+	subFields := []string{"sub_int", "sub_str"}
+
+	// Element missing a field should produce an error
+	raw := []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello"},
+		map[string]any{"sub_int": 2}, // missing "sub_str"
+	}
+	_, err := reconstructArrayForStructArray(raw, subFields)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
+
+	// Element with an extra field should produce an error
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello", "sub_extra": true},
+	}
+	_, err = reconstructArrayForStructArray(raw, subFields)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
+
+	// Consistent fields should succeed
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello1"},
+		map[string]any{"sub_int": 2, "sub_str": "hello2"},
+	}
+	result, err := reconstructArrayForStructArray(raw, subFields)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+
+	// Empty array should succeed
+	raw = []any{}
+	result, err = reconstructArrayForStructArray(raw, subFields)
+	assert.NoError(t, err)
+	assert.Len(t, result, 0)
+
+	// Single element should succeed
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello"},
+	}
+	result, err = reconstructArrayForStructArray(raw, subFields)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+}
+
+func TestArrayOfVectorToFieldData_DimensionMismatch(t *testing.T) {
+	dim := 3
+	fieldID := int64(100)
+	field := &schemapb.FieldSchema{
+		FieldID:     fieldID,
+		Name:        "test_vec",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "3"},
+		},
+	}
+	parser := &rowParser{
+		id2Dim:   map[int64]int{fieldID: dim},
+		id2Field: map[int64]*schemapb.FieldSchema{fieldID: field},
+	}
+
+	// Mismatched dimension: expect 3, got 2
+	vectors := []any{
+		[]any{json.Number("1.0"), json.Number("2.0")}, // dim=2, expected 3
+	}
+	_, err := parser.arrayOfVectorToFieldData(vectors, field)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "dimension")
+
+	// Correct dimension should succeed
+	vectors = []any{
+		[]any{json.Number("1.0"), json.Number("2.0"), json.Number("3.0")},
+	}
+	result, err := parser.arrayOfVectorToFieldData(vectors, field)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(dim), result.Dim)
+}
+
 func TestJsonRowParser(t *testing.T) {
 	suite.Run(t, new(RowParserSuite))
+}
+
+func TestParseTextFieldValue(t *testing.T) {
+	// TEXT fields should be parsed as strings without maxLength validation.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "text_field",
+				DataType: schemapb.DataType_Text,
+				// no TypeParams — TEXT has no max_length
+			},
+		},
+	}
+
+	parser, err := NewRowParser(schema)
+	assert.NoError(t, err)
+
+	// Parse a row with a TEXT value (including very long text)
+	longText := strings.Repeat("hello world ", 1000) // ~12000 chars, no maxLength check
+	row := map[string]any{
+		"text_field": longText,
+	}
+	rowData, err := json.Marshal(row)
+	assert.NoError(t, err)
+
+	var rawRow any
+	err = json.Unmarshal(rowData, &rawRow)
+	assert.NoError(t, err)
+
+	result, err := parser.Parse(rawRow)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify TEXT field value is correctly parsed
+	val, ok := result[int64(101)]
+	assert.True(t, ok)
+	assert.Equal(t, longText, val)
 }

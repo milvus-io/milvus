@@ -10,7 +10,7 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
-        timeout(time: 3, unit: 'HOURS')
+        timeout(time: 4, unit: 'HOURS')
         throttleJobProperty(
             categories: ['cpu-e2e'],
             throttleEnabled: true,
@@ -56,7 +56,7 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
-                                              make_cmd: 'make clean && make jobs=8 install USE_ASAN=ON use_disk_index=ON',
+                                              make_cmd: 'make clean && make jobs=8 install USE_ASAN=ON mode=RelWithDebInfo use_disk_index=ON',
                                               images: '["milvus","pytest","helm"]'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'

@@ -2750,9 +2750,9 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lz4_flex"
-version = "0.11.5"
+version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08ab2867e3eeeca90e844d1940eab391c9dc5228783db2ed999acbc0a9ed375a"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
 
 [[package]]
 name = "maplit"
@@ -3003,7 +3003,7 @@ dependencies = [
 [[package]]
 name = "ownedbytes"
 version = "0.7.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "stable_deref_trait",
 ]
@@ -3112,6 +3112,12 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "pinyin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16f2611cd06a1ac239a0cea4521de9eb068a6ca110324ee00631aa68daa74fc0"
 
 [[package]]
 name = "pkg-config"
@@ -3954,7 +3960,7 @@ dependencies = [
 [[package]]
 name = "tantivy"
 version = "0.23.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -4028,6 +4034,7 @@ dependencies = [
  "log",
  "md5",
  "once_cell",
+ "pinyin",
  "prost",
  "rand 0.7.3",
  "rand 0.9.2",
@@ -4060,7 +4067,7 @@ dependencies = [
 [[package]]
 name = "tantivy-bitpacker"
 version = "0.6.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "bitpacking 0.9.2",
 ]
@@ -4083,7 +4090,7 @@ dependencies = [
 [[package]]
 name = "tantivy-columnar"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "downcast-rs",
  "fastdivide",
@@ -4110,7 +4117,7 @@ dependencies = [
 [[package]]
 name = "tantivy-common"
 version = "0.7.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -4153,7 +4160,7 @@ dependencies = [
 [[package]]
 name = "tantivy-query-grammar"
 version = "0.22.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "nom",
 ]
@@ -4171,7 +4178,7 @@ dependencies = [
 [[package]]
 name = "tantivy-sstable"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "futures-util",
  "itertools 0.14.0",
@@ -4193,7 +4200,7 @@ dependencies = [
 [[package]]
 name = "tantivy-stacker"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "murmurhash32",
  "rand_distr",
@@ -4211,7 +4218,7 @@ dependencies = [
 [[package]]
 name = "tantivy-tokenizer-api"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#6670c135ddc8ea5b75dbb8383ad5c7e4208a062f"
+source = "git+https://github.com/zilliztech/tantivy.git#96f3335ab5f061926c5b44cf246e81243e1dedc5"
 dependencies = [
  "serde",
 ]

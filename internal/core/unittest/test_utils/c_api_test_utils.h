@@ -27,9 +27,8 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "segcore/Collection.h"
-#include "segcore/reduce/Reduce.h"
-#include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/Types.h"
 #include "futures/Future.h"
@@ -79,7 +78,7 @@ AppendFieldInfoForTest(CLoadIndexInfo c_load_index_info,
 
 namespace {
 
-std::string
+[[maybe_unused]] std::string
 generate_max_float_query_data(int all_nq, int max_float_nq) {
     assert(max_float_nq <= all_nq);
     namespace ser = milvus::proto::common;
@@ -129,12 +128,13 @@ generate_query_data(int nq) {
     return blob;
 }
 
-void
+[[maybe_unused]] void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
                            int group_size = 1) {
     auto nq = ((SearchResult*)results[0])->total_nq_;
     std::unordered_set<PkType> pk_set;
-    std::unordered_map<GroupByValueType, int> group_by_map;
+    std::unordered_map<CompositeGroupKey, int, CompositeGroupKeyHash>
+        group_by_map;
     for (int qi = 0; qi < nq; qi++) {
         pk_set.clear();
         group_by_map.clear();
@@ -148,16 +148,32 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
                 auto ret = pk_set.insert(search_result->primary_keys_[ki]);
                 ASSERT_TRUE(ret.second);
 
-                if (search_result->group_by_values_.has_value() &&
-                    search_result->group_by_values_.value().size() > ki) {
-                    auto group_by_val =
-                        search_result->group_by_values_.value()[ki];
+                if (search_result->composite_group_by_values_.has_value() &&
+                    search_result->composite_group_by_values_.value().size() >
+                        ki) {
+                    const auto& group_by_val =
+                        search_result->composite_group_by_values_.value()[ki];
                     group_by_map[group_by_val] += 1;
                     ASSERT_TRUE(group_by_map[group_by_val] <= group_size);
                 }
             }
         }
     }
+}
+
+// Flatten composite group_by values to a single-field vector. qn-reduce
+// group_by tests predate master's multi-field composite group_by (PR #48971)
+// and only exercise single-field group_by, so taking the first field of each
+// CompositeGroupKey preserves the original test intent.
+[[maybe_unused]] static std::vector<milvus::GroupByValueType>
+ExtractFirstFieldGroupByValues(const milvus::SearchResult& sr) {
+    std::vector<milvus::GroupByValueType> result;
+    const auto& composite = sr.composite_group_by_values_.value();
+    result.reserve(composite.size());
+    for (const auto& key : composite) {
+        result.push_back(key[0]);
+    }
+    return result;
 }
 
 template <class TraitType = milvus::FloatVector>
@@ -187,7 +203,7 @@ get_default_schema_config() {
     return fmt.str();
 }
 
-const char*
+[[maybe_unused]] const char*
 get_default_schema_config_nullable() {
     static std::string conf = R"(name: "default-collection"
                                 fields: <
@@ -219,14 +235,23 @@ get_default_schema_config_nullable() {
     return conf.c_str();
 }
 
-CStatus
+[[maybe_unused]] CStatus
 CSearch(CSegmentInterface c_segment,
         CSearchPlan c_plan,
         CPlaceholderGroup c_placeholder_group,
         uint64_t timestamp,
-        CSearchResult* result) {
-    auto future = AsyncSearch(
-        {}, c_segment, c_plan, c_placeholder_group, timestamp, 0, 0);
+        CSearchResult* result,
+        bool filter_only = false) {
+    auto future = AsyncSearch({},
+                              c_segment,
+                              c_plan,
+                              c_placeholder_group,
+                              timestamp,
+                              0,
+                              0,
+                              0,
+                              filter_only,
+                              false);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 
@@ -247,13 +272,29 @@ CSearch(CSegmentInterface c_segment,
     return status;
 }
 
-CStatus
+// Filter-only search wrapper for two-stage search testing
+[[maybe_unused]] CStatus
+CSearchFilterOnly(CSegmentInterface c_segment,
+                  CSearchPlan c_plan,
+                  uint64_t timestamp,
+                  CSearchResult* result) {
+    return CSearch(c_segment, c_plan, nullptr, timestamp, result, true);
+}
+
+[[maybe_unused]] CStatus
 CRetrieve(CSegmentInterface c_segment,
           CRetrievePlan c_plan,
           uint64_t timestamp,
           CRetrieveResult** result) {
-    auto future = AsyncRetrieve(
-        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0, 0);
+    auto future = AsyncRetrieve({},
+                                c_segment,
+                                c_plan,
+                                timestamp,
+                                DEFAULT_MAX_OUTPUT_SIZE,
+                                false,
+                                0,
+                                0,
+                                0);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 
@@ -274,7 +315,7 @@ CRetrieve(CSegmentInterface c_segment,
     return status;
 }
 
-CStatus
+[[maybe_unused]] CStatus
 CRetrieveByOffsets(CSegmentInterface c_segment,
                    CRetrievePlan c_plan,
                    int64_t* offsets,
@@ -338,13 +379,13 @@ generate_collection_schema(std::string metric_type, int dim) {
     other_field_schema3->set_data_type(schema::DataType::Timestamptz);
 
     std::string schema_string;
-    auto marshal = google::protobuf::TextFormat::PrintToString(
+    bool marshal = google::protobuf::TextFormat::PrintToString(
         collection_schema, &schema_string);
-    assert(marshal);
+    AssertInfo(marshal, "failed to serialize collection schema");
     return schema_string;
 }
 
-const char*
+[[maybe_unused]] const char*
 get_default_index_meta() {
     static std::string conf = R"(maxIndexRowCount: 1000
                                 index_metas: <
@@ -371,7 +412,7 @@ get_default_index_meta() {
     return conf.c_str();
 }
 
-IndexBasePtr
+[[maybe_unused]] IndexBasePtr
 generate_index(void* raw_data,
                DataType field_type,
                MetricType metric_type,

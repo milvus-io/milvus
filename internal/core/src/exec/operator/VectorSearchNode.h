@@ -85,8 +85,6 @@ class PhyVectorSearchNode : public Operator {
 
     const milvus::query::PlaceholderGroup* placeholder_group_;
     milvus::SearchInfo search_info_;
-
-    milvus::SearchResult* search_result_;
 };
 }  // namespace exec
 }  // namespace milvus

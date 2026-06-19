@@ -17,12 +17,11 @@
 package rootcoord
 
 import (
-	"fmt"
-
 	"golang.org/x/exp/maps"
 
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type nameDb struct {
@@ -86,7 +85,7 @@ func (n *nameDb) listCollections(dbName string) map[string]UniqueID {
 func (n *nameDb) listCollectionID(dbName string) ([]typeutil.UniqueID, error) {
 	name2ID, ok := n.db2Name2ID[dbName]
 	if !ok {
-		return nil, fmt.Errorf("database not exist: %s", dbName)
+		return nil, merr.WrapErrDatabaseNotFound(dbName)
 	}
 	return maps.Values(name2ID), nil
 }

@@ -19,22 +19,21 @@ package etcdkv
 import (
 	"context"
 	"fmt"
-	"path"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // implementation assertion
@@ -100,7 +99,7 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 			return nil
 		case <-time.After(60 * time.Second):
 			e.Server.Stop() // trigger a shutdown
-			return errors.New("Embedded etcd took too long to start")
+			return merr.WrapErrServiceInternalMsg("Embedded etcd took too long to start")
 		}
 	})
 	if err != nil {
@@ -120,11 +119,11 @@ func (kv *EmbedEtcdKV) Close() {
 
 // GetPath returns the full path by given key
 func (kv *EmbedEtcdKV) GetPath(key string) string {
-	return path.Join(kv.rootPath, key)
+	return util.GetPath(kv.rootPath, key)
 }
 
 func (kv *EmbedEtcdKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	prefix = path.Join(kv.rootPath, prefix)
+	prefix = kv.GetPath(prefix)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
@@ -139,7 +138,7 @@ func (kv *EmbedEtcdKV) WalkWithPrefix(ctx context.Context, prefix string, pagina
 	for {
 		resp, err := kv.client.Get(ctx1, key, opts...)
 		if err != nil {
-			return err
+			return merr.WrapErrIoFailed(key, err)
 		}
 
 		for _, kv := range resp.Kvs {
@@ -159,14 +158,14 @@ func (kv *EmbedEtcdKV) WalkWithPrefix(ctx context.Context, prefix string, pagina
 
 // LoadWithPrefix returns all the keys and values with the given key prefix
 func (kv *EmbedEtcdKV) LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error) {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	log.Ctx(ctx).Debug("LoadWithPrefix ", zap.String("prefix", key))
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx1, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, merr.WrapErrIoFailed(key, err)
 	}
 
 	keys := make([]string, 0, resp.Count)
@@ -179,19 +178,19 @@ func (kv *EmbedEtcdKV) LoadWithPrefix(ctx context.Context, key string) ([]string
 }
 
 func (kv *EmbedEtcdKV) Has(ctx context.Context, key string) (bool, error) {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	log.Ctx(ctx).Debug("Has", zap.String("key", key))
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx1, key, clientv3.WithCountOnly())
 	if err != nil {
-		return false, err
+		return false, merr.WrapErrIoFailed(key, err)
 	}
 	return resp.Count != 0, nil
 }
 
 func (kv *EmbedEtcdKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
-	prefix = path.Join(kv.rootPath, prefix)
+	prefix = kv.GetPath(prefix)
 	log.Ctx(ctx).Debug("HasPrefix", zap.String("prefix", prefix))
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
@@ -199,7 +198,7 @@ func (kv *EmbedEtcdKV) HasPrefix(ctx context.Context, prefix string) (bool, erro
 
 	resp, err := kv.client.Get(ctx1, prefix, clientv3.WithPrefix(), clientv3.WithCountOnly(), clientv3.WithLimit(1))
 	if err != nil {
-		return false, err
+		return false, merr.WrapErrIoFailed(prefix, err)
 	}
 
 	return resp.Count != 0, nil
@@ -207,14 +206,14 @@ func (kv *EmbedEtcdKV) HasPrefix(ctx context.Context, prefix string) (bool, erro
 
 // LoadBytesWithPrefix returns all the keys and values with the given key prefix
 func (kv *EmbedEtcdKV) LoadBytesWithPrefix(ctx context.Context, key string) ([]string, [][]byte, error) {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	log.Ctx(ctx).Debug("LoadBytesWithPrefix ", zap.String("prefix", key))
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx1, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, merr.WrapErrIoFailed(key, err)
 	}
 	keys := make([]string, 0, resp.Count)
 	values := make([][]byte, 0, resp.Count)
@@ -227,14 +226,14 @@ func (kv *EmbedEtcdKV) LoadBytesWithPrefix(ctx context.Context, key string) ([]s
 
 // LoadBytesWithPrefix2 returns all the keys and values with versions by the given key prefix
 func (kv *EmbedEtcdKV) LoadBytesWithPrefix2(ctx context.Context, key string) ([]string, [][]byte, []int64, error) {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	log.Ctx(ctx).Debug("LoadBytesWithPrefix2 ", zap.String("prefix", key))
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx1, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, merr.WrapErrIoFailed(key, err)
 	}
 	keys := make([]string, 0, resp.Count)
 	values := make([][]byte, 0, resp.Count)
@@ -249,12 +248,12 @@ func (kv *EmbedEtcdKV) LoadBytesWithPrefix2(ctx context.Context, key string) ([]
 
 // Load returns value of the given key
 func (kv *EmbedEtcdKV) Load(ctx context.Context, key string) (string, error) {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx1, key)
 	if err != nil {
-		return "", err
+		return "", merr.WrapErrIoFailed(key, err)
 	}
 	if resp.Count <= 0 {
 		return "", merr.WrapErrIoKeyNotFound(key)
@@ -265,12 +264,12 @@ func (kv *EmbedEtcdKV) Load(ctx context.Context, key string) (string, error) {
 
 // LoadBytes returns value of the given key
 func (kv *EmbedEtcdKV) LoadBytes(ctx context.Context, key string) ([]byte, error) {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx1, key)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrIoFailed(key, err)
 	}
 	if resp.Count <= 0 {
 		return nil, merr.WrapErrIoKeyNotFound(key)
@@ -283,14 +282,14 @@ func (kv *EmbedEtcdKV) LoadBytes(ctx context.Context, key string) ([]byte, error
 func (kv *EmbedEtcdKV) MultiLoad(ctx context.Context, keys []string) ([]string, error) {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, keyLoad := range keys {
-		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
+		ops = append(ops, clientv3.OpGet(kv.GetPath(keyLoad)))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx1).If().Then(ops...).Commit()
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
 	}
 
 	result := make([]string, 0, len(keys))
@@ -309,7 +308,7 @@ func (kv *EmbedEtcdKV) MultiLoad(ctx context.Context, keys []string) ([]string, 
 	if len(invalid) != 0 {
 		log.Ctx(ctx).Debug("MultiLoad: there are invalid keys",
 			zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		err = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 		return result, err
 	}
 	return result, nil
@@ -319,14 +318,14 @@ func (kv *EmbedEtcdKV) MultiLoad(ctx context.Context, keys []string) ([]string, 
 func (kv *EmbedEtcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, error) {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, keyLoad := range keys {
-		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
+		ops = append(ops, clientv3.OpGet(kv.GetPath(keyLoad)))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx1).If().Then(ops...).Commit()
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
 	}
 
 	result := make([][]byte, 0, len(keys))
@@ -345,7 +344,7 @@ func (kv *EmbedEtcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]b
 	if len(invalid) != 0 {
 		log.Ctx(ctx).Debug("MultiLoadBytes: there are invalid keys",
 			zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		err = merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 		return result, err
 	}
 	return result, nil
@@ -353,14 +352,14 @@ func (kv *EmbedEtcdKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]b
 
 // LoadBytesWithRevision returns keys, values and revision with given key prefix.
 func (kv *EmbedEtcdKV) LoadBytesWithRevision(ctx context.Context, key string) ([]string, [][]byte, int64, error) {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	log.Ctx(ctx).Debug("LoadBytesWithRevision ", zap.String("prefix", key))
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx1, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, 0, merr.WrapErrIoFailed(key, err)
 	}
 	keys := make([]string, 0, resp.Count)
 	values := make([][]byte, 0, resp.Count)
@@ -373,91 +372,100 @@ func (kv *EmbedEtcdKV) LoadBytesWithRevision(ctx context.Context, key string) ([
 
 // Save saves the key-value pair.
 func (kv *EmbedEtcdKV) Save(ctx context.Context, key, value string) error {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	_, err := kv.client.Put(ctx1, key, value)
-	return err
+	return merr.WrapErrIoFailed(key, err)
 }
 
 // SaveBytes saves the key-value pair.
 func (kv *EmbedEtcdKV) SaveBytes(ctx context.Context, key string, value []byte) error {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	_, err := kv.client.Put(ctx1, key, string(value))
-	return err
+	return merr.WrapErrIoFailed(key, err)
 }
 
 // SaveBytesWithLease is a function to put value in etcd with etcd lease options.
 func (kv *EmbedEtcdKV) SaveBytesWithLease(ctx context.Context, key string, value []byte, id clientv3.LeaseID) error {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	_, err := kv.client.Put(ctx1, key, string(value), clientv3.WithLease(id))
-	return err
+	return merr.WrapErrIoFailed(key, err)
 }
 
 // MultiSave saves the key-value pairs in a transaction.
 func (kv *EmbedEtcdKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	ops := make([]clientv3.Op, 0, len(kvs))
 	for key, value := range kvs {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
+		ops = append(ops, clientv3.OpPut(kv.GetPath(key), value))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx1).If().Then(ops...).Commit()
-	return err
+	if err != nil {
+		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+	}
+	return nil
 }
 
 // MultiSaveBytes saves the key-value pairs in a transaction.
 func (kv *EmbedEtcdKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) error {
 	ops := make([]clientv3.Op, 0, len(kvs))
 	for key, value := range kvs {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
+		ops = append(ops, clientv3.OpPut(kv.GetPath(key), string(value)))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx1).If().Then(ops...).Commit()
-	return err
+	if err != nil {
+		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+	}
+	return nil
 }
 
 // RemoveWithPrefix removes the keys with given prefix.
 func (kv *EmbedEtcdKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
-	key := path.Join(kv.rootPath, prefix)
+	key := kv.GetPath(prefix)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Delete(ctx1, key, clientv3.WithPrefix())
-	return err
+	return merr.WrapErrIoFailed(key, err)
 }
 
 // Remove removes the key.
 func (kv *EmbedEtcdKV) Remove(ctx context.Context, key string) error {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Delete(ctx1, key)
-	return err
+	return merr.WrapErrIoFailed(key, err)
 }
 
 // MultiRemove removes the keys in a transaction.
 func (kv *EmbedEtcdKV) MultiRemove(ctx context.Context, keys []string) error {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, key := range keys {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, key)))
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(key)))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx1).If().Then(ops...).Commit()
-	return err
+	if err != nil {
+		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+	}
+	return nil
 }
 
 // MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
@@ -474,11 +482,11 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]
 	removals = removeKeys.Complement(saveKeys).Collect()
 
 	for _, keyDelete := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete)))
 	}
 
 	for key, value := range saves {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
+		ops = append(ops, clientv3.OpPut(kv.GetPath(key), value))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
@@ -486,7 +494,7 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]
 
 	resp, err := kv.client.Txn(ctx1).If(cmps...).Then(ops...).Commit()
 	if err != nil {
-		return err
+		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
 	}
 
 	if !resp.Succeeded {
@@ -500,34 +508,37 @@ func (kv *EmbedEtcdKV) MultiSaveBytesAndRemove(ctx context.Context, saves map[st
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 
 	for _, keyDelete := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete)))
 	}
 
 	for key, value := range saves {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
+		ops = append(ops, clientv3.OpPut(kv.GetPath(key), string(value)))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx1).If().Then(ops...).Commit()
-	return err
+	if err != nil {
+		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+	}
+	return nil
 }
 
 func (kv *EmbedEtcdKV) Watch(ctx context.Context, key string) clientv3.WatchChan {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithCreatedNotify())
 	return rch
 }
 
 func (kv *EmbedEtcdKV) WatchWithPrefix(ctx context.Context, key string) clientv3.WatchChan {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	return rch
 }
 
 func (kv *EmbedEtcdKV) WatchWithRevision(ctx context.Context, key string, revision int64) clientv3.WatchChan {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	return rch
 }
@@ -541,11 +552,11 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves m
 
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for _, keyDelete := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete), clientv3.WithPrefix()))
 	}
 
 	for key, value := range saves {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
+		ops = append(ops, clientv3.OpPut(kv.GetPath(key), value))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
@@ -553,7 +564,7 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves m
 
 	resp, err := kv.client.Txn(ctx1).If(cmps...).Then(ops...).Commit()
 	if err != nil {
-		return err
+		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
 	}
 
 	if !resp.Succeeded {
@@ -566,18 +577,21 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves m
 func (kv *EmbedEtcdKV) MultiSaveBytesAndRemoveWithPrefix(ctx context.Context, saves map[string][]byte, removals []string) error {
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for key, value := range saves {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
+		ops = append(ops, clientv3.OpPut(kv.GetPath(key), string(value)))
 	}
 
 	for _, keyDelete := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete), clientv3.WithPrefix()))
 	}
 
 	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx1).If().Then(ops...).Commit()
-	return err
+	if err != nil {
+		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+	}
+	return nil
 }
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
@@ -587,12 +601,12 @@ func (kv *EmbedEtcdKV) CompareVersionAndSwap(ctx context.Context, key string, ve
 	defer cancel()
 	resp, err := kv.client.Txn(ctx1).If(
 		clientv3.Compare(
-			clientv3.Version(path.Join(kv.rootPath, key)),
+			clientv3.Version(kv.GetPath(key)),
 			"=",
 			version)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target)).Commit()
+		Then(clientv3.OpPut(kv.GetPath(key), target)).Commit()
 	if err != nil {
-		return false, err
+		return false, merr.WrapErrIoFailed(key, err)
 	}
 	return resp.Succeeded, nil
 }
@@ -604,12 +618,12 @@ func (kv *EmbedEtcdKV) CompareVersionAndSwapBytes(ctx context.Context, key strin
 	defer cancel()
 	resp, err := kv.client.Txn(ctx1).If(
 		clientv3.Compare(
-			clientv3.Version(path.Join(kv.rootPath, key)),
+			clientv3.Version(kv.GetPath(key)),
 			"=",
 			version)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
+		Then(clientv3.OpPut(kv.GetPath(key), string(target), opts...)).Commit()
 	if err != nil {
-		return false, err
+		return false, merr.WrapErrIoFailed(key, err)
 	}
 	return resp.Succeeded, nil
 }

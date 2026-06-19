@@ -16,7 +16,7 @@
 
 package datacoord
 
-import "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+import "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 
 // SegmentOperator is function type to update segment info.
 type SegmentOperator func(segment *SegmentInfo) bool
@@ -43,7 +43,21 @@ func SetTextIndexLogs(textIndexLogs map[int64]*datapb.TextIndexStats) SegmentOpe
 	}
 }
 
-func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
+func SetStatslogs(statslogs []*datapb.FieldBinlog) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		segment.Statslogs = statslogs
+		return true
+	}
+}
+
+func SetBm25Statslogs(bm25Statslogs []*datapb.FieldBinlog) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		segment.Bm25Statslogs = bm25Statslogs
+		return true
+	}
+}
+
+func SetJSONKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
 	return func(segment *SegmentInfo) bool {
 		if segment.JsonKeyStats == nil {
 			segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
@@ -51,6 +65,16 @@ func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) Segmen
 		for field, logs := range jsonKeyIndexLogs {
 			segment.JsonKeyStats[field] = logs
 		}
+		return true
+	}
+}
+
+func SetSchemaVersion(schemaVersion int32) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		if segment.GetSchemaVersion() == schemaVersion {
+			return false
+		}
+		segment.SchemaVersion = schemaVersion
 		return true
 	}
 }

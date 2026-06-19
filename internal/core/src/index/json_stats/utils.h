@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstring>
+#include "common/FastMem.h"
 #include <map>
 #include <optional>
 #include <set>
@@ -73,7 +74,7 @@ UnescapeJsonString(const std::string& escaped) {
         std::string quoted;
         quoted.resize(escaped.size() + 2);
         quoted[0] = '"';
-        std::memcpy(&quoted[1], escaped.data(), escaped.size());
+        milvus::fastmem::FastMemcpy(&quoted[1], escaped.data(), escaped.size());
         quoted[quoted.size() - 1] = '"';
         simdjson::dom::element elem = parser.parse(quoted);
         if (elem.type() != simdjson::dom::element_type::STRING) {
@@ -546,6 +547,11 @@ class JsonStatsMeta {
         layout_type_map_ = layout_map;
     }
 
+    void
+    SetLayoutTypeMap(std::map<JsonKey, JsonKeyLayoutType>&& layout_map) {
+        layout_type_map_ = std::move(layout_map);
+    }
+
     const std::map<JsonKey, JsonKeyLayoutType>&
     GetLayoutTypeMap() const {
         return layout_type_map_;
@@ -593,7 +599,7 @@ template <>
 struct fmt::formatter<milvus::index::JSONType> : fmt::formatter<std::string> {
     template <typename FormatContext>
     auto
-    format(const milvus::index::JSONType& jt, FormatContext& ctx) {
+    format(const milvus::index::JSONType& jt, FormatContext& ctx) const {
         switch (jt) {
             case milvus::index::JSONType::UNKNOWN:
                 return fmt::format_to(ctx.out(), "UNKNOWN");
@@ -631,7 +637,8 @@ template <>
 struct fmt::formatter<milvus::index::JsonKeyLayoutType>
     : fmt::formatter<std::string> {
     auto
-    format(milvus::index::JsonKeyLayoutType type, fmt::format_context& ctx) {
+    format(milvus::index::JsonKeyLayoutType type,
+           fmt::format_context& ctx) const {
         std::string name;
         switch (type) {
             case milvus::index::JsonKeyLayoutType::TYPED:

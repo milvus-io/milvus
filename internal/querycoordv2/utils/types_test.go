@@ -23,9 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func Test_packLoadSegmentRequest(t *testing.T) {
@@ -82,4 +82,92 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
 		assert.Equal(t, channel.SeekPosition.Timestamp, req.GetDeltaPosition().GetTimestamp())
 	})
+}
+
+func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
+	mockPChannel := "fake-by-dev-rootcoord-dml-1"
+	checkpoint := &msgpb.MsgPosition{
+		ChannelName: mockPChannel,
+		Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0),
+	}
+
+	t.Run("manifest set clears legacy stats fields", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			ID:           100,
+			ManifestPath: "base/path@5",
+			Statslogs: []*datapb.FieldBinlog{
+				{FieldID: 1},
+			},
+			Bm25Statslogs: []*datapb.FieldBinlog{
+				{FieldID: 2},
+			},
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				10: {FieldID: 10},
+			},
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				20: {FieldID: 20},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: "delta/1"}}},
+			},
+		}
+		loadInfo := PackSegmentLoadInfo(seg, checkpoint, nil)
+
+		assert.Equal(t, "base/path@5", loadInfo.GetManifestPath())
+		assert.Empty(t, loadInfo.GetStatslogs())
+		assert.Empty(t, loadInfo.GetBm25Logs())
+		assert.Empty(t, loadInfo.GetTextStatsLogs())
+		assert.Empty(t, loadInfo.GetJsonKeyStatsLogs())
+		// Deltalogs should always be populated
+		assert.NotEmpty(t, loadInfo.GetDeltalogs())
+	})
+
+	t.Run("no manifest populates all legacy fields", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			ID: 200,
+			Statslogs: []*datapb.FieldBinlog{
+				{FieldID: 1},
+			},
+			Bm25Statslogs: []*datapb.FieldBinlog{
+				{FieldID: 2},
+			},
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				10: {FieldID: 10},
+			},
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				20: {FieldID: 20},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: "delta/1"}}},
+			},
+		}
+		loadInfo := PackSegmentLoadInfo(seg, checkpoint, nil)
+
+		assert.Empty(t, loadInfo.GetManifestPath())
+		assert.NotEmpty(t, loadInfo.GetStatslogs())
+		assert.NotEmpty(t, loadInfo.GetBm25Logs())
+		assert.NotEmpty(t, loadInfo.GetTextStatsLogs())
+		assert.NotEmpty(t, loadInfo.GetJsonKeyStatsLogs())
+		assert.NotEmpty(t, loadInfo.GetDeltalogs())
+	})
+}
+
+func TestPackSegmentLoadInfo_CommitTimestamp(t *testing.T) {
+	const commitTs uint64 = 99999
+	const dataVersion int32 = 7
+
+	seg := &datapb.SegmentInfo{
+		ID:              1,
+		CollectionID:    10,
+		PartitionID:     100,
+		InsertChannel:   "ch1",
+		CommitTimestamp: commitTs,
+		DataVersion:     dataVersion,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+	}
+
+	checkpoint := &msgpb.MsgPosition{Timestamp: 2000}
+	loadInfo := PackSegmentLoadInfo(seg, checkpoint, nil)
+	assert.Equal(t, commitTs, loadInfo.GetCommitTimestamp())
+	assert.Equal(t, dataVersion, loadInfo.GetDataVersion())
 }

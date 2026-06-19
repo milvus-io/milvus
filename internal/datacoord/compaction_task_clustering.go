@@ -23,28 +23,28 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ CompactionTask = (*clusteringCompactionTask)(nil)
@@ -137,6 +137,14 @@ func (t *clusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 }
 
 func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	// If task is in analyzing state, skip querying the DataNode — the compaction has not been
+	// submitted yet. The state transition (analyzing → pipelining) is driven by Process() /
+	// processAnalyzing(). Once the state becomes pipelining, the scheduler will move the task
+	// back to pendingTasks and CreateTaskOnWorker will call doCompact.
+	if t.GetTaskProto().GetState() == datapb.CompactionTaskState_analyzing {
+		return
+	}
+
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetTaskProto().GetPlanID()),
 		zap.String("type", t.GetTaskProto().GetType().String()))
 
@@ -178,6 +186,11 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
 			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			return
+		}
+
+		if err = binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
+			log.Warn("compress compaction result binlogs failed", zap.Error(err))
 			return
 		}
 
@@ -331,11 +344,11 @@ func (t *clusteringCompactionTask) Clean() bool {
 
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	logIDRange, err := PreAllocateBinlogIDs(t.allocator, t.meta.GetSegmentInfos(taskProto.GetInputSegments()))
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, t.meta.GetSegmentInfos(taskProto.GetInputSegments()), taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
-	compactionParams, err := compaction.GenerateJSONParams()
+	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
@@ -376,8 +389,10 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			Field2StatslogPaths: segInfo.GetStatslogs(),
 			Deltalogs:           segInfo.GetDeltalogs(),
 			IsSorted:            segInfo.GetIsSorted(),
+			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 	}
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
@@ -613,7 +628,7 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 		}
 	case indexpb.JobState_JobStateFailed:
 		log.Warn("analyze task fail", zap.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
-		return errors.New(analyzeTask.FailReason)
+		return merr.WrapErrServiceInternalMsg(analyzeTask.FailReason)
 	default:
 	}
 	return nil
@@ -684,10 +699,8 @@ func (t *clusteringCompactionTask) doClean() error {
 				operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
 				if !hasResultSegments {
 					toSegments, _ := t.meta.(*meta).GetCompactionTo(segID)
-					if toSegments != nil {
-						for _, toSeg := range toSegments {
-							operators = append(operators, UpdateStatusOperator(toSeg.GetID(), commonpb.SegmentState_Dropped))
-						}
+					for _, toSeg := range toSegments {
+						operators = append(operators, UpdateStatusOperator(toSeg.GetID(), commonpb.SegmentState_Dropped))
 					}
 				}
 			}
@@ -760,7 +773,7 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 		log.Warn("Failed to BuildCompactionRequest", zap.Error(err))
 		return err
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan())
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn("Failed to notify compaction tasks to DataNode",

@@ -162,9 +162,8 @@ GcpNativeClientManager::PutObjectBuffer(const std::string& bucket_name,
                                         const std::string& object_name,
                                         void* buf,
                                         uint64_t size) {
-    std::string buffer(reinterpret_cast<char*>(buf), size);
     auto stream = client_->WriteObject(bucket_name, object_name);
-    stream << buffer;
+    stream.write(reinterpret_cast<const char*>(buf), size);
     stream.Close();
     if (stream.bad()) {
         throw std::runtime_error(GetGcpNativeError(stream.metadata().status()));

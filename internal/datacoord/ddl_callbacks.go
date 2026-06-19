@@ -25,8 +25,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // RegisterDDLCallbacks registers the ddl callbacks.
@@ -37,6 +38,9 @@ func RegisterDDLCallbacks(s *Server) {
 	ddlCallback.registerIndexCallbacks()
 	registry.RegisterFlushAllV2AckCallback(ddlCallback.flushAllV2AckCallback)
 	ddlCallback.registerSnapshotCallbacks()
+	ddlCallback.registerExternalCollectionCallbacks()
+	ddlCallback.registerImportCallbacks()
+	ddlCallback.registerBatchUpdateManifestCallbacks()
 }
 
 type DDLCallbacks struct {
@@ -53,6 +57,15 @@ func (c *DDLCallbacks) registerSnapshotCallbacks() {
 	registry.RegisterCreateSnapshotV2AckCallback(c.createSnapshotV2AckCallback)
 	registry.RegisterDropSnapshotV2AckCallback(c.dropSnapshotV2AckCallback)
 	registry.RegisterRestoreSnapshotV2AckCallback(c.restoreSnapshotV2AckCallback)
+	registry.RegisterDropSnapshotsByCollectionV2AckCallback(c.dropSnapshotsByCollectionV2AckCallback)
+}
+
+func (c *DDLCallbacks) registerExternalCollectionCallbacks() {
+	registry.RegisterRefreshExternalCollectionV2AckCallback(c.refreshExternalCollectionV2AckCallback)
+}
+
+func (c *DDLCallbacks) registerBatchUpdateManifestCallbacks() {
+	registry.RegisterBatchUpdateManifestV2AckCallback(c.batchUpdateManifestV2AckCallback)
 }
 
 // startBroadcastWithCollectionID starts a broadcast with collection name.
@@ -71,13 +84,13 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 }
 
 // startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
-// Unlike startBroadcastRestoreSnapshot, this function does NOT validate resources -
-// it only creates the broadcaster with appropriate resource keys (collection + snapshot).
+// It only creates the broadcaster with appropriate resource keys (DB, collection, snapshot)
+// without performing resource validation.
 // Use this when you need a broadcaster before all resources are created (e.g., for index restoration).
 func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("collection %d does not exist: %w", collectionID, err)
+		return nil, merr.Wrapf(err, "collection %d does not exist", collectionID)
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
@@ -86,7 +99,7 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 		ctx,
 		message.NewSharedDBNameResourceKey(dbName),
 		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
-		message.NewExclusiveSnapshotNameResourceKey(snapshotName),
+		message.NewExclusiveSnapshotNameResourceKey(collectionID, snapshotName),
 	)
 	if err != nil {
 		return nil, err
@@ -98,47 +111,66 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 	return b, nil
 }
 
+// startRestoreSnapshotLock acquires the Phase 0 restore lock set for RestoreSnapshot.
+//
+// It holds three locks that together serialize the full restore flow against
+// concurrent DropSnapshot / CreateCollection on both the source snapshot and
+// the target collection name:
+//
+//   - Shared lock on target database
+//   - Exclusive lock on target collection name (reserves the name before the
+//     collection is created in Phase 2)
+//   - Exclusive lock on (sourceCollectionID, snapshotName) — namespaced by
+//     collection so cross-collection same-name snapshots do not contend,
+//     and serializes against DropSnapshot of the same source snapshot
+//
+// The returned broadcaster holds the locks only; Close() releases them
+// without broadcasting any message. Callers are expected to increment
+// the restore reference count while the lock is held, then Close() — the
+// refcount becomes the persistent guard after the lock is released.
+func (s *Server) startRestoreSnapshotLock(
+	ctx context.Context,
+	sourceCollectionID int64,
+	snapshotName, targetDbName, targetCollectionName string,
+) (broadcaster.BroadcastAPI, error) {
+	b, err := broadcast.StartBroadcastWithResourceKeys(
+		ctx,
+		message.NewSharedDBNameResourceKey(targetDbName),
+		message.NewExclusiveCollectionNameResourceKey(targetDbName, targetCollectionName),
+		message.NewExclusiveSnapshotNameResourceKey(sourceCollectionID, snapshotName),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info("phase 0 restore lock acquired",
+		zap.Int64("sourceCollectionID", sourceCollectionID),
+		zap.String("snapshotName", snapshotName),
+		zap.String("targetDbName", targetDbName),
+		zap.String("targetCollectionName", targetCollectionName))
+	return b, nil
+}
+
 // validateRestoreSnapshotResources validates that all required resources exist for restore.
-// This includes collection, partitions, and indexes.
+// This includes snapshot, collection, partitions, and indexes.
 func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	// Validate partitions exist
-	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
+	// ========== Validate Snapshot Exists ==========
+	// Use source collection ID from snapshot data (not the target collectionID parameter)
+	// because snapshots are stored under the source collection's namespace.
+	sourceCollectionID := snapshotData.SnapshotInfo.GetCollectionId()
+	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, sourceCollectionID, snapshotData.SnapshotInfo.GetName())
 	if err != nil {
-		return fmt.Errorf("failed to get partitions for collection %d: %w", collectionID, err)
+		return merr.Wrapf(err, "snapshot %s does not exist for collection %d",
+			snapshotData.SnapshotInfo.GetName(), sourceCollectionID)
 	}
-
-	existingPartitions := make(map[string]bool)
-	for _, name := range partitionsResp.GetPartitionNames() {
-		existingPartitions[name] = true
-	}
-
-	for partName := range snapshotData.Collection.GetPartitions() {
-		if !existingPartitions[partName] {
-			return fmt.Errorf("partition %s does not exist in collection %d", partName, collectionID)
-		}
-	}
-	log.Info("partitions validated", zap.Int("count", len(existingPartitions)))
-
-	return nil
-}
-
-// startBroadcastRestoreSnapshot starts a broadcast for restore snapshot.
-// It validates that all previously created resources (collection, partitions, indexes)
-// exist before starting the broadcast.
-// Deprecated: Use startBroadcastForRestoreSnapshot + validateRestoreSnapshotResources instead.
-func (s *Server) startBroadcastRestoreSnapshot(
-	ctx context.Context,
-	collectionID int64,
-	snapshotData *SnapshotData,
-) (broadcaster.BroadcastAPI, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+	log.Info("snapshot validated", zap.String("snapshotName", snapshot.GetName()))
 
 	// ========== Validate Collection Exists ==========
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("collection %d does not exist: %w", collectionID, err)
+		return merr.Wrapf(err, "collection %d does not exist", collectionID)
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
@@ -149,7 +181,7 @@ func (s *Server) startBroadcastRestoreSnapshot(
 	// ========== Validate Partitions Exist ==========
 	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get partitions for collection %d: %w", collectionID, err)
+		return merr.Wrapf(err, "failed to get partitions for collection %d", collectionID)
 	}
 
 	// Build set of existing partition names
@@ -161,8 +193,7 @@ func (s *Server) startBroadcastRestoreSnapshot(
 	// Check all snapshot partitions exist
 	for partName := range snapshotData.Collection.GetPartitions() {
 		if !existingPartitions[partName] {
-			return nil, fmt.Errorf("partition %s does not exist in collection %d",
-				partName, collectionID)
+			return merr.WrapErrPartitionNotFound(partName, fmt.Sprintf("partition does not exist in collection %d", collectionID))
 		}
 	}
 	log.Info("partitions validated", zap.Int("count", len(existingPartitions)))
@@ -180,23 +211,10 @@ func (s *Server) startBroadcastRestoreSnapshot(
 			}
 		}
 		if !indexFound {
-			return nil, fmt.Errorf("index %s for field %d does not exist in collection %d",
-				indexInfo.GetIndexName(), indexInfo.GetFieldID(), collectionID)
+			return merr.WrapErrIndexNotFound(indexInfo.GetIndexName(), fmt.Sprintf("index for field %d does not exist in collection %d", indexInfo.GetFieldID(), collectionID))
 		}
 	}
 	log.Info("indexes validated", zap.Int("count", len(snapshotData.Indexes)))
 
-	// ========== Start Broadcast ==========
-	b, err := broadcast.StartBroadcastWithResourceKeys(
-		ctx,
-		message.NewSharedDBNameResourceKey(dbName),
-		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
-		message.NewExclusiveSnapshotNameResourceKey(snapshotData.SnapshotInfo.GetName()),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Info("broadcast started for restore snapshot")
-	return b, nil
+	return nil
 }

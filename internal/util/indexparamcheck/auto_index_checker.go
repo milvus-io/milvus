@@ -1,7 +1,7 @@
 package indexparamcheck
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 // AUTOINDEXChecker checks if a TRIE index can be built.

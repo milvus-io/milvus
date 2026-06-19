@@ -70,16 +70,20 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
+#include "storage/ThreadPools.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -106,7 +110,7 @@ TEST(Sealed, without_predicate) {
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
@@ -210,11 +214,10 @@ TEST(Sealed, without_predicate) {
 TEST(Sealed, without_search_ef_less_than_limit) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
-    auto topK = 5;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
@@ -380,7 +383,6 @@ TEST(Sealed, with_predicate) {
 TEST(Sealed, with_predicate_filter_all) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
-    auto topK = 5;
     // auto metric_type = MetricType::METRIC_L2;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
@@ -488,9 +490,123 @@ TEST(Sealed, with_predicate_filter_all) {
     EXPECT_EQ(sr2->get_total_result_count(), 0);
 }
 
+TEST(Sealed, SegmentInterfaceIsIndexRefineEnabledPropagatesOpContext) {
+    auto dim = 4;
+    auto N = ROW_COUNT;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fake_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto dataset = DataGen(schema, N);
+    auto vec_col = dataset.get_col<float>(fake_id);
+
+    auto create_index_info = milvus::index::CreateIndexInfo{};
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+    auto build_conf =
+        knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::HNSW_M, "16"},
+                       {knowhere::indexparam::EFCONSTRUCTION, "200"},
+                       {knowhere::indexparam::EF, "200"},
+                       {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    auto database = knowhere::GenDataSet(N, dim, vec_col.data());
+    indexing->BuildWithDataset(database, build_conf);
+    auto expected_refine_enabled =
+        dynamic_cast<index::VectorIndex*>(indexing.get())
+            ->IsIndexRefineEnabled();
+
+    milvus::OpContext* observed_ctx = nullptr;
+    LoadIndexInfo load_info;
+    load_info.field_id = fake_id.get();
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
+    load_info.index_params["metric_type"] = "L2";
+
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    sealed_segment->DropFieldData(fake_id);
+    sealed_segment->LoadIndex(load_info);
+
+    auto* segment_interface =
+        static_cast<SegmentInterface*>(sealed_segment.get());
+    folly::CancellationSource source;
+    milvus::OpContext op_context(source.getToken());
+
+    EXPECT_EQ(segment_interface->IsIndexRefineEnabled(&op_context, fake_id),
+              expected_refine_enabled);
+    EXPECT_EQ(observed_ctx, &op_context);
+}
+
+TEST(Sealed, SegmentInterfaceCalcDistByIDsPropagatesOpContext) {
+    auto dim = 4;
+    auto N = ROW_COUNT;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fake_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto dataset = DataGen(schema, N);
+    auto vec_col = dataset.get_col<float>(fake_id);
+
+    auto create_index_info = milvus::index::CreateIndexInfo{};
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+    auto build_conf =
+        knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::HNSW_M, "16"},
+                       {knowhere::indexparam::EFCONSTRUCTION, "200"},
+                       {knowhere::indexparam::EF, "200"},
+                       {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    auto database = knowhere::GenDataSet(N, dim, vec_col.data());
+    indexing->BuildWithDataset(database, build_conf);
+
+    milvus::OpContext* observed_ctx = nullptr;
+    LoadIndexInfo load_info;
+    load_info.field_id = fake_id.get();
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
+    load_info.index_params["metric_type"] = "L2";
+
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    sealed_segment->DropFieldData(fake_id);
+    sealed_segment->LoadIndex(load_info);
+
+    auto* segment_interface =
+        static_cast<SegmentInterface*>(sealed_segment.get());
+    auto query_dataset = knowhere::GenDataSet(1, dim, vec_col.data());
+    auto seg_offsets = std::array<int64_t, 1>{0};
+    auto distances = std::array<float, 1>{0.0F};
+    folly::CancellationSource source;
+    milvus::OpContext op_context(source.getToken());
+
+    EXPECT_TRUE(segment_interface->CalcDistByIDs(&op_context,
+                                                 fake_id,
+                                                 query_dataset,
+                                                 seg_offsets.data(),
+                                                 seg_offsets.size(),
+                                                 false,
+                                                 distances.data()));
+    EXPECT_EQ(observed_ctx, &op_context);
+}
+
 TEST(Sealed, LoadFieldData) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -498,7 +614,7 @@ TEST(Sealed, LoadFieldData) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -519,8 +635,7 @@ TEST(Sealed, LoadFieldData) {
         schema->AddDebugField("double_null", DataType::DOUBLE, true);
     auto str_nullable_id =
         schema->AddDebugField("str_null", DataType::VARCHAR, true);
-    auto float_nullable_id =
-        schema->AddDebugField("float_null", DataType::FLOAT, true);
+    schema->AddDebugField("float_null", DataType::FLOAT, true);
 
     auto dataset = DataGen(schema, N);
 
@@ -655,7 +770,6 @@ TEST(Sealed, ClearData) {
         milvus::exec::expression::FunctionFactory::Instance();
     factory.Initialize();
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -663,7 +777,7 @@ TEST(Sealed, ClearData) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -742,7 +856,6 @@ TEST(Sealed, ClearData) {
 
 TEST(Sealed, LoadFieldDataMmap) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -750,7 +863,7 @@ TEST(Sealed, LoadFieldDataMmap) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -825,7 +938,7 @@ TEST(Sealed, LoadPkScalarIndex) {
     size_t N = ROW_COUNT;
     auto schema = std::make_shared<Schema>();
     auto pk_id = schema->AddDebugField("counter", DataType::INT64);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(pk_id);
 
     auto dataset = DataGen(schema, N);
@@ -933,15 +1046,14 @@ TEST(Sealed, LoadScalarIndex) {
 
 TEST(Sealed, Delete) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -996,15 +1108,14 @@ TEST(Sealed, Delete) {
 
 TEST(Sealed, OverlapDelete) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -1478,7 +1589,6 @@ TEST(Sealed, GetVector) {
 
 TEST(Sealed, LoadArrayFieldData) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -1517,15 +1627,13 @@ TEST(Sealed, LoadArrayFieldData) {
 
 TEST(Sealed, LoadArrayFieldDataWithMMap) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto array_id =
-        schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
+    schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -1551,8 +1659,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
     auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
@@ -1700,8 +1807,7 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     size_t N = 10;
     auto dataset = DataGen(schema, N);
@@ -1743,8 +1849,7 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
 
     auto dataset = DataGen(schema, 5);
@@ -1815,8 +1920,7 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
     auto dataset = DataGen(schema, 5);
     auto segment = CreateSealedSegment(schema);
@@ -1858,10 +1962,9 @@ TEST(Sealed, SkipIndexSkipStringRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField("pk", DataType::INT64);
     auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     size_t N = 5;
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
@@ -2264,6 +2367,49 @@ TEST(Sealed, QueryAllNullableFields) {
 using VectorArrayTestParam =
     std::tuple<DataType, std::string, int, std::string>;
 
+void
+VerifyVectorResults(const VectorFieldProto& result_vec,
+                    const VectorFieldProto& expected_vec,
+                    DataType element_type) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT: {
+            auto result_data = result_vec.float_vector().data();
+            auto expected_data = expected_vec.float_vector().data();
+            EXPECT_EQ(result_data.size(), expected_data.size());
+            for (int64_t i = 0; i < result_data.size(); ++i) {
+                EXPECT_NEAR(result_data[i], expected_data[i], 1e-6f);
+            }
+            break;
+        }
+        case DataType::VECTOR_BINARY: {
+            auto result_data = result_vec.binary_vector();
+            auto expected_data = expected_vec.binary_vector();
+            EXPECT_EQ(result_data, expected_data);
+            break;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            auto result_data = result_vec.float16_vector();
+            auto expected_data = expected_vec.float16_vector();
+            EXPECT_EQ(result_data, expected_data);
+            break;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            auto result_data = result_vec.bfloat16_vector();
+            auto expected_data = expected_vec.bfloat16_vector();
+            EXPECT_EQ(result_data, expected_data);
+            break;
+        }
+        case DataType::VECTOR_INT8: {
+            auto result_data = result_vec.int8_vector();
+            auto expected_data = expected_vec.int8_vector();
+            EXPECT_EQ(result_data, expected_data);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 class SealedVectorArrayTest
     : public ::testing::TestWithParam<VectorArrayTestParam> {
  protected:
@@ -2283,49 +2429,6 @@ class SealedVectorArrayTest
         // Ensure dim is valid for binary vectors
         if (element_type == DataType::VECTOR_BINARY) {
             ASSERT_EQ(dim % 8, 0) << "Binary vector dim must be multiple of 8";
-        }
-    }
-
-    void
-    VerifyVectorResults(const VectorFieldProto& result_vec,
-                        const VectorFieldProto& expected_vec,
-                        DataType element_type) {
-        switch (element_type) {
-            case DataType::VECTOR_FLOAT: {
-                auto result_data = result_vec.float_vector().data();
-                auto expected_data = expected_vec.float_vector().data();
-                EXPECT_EQ(result_data.size(), expected_data.size());
-                for (int64_t i = 0; i < result_data.size(); ++i) {
-                    EXPECT_NEAR(result_data[i], expected_data[i], 1e-6f);
-                }
-                break;
-            }
-            case DataType::VECTOR_BINARY: {
-                auto result_data = result_vec.binary_vector();
-                auto expected_data = expected_vec.binary_vector();
-                EXPECT_EQ(result_data, expected_data);
-                break;
-            }
-            case DataType::VECTOR_FLOAT16: {
-                auto result_data = result_vec.float16_vector();
-                auto expected_data = expected_vec.float16_vector();
-                EXPECT_EQ(result_data, expected_data);
-                break;
-            }
-            case DataType::VECTOR_BFLOAT16: {
-                auto result_data = result_vec.bfloat16_vector();
-                auto expected_data = expected_vec.bfloat16_vector();
-                EXPECT_EQ(result_data, expected_data);
-                break;
-            }
-            case DataType::VECTOR_INT8: {
-                auto result_data = result_vec.int8_vector();
-                auto expected_data = expected_vec.int8_vector();
-                EXPECT_EQ(result_data, expected_data);
-                break;
-            }
-            default:
-                break;
         }
     }
 };
@@ -2377,7 +2480,6 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     int64_t segment_id = 3;
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
-    int64_t index_id = 5000;
 
     auto schema = std::make_shared<Schema>();
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
@@ -2404,7 +2506,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
 
     // create field data
-    std::string root_path = "/tmp/test-vector-array/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
@@ -2437,7 +2539,8 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -2656,6 +2759,739 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     }
 }
 
+TEST_P(SealedVectorArrayTest, BulkSubscriptVectorArrayFromIndex) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 5000;
+    int64_t index_version = 5000;
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField(
+        "array_vec", element_type, dim, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      array_vec.get(),
+                                                      DataType::VECTOR_ARRAY,
+                                                      element_type,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, array_vec.get(), index_build_id, index_version);
+
+    int64_t dataset_size = 100;
+    auto emb_list_len = 2;
+    auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
+
+    // prepare field data and binlog
+    std::string root_path = TestLocalPath;
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
+    std::vector<milvus::VectorArray> vector_arrays;
+    for (auto& v : vec_array_col) {
+        vector_arrays.push_back(milvus::VectorArray(v));
+    }
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, element_type, false, dim);
+    field_data->FillFieldData(vector_arrays.data(), vector_arrays.size());
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          array_vec.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+
+    // serialize binlog for index building
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                array_vec.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    // build HNSW index (FLAT base = has_raw_data = true)
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.metric_type = metric_type;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto emb_list_hnsw_index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info,
+            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+
+    Config config;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::indexparam::M] = "16";
+    config[knowhere::indexparam::EF] = "10";
+    config[DIM_KEY] = dim;
+    emb_list_hnsw_index->Build(config);
+
+    // drop field data and load index
+    LoadIndexInfo load_info;
+    load_info.field_id = array_vec.get();
+    load_info.field_type = DataType::VECTOR_ARRAY;
+    load_info.element_type = element_type;
+    load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
+    load_info.index_params["metric_type"] = metric_type;
+
+    segment->DropFieldData(array_vec);
+    segment->LoadIndex(load_info);
+
+    // bulk_subscript should now go through get_emb_list -> GetEmbListByIds
+    auto ids_ds = GenRandomIds(dataset_size);
+    auto result = sealed->bulk_subscript(
+        nullptr, array_vec, ids_ds->GetIds(), dataset_size);
+
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->vectors().vector_array().data_size(), dataset_size);
+
+    // verify each row's embedding list matches original data
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        auto result_vec = result->vectors().vector_array().data()[i];
+        auto expected_vec = vec_array_col[ids_ds->GetIds()[i]];
+        VerifyVectorResults(result_vec, expected_vec, element_type);
+    }
+}
+
+TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
+    constexpr int64_t collection_id = 1;
+    constexpr int64_t partition_id = 2;
+    constexpr int64_t segment_id = 3;
+    constexpr int64_t dim = 8;
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField("array_vec",
+                                                      DataType::VECTOR_FLOAT,
+                                                      dim,
+                                                      knowhere::metric::MAX_SIM,
+                                                      true);
+    schema->set_primary_field_id(int64_field);
+
+    VectorFieldProto empty_row;
+    empty_row.set_dim(dim);
+    empty_row.mutable_float_vector();
+
+    VectorFieldProto single_row;
+    single_row.set_dim(dim);
+    for (int64_t i = 0; i < dim; ++i) {
+        single_row.mutable_float_vector()->add_data(static_cast<float>(i + 1));
+    }
+
+    std::vector<milvus::VectorArray> vector_arrays;
+    vector_arrays.emplace_back(empty_row);
+    vector_arrays.emplace_back(single_row);
+
+    constexpr int64_t row_count = 2;
+    std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+    valid_bitmap[0] = 0b00000011;
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
+    field_data->FillFieldData(
+        vector_arrays.data(), valid_bitmap.data(), row_count, 0);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          array_vec.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    std::vector<int64_t> offsets = {0, 1};
+    auto result = sealed->bulk_subscript(
+        nullptr, array_vec, offsets.data(), offsets.size());
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->valid_data_size(), row_count);
+    EXPECT_TRUE(result->valid_data(0));
+    EXPECT_TRUE(result->valid_data(1));
+
+    const auto& rows = result->vectors().vector_array().data();
+    ASSERT_EQ(rows.size(), row_count);
+    EXPECT_EQ(rows.Get(0).float_vector().data_size(), 0);
+    ASSERT_EQ(rows.Get(1).float_vector().data_size(), dim);
+    EXPECT_FLOAT_EQ(rows.Get(1).float_vector().data(0), 1.0F);
+    EXPECT_FLOAT_EQ(rows.Get(1).float_vector().data(dim - 1),
+                    static_cast<float>(dim));
+}
+
+TEST(SealedVectorArrayNullable,
+     BulkSubscriptVectorArrayFromIndexKeepsLogicalRows) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 5100;
+    int64_t index_version = 5100;
+
+    constexpr int64_t dim = 8;
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField("array_vec",
+                                                      DataType::VECTOR_FLOAT,
+                                                      dim,
+                                                      knowhere::metric::MAX_SIM,
+                                                      true);
+    schema->set_primary_field_id(int64_field);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      array_vec.get(),
+                                                      DataType::VECTOR_ARRAY,
+                                                      DataType::VECTOR_FLOAT,
+                                                      true);
+    auto index_meta = gen_index_meta(
+        segment_id, array_vec.get(), index_build_id, index_version);
+
+    int64_t dataset_size = 12;
+    auto emb_list_len = 2;
+    auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
+    auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
+
+    std::vector<uint8_t> valid_bitmap((dataset_size + 7) / 8, 0);
+    std::vector<milvus::VectorArray> vector_arrays;
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        if (i % 3 != 0) {
+            valid_bitmap[i >> 3] |= (1 << (i & 0x07));
+            vector_arrays.emplace_back(vec_array_col[i]);
+        }
+    }
+
+    std::string root_path = TestLocalPath;
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
+    field_data->FillFieldData(
+        vector_arrays.data(), valid_bitmap.data(), dataset_size, 0);
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          array_vec.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                array_vec.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.metric_type = knowhere::metric::MAX_SIM;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto emb_list_hnsw_index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info,
+            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+
+    Config config;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::indexparam::M] = "16";
+    config[knowhere::indexparam::EF] = "10";
+    config[DIM_KEY] = dim;
+    emb_list_hnsw_index->Build(config);
+
+    auto vec_index =
+        dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
+    ASSERT_NE(vec_index, nullptr);
+    EXPECT_TRUE(vec_index->HasValidData());
+    EXPECT_EQ(vec_index->GetValidCount(), vector_arrays.size());
+
+    LoadIndexInfo load_info;
+    load_info.field_id = array_vec.get();
+    load_info.field_type = DataType::VECTOR_ARRAY;
+    load_info.element_type = DataType::VECTOR_FLOAT;
+    load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
+    load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
+
+    segment->DropFieldData(array_vec);
+    segment->LoadIndex(load_info);
+
+    std::vector<int64_t> offsets = {0, 1, 3, 4, 8};
+    auto result = sealed->bulk_subscript(
+        nullptr, array_vec, offsets.data(), offsets.size());
+
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    ASSERT_EQ(result->vectors().vector_array().data_size(), offsets.size());
+
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        auto logical_offset = offsets[i];
+        auto expected_valid = logical_offset % 3 != 0;
+        EXPECT_EQ(result->valid_data(i), expected_valid);
+        const auto& result_vec = result->vectors().vector_array().data(i);
+        if (!expected_valid) {
+            EXPECT_TRUE(result_vec.has_float_vector());
+            EXPECT_EQ(result_vec.float_vector().data_size(), 0);
+            continue;
+        }
+        VerifyVectorResults(
+            result_vec, vec_array_col[logical_offset], DataType::VECTOR_FLOAT);
+    }
+}
+
+TEST(SealedVectorArrayNullable, BulkSubscriptAllNullVectorArrayFromIndex) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 5101;
+    int64_t index_version = 5101;
+
+    constexpr int64_t dim = 8;
+    constexpr int64_t dataset_size = 8;
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField("array_vec",
+                                                      DataType::VECTOR_FLOAT,
+                                                      dim,
+                                                      knowhere::metric::MAX_SIM,
+                                                      true);
+    schema->set_primary_field_id(int64_field);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      array_vec.get(),
+                                                      DataType::VECTOR_ARRAY,
+                                                      DataType::VECTOR_FLOAT,
+                                                      true);
+    auto index_meta = gen_index_meta(
+        segment_id, array_vec.get(), index_build_id, index_version);
+
+    std::string root_path = TestLocalPath;
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
+    std::vector<uint8_t> valid_bitmap((dataset_size + 7) / 8, 0);
+    std::vector<milvus::VectorArray> vector_arrays;
+    field_data->FillFieldData(
+        vector_arrays.data(), valid_bitmap.data(), dataset_size, 0);
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          array_vec.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                array_vec.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.metric_type = knowhere::metric::MAX_SIM;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto emb_list_hnsw_index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info,
+            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+
+    Config config;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::indexparam::M] = "16";
+    config[knowhere::indexparam::EF] = "10";
+    config[DIM_KEY] = dim;
+    emb_list_hnsw_index->Build(config);
+
+    auto vec_index =
+        dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
+    ASSERT_NE(vec_index, nullptr);
+    EXPECT_TRUE(vec_index->HasValidData());
+    EXPECT_EQ(vec_index->GetValidCount(), 0);
+    EXPECT_TRUE(vec_index->HasRawData());
+
+    LoadIndexInfo load_info;
+    load_info.field_id = array_vec.get();
+    load_info.field_type = DataType::VECTOR_ARRAY;
+    load_info.element_type = DataType::VECTOR_FLOAT;
+    load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
+    load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
+
+    segment->DropFieldData(array_vec);
+    segment->LoadIndex(load_info);
+
+    std::vector<int64_t> offsets = {0, 1, 7};
+    auto result = sealed->bulk_subscript(
+        nullptr, array_vec, offsets.data(), offsets.size());
+
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    ASSERT_EQ(result->vectors().vector_array().data_size(), offsets.size());
+    for (int i = 0; i < result->valid_data_size(); ++i) {
+        EXPECT_FALSE(result->valid_data(i));
+        EXPECT_EQ(
+            result->vectors().vector_array().data(i).float_vector().data_size(),
+            0);
+    }
+}
+
+TEST(SealedVectorArrayFallback,
+     BulkSubscriptVectorArrayFallsBackToFieldDataWhenIndexHasNoRawData) {
+    constexpr int64_t collection_id = 1;
+    constexpr int64_t partition_id = 2;
+    constexpr int64_t segment_id = 3;
+    constexpr int64_t index_build_id = 7000;
+    constexpr int64_t index_version = 7000;
+    constexpr int64_t dataset_size = 100;
+    constexpr int64_t emb_list_len = 2;
+    constexpr int64_t dim = 4;
+    const auto element_type = DataType::VECTOR_FLOAT;
+    const auto metric_type = knowhere::metric::MAX_SIM;
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField(
+        "array_vec", element_type, dim, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      array_vec.get(),
+                                                      DataType::VECTOR_ARRAY,
+                                                      element_type,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, array_vec.get(), index_build_id, index_version);
+
+    auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
+
+    std::string root_path = TestLocalPath;
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
+    std::vector<milvus::VectorArray> vector_arrays;
+    for (auto& v : vec_array_col) {
+        vector_arrays.push_back(milvus::VectorArray(v));
+    }
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, element_type, false, dim);
+    field_data->FillFieldData(vector_arrays.data(), vector_arrays.size());
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          array_vec.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                array_vec.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.metric_type = metric_type;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW_SQ;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto emb_list_hnsw_sq_index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info,
+            storage::FileManagerContext(field_meta, index_meta, cm, fs));
+
+    Config config;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW_SQ;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::indexparam::M] = "16";
+    config[knowhere::indexparam::EF] = "10";
+    config[knowhere::indexparam::SQ_TYPE] = "SQ8";
+    config[DIM_KEY] = dim;
+    emb_list_hnsw_sq_index->Build(config);
+
+    auto index_params = GenIndexParams(emb_list_hnsw_sq_index.get());
+    index_params["metric_type"] = metric_type;
+    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        DataType::VECTOR_ARRAY,
+        element_type,
+        create_index_info.index_engine_version,
+        0,
+        index_params,
+        false,
+        dataset_size * emb_list_len,
+        dim);
+    ASSERT_FALSE(request.has_raw_data);
+
+    LoadIndexInfo load_info;
+    load_info.field_id = array_vec.get();
+    load_info.field_type = DataType::VECTOR_ARRAY;
+    load_info.element_type = element_type;
+    load_info.index_params = index_params;
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(emb_list_hnsw_sq_index));
+
+    ASSERT_TRUE(segment->HasFieldData(array_vec));
+    segment->LoadIndex(load_info);
+    ASSERT_TRUE(segment->HasFieldData(array_vec));
+
+    auto ids_ds = GenRandomIds(dataset_size);
+    auto result = sealed->bulk_subscript(
+        nullptr, array_vec, ids_ds->GetIds(), dataset_size);
+
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->vectors().vector_array().data_size(), dataset_size);
+
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        auto result_vec = result->vectors().vector_array().data()[i];
+        auto expected_vec = vec_array_col[ids_ds->GetIds()[i]];
+        VerifyVectorResults(result_vec, expected_vec, element_type);
+    }
+}
+
+#ifdef BUILD_DISK_ANN
+TEST_P(SealedVectorArrayTest, BulkSubscriptVectorArrayFromDiskIndex) {
+    // DiskANN only registers fp32, fp16, bf16
+    if (element_type == DataType::VECTOR_BINARY ||
+        element_type == DataType::VECTOR_INT8) {
+        GTEST_SKIP() << "DiskANN does not support this element type";
+    }
+
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 6000;
+    int64_t index_version = 6000;
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField(
+        "array_vec", element_type, dim, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      array_vec.get(),
+                                                      DataType::VECTOR_ARRAY,
+                                                      element_type,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, array_vec.get(), index_build_id, index_version);
+
+    int64_t dataset_size = 100;
+    auto emb_list_len = 2;
+    auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
+
+    // prepare field data and binlog
+    std::string root_path = TestLocalPath;
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
+    std::vector<milvus::VectorArray> vector_arrays;
+    for (auto& v : vec_array_col) {
+        vector_arrays.push_back(milvus::VectorArray(v));
+    }
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, element_type, false, dim);
+    field_data->FillFieldData(vector_arrays.data(), vector_arrays.size());
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          array_vec.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    auto sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+
+    // serialize binlog for index building
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                TestLocalPath,
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                array_vec.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    storage::FileManagerContext file_mgr_ctx(field_meta, index_meta, cm, fs);
+
+    // build DiskANN index
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.metric_type = metric_type;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_DISKANN;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto disk_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_mgr_ctx);
+
+    Config config;
+    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_DISKANN;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    config[knowhere::meta::METRIC_TYPE] = metric_type;
+    config[DIM_KEY] = dim;
+    config[milvus::index::DISK_ANN_MAX_DEGREE] = std::to_string(24);
+    config[milvus::index::DISK_ANN_SEARCH_LIST_SIZE] = std::to_string(56);
+    config[milvus::index::DISK_ANN_PQ_CODE_BUDGET] = std::to_string(0.001);
+    config[milvus::index::DISK_ANN_BUILD_DRAM_BUDGET] = std::to_string(2);
+    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = std::to_string(2);
+    disk_index->Build(config);
+
+    // Upload to serialize, then reload
+    auto upload_result = disk_index->Upload();
+    auto index_files = upload_result->GetIndexFiles();
+    disk_index.reset();
+
+    auto loaded_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_mgr_ctx);
+    auto vec_index =
+        dynamic_cast<milvus::index::VectorIndex*>(loaded_index.get());
+    auto load_conf = generate_load_conf(knowhere::IndexEnum::INDEX_DISKANN,
+                                        metric_type,
+                                        dataset_size * emb_list_len);
+    load_conf["index_files"] = index_files;
+    load_conf[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+
+    // drop field data and load index into segment
+    LoadIndexInfo load_info;
+    load_info.field_id = array_vec.get();
+    load_info.field_type = DataType::VECTOR_ARRAY;
+    load_info.element_type = element_type;
+    load_info.index_params = GenIndexParams(vec_index);
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(loaded_index));
+    load_info.index_params["metric_type"] = metric_type;
+
+    segment->DropFieldData(array_vec);
+    segment->LoadIndex(load_info);
+
+    // bulk_subscript should go through get_emb_list -> GetEmbListByIds on disk index
+    auto ids_ds = GenRandomIds(dataset_size);
+    auto result = sealed->bulk_subscript(
+        nullptr, array_vec, ids_ds->GetIds(), dataset_size);
+
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->vectors().vector_array().data_size(), dataset_size);
+
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        auto result_vec = result->vectors().vector_array().data()[i];
+        auto expected_vec = vec_array_col[ids_ds->GetIds()[i]];
+        VerifyVectorResults(result_vec, expected_vec, element_type);
+    }
+}
+#endif  // BUILD_DISK_ANN
+
 INSTANTIATE_TEST_SUITE_P(
     VectorArrayTypes,
     SealedVectorArrayTest,
@@ -2679,3 +3515,251 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<VectorArrayTestParam>& info) {
         return std::get<3>(info.param);
     });
+
+// ==================== DropFieldData Guard Tests ====================
+
+TEST(SealedDropFieldData, SkipPKField) {
+    // DropFieldData should skip dropping PK field data
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    auto N = 100;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // PK field data should be present
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+
+    // Try to drop PK field - should be skipped
+    segment->DropFieldData(pk_id);
+
+    // PK field data should still be present (protected)
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+}
+
+TEST(SealedDropFieldData, DropNonPKField) {
+    // DropFieldData should successfully drop non-PK, non-column-group fields
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    auto N = 100;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Vec field data should be present
+    EXPECT_TRUE(segment->HasFieldData(vec_id));
+
+    // Drop vec field - should succeed (not PK, not column group)
+    segment->DropFieldData(vec_id);
+
+    // Vec field data should be gone
+    EXPECT_FALSE(segment->HasFieldData(vec_id));
+}
+
+TEST(SealedDropFieldData, PKFieldStillDropsBinlogIndex) {
+    // When dropping PK field, field data is preserved but binlog index
+    // (if present) should still be cleared.
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    auto N = 100;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // PK field data should be present
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+
+    // Drop PK field - field data should remain
+    segment->DropFieldData(pk_id);
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+
+    // Drop again - should be a no-op (idempotent)
+    segment->DropFieldData(pk_id);
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+}
+
+TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(FieldId(100));
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->AddDebugField("pk", DataType::INT64);
+    new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(FieldId(100));
+    new_schema->set_schema_version(200);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    EXPECT_NO_THROW(sealed->Reopen(new_schema));
+    EXPECT_TRUE(sealed->HasFieldData(FieldId(101)));
+
+    auto snapshot = sealed->TestGetSegmentLoadInfo();
+    EXPECT_TRUE(snapshot->IsFieldFilledWithDefault(FieldId(101)));
+}
+
+TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
+    auto old_schema = std::make_shared<Schema>();
+    auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk_id);
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    auto new_field = new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(200);
+
+    auto stale_schema = std::make_shared<Schema>();
+    auto stale_pk_id = stale_schema->AddDebugField("pk", DataType::INT64);
+    stale_schema->set_primary_field_id(stale_pk_id);
+    stale_schema->set_schema_version(150);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    EXPECT_NO_THROW(sealed->Reopen(new_schema));
+    ASSERT_TRUE(sealed->TestGetSegmentLoadInfo()->HasFieldInSchema(new_field));
+
+    proto::segcore::SegmentLoadInfo stale_proto =
+        sealed->TestGetSegmentLoadInfo()->GetProto();
+    milvus::OpContext op_ctx;
+    EXPECT_NO_THROW(sealed->Reopen(&op_ctx, stale_proto, stale_schema));
+
+    auto snapshot = sealed->TestGetSegmentLoadInfo();
+    EXPECT_TRUE(snapshot->HasFieldInSchema(new_field));
+    EXPECT_TRUE(sealed->HasFieldData(new_field));
+}
+
+TEST(SealedSegmentReopen, SchemaOnlyReopenPreservesCreatedTextIndexState) {
+    std::map<std::string, std::string> analyzer_params;
+    auto old_schema = std::make_shared<Schema>();
+    auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
+    auto text_fid = old_schema->AddDebugVarcharField(FieldName("text_field"),
+                                                     DataType::VARCHAR,
+                                                     /*max_length=*/65535,
+                                                     /*nullable=*/false,
+                                                     /*enable_match=*/true,
+                                                     /*enable_analyzer=*/true,
+                                                     analyzer_params,
+                                                     std::nullopt);
+    old_schema->set_primary_field_id(pk_id);
+    old_schema->set_schema_version(100);
+
+    auto new_schema = std::make_shared<Schema>();
+    auto new_pk_id = new_schema->AddDebugField("pk", DataType::INT64);
+    auto new_text_fid =
+        new_schema->AddDebugVarcharField(FieldName("text_field"),
+                                         DataType::VARCHAR,
+                                         /*max_length=*/65535,
+                                         /*nullable=*/false,
+                                         /*enable_match=*/true,
+                                         /*enable_analyzer=*/true,
+                                         analyzer_params,
+                                         std::nullopt);
+    new_schema->AddDebugField("new_field", DataType::INT64);
+    new_schema->set_primary_field_id(new_pk_id);
+    new_schema->set_schema_version(200);
+    ASSERT_EQ(text_fid, new_text_fid);
+
+    auto dataset = DataGen(old_schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    sealed->TestRecordTextIndexCreated(text_fid);
+    ASSERT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
+
+    EXPECT_NO_THROW(sealed->Reopen(new_schema));
+    EXPECT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
+}
+
+// Reproducer for issue #49076.
+//
+// Reopen on a sealed segment does:
+//     SegmentLoadInfo new_seg_load_info(new_load_info, schema_);
+//     segment_load_info_ = new_seg_load_info;          // <-- Bug 1
+//     diff = current.ComputeDiff(new_seg_load_info);
+//     ApplyLoadDiff(op_ctx, new_seg_load_info, diff);  // <-- Bug 2
+//
+// `created_text_indexes_` is runtime-only (not proto-backed), so the RHS is
+// always empty; the copy-assign wipes the member (Bug 1). And any Create
+// done during this Reopen writes to the local new_seg_load_info, lost on
+// return (Bug 2). A later Reopen's ComputeDiff then re-schedules
+// CreateTextIndex for the same field at the same deterministic path,
+// racing with the still-live holder and causing
+// TantivyError: FileDoesNotExist("meta.json").
+TEST(SealedSegmentReopen, TextIndexCreatedWipedByReopen) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("pk", DataType::INT64);  // 100
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);  // 101
+    std::map<std::string, std::string> analyzer_params;
+    schema->AddDebugVarcharField(FieldName("text_field"),
+                                 DataType::VARCHAR,
+                                 /*max_length=*/65535,
+                                 /*nullable=*/false,
+                                 /*enable_match=*/true,
+                                 /*enable_analyzer=*/true,
+                                 analyzer_params,
+                                 std::nullopt);  // 102
+    schema->set_primary_field_id(FieldId(100));
+
+    const FieldId text_fid(102);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(49076);
+    proto.set_num_of_rows(0);
+    sealed->SetLoadInfo(proto);
+
+    // Simulate the state a prior Load would leave behind after running
+    // CreateTextIndex for the enable_match field.
+    sealed->TestRecordTextIndexCreated(text_fid);
+    ASSERT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
+
+    // Reopen must preserve the runtime-only created_text_indexes_. Before
+    // the fix this fails (member wiped by `segment_load_info_ =
+    // new_seg_load_info`); after the fix it passes. The wipe happens before
+    // ApplyLoadDiff, so even though ApplyLoadDiff throws here (num_rows_ is
+    // unset because no real data was loaded), the state under test is
+    // already settled.
+    milvus::OpContext op_ctx;
+    try {
+        sealed->Reopen(&op_ctx, proto);
+    } catch (...) {
+    }
+
+    EXPECT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
+}

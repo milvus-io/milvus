@@ -17,15 +17,16 @@
 package proxy
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestIsVectorTypeMatch(t *testing.T) {
@@ -54,114 +55,114 @@ func TestIsVectorTypeMatch(t *testing.T) {
 	}
 }
 
-func TestValidateFloat32ForFloat16(t *testing.T) {
-	tests := []struct {
+func TestConvertPlaceholderGroupAllowsFloat16Underflow(t *testing.T) {
+	vectors := [][]float32{{0.0, 1e-9, -1e-9, 0.5}}
+	phgBytes := createFloat32PlaceholderGroup(vectors)
+	fieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Float16Vector}
+
+	convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+	assert.NoError(t, err)
+
+	var resultPhg commonpb.PlaceholderGroup
+	assert.NoError(t, proto.Unmarshal(convertedBytes, &resultPhg))
+	assertPlaceholderVectorsMatchFloat32(t, commonpb.PlaceholderType_Float16Vector, schemapb.DataType_Float16Vector, resultPhg.Placeholders, vectors)
+}
+
+func TestConvertPlaceholderGroupRejectsInvalidFloatInput(t *testing.T) {
+	for _, tt := range []struct {
 		name      string
-		values    []float32
-		expectErr bool
-		errMsg    string
+		dataType  schemapb.DataType
+		vectors   [][]float32
+		errSubstr string
 	}{
 		{
-			name:      "normal values",
-			values:    []float32{0.0, 1.0, -1.0, 0.5, -0.5},
-			expectErr: false,
+			name:      "float16 rejects NaN",
+			dataType:  schemapb.DataType_Float16Vector,
+			vectors:   [][]float32{{0.0, float32(math.NaN())}},
+			errSubstr: "not a number or infinity",
 		},
 		{
-			name:      "max boundary",
-			values:    []float32{65504.0, -65504.0},
-			expectErr: false,
+			name:      "bfloat16 rejects infinity",
+			dataType:  schemapb.DataType_BFloat16Vector,
+			vectors:   [][]float32{{0.0, float32(math.Inf(1))}},
+			errSubstr: "not a number or infinity",
 		},
-		{
-			name:      "overflow positive",
-			values:    []float32{0.0, 65505.0},
-			expectErr: true,
-			errMsg:    "exceeds float16 range",
-		},
-		{
-			name:      "overflow negative",
-			values:    []float32{-65505.0, 0.0},
-			expectErr: true,
-			errMsg:    "exceeds float16 range",
-		},
-		{
-			name:      "underflow",
-			values:    []float32{0.0, 1e-9},
-			expectErr: true,
-			errMsg:    "underflows float16",
-		},
-		{
-			name:      "zero is valid",
-			values:    []float32{0.0, 0.0, 0.0},
-			expectErr: false,
-		},
-		{
-			name:      "min positive normal",
-			values:    []float32{6.104e-5},
-			expectErr: false,
-		},
-	}
-
-	for _, tt := range tests {
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateFloat32ForFloat16(tt.values)
-			if tt.expectErr {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errMsg)
-			} else {
-				assert.NoError(t, err)
-			}
+			phgBytes := createFloat32PlaceholderGroup(tt.vectors)
+			fieldSchema := &schemapb.FieldSchema{DataType: tt.dataType}
+
+			_, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errSubstr)
 		})
 	}
 }
 
-func TestValidateFloat32ForBFloat16(t *testing.T) {
-	tests := []struct {
-		name      string
-		values    []float32
-		expectErr bool
-	}{
-		{
-			name:      "normal values",
-			values:    []float32{0.0, 1.0, -1.0, 0.5, -0.5},
-			expectErr: false,
-		},
-		{
-			name:      "large values within float32 range",
-			values:    []float32{1e38, -1e38},
-			expectErr: false,
-		},
-		{
-			name:      "very small values",
-			values:    []float32{1e-38, -1e-38},
-			expectErr: false,
-		},
-		{
-			name:      "infinity",
-			values:    []float32{float32(math.Inf(1))},
-			expectErr: true,
-		},
-		{
-			name:      "negative infinity",
-			values:    []float32{float32(math.Inf(-1))},
-			expectErr: true,
-		},
-		{
-			name:      "NaN",
-			values:    []float32{float32(math.NaN())},
-			expectErr: true,
-		},
+func assertFP16BF16BytesMatchFloat32(
+	t *testing.T,
+	dataType schemapb.DataType,
+	floatData []float32,
+	got []byte,
+) {
+	t.Helper()
+	var want []byte
+	var decoded []float32
+	var tolerance float64
+	switch dataType {
+	case schemapb.DataType_Float16Vector:
+		want = typeutil.Float32ArrayToFloat16Bytes(floatData)
+		decoded = typeutil.Float16BytesToFloat32Vector(got)
+		tolerance = 1e-3
+	case schemapb.DataType_BFloat16Vector:
+		want = typeutil.Float32ArrayToBFloat16Bytes(floatData)
+		decoded = typeutil.BFloat16BytesToFloat32Vector(got)
+		tolerance = 1e-2
+	default:
+		t.Fatalf("unsupported data type: %s", dataType.String())
 	}
+	assert.Equal(t, want, got)
+	assert.InDeltaSlice(t, floatData, decoded, tolerance)
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateFloat32ForBFloat16(tt.values)
-			if tt.expectErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
+func assertPlaceholderVectorsMatchFloat32(
+	t *testing.T,
+	placeholderType commonpb.PlaceholderType,
+	fieldType schemapb.DataType,
+	placeholders []*commonpb.PlaceholderValue,
+	inputs [][]float32,
+) {
+	t.Helper()
+	assert.Len(t, placeholders, 1)
+	placeholder := placeholders[0]
+	assert.Equal(t, placeholderType, placeholder.GetType())
+	assert.Len(t, placeholder.GetValues(), len(inputs))
+	for i, input := range inputs {
+		switch fieldType {
+		case schemapb.DataType_Float16Vector:
+			assertFP16BF16BytesMatchFloat32(t, fieldType, input, placeholder.GetValues()[i])
+		case schemapb.DataType_BFloat16Vector:
+			assertFP16BF16BytesMatchFloat32(t, fieldType, input, placeholder.GetValues()[i])
+		default:
+			assert.Equal(t, typeutil.Float32ArrayToBytes(input), placeholder.GetValues()[i])
+		}
 	}
+}
+
+func fp16BF16SchemaInfo(dataType schemapb.DataType, dim int64) *schemaInfo {
+	return newSchemaInfo(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "vector",
+				DataType: dataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+				},
+			},
+		},
+	})
 }
 
 func createFloat32PlaceholderGroup(vectors [][]float32) []byte {
@@ -193,7 +194,7 @@ func TestConvertPlaceholderGroupToFloat16(t *testing.T) {
 		DataType: schemapb.DataType_Float16Vector,
 	}
 
-	convertedBytes, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+	convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 	assert.NoError(t, err)
 
 	var resultPhg commonpb.PlaceholderGroup
@@ -214,7 +215,7 @@ func TestConvertPlaceholderGroupToBFloat16(t *testing.T) {
 		DataType: schemapb.DataType_BFloat16Vector,
 	}
 
-	convertedBytes, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+	convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 	assert.NoError(t, err)
 
 	var resultPhg commonpb.PlaceholderGroup
@@ -241,7 +242,7 @@ func TestConvertPlaceholderGroupTypeMismatch(t *testing.T) {
 		DataType: schemapb.DataType_BFloat16Vector,
 	}
 
-	_, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+	_, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "vector type must be the same")
 }
@@ -262,7 +263,7 @@ func TestConvertPlaceholderGroupPassThrough(t *testing.T) {
 		DataType: schemapb.DataType_FloatVector,
 	}
 
-	result, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+	result, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 	assert.NoError(t, err)
 	assert.Equal(t, phgBytes, result)
 }
@@ -275,12 +276,12 @@ func TestConvertPlaceholderGroupNoConversionNeeded(t *testing.T) {
 		DataType: schemapb.DataType_FloatVector,
 	}
 
-	convertedBytes, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+	convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 	assert.NoError(t, err)
 	assert.Equal(t, phgBytes, convertedBytes)
 }
 
-func TestConvertPlaceholderGroupOutOfRange(t *testing.T) {
+func TestConvertPlaceholderGroupOverflowToFloat16Infinity(t *testing.T) {
 	vectors := [][]float32{{0.1, 100000.0, 0.3, 0.4}}
 	phgBytes := createFloat32PlaceholderGroup(vectors)
 
@@ -288,9 +289,110 @@ func TestConvertPlaceholderGroupOutOfRange(t *testing.T) {
 		DataType: schemapb.DataType_Float16Vector,
 	}
 
-	_, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+	_, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "exceeds float16 range")
+	assert.Contains(t, err.Error(), "nan or infinity")
+}
+
+func TestNormalizeFp32ToFp16Bf16VectorFieldData(t *testing.T) {
+	newTestSchema := func(dataType schemapb.DataType) *schemaInfo {
+		return newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "vector",
+					DataType: dataType,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "2"},
+					},
+				},
+			},
+		})
+	}
+
+	for _, tt := range []struct {
+		name      string
+		dataType  schemapb.DataType
+		fieldData *schemapb.FieldData
+		wantBytes func([]float32) []byte
+	}{
+		{
+			name:      "float16",
+			dataType:  schemapb.DataType_Float16Vector,
+			fieldData: testFloatVectorFieldData("vector", []float32{0.1, 0.2, 0.3, 0.4}, 2),
+			wantBytes: typeutil.Float32ArrayToFloat16Bytes,
+		},
+		{
+			name:      "bfloat16",
+			dataType:  schemapb.DataType_BFloat16Vector,
+			fieldData: testFloatVectorFieldData("vector", []float32{0.1, 0.2, 0.3, 0.4}, 2),
+			wantBytes: typeutil.Float32ArrayToBFloat16Bytes,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			floatData := append([]float32(nil), tt.fieldData.GetVectors().GetFloatVector().GetData()...)
+			schema := newTestSchema(tt.dataType)
+			err := fillFieldPropertiesOnly([]*schemapb.FieldData{tt.fieldData}, schema)
+			assert.NoError(t, err)
+
+			err = normalizeFP32ToFP16BF16VectorFieldData([]*schemapb.FieldData{tt.fieldData}, schema)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.dataType, tt.fieldData.GetType())
+			assert.Equal(t, int64(2), tt.fieldData.GetVectors().GetDim())
+			if tt.dataType == schemapb.DataType_Float16Vector {
+				assert.Equal(t, tt.wantBytes(floatData), tt.fieldData.GetVectors().GetFloat16Vector())
+			} else {
+				assert.Equal(t, tt.wantBytes(floatData), tt.fieldData.GetVectors().GetBfloat16Vector())
+			}
+		})
+	}
+
+	t.Run("skip non fp16 bf16 schema field", func(t *testing.T) {
+		fieldData := testFloatVectorFieldData("vector", []float32{0.1, 0.2}, 2)
+		schema := newTestSchema(schemapb.DataType_FloatVector)
+		err := fillFieldPropertiesOnly([]*schemapb.FieldData{fieldData}, schema)
+		assert.NoError(t, err)
+		err = normalizeFP32ToFP16BF16VectorFieldData([]*schemapb.FieldData{fieldData}, schema)
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldData.GetVectors().GetFloatVector())
+	})
+
+	t.Run("skip non float vector payload", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{FieldName: "vector"}
+		schema := newTestSchema(schemapb.DataType_Float16Vector)
+		err := normalizeFP32ToFP16BF16VectorFieldData([]*schemapb.FieldData{fieldData}, schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("unknown field", func(t *testing.T) {
+		fieldData := testFloatVectorFieldData("missing", []float32{0.1, 0.2}, 2)
+		err := normalizeFP32ToFP16BF16VectorFieldData([]*schemapb.FieldData{fieldData}, newTestSchema(schemapb.DataType_Float16Vector))
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid fp32 value", func(t *testing.T) {
+		fieldData := testFloatVectorFieldData("vector", []float32{float32(math.Inf(1)), 0.2}, 2)
+		schema := newTestSchema(schemapb.DataType_Float16Vector)
+		err := fillFieldPropertiesOnly([]*schemapb.FieldData{fieldData}, schema)
+		assert.NoError(t, err)
+		err = normalizeFP32ToFP16BF16VectorFieldData([]*schemapb.FieldData{fieldData}, schema)
+		assert.Error(t, err)
+	})
+}
+
+func testFloatVectorFieldData(fieldName string, data []float32, dim int64) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldName: fieldName,
+		Type:      schemapb.DataType_FloatVector,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: data},
+				},
+			},
+		},
+	}
 }
 
 func TestConvertPlaceholderGroupIntegration(t *testing.T) {
@@ -327,7 +429,7 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 			DataType: schemapb.DataType_Float16Vector,
 		}
 
-		convertedBytes, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+		convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 		assert.NoError(t, err)
 
 		var resultPhg commonpb.PlaceholderGroup
@@ -344,7 +446,7 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 			DataType: schemapb.DataType_BFloat16Vector,
 		}
 
-		convertedBytes, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+		convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 		assert.NoError(t, err)
 
 		var resultPhg commonpb.PlaceholderGroup
@@ -361,7 +463,7 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 			DataType: schemapb.DataType_FloatVector,
 		}
 
-		convertedBytes, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
+		convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 		assert.NoError(t, err)
 		assert.Equal(t, phgBytes, convertedBytes) // Should be unchanged
 	})

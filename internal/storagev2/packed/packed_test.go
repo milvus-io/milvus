@@ -25,8 +25,10 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestPackedReadAndWrite(t *testing.T) {
@@ -170,4 +172,136 @@ func randomString(length int) string {
 		result[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(result)
+}
+
+func (suite *PackedTestSuite) TestCloseAndTellOneGroup() {
+	batches := 100
+
+	paths := []string{"/tmp/tell_one_group"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	bufferSize := int64(10 * 1024 * 1024)
+	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	for i := 0; i < batches; i++ {
+		err = pw.WriteRecordBatch(suite.rec)
+		suite.NoError(err)
+	}
+	sizes, err := pw.CloseAndTell(len(columnGroups))
+	suite.NoError(err)
+	suite.Len(sizes, 1)
+	suite.Positive(sizes[0], "file size should be positive after writing data")
+}
+
+func (suite *PackedTestSuite) TestCloseIsIdempotent() {
+	paths := []string{"/tmp/close_idempotent"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	pw, err := NewPackedWriter(paths, suite.schema, int64(10*1024*1024), 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	err = pw.WriteRecordBatch(suite.rec)
+	suite.NoError(err)
+	err = pw.Close()
+	suite.NoError(err)
+	err = pw.Close()
+	suite.NoError(err)
+}
+
+func (suite *PackedTestSuite) TestCloseAndTellIsIdempotent() {
+	paths := []string{"/tmp/close_and_tell_idempotent"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	pw, err := NewPackedWriter(paths, suite.schema, int64(10*1024*1024), 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	err = pw.WriteRecordBatch(suite.rec)
+	suite.NoError(err)
+	sizes, err := pw.CloseAndTell(len(columnGroups))
+	suite.NoError(err)
+	suite.Len(sizes, 1)
+	suite.Positive(sizes[0])
+	again, err := pw.CloseAndTell(len(columnGroups))
+	suite.NoError(err)
+	suite.Equal(sizes, again)
+}
+
+func (suite *PackedTestSuite) TestCloseAndTellMultiGroups() {
+	batches := 100
+
+	b := array.NewRecordBuilder(memory.DefaultAllocator, suite.schema)
+	arrLen := 30
+	defer b.Release()
+	for idx := range suite.schema.Fields() {
+		switch idx {
+		case 0:
+			values := make([]int32, arrLen)
+			for i := 0; i < arrLen; i++ {
+				values[i] = int32(i + 1)
+			}
+			b.Field(idx).(*array.Int32Builder).AppendValues(values, nil)
+		case 1:
+			values := make([]int64, arrLen)
+			for i := 0; i < arrLen; i++ {
+				values[i] = int64(i + 1)
+			}
+			b.Field(idx).(*array.Int64Builder).AppendValues(values, nil)
+		case 2:
+			values := make([]string, arrLen)
+			for i := 0; i < arrLen; i++ {
+				values[i] = randomString(100)
+			}
+			b.Field(idx).(*array.StringBuilder).AppendValues(values, nil)
+		}
+	}
+	rec := b.NewRecord()
+	defer rec.Release()
+
+	paths := []string{"/tmp/tell_multi_0", "/tmp/tell_multi_1"}
+	columnGroups := []storagecommon.ColumnGroup{
+		{Columns: []int{2}, GroupID: 2},
+		{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
+	}
+	pw, err := NewPackedWriter(paths, suite.schema, int64(10*1024*1024), 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	for i := 0; i < batches; i++ {
+		err = pw.WriteRecordBatch(rec)
+		suite.NoError(err)
+	}
+	sizes, err := pw.CloseAndTell(len(columnGroups))
+	suite.NoError(err)
+	suite.Len(sizes, 2)
+	for i, size := range sizes {
+		suite.Positive(size, "size[%d] should be positive", i)
+	}
+}
+
+func (suite *PackedTestSuite) TestFilesystemMetrics() {
+	localConfig := &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    "/tmp",
+	}
+
+	beforeMetrics, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
+	suite.NoError(err)
+
+	paths := []string{"/tmp/metrics_test"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	pw, err := NewPackedWriter(paths, suite.schema, 10*1024*1024, 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	for i := 0; i < 100; i++ {
+		err = pw.WriteRecordBatch(suite.rec)
+		suite.NoError(err)
+	}
+	err = pw.Close()
+	suite.NoError(err)
+
+	afterWrite, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
+	suite.NoError(err)
+	suite.Greater(afterWrite.WriteBytes, beforeMetrics.WriteBytes, "write bytes should increase")
+
+	reader, err := NewPackedReader(paths, suite.schema, 10*1024*1024, nil, nil)
+	suite.NoError(err)
+	rr, err := reader.ReadNext()
+	suite.NoError(err)
+	rr.Release()
+
+	afterRead, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
+	suite.NoError(err)
+	suite.Greater(afterRead.ReadBytes, afterWrite.ReadBytes, "read bytes should increase")
 }

@@ -21,20 +21,18 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // newDeltalogOneFieldReader creates a reader for the old single-field deltalog format
@@ -116,7 +114,7 @@ func (dsw *DeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) error {
 	// Write descriptor
 	de := NewBaseDescriptorEvent(dsw.collectionID, dsw.partitionID, dsw.segmentID)
 	de.PayloadDataType = dsw.fieldSchema.DataType
-	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
+	de.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
 	if err := de.Write(w); err != nil {
 		return err
 	}
@@ -357,8 +355,8 @@ func (dsw *MultiFieldDeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) err
 	// Write descriptor
 	de := NewBaseDescriptorEvent(dsw.collectionID, dsw.partitionID, dsw.segmentID)
 	de.PayloadDataType = schemapb.DataType_Int64
-	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
-	de.descriptorEventData.AddExtra(version, MultiField)
+	de.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
+	de.AddExtra(version, MultiField)
 	if err := de.Write(w); err != nil {
 		return err
 	}
@@ -416,7 +414,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 				pb.Append(pk)
 			}
 		default:
-			return nil, fmt.Errorf("unexpected pk type %v", v[0].PkType)
+			return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", v[0].PkType)
 		}
 
 		for _, vv := range v {
@@ -441,7 +439,7 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteL
 	return NewDeserializeReader(reader, func(r Record, v []*DeleteLog) error {
 		rec, ok := r.(*simpleArrowRecord)
 		if !ok {
-			return errors.New("can not cast to simple arrow record")
+			return merr.WrapErrServiceInternalMsg("can not cast to simple arrow record")
 		}
 		fields := rec.r.Schema().Fields()
 		switch fields[0].Type.ID() {
@@ -462,7 +460,7 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteL
 				v[j].Pk = NewVarCharPrimaryKey(arr.Value(j))
 			}
 		default:
-			return fmt.Errorf("unexpected delta log pkType %v", fields[0].Type.Name())
+			return merr.WrapErrServiceInternalMsg("unexpected delta log pkType %v", fields[0].Type.Name())
 		}
 
 		arr := r.Column(1).(*array.Int64)
@@ -492,7 +490,7 @@ func supportMultiFieldFormat(blobs []*Blob) bool {
 			return false
 		}
 		defer reader.Close()
-		version := reader.descriptorEventData.Extras[version]
+		version := reader.Extras[version]
 		return version != nil && version.(string) == MultiField
 	}
 	return false
@@ -561,7 +559,7 @@ func (w *LegacyDeltalogWriter) Write(rec Record) error {
 			pk := NewVarCharPrimaryKey(rec.Column(0).(*array.String).Value(i))
 			return NewDeleteLog(pk, ts), nil
 		default:
-			return nil, fmt.Errorf("unexpected pk type %v", w.pkType)
+			return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", w.pkType)
 		}
 	}
 
@@ -589,39 +587,134 @@ func (w *LegacyDeltalogWriter) Close() error {
 		return err
 	}
 
-	return w.uploader(context.Background(), map[string][]byte{blob.Key: blob.Value})
+	return w.uploader(context.Background(), map[string][]byte{w.path: blob.Value})
 }
 
 func (w *LegacyDeltalogWriter) GetWrittenUncompressed() uint64 {
 	return w.writtenUncompressed
 }
 
-func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			pkField,
-			{
-				FieldID:  common.TimeStampField,
-				DataType: schemapb.DataType_Int64,
-			},
-		},
-	}
+// deleteLogToRecordReader wraps a DeserializeReaderImpl[*DeleteLog] and converts
+// DeleteLog entries to Records with pk and ts columns for use by common.readFromReader.
+type deleteLogToRecordReader struct {
+	reader  *DeserializeReaderImpl[*DeleteLog]
+	pkType  schemapb.DataType
+	current Record
+}
 
-	chunkPos := 0
-	blobsReader := func() ([]*Blob, error) {
-		path := paths[chunkPos]
-		chunkPos++
-		blobs, err := downloader(context.Background(), []string{path})
+func (r *deleteLogToRecordReader) Next() (Record, error) {
+	// Collect all values from the current batch
+	var deleteLogs []*DeleteLog
+	for {
+		dl, err := r.reader.NextValue()
+		if err == io.EOF {
+			if len(deleteLogs) == 0 {
+				return nil, io.EOF
+			}
+			break
+		}
 		if err != nil {
 			return nil, err
 		}
-		return []*Blob{{Key: path, Value: blobs[0]}}, nil
+		deleteLogs = append(deleteLogs, *dl)
 	}
 
-	return newIterativeCompositeBinlogRecordReader(
-		schema,
-		nil,
-		blobsReader,
-		nil,
-	), nil
+	// Build Arrow arrays from DeleteLog entries
+	allocator := memory.DefaultAllocator
+	numRows := len(deleteLogs)
+
+	var pkArray arrow.Array
+	switch r.pkType {
+	case schemapb.DataType_Int64:
+		builder := array.NewInt64Builder(allocator)
+		defer builder.Release()
+		for _, dl := range deleteLogs {
+			builder.Append(dl.Pk.GetValue().(int64))
+		}
+		pkArray = builder.NewArray()
+	case schemapb.DataType_VarChar:
+		builder := array.NewStringBuilder(allocator)
+		defer builder.Release()
+		for _, dl := range deleteLogs {
+			builder.Append(dl.Pk.GetValue().(string))
+		}
+		pkArray = builder.NewArray()
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported pk type: %v", r.pkType)
+	}
+
+	tsBuilder := array.NewInt64Builder(allocator)
+	defer tsBuilder.Release()
+	for _, dl := range deleteLogs {
+		tsBuilder.Append(int64(dl.Ts))
+	}
+	tsArray := tsBuilder.NewArray()
+
+	// Create arrow schema
+	var pkFieldType arrow.DataType
+	if r.pkType == schemapb.DataType_Int64 {
+		pkFieldType = arrow.PrimitiveTypes.Int64
+	} else {
+		pkFieldType = arrow.BinaryTypes.String
+	}
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: pkFieldType, Nullable: false},
+		{Name: "ts", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+	}, nil)
+
+	record := array.NewRecord(schema, []arrow.Array{pkArray, tsArray}, int64(numRows))
+
+	field2Col := map[FieldID]int{
+		0: 0, // pk column
+		1: 1, // ts column
+	}
+
+	if r.current != nil {
+		r.current.Release()
+	}
+	r.current = NewSimpleArrowRecord(record, field2Col)
+	return r.current, nil
+}
+
+func (r *deleteLogToRecordReader) SetNeededFields(_ typeutil.Set[int64]) {}
+
+func (r *deleteLogToRecordReader) Close() error {
+	if r.current != nil {
+		r.current.Release()
+	}
+	return r.reader.Close()
+}
+
+func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
+	if len(paths) == 0 {
+		return newSimpleArrowRecordReader(nil)
+	}
+
+	// Download all blobs first
+	blobData, err := downloader(context.Background(), paths)
+	if err != nil {
+		return nil, err
+	}
+
+	blobs := make([]*Blob, len(paths))
+	for i, path := range paths {
+		blobs[i] = &Blob{Key: path, Value: blobData[i]}
+	}
+
+	// Check if this is the multi-field format (parquet with pk+ts columns)
+	if supportMultiFieldFormat(blobs) {
+		return newSimpleArrowRecordReader(blobs)
+	}
+
+	// JSON format: use DeserializeReader and wrap it to produce pk/ts records
+	deserializeReader, err := newDeltalogOneFieldReader(blobs)
+	if err != nil {
+		return nil, err
+	}
+
+	return &deleteLogToRecordReader{
+		reader: deserializeReader,
+		pkType: pkField.GetDataType(),
+	}, nil
 }

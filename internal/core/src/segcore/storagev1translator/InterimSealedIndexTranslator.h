@@ -56,7 +56,6 @@ class InterimSealedIndexTranslator
  private:
     std::shared_ptr<ChunkedColumnInterface> vec_data_;
     int64_t segment_id_;
-    int64_t field_id_;
     knowhere::IndexType index_type_;
     knowhere::MetricType metric_type_;
     knowhere::Json build_config_;

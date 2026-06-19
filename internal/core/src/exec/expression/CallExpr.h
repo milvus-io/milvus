@@ -73,7 +73,7 @@ class PhyCallExpr : public Expr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -87,13 +87,29 @@ class PhyCallExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        for (const auto& input : inputs_) {
+            if (!input->CanExecuteAllAtOnce()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        batch_size_ = active_count_;
+        for (auto& input : inputs_) {
+            input->SetExecuteAllAtOnce();
+        }
+    }
+
  private:
     std::shared_ptr<const milvus::expr::CallExpr> expr_;
 
     int64_t active_count_{0};
     int64_t num_chunk_{0};
-    int64_t current_chunk_id_{0};
-    int64_t current_chunk_pos_{0};
     int64_t size_per_chunk_{0};
 
     const segcore::SegmentInternalInterface* segment_;

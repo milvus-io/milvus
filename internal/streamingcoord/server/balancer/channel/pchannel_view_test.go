@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 func TestPChannelView(t *testing.T) {
@@ -19,13 +19,13 @@ func TestPChannelView(t *testing.T) {
 		}: newPChannelMetaFromProto(&streamingpb.PChannelMeta{
 			Channel: &streamingpb.PChannelInfo{Name: "test", Term: 1},
 			State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
-		}),
+		}, nil),
 		types.ChannelID{
 			Name: "test2",
 		}: newPChannelMetaFromProto(&streamingpb.PChannelMeta{
 			Channel: &streamingpb.PChannelInfo{Name: "test2", Term: 1},
 			State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
-		}),
+		}, nil),
 	}
 	view := newPChannelView(metas)
 	assert.Len(t, view.Channels, 2)

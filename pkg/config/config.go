@@ -17,6 +17,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -25,13 +26,26 @@ import (
 	"github.com/spf13/cast"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
 	ErrNotInitial   = errors.New("config is not initialized")
 	ErrIgnoreChange = errors.New("ignore change")
 	ErrKeyNotFound  = errors.New("key not found")
+
+	// config source management
+	ErrSourceDuplicate = errors.New("duplicate config source")
+	ErrSourceInvalid   = errors.New("invalid config source or source not added")
+
+	// etcd config read/write
+	ErrEtcdClientUnavailable     = errors.New("etcd client is not available")
+	ErrImmutableConfigSaveFailed = errors.New("failed to save immutable configs to etcd")
+	ErrNoConfigsToAlter          = errors.New("no configs to alter")
+
+	// config file parsing
+	ErrUnsupportedConfigType  = errors.New("unsupported config file type")
+	ErrAllConfigFilesNotExist = errors.New("all config files not exist")
 )
 
 const (
@@ -99,16 +113,40 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 		case map[interface{}]interface{}:
 			flattenAndMergeMap(fullKey, cast.ToStringMap(val), result)
 		case []interface{}:
-			str := ""
-			for i, item := range val {
-				itemStr, err := cast.ToStringE(item)
+			// Check if array contains complex types (maps/structs)
+			isComplexArray := false
+			for _, item := range val {
+				switch item.(type) {
+				case map[string]interface{}, map[interface{}]interface{}:
+					isComplexArray = true
+				}
+				if isComplexArray {
+					break
+				}
+			}
+
+			var str string
+			if isComplexArray {
+				// For complex arrays (containing objects), convert to JSON-compatible format and serialize
+				jsonCompatible := convertToJSONCompatible(val)
+				jsonBytes, err := json.Marshal(jsonCompatible)
 				if err != nil {
+					fmt.Printf("marshal to json failed %s, error = %s\n", fullKey, err.Error())
 					continue
 				}
-				if i == 0 {
-					str = itemStr
-				} else {
-					str = str + "," + itemStr
+				str = string(jsonBytes)
+			} else {
+				// For simple arrays, use comma-separated values
+				for i, item := range val {
+					itemStr, err := cast.ToStringE(item)
+					if err != nil {
+						continue
+					}
+					if i == 0 {
+						str = itemStr
+					} else {
+						str = str + "," + itemStr
+					}
 				}
 			}
 			result[lowerKey(fullKey)] = str
@@ -122,5 +160,36 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 			result[lowerKey(fullKey)] = str
 			result[formatKey(fullKey)] = str
 		}
+	}
+}
+
+// convertToJSONCompatible converts map[interface{}]interface{} to map[string]interface{}
+// recursively to make it compatible with JSON marshaling
+func convertToJSONCompatible(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[interface{}]interface{}:
+		result := make(map[string]interface{})
+		for k, v := range val {
+			keyStr, err := cast.ToStringE(k)
+			if err != nil {
+				continue
+			}
+			result[keyStr] = convertToJSONCompatible(v)
+		}
+		return result
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for k, v := range val {
+			result[k] = convertToJSONCompatible(v)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(val))
+		for i, item := range val {
+			result[i] = convertToJSONCompatible(item)
+		}
+		return result
+	default:
+		return v
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -29,24 +30,30 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	qn "github.com/milvus-io/milvus/internal/querynodev2"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/netutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // UniqueID is an alias for type typeutil.UniqueID, used as a unique identifier for the request.
@@ -65,7 +72,31 @@ type Server struct {
 	grpcServer *grpc.Server
 	listener   *netutil.NetListener
 
-	etcdCli *clientv3.Client
+	etcdCli  *clientv3.Client
+	mixCoord *syncutil.Future[types.MixCoordClient]
+}
+
+// lazyBinlogSaver implements segments.BinlogSaver with lazy initialization.
+// It waits for MixCoordClient to be ready on first SaveBinlogPaths call.
+type lazyBinlogSaver struct {
+	mixCoordFuture *syncutil.Future[types.MixCoordClient]
+	mu             sync.Mutex
+	broker         broker.Broker
+}
+
+func (s *lazyBinlogSaver) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
+	s.mu.Lock()
+	if s.broker == nil {
+		client, err := s.mixCoordFuture.GetWithContext(ctx)
+		if err != nil {
+			s.mu.Unlock()
+			return errors.Wrap(err, "failed to get MixCoordClient for SaveBinlogPaths")
+		}
+		s.broker = broker.NewCoordBroker(client, paramtable.GetNodeID())
+	}
+	b := s.broker
+	s.mu.Unlock()
+	return b.SaveBinlogPaths(ctx, req)
 }
 
 func (s *Server) GetStatistics(ctx context.Context, request *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
@@ -85,6 +116,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		cancel:      cancel,
 		querynode:   qn.NewQueryNode(ctx, factory),
 		grpcErrChan: make(chan error),
+		mixCoord:    syncutil.NewFuture[types.MixCoordClient](),
 	}
 	return s, nil
 }
@@ -148,7 +180,35 @@ func (s *Server) init() error {
 	}
 	s.serverID.Store(s.querynode.GetNodeID())
 
+	// initialize MixCoord client asynchronously and set BinlogSaver on QueryNode
+	s.initMixCoord()
+	if qnImpl, ok := s.querynode.(*qn.QueryNode); ok {
+		qnImpl.SetBinlogSaver(&lazyBinlogSaver{mixCoordFuture: s.mixCoord})
+	}
+
 	return nil
+}
+
+func (s *Server) initMixCoord() {
+	log := log.Ctx(s.ctx)
+	go func() {
+		retry.Do(s.ctx, func() error {
+			log.Info("QueryNode connect to mixCoord...")
+			mixCoord, err := mix.NewClient(s.ctx)
+			if err != nil {
+				return errors.Wrap(err, "QueryNode try to new mixCoord client failed")
+			}
+
+			log.Info("QueryNode try to wait for mixCoord ready")
+			err = componentutil.WaitForComponentHealthy(s.ctx, mixCoord, "mixCoord", 1000000, time.Millisecond*200)
+			if err != nil {
+				return errors.Wrap(err, "QueryNode wait for mixCoord ready failed")
+			}
+			log.Info("QueryNode mixCoord client ready")
+			s.mixCoord.Set(mixCoord)
+			return nil
+		}, retry.AttemptAlways())
+	}()
 }
 
 // start starts QueryNode's grpc service.
@@ -408,6 +468,10 @@ func (s *Server) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (
 	return s.querynode.DropIndex(ctx, req)
 }
 
+func (s *Server) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	return s.querynode.UpdateIndex(ctx, req)
+}
+
 func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.querynode.ValidateAnalyzer(ctx, req)
 }
@@ -418,6 +482,10 @@ func (s *Server) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequ
 
 func (s *Server) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
 	return s.querynode.SyncFileResource(ctx, req)
+}
+
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.querynode.ClearReadTaskQueue(ctx, req)
 }
 
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {

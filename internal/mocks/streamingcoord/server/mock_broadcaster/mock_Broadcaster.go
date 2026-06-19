@@ -7,7 +7,7 @@ import (
 
 	broadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -101,6 +101,53 @@ func (_c *MockBroadcaster_Close_Call) Return() *MockBroadcaster_Close_Call {
 
 func (_c *MockBroadcaster_Close_Call) RunAndReturn(run func()) *MockBroadcaster_Close_Call {
 	_c.Run(run)
+	return _c
+}
+
+// GetPendingCreateCollectionResources provides a mock function with no fields
+func (_m *MockBroadcaster) GetPendingCreateCollectionResources() map[int64][]int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPendingCreateCollectionResources")
+	}
+
+	var r0 map[int64][]int64
+	if rf, ok := ret.Get(0).(func() map[int64][]int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64][]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockBroadcaster_GetPendingCreateCollectionResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingCreateCollectionResources'
+type MockBroadcaster_GetPendingCreateCollectionResources_Call struct {
+	*mock.Call
+}
+
+// GetPendingCreateCollectionResources is a helper method to define mock.On call
+func (_e *MockBroadcaster_Expecter) GetPendingCreateCollectionResources() *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+	return &MockBroadcaster_GetPendingCreateCollectionResources_Call{Call: _e.mock.On("GetPendingCreateCollectionResources")}
+}
+
+func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) Run(run func()) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) Return(_a0 map[int64][]int64) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) RunAndReturn(run func() map[int64][]int64) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+	_c.Call.Return(run)
 	return _c
 }
 
@@ -221,6 +268,64 @@ func (_c *MockBroadcaster_WithResourceKeys_Call) Return(_a0 broadcaster.Broadcas
 }
 
 func (_c *MockBroadcaster_WithResourceKeys_Call) RunAndReturn(run func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error)) *MockBroadcaster_WithResourceKeys_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WithSecondaryClusterResourceKey provides a mock function with given fields: ctx
+func (_m *MockBroadcaster) WithSecondaryClusterResourceKey(ctx context.Context) (broadcaster.BroadcastAPI, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WithSecondaryClusterResourceKey")
+	}
+
+	var r0 broadcaster.BroadcastAPI
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (broadcaster.BroadcastAPI, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) broadcaster.BroadcastAPI); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(broadcaster.BroadcastAPI)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcaster_WithSecondaryClusterResourceKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithSecondaryClusterResourceKey'
+type MockBroadcaster_WithSecondaryClusterResourceKey_Call struct {
+	*mock.Call
+}
+
+// WithSecondaryClusterResourceKey is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockBroadcaster_Expecter) WithSecondaryClusterResourceKey(ctx interface{}) *MockBroadcaster_WithSecondaryClusterResourceKey_Call {
+	return &MockBroadcaster_WithSecondaryClusterResourceKey_Call{Call: _e.mock.On("WithSecondaryClusterResourceKey", ctx)}
+}
+
+func (_c *MockBroadcaster_WithSecondaryClusterResourceKey_Call) Run(run func(ctx context.Context)) *MockBroadcaster_WithSecondaryClusterResourceKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_WithSecondaryClusterResourceKey_Call) Return(_a0 broadcaster.BroadcastAPI, _a1 error) *MockBroadcaster_WithSecondaryClusterResourceKey_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroadcaster_WithSecondaryClusterResourceKey_Call) RunAndReturn(run func(context.Context) (broadcaster.BroadcastAPI, error)) *MockBroadcaster_WithSecondaryClusterResourceKey_Call {
 	_c.Call.Return(run)
 	return _c
 }

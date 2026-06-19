@@ -26,9 +26,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type deleteNode struct {
@@ -63,7 +63,7 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 }
 
 func (dNode *deleteNode) Operate(in Msg) Msg {
-	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Dec()
+	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).Dec()
 	nodeMsg := in.(*deleteNodeMsg)
 
 	if len(nodeMsg.deleteMsgs) > 0 {
@@ -78,7 +78,13 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	if nodeMsg.schema != nil {
-		dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema, nodeMsg.schemaVersion)
+		if err := dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema, nodeMsg.schemaVersion); err != nil {
+			log.Warn("failed to update schema in delete node",
+				zap.Int64("collectionID", dNode.collectionID),
+				zap.String("channel", dNode.channel),
+				zap.Uint64("schemaVersion", nodeMsg.schemaVersion),
+				zap.Error(err))
+		}
 	}
 
 	// update tSafe

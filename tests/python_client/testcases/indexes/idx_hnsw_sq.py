@@ -267,7 +267,10 @@ class HNSW_SQ:
         {
             "description": "Minimum boundary combination",
             "params": {"M": 2, "efConstruction": 1, "sq_type": "SQ6"},
-            "expected": success
+            "expected": success,
+            # M=2 + efConstruction=1 produces a poorly connected graph; HNSW does not
+            # guarantee returning topK results under these extreme parameters.
+            "relaxed_limit": True
         },
         {
             "description": "Maximum boundary combination",

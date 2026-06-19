@@ -26,20 +26,18 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // StoppingBalancer is responsible for balancing segments and channels from stopping nodes (RO nodes)
 // to active nodes (RW nodes). It provides a centralized implementation of stopping balance logic
 // that was previously duplicated across multiple balancer implementations.
 type StoppingBalancer struct {
+	BalanceReplicaHelper
 	dist         *meta.DistributionManager
 	targetMgr    meta.TargetManagerInterface
 	assignPolicy assign.AssignPolicy
-	nodeManager  *session.NodeManager
 }
 
 // NewStoppingBalancer creates a new StoppingBalancer instance
@@ -50,10 +48,10 @@ func NewStoppingBalancer(
 	nodeManager *session.NodeManager,
 ) *StoppingBalancer {
 	return &StoppingBalancer{
-		dist:         dist,
-		targetMgr:    targetMgr,
-		assignPolicy: assignPolicy,
-		nodeManager:  nodeManager,
+		BalanceReplicaHelper: BalanceReplicaHelper{nodeManager: nodeManager},
+		dist:                 dist,
+		targetMgr:            targetMgr,
+		assignPolicy:         assignPolicy,
 	}
 }
 
@@ -96,12 +94,7 @@ func (b *StoppingBalancer) BalanceReplica(ctx context.Context, replica *meta.Rep
 }
 
 func (b *StoppingBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.ChannelAssignPlan {
-	var rwNodes, roNodes []int64
-	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, roNodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
-	} else {
-		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
-	}
+	rwNodes, roNodes := b.GetRWAndRONodesForChannels(replica)
 
 	// If there are no RW nodes or no RO nodes, no stopping balance is needed
 	if len(rwNodes) == 0 || len(roNodes) == 0 {
@@ -129,8 +122,8 @@ func (b *StoppingBalancer) genChannelPlan(ctx context.Context, br *balanceReport
 
 	for _, nodeID := range roNodes {
 		// Get all channels on this stopping node
-		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(
-			replica.GetCollectionID(),
+		dmChannels := b.dist.ChannelDistManager.GetByFilter(
+			meta.WithCollectionID2Channel(replica.GetCollectionID()),
 			meta.WithNodeID2Channel(nodeID),
 		)
 

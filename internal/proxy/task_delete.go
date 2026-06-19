@@ -6,33 +6,32 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type BaseDeleteTask = msgstream.DeleteMsg
@@ -274,18 +273,21 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 
 	db, err := globalMetaCache.GetDatabaseInfo(ctx, dr.req.GetDbName())
 	if err != nil {
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrDatabaseNotFound)
+		return err
 	}
 	dr.dbID = db.dbID
 
 	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
-		return ErrWithLog(log, "Failed to get collection id", merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound))
+		return ErrWithLog(log, "Failed to get collection id", err)
 	}
 
 	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection schema", err)
+	}
+	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
+		return ErrWithLog(log, "TEXT field requires StorageV3", err)
 	}
 
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
@@ -298,10 +300,10 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	start := time.Now()
 	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
 	if err != nil {
-		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
 	}
-	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
+	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 
 	if planparserv2.IsAlwaysTruePlan(dr.plan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
@@ -311,7 +313,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	partName := dr.req.GetPartitionName()
 	if dr.schema.IsPartitionKeyCollection() {
 		if len(partName) > 0 {
-			return errors.New("not support manually specifying the partition names if partition key mode is used")
+			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 		}
 		expr, err := exprutil.ParseExprFromPlan(dr.plan)
 		if err != nil {
@@ -433,6 +435,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) sha
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
 				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+				QueryLabel:         metrics.DeleteQueryLabel,
 			},
 			DmlChannels: []string{channel},
 			Scope:       querypb.DataScope_All,
@@ -640,7 +643,7 @@ func getPrimaryKeysFromUnaryRangeExpr(schema *schemapb.CollectionSchema, unaryRa
 			},
 		}
 	default:
-		return pks, errors.New("invalid field data type specifyed in simple delete expr")
+		return pks, merr.WrapErrParameterInvalidMsg("invalid field data type specifyed in simple delete expr")
 	}
 
 	return pks, nil
@@ -671,7 +674,7 @@ func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *pla
 			},
 		}
 	default:
-		return pks, 0, errors.New("invalid field data type specifyed in simple delete expr")
+		return pks, 0, merr.WrapErrParameterInvalidMsg("invalid field data type specifyed in simple delete expr")
 	}
 
 	return pks, pkCount, nil

@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.clustering;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/clusteringpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb";
 import "schema.proto";
 
 // Synchronously modify StorageConfig in index_coord.proto/index_cgo_msg.proto file
@@ -22,6 +22,8 @@ message StorageConfig {
   string sslCACert = 14;
   string GcpCredentialJSON = 15;
   uint32 max_connections = 16;
+  string ssl_tls_min_version = 17;
+  bool use_crc32c_checksum = 18;
 }
 
 message InsertFiles {

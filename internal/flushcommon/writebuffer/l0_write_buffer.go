@@ -6,19 +6,19 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 type l0WriteBuffer struct {
@@ -59,13 +59,21 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream
 	}
 }
 
-func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
+func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
 
-	// buffer insert data and add segment if not exists
 	for _, inData := range insertData {
-		err := wb.bufferInsert(inData, startPos, endPos)
+		if wb.useGrowingSourceFlush {
+			targetOffset := wb.growingSourceTargetOffset(inData.segmentID, inData.rowNum)
+			decision := wb.decideGrowingFlushSource(inData.segmentID, targetOffset, endPos)
+			if decision.sourceType == metacache.FlushSourceGrowing {
+				wb.recordGrowingSourceProgress(inData, startPos, endPos, schemaVersion, targetOffset)
+				continue
+			}
+		}
+
+		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
 		if err != nil {
 			return err
 		}
@@ -77,6 +85,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
+	wb.updateProcessedTsLocked(endPos.GetTimestamp())
 
 	segmentsSync := wb.triggerSync()
 	for _, segment := range segmentsSync {
@@ -91,8 +100,8 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 }
 
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
-func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
-	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos)
+func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
+	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos, schemaVersion)
 	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
@@ -101,7 +110,7 @@ func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgp
 		metacache.SetStartPositionIfNil(startPos),
 	), metacache.WithSegmentIDs(inData.segmentID))
 
-	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
+	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
 
 	return nil
 }

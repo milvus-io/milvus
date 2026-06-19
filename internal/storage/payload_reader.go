@@ -3,7 +3,6 @@ package storage
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -13,14 +12,13 @@ import (
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // PayloadReader reads data from payload
@@ -39,7 +37,7 @@ var _ PayloadReaderInterface = (*PayloadReader)(nil)
 
 func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*PayloadReader, error) {
 	if len(buf) == 0 {
-		return nil, errors.New("create Payload reader failed, buffer is empty")
+		return nil, merr.WrapErrDataIntegrityMsg("create Payload reader failed, buffer is empty")
 	}
 	parquetReader, err := file.NewParquetReader(bytes.NewReader(buf))
 	if err != nil {
@@ -56,32 +54,32 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*Pa
 	if colType == schemapb.DataType_ArrayOfVector {
 		arrowReader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{BatchSize: 1024}, memory.DefaultAllocator)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create arrow reader for VectorArray: %w", err)
+			return nil, merr.WrapErrStorage(err, "failed to create arrow reader for VectorArray")
 		}
 
 		arrowSchema, err := arrowReader.Schema()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get arrow schema for VectorArray: %w", err)
+			return nil, merr.WrapErrStorage(err, "failed to get arrow schema for VectorArray")
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, fmt.Errorf("VectorArray should have exactly 1 field, got %d", arrowSchema.NumFields())
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray should have exactly 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
 		if !field.HasMetadata() {
-			return nil, errors.New("VectorArray field is missing metadata")
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray field is missing metadata")
 		}
 
 		metadata := field.Metadata
 
 		elementTypeStr, ok := metadata.GetValue("elementType")
 		if !ok {
-			return nil, errors.New("VectorArray metadata missing required 'elementType' field")
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray metadata missing required 'elementType' field")
 		}
 		elementTypeInt, err := strconv.ParseInt(elementTypeStr, 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("invalid elementType in VectorArray metadata: %s", elementTypeStr)
+			return nil, merr.WrapErrDataIntegrityMsg("invalid elementType in VectorArray metadata: %s", elementTypeStr)
 		}
 
 		elementType := schemapb.DataType(elementTypeInt)
@@ -94,19 +92,19 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte, nullable bool) (*Pa
 			schemapb.DataType_SparseFloatVector:
 			reader.elementType = elementType
 		default:
-			return nil, fmt.Errorf("invalid vector type for VectorArray: %s", elementType.String())
+			return nil, merr.WrapErrDataIntegrityMsg("invalid vector type for VectorArray: %s", elementType.String())
 		}
 
 		dimStr, ok := metadata.GetValue("dim")
 		if !ok {
-			return nil, errors.New("VectorArray metadata missing required 'dim' field")
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray metadata missing required 'dim' field")
 		}
 		dimVal, err := strconv.ParseInt(dimStr, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid dim in VectorArray metadata: %s", dimStr)
+			return nil, merr.WrapErrDataIntegrityMsg("invalid dim in VectorArray metadata: %s", dimStr)
 		}
 		if dimVal <= 0 {
-			return nil, fmt.Errorf("VectorArray dim must be positive, got %d", dimVal)
+			return nil, merr.WrapErrDataIntegrityMsg("VectorArray dim must be positive, got %d", dimVal)
 		}
 		reader.dim = dimVal
 	}
@@ -182,7 +180,7 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 		val, validData, err := r.GetGeometryFromPayload()
 		return val, validData, 0, err
 	default:
-		return nil, nil, 0, merr.WrapErrParameterInvalidMsg("unknown type")
+		return nil, nil, 0, merr.WrapErrDataIntegrityMsg("unknown type")
 	}
 }
 
@@ -194,7 +192,7 @@ func (r *PayloadReader) ReleasePayloadReader() error {
 // GetBoolFromPayload returns bool slice from payload.
 func (r *PayloadReader) GetBoolFromPayload() ([]bool, []bool, error) {
 	if r.colType != schemapb.DataType_Bool {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get bool from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get bool from datatype %v", r.colType.String())
 	}
 
 	values := make([]bool, r.numRows)
@@ -206,7 +204,7 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, []bool, error) {
 			return nil, nil, err
 		}
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 		return values, validData, nil
 	}
@@ -215,7 +213,7 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, []bool, error) {
 		return nil, nil, err
 	}
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 	return values, nil, nil
 }
@@ -223,7 +221,7 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, []bool, error) {
 // GetByteFromPayload returns byte slice from payload
 func (r *PayloadReader) GetByteFromPayload() ([]byte, []bool, error) {
 	if r.colType != schemapb.DataType_Int8 {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get byte from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get byte from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -234,7 +232,7 @@ func (r *PayloadReader) GetByteFromPayload() ([]byte, []bool, error) {
 			return nil, nil, err
 		}
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 		ret := make([]byte, r.numRows)
 		for i := int64(0); i < r.numRows; i++ {
@@ -249,7 +247,7 @@ func (r *PayloadReader) GetByteFromPayload() ([]byte, []bool, error) {
 	}
 
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, r.numRows)
@@ -261,7 +259,7 @@ func (r *PayloadReader) GetByteFromPayload() ([]byte, []bool, error) {
 
 func (r *PayloadReader) GetInt8FromPayload() ([]int8, []bool, error) {
 	if r.colType != schemapb.DataType_Int8 {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get int8 from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get int8 from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -273,7 +271,7 @@ func (r *PayloadReader) GetInt8FromPayload() ([]int8, []bool, error) {
 		}
 
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 
 		return values, validData, nil
@@ -285,7 +283,7 @@ func (r *PayloadReader) GetInt8FromPayload() ([]int8, []bool, error) {
 	}
 
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 
 	ret := make([]int8, r.numRows)
@@ -297,7 +295,7 @@ func (r *PayloadReader) GetInt8FromPayload() ([]int8, []bool, error) {
 
 func (r *PayloadReader) GetInt16FromPayload() ([]int16, []bool, error) {
 	if r.colType != schemapb.DataType_Int16 {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get int16 from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get int16 from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -309,7 +307,7 @@ func (r *PayloadReader) GetInt16FromPayload() ([]int16, []bool, error) {
 		}
 
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 		return values, validData, nil
 	}
@@ -320,7 +318,7 @@ func (r *PayloadReader) GetInt16FromPayload() ([]int16, []bool, error) {
 	}
 
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 
 	ret := make([]int16, r.numRows)
@@ -332,7 +330,7 @@ func (r *PayloadReader) GetInt16FromPayload() ([]int16, []bool, error) {
 
 func (r *PayloadReader) GetInt32FromPayload() ([]int32, []bool, error) {
 	if r.colType != schemapb.DataType_Int32 {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get int32 from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get int32 from datatype %v", r.colType.String())
 	}
 
 	values := make([]int32, r.numRows)
@@ -344,7 +342,7 @@ func (r *PayloadReader) GetInt32FromPayload() ([]int32, []bool, error) {
 		}
 
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 		return values, validData, nil
 	}
@@ -354,14 +352,14 @@ func (r *PayloadReader) GetInt32FromPayload() ([]int32, []bool, error) {
 	}
 
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 	return values, nil, nil
 }
 
 func (r *PayloadReader) GetInt64FromPayload() ([]int64, []bool, error) {
 	if r.colType != schemapb.DataType_Int64 {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get int64 from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get int64 from datatype %v", r.colType.String())
 	}
 
 	values := make([]int64, r.numRows)
@@ -373,7 +371,7 @@ func (r *PayloadReader) GetInt64FromPayload() ([]int64, []bool, error) {
 		}
 
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 
 		return values, validData, nil
@@ -384,7 +382,7 @@ func (r *PayloadReader) GetInt64FromPayload() ([]int64, []bool, error) {
 	}
 
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 
 	return values, nil, nil
@@ -392,7 +390,7 @@ func (r *PayloadReader) GetInt64FromPayload() ([]int64, []bool, error) {
 
 func (r *PayloadReader) GetFloatFromPayload() ([]float32, []bool, error) {
 	if r.colType != schemapb.DataType_Float {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get float32 from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get float32 from datatype %v", r.colType.String())
 	}
 
 	values := make([]float32, r.numRows)
@@ -403,7 +401,7 @@ func (r *PayloadReader) GetFloatFromPayload() ([]float32, []bool, error) {
 			return nil, nil, err
 		}
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 		return values, validData, nil
 	}
@@ -412,14 +410,14 @@ func (r *PayloadReader) GetFloatFromPayload() ([]float32, []bool, error) {
 		return nil, nil, err
 	}
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 	return values, nil, nil
 }
 
 func (r *PayloadReader) GetDoubleFromPayload() ([]float64, []bool, error) {
 	if r.colType != schemapb.DataType_Double {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get double from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get double from datatype %v", r.colType.String())
 	}
 
 	values := make([]float64, r.numRows)
@@ -431,7 +429,7 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, []bool, error) {
 		}
 
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 		return values, validData, nil
 	}
@@ -441,14 +439,14 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, []bool, error) {
 	}
 
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 	return values, nil, nil
 }
 
 func (r *PayloadReader) GetTimestamptzFromPayload() ([]int64, []bool, error) {
 	if r.colType != schemapb.DataType_Timestamptz {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get timestamptz from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get timestamptz from datatype %v", r.colType.String())
 	}
 
 	values := make([]int64, r.numRows)
@@ -460,7 +458,7 @@ func (r *PayloadReader) GetTimestamptzFromPayload() ([]int64, []bool, error) {
 		}
 
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 
 		return values, validData, nil
@@ -471,7 +469,7 @@ func (r *PayloadReader) GetTimestamptzFromPayload() ([]int64, []bool, error) {
 	}
 
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 
 	return values, nil, nil
@@ -479,7 +477,7 @@ func (r *PayloadReader) GetTimestamptzFromPayload() ([]int64, []bool, error) {
 
 func (r *PayloadReader) GetStringFromPayload() ([]string, []bool, error) {
 	if r.colType != schemapb.DataType_String && r.colType != schemapb.DataType_VarChar {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get string from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get string from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -491,7 +489,7 @@ func (r *PayloadReader) GetStringFromPayload() ([]string, []bool, error) {
 		}
 
 		if valuesRead != r.numRows {
-			return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 		}
 		return values, validData, nil
 	}
@@ -506,7 +504,7 @@ func (r *PayloadReader) GetStringFromPayload() ([]string, []bool, error) {
 
 func (r *PayloadReader) GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, error) {
 	if r.colType != schemapb.DataType_Array {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get array from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get array from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -529,7 +527,7 @@ func (r *PayloadReader) GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, 
 
 func (r *PayloadReader) GetVectorArrayFromPayload() ([]*schemapb.VectorField, error) {
 	if r.colType != schemapb.DataType_ArrayOfVector {
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get vector from datatype %v", r.colType.String()))
+		return nil, merr.WrapErrDataIntegrityMsg("failed to get vector from datatype %v", r.colType.String())
 	}
 
 	return readVectorArrayFromListArray(r)
@@ -537,7 +535,7 @@ func (r *PayloadReader) GetVectorArrayFromPayload() ([]*schemapb.VectorField, er
 
 func (r *PayloadReader) GetJSONFromPayload() ([][]byte, []bool, error) {
 	if r.colType != schemapb.DataType_JSON {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get json from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get json from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -556,7 +554,7 @@ func (r *PayloadReader) GetJSONFromPayload() ([][]byte, []bool, error) {
 
 func (r *PayloadReader) GetGeometryFromPayload() ([][]byte, []bool, error) {
 	if r.colType != schemapb.DataType_Geometry {
-		return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("failed to get Geometry from datatype %v", r.colType.String()))
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get Geometry from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -575,7 +573,7 @@ func (r *PayloadReader) GetGeometryFromPayload() ([][]byte, []bool, error) {
 
 func (r *PayloadReader) GetByteArrayDataSet() (*DataSet[parquet.ByteArray, *file.ByteArrayColumnChunkReader], error) {
 	if r.colType != schemapb.DataType_String && r.colType != schemapb.DataType_VarChar {
-		return nil, fmt.Errorf("failed to get string from datatype %v", r.colType.String())
+		return nil, merr.WrapErrServiceInternalMsg("failed to get string from datatype %v", r.colType.String())
 	}
 
 	return NewDataSet[parquet.ByteArray, *file.ByteArrayColumnChunkReader](r.reader, 0, r.numRows), nil
@@ -610,7 +608,7 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 	defer table.Release()
 
 	if table.NumCols() != 1 {
-		return nil, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+		return nil, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 	}
 
 	column := table.Column(0)
@@ -625,17 +623,17 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 	for _, chunk := range column.Data().Chunks() {
 		listArray, ok := chunk.(*array.List)
 		if !ok {
-			return nil, fmt.Errorf("expected ListArray, got %T", chunk)
+			return nil, merr.WrapErrDataIntegrityMsg("expected ListArray, got %T", chunk)
 		}
 
 		for i := 0; i < listArray.Len(); i++ {
 			value, err := deserializeArrayOfVector(listArray, i, elementType, dim, true)
 			if err != nil {
-				return nil, fmt.Errorf("failed to deserialize VectorArray at row %d: %w", len(result), err)
+				return nil, merr.Wrapf(err, "failed to deserialize VectorArray at row %d", len(result))
 			}
 			vectorField, _ := value.(*schemapb.VectorField)
 			if vectorField == nil {
-				return nil, fmt.Errorf("null value in VectorArray")
+				return nil, merr.WrapErrDataIntegrityMsg("null value in VectorArray")
 			}
 			result = append(result, vectorField)
 		}
@@ -653,7 +651,7 @@ func readNullableByteAndConvert[T any](r *PayloadReader, convert func([]byte) T)
 	}
 
 	if valuesRead != r.numRows {
-		return nil, nil, merr.WrapErrParameterInvalid(r.numRows, valuesRead, "valuesRead is not equal to rows")
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
 	}
 
 	ret := make([]T, r.numRows)
@@ -671,7 +669,7 @@ func readByteAndConvert[T any](r *PayloadReader, convert func(parquet.ByteArray)
 	}
 
 	if valuesRead != r.numRows {
-		return nil, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]T, r.numRows)
@@ -684,7 +682,7 @@ func readByteAndConvert[T any](r *PayloadReader, convert func(parquet.ByteArray)
 // GetBinaryVectorFromPayload returns vector, dimension, validData, numRows, error
 func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_BinaryVector {
-		return nil, -1, nil, 0, fmt.Errorf("failed to get binary vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("failed to get binary vector from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -699,7 +697,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -707,17 +705,17 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, fmt.Errorf("nullable binary vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable binary vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("nullable binary vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable binary vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 			dim = dim / 8
 		} else {
@@ -735,37 +733,13 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
-		}
-
-		ret := make([]byte, validCount*dim)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					copy(ret[dataIdx*dim:(dataIdx+1)*dim], bytes)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
 		return ret, dim * 8, validData, int(r.numRows), nil
@@ -784,7 +758,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim)*r.numRows)
@@ -797,7 +771,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 // GetFloat16VectorFromPayload returns vector, dimension, validData, numRows, error
 func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_Float16Vector {
-		return nil, -1, nil, 0, fmt.Errorf("failed to get float16 vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("failed to get float16 vector from datatype %v", r.colType.String())
 	}
 	if r.nullable {
 		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
@@ -811,7 +785,7 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -819,17 +793,17 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, fmt.Errorf("nullable float16 vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable float16 vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("nullable float16 vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable float16 vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 		} else {
 			col, err := r.reader.RowGroup(0).Column(0)
@@ -846,37 +820,13 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
-		}
-
-		ret := make([]byte, validCount*dim*2)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					copy(ret[dataIdx*dim*2:(dataIdx+1)*dim*2], bytes)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim*2)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
 		return ret, dim, validData, int(r.numRows), nil
@@ -896,7 +846,7 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim*2)*r.numRows)
@@ -909,7 +859,7 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 // GetBFloat16VectorFromPayload returns vector, dimension, validData, numRows, error
 func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_BFloat16Vector {
-		return nil, -1, nil, 0, fmt.Errorf("failed to get bfloat16 vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("failed to get bfloat16 vector from datatype %v", r.colType.String())
 	}
 	if r.nullable {
 		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
@@ -923,7 +873,7 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -931,17 +881,17 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, fmt.Errorf("nullable bfloat16 vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable bfloat16 vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("nullable bfloat16 vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable bfloat16 vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 		} else {
 			col, err := r.reader.RowGroup(0).Column(0)
@@ -958,37 +908,13 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
-		}
-
-		ret := make([]byte, validCount*dim*2)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					copy(ret[dataIdx*dim*2:(dataIdx+1)*dim*2], bytes)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim*2)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
 		return ret, dim, validData, int(r.numRows), nil
@@ -1008,7 +934,7 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]byte, int64(dim*2)*r.numRows)
@@ -1021,7 +947,7 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 // GetFloatVectorFromPayload returns vector, dimension, validData, numRows, error
 func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_FloatVector {
-		return nil, -1, nil, 0, fmt.Errorf("failed to get float vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("failed to get float vector from datatype %v", r.colType.String())
 	}
 	if r.nullable {
 		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
@@ -1035,7 +961,7 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -1043,17 +969,17 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, fmt.Errorf("nullable float vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable float vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("nullable float vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable float vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 		} else {
 			col, err := r.reader.RowGroup(0).Column(0)
@@ -1070,40 +996,16 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
+		retBytes, validData, err := readNullableVectorData(column, r.numRows, dim*4)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
-		ret := make([]float32, validCount*dim)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					copy(arrow.Float32Traits.CastToBytes(ret[dataIdx*dim:(dataIdx+1)*dim]), bytes)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
-		}
-
-		return ret, dim, validData, int(r.numRows), nil
+		return arrow.Float32Traits.CastFromBytes(retBytes), dim, validData, int(r.numRows), nil
 	}
 
 	col, err := r.reader.RowGroup(0).Column(0)
@@ -1120,7 +1022,7 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]float32, int64(dim)*r.numRows)
@@ -1133,7 +1035,7 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 // GetSparseFloatVectorFromPayload returns fieldData, dimension, validData, error
 func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFieldData, int, []bool, error) {
 	if !typeutil.IsSparseFloatVectorType(r.colType) {
-		return nil, -1, nil, fmt.Errorf("failed to get sparse float vector from datatype %v", r.colType.String())
+		return nil, -1, nil, merr.WrapErrServiceInternalMsg("failed to get sparse float vector from datatype %v", r.colType.String())
 	}
 
 	if r.nullable {
@@ -1152,7 +1054,7 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
@@ -1160,7 +1062,7 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 		for _, chunk := range column.Data().Chunks() {
 			binaryArray, ok := chunk.(*array.Binary)
 			if !ok {
-				return nil, -1, nil, fmt.Errorf("expected Binary array, got %T", chunk)
+				return nil, -1, nil, merr.WrapErrDataIntegrityMsg("expected Binary array, got %T", chunk)
 			}
 
 			for i := 0; i < binaryArray.Len(); i++ {
@@ -1168,15 +1070,13 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 				if validData[offset+i] {
 					value := binaryArray.Value(i)
 					if len(value)%8 != 0 {
-						return nil, -1, nil, errors.New("invalid bytesData length")
+						return nil, -1, nil, merr.WrapErrDataIntegrityMsg("invalid bytesData length")
 					}
-					fieldData.Contents = append(fieldData.Contents, value)
+					fieldData.Contents = append(fieldData.Contents, append([]byte{}, value...))
 					rowDim := typeutil.SparseFloatRowDim(value)
 					if rowDim > fieldData.Dim {
 						fieldData.Dim = rowDim
 					}
-				} else {
-					fieldData.Contents = append(fieldData.Contents, nil)
 				}
 			}
 			offset += binaryArray.Len()
@@ -1191,14 +1091,14 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 		return nil, -1, nil, err
 	}
 	if valuesRead != r.numRows {
-		return nil, -1, nil, fmt.Errorf("expect %d binary, but got = %d", r.numRows, valuesRead)
+		return nil, -1, nil, merr.WrapErrDataIntegrityMsg("expect %d binary, but got = %d", r.numRows, valuesRead)
 	}
 
 	fieldData := &SparseFloatVectorFieldData{}
 
 	for _, value := range values {
 		if len(value)%8 != 0 {
-			return nil, -1, nil, errors.New("invalid bytesData length")
+			return nil, -1, nil, merr.WrapErrDataIntegrityMsg("invalid bytesData length")
 		}
 
 		fieldData.Contents = append(fieldData.Contents, value)
@@ -1214,7 +1114,7 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 // GetInt8VectorFromPayload returns vector, dimension, validData, numRows, error
 func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, error) {
 	if r.colType != schemapb.DataType_Int8Vector {
-		return nil, -1, nil, 0, fmt.Errorf("failed to get int8 vector from datatype %v", r.colType.String())
+		return nil, -1, nil, 0, merr.WrapErrServiceInternalMsg("failed to get int8 vector from datatype %v", r.colType.String())
 	}
 	if r.nullable {
 		fileReader, err := pqarrow.NewFileReader(r.reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
@@ -1228,7 +1128,7 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 		}
 
 		if arrowSchema.NumFields() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 field, got %d", arrowSchema.NumFields())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 field, got %d", arrowSchema.NumFields())
 		}
 
 		field := arrowSchema.Field(0)
@@ -1236,17 +1136,17 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 
 		if field.Type.ID() == arrow.BINARY {
 			if !field.HasMetadata() {
-				return nil, -1, nil, 0, fmt.Errorf("nullable int8 vector field is missing metadata")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable int8 vector field is missing metadata")
 			}
 			metadata := field.Metadata
 			dimStr, ok := metadata.GetValue("dim")
 			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("nullable int8 vector metadata missing required 'dim' field")
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("nullable int8 vector metadata missing required 'dim' field")
 			}
 			var err error
 			dim, err = strconv.Atoi(dimStr)
 			if err != nil {
-				return nil, -1, nil, 0, fmt.Errorf("invalid dim value in metadata: %v", err)
+				return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("invalid dim value in metadata: %v", err)
 			}
 		} else {
 			col, err := r.reader.RowGroup(0).Column(0)
@@ -1263,41 +1163,16 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 		defer table.Release()
 
 		if table.NumCols() != 1 {
-			return nil, -1, nil, 0, fmt.Errorf("expected 1 column, got %d", table.NumCols())
+			return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expected 1 column, got %d", table.NumCols())
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
+		retBytes, validData, err := readNullableVectorData(column, r.numRows, dim)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
-		ret := make([]int8, validCount*dim)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					int8Vals := arrow.Int8Traits.CastFromBytes(bytes)
-					copy(ret[dataIdx*dim:(dataIdx+1)*dim], int8Vals)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
-		}
-
-		return ret, dim, validData, int(r.numRows), nil
+		return arrow.Int8Traits.CastFromBytes(retBytes), dim, validData, int(r.numRows), nil
 	}
 
 	col, err := r.reader.RowGroup(0).Column(0)
@@ -1314,7 +1189,7 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 	}
 
 	if valuesRead != r.numRows {
-		return nil, -1, nil, 0, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+		return nil, -1, nil, 0, merr.WrapErrDataIntegrityMsg("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
 	}
 
 	ret := make([]int8, int64(dim)*r.numRows)
@@ -1343,7 +1218,7 @@ func ReadDataFromAllRowGroups[T any, E interface {
 
 	for i := 0; i < reader.NumRowGroups(); i++ {
 		if columnIdx >= reader.RowGroup(i).NumColumns() {
-			return -1, fmt.Errorf("try to fetch %d-th column of reader but row group has only %d column(s)", columnIdx, reader.RowGroup(i).NumColumns())
+			return -1, merr.WrapErrDataIntegrityMsg("try to fetch %d-th column of reader but row group has only %d column(s)", columnIdx, reader.RowGroup(i).NumColumns())
 		}
 		column, err := reader.RowGroup(i).Column(columnIdx)
 		if err != nil {
@@ -1352,7 +1227,7 @@ func ReadDataFromAllRowGroups[T any, E interface {
 
 		cReader, ok := column.(E)
 		if !ok {
-			return -1, fmt.Errorf("expect type %T, but got %T", *new(E), column)
+			return -1, merr.WrapErrDataIntegrityMsg("expect type %T, but got %T", *new(E), column)
 		}
 
 		_, valuesRead, err := cReader.ReadBatch(numRows, values[offset:], nil, nil)
@@ -1395,7 +1270,7 @@ func (s *DataSet[T, E]) nextGroup() error {
 
 	cReader, ok := column.(E)
 	if !ok {
-		return fmt.Errorf("expect type %T, but got %T", *new(E), column)
+		return merr.WrapErrDataIntegrityMsg("expect type %T, but got %T", *new(E), column)
 	}
 	s.groupID++
 	s.cReader = cReader
@@ -1411,7 +1286,7 @@ func (s *DataSet[T, E]) HasNext() bool {
 
 func (s *DataSet[T, E]) NextBatch(batch int64) ([]T, error) {
 	if s.groupID > s.reader.NumRowGroups() || (s.groupID == s.reader.NumRowGroups() && s.cnt >= s.numRows) || s.numRows == 0 {
-		return nil, errors.New("has no more data")
+		return nil, merr.WrapErrServiceInternalMsg("has no more data")
 	}
 
 	if s.groupID == 0 || s.cnt >= s.numRows {
@@ -1466,7 +1341,7 @@ func ReadData[T any, E interface {
 			reader, ok := chunk.(E)
 			if !ok {
 				log.Warn("the column data in parquet is not equal to field", zap.String("fieldName", field.Name), zap.String("actual type", chunk.DataType().Name()))
-				return -1, merr.WrapErrImportFailed(fmt.Sprintf("the column data in parquet is not equal to field: %s, but: %s", field.Name, chunk.DataType().Name()))
+				return -1, merr.WrapErrImportFailedMsg("the column data in parquet is not equal to field: %s, but: %s", field.Name, chunk.DataType().Name())
 			}
 			nullBitset := bytesToBoolArray(dataNums, reader.NullBitmapBytes())
 			for i := 0; i < dataNums; i++ {
@@ -1495,3 +1370,63 @@ var (
 	BitMask        = [8]byte{1, 2, 4, 8, 16, 32, 64, 128}
 	FlippedBitMask = [8]byte{254, 253, 251, 247, 239, 223, 191, 127}
 )
+
+// readNullableVectorData reads nullable vector data stored as Arrow Binary chunks.
+// bytesPerVector is the byte size of each vector entry.
+// Returns compact byte data (only valid vector entries) and validData bitmap.
+//
+// Arrow Binary array has 3 buffers:
+//   - Buffer 0 (validity bitmap): bit i indicates whether row i is valid (non-null).
+//   - Buffer 1 (offsets, int32): length n+1, offsets[i] is the start position of row i
+//     in the values buffer, offsets[n] is the total byte length.
+//   - Buffer 2 (values): concatenated raw bytes of all entries.
+//
+// Milvus's PayloadWriter uses BinaryBuilder.AppendNull() for null entries, which advances
+// the offset without appending any bytes (offsets[i] == offsets[i+1]). Therefore null entries
+// contribute zero bytes to the values buffer, and ValueBytes() returns a contiguous block
+// containing only valid entries' data. This allows us to bulk-copy ValueBytes() directly
+// instead of iterating per element with Value(i).
+// We add a length assertion to guard against any future change that breaks this invariant.
+func readNullableVectorData(column *arrow.Column, numRows int64, bytesPerVector int) ([]byte, []bool, error) {
+	chunks := column.Data().Chunks()
+	validCount := column.Len() - column.NullN()
+
+	ret := make([]byte, validCount*bytesPerVector)
+	validData := make([]bool, numRows)
+	logicalOffset := 0
+	dataOffset := 0
+	for _, chunk := range chunks {
+		binaryArray, ok := chunk.(*array.Binary)
+		if !ok {
+			return nil, nil, merr.WrapErrDataIntegrityMsg("expected Binary array for nullable vector, got %T", chunk)
+		}
+		chunkLen := binaryArray.Len()
+
+		// Bulk copy all non-null vector data from this chunk
+		chunkValidCount := chunkLen - binaryArray.NullN()
+		if chunkValidCount > 0 {
+			valueBytes := binaryArray.ValueBytes()
+			expected := chunkValidCount * bytesPerVector
+			if len(valueBytes) != expected {
+				return nil, nil, merr.WrapErrDataIntegrityMsg(
+					"unexpected valueBytes length for nullable vector: got %d, expected %d", len(valueBytes), expected)
+			}
+			copy(ret[dataOffset:dataOffset+len(valueBytes)], valueBytes)
+			dataOffset += len(valueBytes)
+		}
+
+		// Build validData
+		if binaryArray.NullN() == 0 {
+			// compiler optimizes this range-based fill pattern
+			for i := range validData[logicalOffset : logicalOffset+chunkLen] {
+				validData[logicalOffset+i] = true
+			}
+		} else {
+			for i := 0; i < chunkLen; i++ {
+				validData[logicalOffset+i] = binaryArray.IsValid(i)
+			}
+		}
+		logicalOffset += chunkLen
+	}
+	return ret, validData, nil
+}

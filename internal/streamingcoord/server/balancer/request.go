@@ -6,10 +6,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 type response struct {
@@ -48,7 +48,7 @@ func newOpUpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePo
 			// apply the freeze streaming nodes.
 			if len(req.GetNodes().GetFreezeNodeIds()) > 0 || len(req.GetNodes().GetDefreezeNodeIds()) > 0 {
 				impl.Logger().Info("update freeze nodes", zap.Int64s("freezeNodeIDs", req.GetNodes().GetFreezeNodeIds()), zap.Int64s("defreezeNodeIDs", req.GetNodes().GetDefreezeNodeIds()))
-				impl.freezeNodes.Insert(req.GetNodes().GetFreezeNodeIds()...)
+				impl.freezeNodes.Upsert(req.GetNodes().GetFreezeNodeIds()...)
 				impl.freezeNodes.Remove(req.GetNodes().GetDefreezeNodeIds()...)
 			}
 			future.Set(response{resp: &types.UpdateWALBalancePolicyResponse{

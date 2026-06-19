@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestDataCoordNumSegmentsWithStorageVersion(t *testing.T) {
+func TestDataCoordNumSegmentsWithStorageVersionAndFormat(t *testing.T) {
 	// Create a new registry to avoid conflicts with global metrics
 	registry := prometheus.NewRegistry()
 
@@ -40,33 +40,35 @@ func TestDataCoordNumSegmentsWithStorageVersion(t *testing.T) {
 			segmentLevelLabelName,
 			segmentIsSortedLabelName,
 			segmentStorageVersionLabelName,
+			segmentFormatLabelName,
 		})
 
 	registry.MustRegister(testGauge)
 
-	// Test with different storage versions
+	// Test with different storage versions and segment formats
 	testCases := []struct {
 		state          string
 		level          string
 		isSorted       string
 		storageVersion string
+		format         string
 		value          float64
 	}{
-		{"Flushed", "L1", "sorted", "0", 10},  // StorageV1
-		{"Flushed", "L1", "sorted", "2", 20},  // StorageV2
-		{"Flushed", "L2", "unsorted", "0", 5}, // StorageV1
-		{"Growing", "L0", "unsorted", "2", 3}, // StorageV2
+		{"Flushed", "L1", "sorted", "0", "legacy", 10},         // StorageV1
+		{"Flushed", "L1", "sorted", "2", "parquet", 20},        // StorageV2
+		{"Flushed", "L2", "unsorted", "0", "legacy", 5},        // StorageV1
+		{"Growing", "L0", "unsorted", "2", "iceberg-table", 3}, // StorageV2 external
 	}
 
 	for _, tc := range testCases {
-		testGauge.WithLabelValues(tc.state, tc.level, tc.isSorted, tc.storageVersion).Set(tc.value)
+		testGauge.WithLabelValues(tc.state, tc.level, tc.isSorted, tc.storageVersion, tc.format).Set(tc.value)
 	}
 
 	// Verify each metric value
 	for _, tc := range testCases {
-		value := testutil.ToFloat64(testGauge.WithLabelValues(tc.state, tc.level, tc.isSorted, tc.storageVersion))
-		assert.Equal(t, tc.value, value, "metric value should match for state=%s, level=%s, sorted=%s, version=%s",
-			tc.state, tc.level, tc.isSorted, tc.storageVersion)
+		value := testutil.ToFloat64(testGauge.WithLabelValues(tc.state, tc.level, tc.isSorted, tc.storageVersion, tc.format))
+		assert.Equal(t, tc.value, value, "metric value should match for state=%s, level=%s, sorted=%s, version=%s, format=%s",
+			tc.state, tc.level, tc.isSorted, tc.storageVersion, tc.format)
 	}
 
 	// Test DeletePartialMatch by storage version
@@ -74,24 +76,24 @@ func TestDataCoordNumSegmentsWithStorageVersion(t *testing.T) {
 	assert.Equal(t, 2, deleted, "should delete 2 metrics with StorageV1")
 
 	// Verify remaining metrics
-	value := testutil.ToFloat64(testGauge.WithLabelValues("Flushed", "L1", "sorted", "2"))
+	value := testutil.ToFloat64(testGauge.WithLabelValues("Flushed", "L1", "sorted", "2", "parquet"))
 	assert.Equal(t, float64(20), value, "StorageV2 metric should still exist")
 }
 
 func TestDataCoordNumSegmentsRegistration(t *testing.T) {
-	// Test that DataCoordNumSegments can be used with 4 labels including storage version
+	// Test that DataCoordNumSegments can be used with 5 labels including storage version and segment format
 	registry := prometheus.NewRegistry()
 	RegisterDataCoord(registry)
 
-	// This should not panic - using all 4 labels
-	DataCoordNumSegments.WithLabelValues("Flushed", "L1", "sorted", "0").Set(1)
-	DataCoordNumSegments.WithLabelValues("Growing", "L0", "unsorted", "2").Set(2)
+	// This should not panic - using all 5 labels
+	DataCoordNumSegments.WithLabelValues("Flushed", "L1", "sorted", "0", "legacy").Set(1)
+	DataCoordNumSegments.WithLabelValues("Growing", "L0", "unsorted", "2", "lance-table").Set(2)
 
 	// Verify values
-	value := testutil.ToFloat64(DataCoordNumSegments.WithLabelValues("Flushed", "L1", "sorted", "0"))
+	value := testutil.ToFloat64(DataCoordNumSegments.WithLabelValues("Flushed", "L1", "sorted", "0", "legacy"))
 	assert.Equal(t, float64(1), value)
 
-	value = testutil.ToFloat64(DataCoordNumSegments.WithLabelValues("Growing", "L0", "unsorted", "2"))
+	value = testutil.ToFloat64(DataCoordNumSegments.WithLabelValues("Growing", "L0", "unsorted", "2", "lance-table"))
 	assert.Equal(t, float64(2), value)
 
 	// Clean up
@@ -100,12 +102,12 @@ func TestDataCoordNumSegmentsRegistration(t *testing.T) {
 
 func TestDataCoordNumSegmentsLabelNames(t *testing.T) {
 	// Verify the metric has the expected number of labels
-	desc := DataCoordNumSegments.WithLabelValues("state", "level", "sorted", "version").Desc()
+	desc := DataCoordNumSegments.WithLabelValues("state", "level", "sorted", "version", "format").Desc()
 	assert.NotNil(t, desc)
 
-	// The metric should work with exactly 4 label values
+	// The metric should work with exactly 5 label values
 	assert.NotPanics(t, func() {
-		DataCoordNumSegments.WithLabelValues("Flushed", "L1", "sorted", "0").Inc()
+		DataCoordNumSegments.WithLabelValues("Flushed", "L1", "sorted", "0", "legacy").Inc()
 	})
 
 	// Clean up

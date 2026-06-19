@@ -26,7 +26,7 @@ import (
 	"golang.org/x/exp/constraints"
 	"google.golang.org/grpc/grpclog"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 const (

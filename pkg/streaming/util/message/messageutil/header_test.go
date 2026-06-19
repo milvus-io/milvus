@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func TestIsSchemaChange(t *testing.T) {

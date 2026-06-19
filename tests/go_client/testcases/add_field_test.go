@@ -17,6 +17,8 @@ import (
 
 // create -> add field -> index -> load -> insert -> query/search
 func TestAddCollectionField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// Test cases for different defaultValue and filter
@@ -74,8 +76,64 @@ func TestAddCollectionField(t *testing.T) {
 	}
 }
 
+func TestAddCollectionStructField(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{
+		Address:  hp.GetAddr(),
+		Username: hp.GetUser(),
+		Password: hp.GetPassword(),
+	})
+
+	collName := common.GenRandomString("addstructfield", 6)
+	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
+	common.CheckErr(t, err, true)
+
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim))
+	structField := entity.NewField().
+		WithName("clips").
+		WithDataType(entity.FieldTypeArray).
+		WithElementType(entity.FieldTypeStruct).
+		WithMaxCapacity(16).
+		WithNullable(true).
+		WithStructSchema(structSchema)
+
+	err = mc.AddCollectionStructField(ctx, client.NewAddCollectionStructFieldOption(collName, structField))
+	common.CheckErr(t, err, true)
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	var added *entity.Field
+	for _, field := range coll.Schema.Fields {
+		if field.Name == "clips" {
+			added = field
+			break
+		}
+	}
+	require.NotNil(t, added)
+	require.Equal(t, entity.FieldTypeArray, added.DataType)
+	require.Equal(t, entity.FieldTypeStruct, added.ElementType)
+	require.True(t, added.Nullable)
+	require.Equal(t, "16", added.TypeParams[entity.TypeParamMaxCapacity])
+	require.NotNil(t, added.StructSchema)
+	require.Len(t, added.StructSchema.Fields, 2)
+	require.Equal(t, "tag", added.StructSchema.Fields[0].Name)
+	require.Equal(t, entity.FieldTypeVarChar, added.StructSchema.Fields[0].DataType)
+	require.Equal(t, "embedding", added.StructSchema.Fields[1].Name)
+	require.Equal(t, entity.FieldTypeFloatVector, added.StructSchema.Fields[1].DataType)
+	dim, err := added.StructSchema.Fields[1].GetDim()
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, common.DefaultDim, dim)
+}
+
 // parameterized test for add field invalid cases
 func TestAddCollectionFieldInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -169,7 +227,7 @@ func TestAddCollectionFieldInvalid(t *testing.T) {
 			fieldBuilder: func() *entity.Field {
 				return entity.NewField().WithName(common.DefaultNewField).WithDataType(entity.FieldTypeInt64).WithNullable(true).WithIsClusteringKey(true)
 			},
-			expectedError: "already has another clutering key field, field name: " + common.DefaultNewField + ": invalid parameter",
+			expectedError: "already has another clustering key field, field name: " + common.DefaultNewField + ": invalid parameter",
 		},
 		{
 			name: "addFieldSameOtherName",
@@ -185,7 +243,7 @@ func TestAddCollectionFieldInvalid(t *testing.T) {
 			fieldBuilder: func() *entity.Field {
 				return entity.NewField().WithName(common.DefaultVarcharFieldName).WithDataType(entity.FieldTypeVarChar).WithNullable(true).WithMaxLength(64)
 			},
-			expectedError: "duplicate field name: varchar: invalid parameter",
+			expectedError: "duplicated field name varchar: invalid parameter",
 		},
 	}
 
@@ -207,6 +265,8 @@ func TestAddCollectionFieldInvalid(t *testing.T) {
 
 // test add field when max field number exceeded
 func TestCollectionAddFieldExceedMaxFieldNumber(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -229,6 +289,8 @@ func TestCollectionAddFieldExceedMaxFieldNumber(t *testing.T) {
 
 // create Inverted index for added field and drop index
 func TestIndexAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -300,6 +362,8 @@ func TestIndexAddedField(t *testing.T) {
 }
 
 func TestInsertWithAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, autoID := range [2]bool{false, true} {
@@ -345,6 +409,8 @@ func TestInsertWithAddedField(t *testing.T) {
 }
 
 func TestUpsertDynamicAddField(t *testing.T) {
+	t.Parallel()
+
 	// enable dynamic field/add field and insert dynamic/added column
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -397,6 +463,8 @@ func TestUpsertDynamicAddField(t *testing.T) {
 
 // query with dynamic field same as added field
 func TestQueryWithDynamicAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -447,6 +515,8 @@ func TestQueryWithDynamicAddedField(t *testing.T) {
 
 // search with dynamic field same as added field
 func TestSearchWithDynamicAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -501,6 +571,8 @@ func TestSearchWithDynamicAddedField(t *testing.T) {
 
 // test delete with added field
 func TestDeleteWithAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

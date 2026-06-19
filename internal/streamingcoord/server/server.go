@@ -15,9 +15,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
 // Server is the streamingcoord server.
@@ -50,10 +50,12 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 	futures := make([]*conc.Future[struct{}], 0)
 	futures = append(futures, conc.Go(func() (struct{}, error) {
 		s.logger.Info("start recovery balancer...")
-		// Read new incoming topics from configuration, and register it into balancer.
-		newIncomingTopics := util.GetAllTopicsFromConfiguration()
-		balancer, err := balancer.RecoverBalancer(ctx, newIncomingTopics.Collect()...)
+		// Create a provider that reads channel names from configuration
+		// and polls for dynamic changes.
+		provider := util.NewConfigChannelProvider()
+		balancer, err := balancer.RecoverBalancer(ctx, provider)
 		if err != nil {
+			provider.Close()
 			s.logger.Warn("recover balancer failed", zap.Error(err))
 			return struct{}{}, err
 		}

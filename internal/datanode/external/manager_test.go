@@ -18,16 +18,16 @@ package external
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 func TestExternalCollectionManager_Basic(t *testing.T) {
@@ -90,16 +90,16 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	taskID := int64(2)
 	collID := int64(200)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
 
 	// Track task execution
 	var executed atomic.Bool
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		executed.Store(true)
-		return &datapb.UpdateExternalCollectionResponse{
+		return &datapb.RefreshExternalCollectionTaskResponse{
 			State:        indexpb.JobState_JobStateFinished,
 			KeptSegments: []int64{1, 2},
 		}, nil
@@ -109,9 +109,7 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	err := manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		return executed.Load()
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
 
 	require.Eventually(t, func() bool {
 		info := manager.Get(clusterID, taskID)
@@ -128,6 +126,33 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	assert.Equal(t, []int64{1, 2}, info.KeptSegments)
 }
 
+func TestExternalCollectionManager_SubmitTask_DefaultsNoneStateToFinished(t *testing.T) {
+	ctx := context.Background()
+	manager := NewExternalCollectionManager(ctx, 4)
+	defer manager.Close()
+
+	clusterID := "test-cluster"
+	taskID := int64(20)
+	collID := int64(2000)
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		TaskID:       taskID,
+		CollectionID: collID,
+	}
+
+	err := manager.SubmitTask(clusterID, req, func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+		return &datapb.RefreshExternalCollectionTaskResponse{
+			State: indexpb.JobState_JobStateNone,
+		}, nil
+	})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		info := manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFinished
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
@@ -137,14 +162,14 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	taskID := int64(3)
 	collID := int64(300)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
 
 	// Task function that fails
 	expectedError := errors.New("task execution failed")
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		return nil, expectedError
 	}
 
@@ -164,6 +189,44 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	assert.Equal(t, expectedError.Error(), info.FailReason)
 }
 
+// Regression for #49225: a panic inside taskFunc (e.g. divide-by-zero from a
+// malformed external parquet) must be isolated to the task — the manager pool
+// goroutine must NOT crash the process, and the task must surface as Failed.
+func TestExternalCollectionManager_SubmitTask_PanicIsolated(t *testing.T) {
+	ctx := context.Background()
+	manager := NewExternalCollectionManager(ctx, 4)
+	defer manager.Close()
+
+	clusterID := "test-cluster"
+	taskID := int64(4242)
+	collID := int64(9999)
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		TaskID:       taskID,
+		CollectionID: collID,
+	}
+
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+		var zero int64
+		// Reproduces the original #49225 crash shape.
+		_ = int64(1) / zero
+		return nil, nil
+	}
+
+	err := manager.SubmitTask(clusterID, req, taskFunc)
+	assert.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		info := manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFailed
+	}, time.Second, 10*time.Millisecond)
+
+	info := manager.Get(clusterID, taskID)
+	assert.NotNil(t, info)
+	assert.Equal(t, indexpb.JobState_JobStateFailed, info.State)
+	assert.Contains(t, info.FailReason, "panic")
+}
+
 func TestExternalCollectionManager_CancelTask(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
@@ -173,19 +236,19 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 	taskID := int64(30)
 	collID := int64(3000)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
 
 	cancelObserved := make(chan struct{})
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		select {
 		case <-ctx.Done():
 			close(cancelObserved)
 			return nil, ctx.Err()
 		case <-time.After(time.Second):
-			return &datapb.UpdateExternalCollectionResponse{
+			return &datapb.RefreshExternalCollectionTaskResponse{
 				State: indexpb.JobState_JobStateFinished,
 			}, nil
 		}
@@ -200,8 +263,8 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		return info != nil
 	}, time.Second, 10*time.Millisecond)
 
-	cancelled := manager.CancelTask(clusterID, taskID)
-	assert.True(t, cancelled)
+	canceled := manager.CancelTask(clusterID, taskID)
+	assert.True(t, canceled)
 
 	require.Eventually(t, func() bool {
 		select {
@@ -212,9 +275,13 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		}
 	}, time.Second, 10*time.Millisecond)
 
-	info := manager.Get(clusterID, taskID)
+	var info *TaskInfo
+	require.Eventually(t, func() bool {
+		info = manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFailed
+	}, time.Second, 10*time.Millisecond)
+
 	require.NotNil(t, info)
-	assert.Equal(t, indexpb.JobState_JobStateFailed, info.State)
 	assert.Contains(t, info.FailReason, "context canceled")
 }
 
@@ -269,16 +336,16 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	taskID := int64(4)
 	collID := int64(400)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
 
 	// Task function that blocks
 	blockChan := make(chan struct{})
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		<-blockChan
-		return &datapb.UpdateExternalCollectionResponse{
+		return &datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateFinished,
 		}, nil
 	}
@@ -292,10 +359,9 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	assert.NotNil(t, info)
 	assert.Equal(t, indexpb.JobState_JobStateInProgress, info.State)
 
-	// Try to submit duplicate task
+	// Duplicate submit should be idempotent (no error)
 	err = manager.SubmitTask(clusterID, req, taskFunc)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "task already exists")
+	assert.NoError(t, err)
 
 	// Unblock the task
 	close(blockChan)
@@ -319,13 +385,13 @@ func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
 		taskID := int64(i + 100)
 		collID := int64(i + 1000)
 
-		req := &datapb.UpdateExternalCollectionRequest{
+		req := &datapb.RefreshExternalCollectionTaskRequest{
 			TaskID:       taskID,
 			CollectionID: collID,
 		}
 
-		taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
-			return &datapb.UpdateExternalCollectionResponse{
+		taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			return &datapb.RefreshExternalCollectionTaskResponse{
 				State: indexpb.JobState_JobStateFinished,
 			}, nil
 		}
@@ -362,7 +428,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 	taskID := int64(5)
 	collID := int64(500)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
@@ -371,7 +437,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 	var executed atomic.Bool
 	started := make(chan struct{})
 	unblock := make(chan struct{})
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		close(started)
 		select {
 		case <-unblock:
@@ -379,7 +445,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 			return nil, ctx.Err()
 		}
 		executed.Store(true)
-		return &datapb.UpdateExternalCollectionResponse{
+		return &datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateFinished,
 		}, nil
 	}
@@ -401,9 +467,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 
 	close(unblock)
 
-	require.Eventually(t, func() bool {
-		return executed.Load()
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
 
 	// Task should have executed before close
 	assert.True(t, executed.Load())

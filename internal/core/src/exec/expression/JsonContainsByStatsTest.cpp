@@ -33,7 +33,6 @@
 #include "gtest/gtest.h"
 #include "index/IndexStats.h"
 #include "index/json_stats/JsonKeyStats.h"
-#include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -50,6 +49,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -100,12 +100,6 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(
-        milvus_storage::ArrowFileSystemConfig{
-            .root_path = root_path,
-            .storage_type = "local",
-        });
-
     auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
                                 root_path,
                                 collection_id,
@@ -131,6 +125,14 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     load_config["index_files"] = index_files;
     load_config[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
+    load_config[STATS_BASE_PATH_KEY] =
+        storage::GenRemoteJsonStatsPathPrefix(chunk_manager,
+                                              build_id,
+                                              version_id,
+                                              collection_id,
+                                              partition_id,
+                                              segment_id,
+                                              field_id);
 
     auto reader = std::make_shared<JsonKeyStats>(ctx, true);
     reader->Load(milvus::tracer::TraceContext{}, load_config);
@@ -181,7 +183,7 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     const int64_t field_id = json_fid.get();
     const int64_t build_id = 5001;
     const int64_t version_id = 1;
-    const std::string root_path = "/tmp/test-json-contains-by-stats";
+    const std::string root_path = TestLocalPath;
 
     auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
                                           json_fid,

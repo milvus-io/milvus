@@ -22,10 +22,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 type SegmentDistManagerSuite struct {
@@ -35,6 +35,19 @@ type SegmentDistManagerSuite struct {
 	partitions []int64
 	nodes      []int64
 	segments   map[int64]*Segment
+}
+
+type countingSegmentDistFilter struct {
+	count *int
+}
+
+func (f countingSegmentDistFilter) Match(*Segment) bool {
+	*f.count++
+	return true
+}
+
+func (f countingSegmentDistFilter) AddFilter(criterion *segDistCriterion) {
+	criterion.hasOtherFilter = true
 }
 
 func (suite *SegmentDistManagerSuite) SetupSuite() {
@@ -99,6 +112,25 @@ func (suite *SegmentDistManagerSuite) TestVersion() {
 	suite.Greater(v2, v1)
 }
 
+func (suite *SegmentDistManagerSuite) TestNodeOffline() {
+	dist := suite.dist
+
+	// Verify node 0 has segments
+	segments := dist.GetByFilter(WithNodeID(suite.nodes[0]))
+	suite.Len(segments, 2)
+
+	// Simulate node offline by calling Update with empty segments
+	dist.Update(suite.nodes[0])
+
+	// Verify node 0's segments are removed
+	segments = dist.GetByFilter(WithNodeID(suite.nodes[0]))
+	suite.Len(segments, 0)
+
+	// Verify other nodes are not affected
+	segments = dist.GetByFilter(WithNodeID(suite.nodes[1]))
+	suite.Len(segments, 4)
+}
+
 func (suite *SegmentDistManagerSuite) TestGetBy() {
 	dist := suite.dist
 	// Test GetByNode
@@ -153,6 +185,27 @@ func (suite *SegmentDistManagerSuite) TestGetBy() {
 	})
 	segments = dist.GetByFilter(WithReplica(replica))
 	suite.Len(segments, 2)
+
+	// Test GetBySegment
+	segments = dist.GetByFilter(WithSegmentID(1))
+	suite.Len(segments, 2)
+	suite.AssertIDs(segments, 1)
+
+	segments = dist.GetByFilter(WithCollectionID(-1), WithSegmentID(1))
+	suite.Len(segments, 0)
+
+	segments = dist.GetByFilter(WithNodeID(suite.nodes[2]), WithSegmentID(1))
+	suite.Len(segments, 0)
+}
+
+func (suite *SegmentDistManagerSuite) TestGetBySegmentIDUsesIndex() {
+	visited := 0
+
+	segments := suite.dist.GetByFilter(countingSegmentDistFilter{count: &visited}, WithSegmentID(4))
+
+	suite.Len(segments, 2)
+	suite.AssertIDs(segments, 4)
+	suite.Equal(2, visited)
 }
 
 func (suite *SegmentDistManagerSuite) AssertIDs(segments []*Segment, ids ...int64) bool {
@@ -236,21 +289,22 @@ func TestGetSegmentDistJSON(t *testing.T) {
 	assert.Equal(t, 2, len(segments))
 
 	checkResults := func(s *metricsinfo.Segment) {
-		if s.SegmentID == 1 {
+		switch s.SegmentID {
+		case 1:
 			assert.Equal(t, int64(100), s.CollectionID)
 			assert.Equal(t, int64(10), s.PartitionID)
 			assert.Equal(t, "channel-1", s.Channel)
 			assert.Equal(t, int64(1000), s.NumOfRows)
 			assert.Equal(t, "Flushed", s.State)
 			assert.Equal(t, int64(1), s.NodeID)
-		} else if s.SegmentID == 2 {
+		case 2:
 			assert.Equal(t, int64(200), s.CollectionID)
 			assert.Equal(t, int64(20), s.PartitionID)
 			assert.Equal(t, "channel-2", s.Channel)
 			assert.Equal(t, int64(2000), s.NumOfRows)
 			assert.Equal(t, "Flushed", s.State)
 			assert.Equal(t, int64(2), s.NodeID)
-		} else {
+		default:
 			assert.Failf(t, "unexpected segment id", "unexpected segment id %d", s.SegmentID)
 		}
 	}

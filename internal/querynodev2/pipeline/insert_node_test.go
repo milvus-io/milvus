@@ -23,12 +23,13 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type InsertNodeSuite struct {
@@ -87,7 +88,8 @@ func (suite *InsertNodeSuite) TestBasic() {
 	})
 
 	// TODO mock a delgator for test
-	node := newInsertNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
+	node, err := newInsertNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, schema, 8)
+	suite.NoError(err)
 	out := node.Operate(in)
 
 	nodeMsg, ok := out.(*deleteNodeMsg)
@@ -125,10 +127,79 @@ func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
 	}
 
 	// TODO mock a delgator for test
-	node := newInsertNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
+	node, err := newInsertNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, schema, 8)
+	suite.NoError(err)
 	suite.Panics(func() {
 		node.Operate(in)
 	})
+}
+
+func (suite *InsertNodeSuite) TestLegacyInsertMaterializesBM25Stats() {
+	schema := &schemapb.CollectionSchema{
+		Name: suite.collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "1024"},
+				},
+			},
+			{
+				FieldID:          102,
+				Name:             "sparse",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "bm25",
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{101},
+				OutputFieldIds: []int64{102},
+			},
+			{
+				Name:          "rerank",
+				Type:          schemapb.FunctionType_Rerank,
+				InputFieldIds: []int64{101},
+			},
+		},
+	}
+	in := suite.buildInsertNodeMsg(schema)
+	for _, msg := range in.insertMsgs {
+		msg.FieldsData = msg.FieldsData[:2]
+	}
+
+	collection := segments.NewCollectionWithoutSegcoreForTest(suite.collectionID, schema)
+	collection.AddPartition(suite.partitionID)
+
+	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockCollectionManager.EXPECT().Get(suite.collectionID).Return(collection)
+
+	suite.manager = &segments.Manager{
+		Collection: mockCollectionManager,
+		Segment:    segments.NewMockSegmentManager(suite.T()),
+	}
+
+	suite.delegator = delegator.NewMockShardDelegator(suite.T())
+	suite.delegator.EXPECT().ProcessInsert(mock.Anything).Run(func(insertRecords map[int64]*delegator.InsertData) {
+		for _, insertData := range insertRecords {
+			suite.Require().Contains(insertData.BM25Stats, int64(102))
+			suite.Equal(int64(2), insertData.BM25Stats[102].NumRow())
+		}
+	})
+
+	node, err := newInsertNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, schema, 8)
+	suite.NoError(err)
+	node.Operate(in)
 }
 
 func (suite *InsertNodeSuite) buildInsertNodeMsg(schema *schemapb.CollectionSchema) *insertNodeMsg {
@@ -145,6 +216,9 @@ func (suite *InsertNodeSuite) buildInsertNodeMsg(schema *schemapb.CollectionSche
 		insertMsg := buildInsertMsg(suite.collectionID, suite.partitionID, segmentID, suite.channel, 1)
 		insertMsg.FieldsData = genFiledDataWithSchema(schema, 1)
 		nodeMsg.insertMsgs = append(nodeMsg.insertMsgs, insertMsg)
+
+		insertMsg = buildInsertMsg(suite.collectionID, suite.partitionID, segmentID, suite.channel, 1)
+		insertMsg.FieldsData = genFiledDataWithSchema(schema, 1)
 		nodeMsg.insertMsgs = append(nodeMsg.insertMsgs, insertMsg)
 	}
 

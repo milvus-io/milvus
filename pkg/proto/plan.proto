@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.plan;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/planpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/planpb";
 import "schema.proto";
 import "common.proto";
 
@@ -22,6 +22,7 @@ enum OpType {
   TextMatch = 13;   // text match
   PhraseMatch = 14; // phrase match
   InnerMatch = 15; // substring (e.g., "%value%")
+  RegexMatch = 16; // regex substring match (e.g., =~ "pattern")
 };
 
 enum ArithOpType {
@@ -86,6 +87,10 @@ message QueryInfo {
   string json_path = 14;
   schema.DataType json_type = 15;
   bool strict_cast = 16;
+  float search_topk_ratio = 17;
+  float refine_topk_ratio = 18;
+  // Multi-field group by: list of field IDs for composite grouping
+  repeated int64 group_by_field_ids = 19;
 }
 
 message ColumnInfo {
@@ -335,13 +340,28 @@ message Aggregate {
   int64 field_id = 2;
 }
 
+// OrderByField specifies a single field for ORDER BY sorting
+message OrderByField {
+  int64 field_id = 1;      // Field ID to sort by
+  bool ascending = 2;      // true for ASC (default), false for DESC
+  bool nulls_first = 3;    // true for NULLS FIRST, false for NULLS LAST (default)
+}
+
 message QueryPlanNode {
   Expr predicates = 1;
   bool is_count = 2;
   int64 limit = 3;
   repeated int64 group_by_field_ids = 4;
   repeated Aggregate aggregates = 5;
+  repeated OrderByField order_by_fields = 6;  // ORDER BY specifications
+  optional QueryIteratorCursor query_iterator_cursor = 7;
 };
+
+message QueryIteratorCursor {
+  optional int64 last_int_pk = 1;
+  optional string last_str_pk = 2;
+  int64 last_element_offset = 3;
+}
 
 enum FunctionType{
   FunctionTypeWeight = 0;

@@ -45,9 +45,11 @@ MINIO_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-minio.${MILVUS_HELM_NAMES
 # Shellcheck source=ci-util.sh
 source "${ROOT}/tests/scripts/ci-util-4am.sh"
 
+activate_pytest_python_env
+
 cd ${ROOT}/tests/python_client
 
-# Print python3 version, python version 3.6.8 is more stable for test
+# Print python3 version
 python3 -V
 
 # Pytest will try to get ${CI_LOG_PATH} from environment variables first,then use default path
@@ -74,4 +76,3 @@ if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 else
   pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --dist loadgroup ${@:-}
 fi
-

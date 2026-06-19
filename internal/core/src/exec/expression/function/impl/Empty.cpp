@@ -40,7 +40,7 @@ EmptyVarchar(const RowVector& args, FilterFunctionReturn& result) {
                   "invalid argument count, expect 1, actual {}",
                   args.childrens().size());
     }
-    auto arg = args.child(0);
+    const auto& arg = args.childrens()[0];
     auto vec = std::dynamic_pointer_cast<SimpleVector>(arg);
     Assert(vec != nullptr);
     CheckVarcharOrStringType(vec);

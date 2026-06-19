@@ -1,6 +1,6 @@
 package deletebuffer
 
-import "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+import "github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 
 // deleteBuffer caches L0 delete buffer for remote segments.
 type deleteBuffer struct {

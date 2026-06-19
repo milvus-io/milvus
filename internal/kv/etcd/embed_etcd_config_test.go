@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestEtcdConfigLoad(te *testing.T) {
@@ -34,6 +34,7 @@ func TestEtcdConfigLoad(te *testing.T) {
 	param := new(paramtable.ComponentParam)
 
 	te.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.auth.enabled", "false") // embedded etcd does not support auth
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	te.Setenv("etcd.data.dir", "etcd.test.data.dir")
 

@@ -40,7 +40,6 @@
 #include "index/IndexStats.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
-#include "milvus-storage/filesystem/fs.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
@@ -99,12 +98,6 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
-
-    // Initialize ArrowFileSystemSingleton for UpdateSealedSegmentIndex
-    milvus_storage::ArrowFileSystemConfig arrow_conf;
-    arrow_conf.storage_type = "local";
-    arrow_conf.root_path = storage_config.root_path;
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_conf);
 
     // Test data: 8 rows
     // title conditions: "Database" AND "Design"
@@ -209,7 +202,8 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             insert_data.SetTimestamps(0, 100);
             auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-            auto log_path = fmt::format("{}/{}/{}/{}/{}",
+            auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                        TestLocalPath,
                                         collection_id,
                                         partition_id,
                                         segment_id,
@@ -233,7 +227,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             auto index =
                 std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
             index->Build(config);
-            auto create_index_result = index->Upload();
+            auto create_index_result = index->UploadUnified({});
             auto index_files = create_index_result->GetIndexFiles();
 
             std::map<std::string, std::string> index_params{
@@ -241,6 +235,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
                 {milvus::index::MIN_GRAM, "2"},
                 {milvus::index::MAX_GRAM, "4"},
                 {milvus::LOAD_PRIORITY, "HIGH"},
+                {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
             };
             LoadIndexInfo load_index_info;
             load_index_info.collection_id = collection_id;
@@ -249,7 +244,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             load_index_info.field_id = field_id.get();
             load_index_info.field_type = DataType::VARCHAR;
             load_index_info.enable_mmap = true;
-            load_index_info.mmap_dir_path = "/tmp/test-like-conjunct-mmap-dir";
+            load_index_info.mmap_dir_path = TestLocalPath + "mmap";
             load_index_info.index_id = index_id;
             load_index_info.index_build_id = field_index_build_id;
             load_index_info.index_version = index_version;

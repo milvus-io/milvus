@@ -18,8 +18,8 @@ package binlog
 
 import (
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type Filter func(row map[int64]interface{}) bool

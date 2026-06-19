@@ -86,7 +86,13 @@ extraConfigFiles:
     common:
       storage:
         enablev2: true
+        # enable storage v3
+        useLoonFFI: true
+    dataNode:
+      storage:
+        format: vortex
     dataCoord:
+      targetVecIndexVersion: 10
       gc:
         interval: 1800
         missingTolerance: 1800
@@ -176,4 +182,3 @@ image:
     pullPolicy: Always
     repository: harbor.milvus.io/milvus/milvus
     tag: nightly-20240821-ed4eaff
-

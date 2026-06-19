@@ -65,7 +65,7 @@ Milvus 支持4种部署方式，请根据需求选择部署方式，PyMilvus 支
 
 ### PyMilvus 测试环境部署及用例执行
 
-推荐使用 **Python 3(>= 3.8)** ，与 **[PyMilvus](https://pymilvus.readthedocs.io/en/latest/install.html)** 支持的 Python 版本保持一致。
+推荐使用 **Python 3.12**，与 Python client CI 运行环境保持一致。
 
 > **_NOTE:_**  如选择KinD部署方式，以下步骤可以自动完成
 

@@ -32,7 +32,7 @@ spec:
     volumeMounts:
     - mountPath: /var/run
       name: docker-root
-    - mountPath: /root/.conan
+    - mountPath: /root/.conan2
       name: build-cache
     # - mountPath: /ci-logs
     #   name: ci-logs  
@@ -51,13 +51,13 @@ spec:
     volumeMounts:
     - mountPath: /var/run
       name: docker-root
-    - mountPath: /root/.conan
+    - mountPath: /root/.conan2
       name: build-cache
   volumes:
   - emptyDir: {}
     name: docker-root
   - hostPath:
-      path:  /root/.conan
+      path:  /root/.conan2
       type: DirectoryOrCreate
     name: build-cache
   # - name: ci-logs

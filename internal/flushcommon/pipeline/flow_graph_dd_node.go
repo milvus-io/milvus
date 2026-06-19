@@ -26,18 +26,18 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // make sure ddNode implements flowgraph.Node
@@ -183,15 +183,15 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			util.GetRateCollector().Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
 				Add(float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
 				Inc()
 
 			metrics.DataNodeConsumeMsgRowsCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
 				Add(float64(imsg.GetNumRows()))
 
 			log.Debug("DDNode receive insert messages",
@@ -222,15 +222,15 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			util.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 				Add(float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).
 				Inc()
 
 			metrics.DataNodeConsumeMsgRowsCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 				Add(float64(dmsg.GetNumRows()))
 			fgMsg.DeleteMessages = append(fgMsg.DeleteMessages, dmsg)
 		case commonpb.MsgType_CreateSegment:

@@ -14,15 +14,18 @@
 #include <iterator>
 #include <memory>
 
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "index/Meta.h"
+#include "log/Log.h"
 #include "common/resource_c.h"
 #include "index/IndexFactory.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/manifest.h"
 #include "pb/schema.pb.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -34,7 +37,7 @@
 namespace milvus::segcore {
 
 std::shared_ptr<milvus_storage::api::ColumnGroups>
-SegmentLoadInfo::GetColumnGroups() {
+SegmentLoadInfo::GetColumnGroups() const {
     auto manifest_path = GetManifestPath();
     if (manifest_path.empty()) {
         return nullptr;
@@ -62,6 +65,7 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     // Extract field ID
     auto field_id = FieldId(field_index_info->fieldid());
     load_index_info.field_id = field_id.get();
+    load_index_info.collection_id = GetCollectionID();
     load_index_info.partition_id = GetPartitionID();
 
     // Get field type from schema
@@ -73,6 +77,8 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.index_id = field_index_info->indexid();
     load_index_info.index_build_id = field_index_info->buildid();
     load_index_info.index_version = field_index_info->index_version();
+    load_index_info.index_store_path_version =
+        field_index_info->index_store_path_version();
     load_index_info.index_engine_version =
         static_cast<IndexVersion>(field_index_info->current_index_version());
     load_index_info.index_size = field_index_info->index_size();
@@ -150,39 +156,146 @@ SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
     return request.has_raw_data;
 }
 
+std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
+SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
+    const proto::segcore::TextIndexStats& text_index_stats,
+    FieldId field_id) const {
+    auto info = std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
+
+    info->set_fieldid(text_index_stats.fieldid());
+    info->set_version(text_index_stats.version());
+    info->set_buildid(text_index_stats.buildid());
+    for (const auto& f : text_index_stats.files()) {
+        info->add_files(f);
+    }
+
+    const auto& field_meta = schema_->operator[](field_id);
+    *info->mutable_schema() = field_meta.ToProto();
+
+    info->set_collectionid(GetCollectionID());
+    info->set_partitionid(GetPartitionID());
+    info->set_load_priority(GetPriority());
+
+    // Text match index mmap config is based on the scalar field mmap
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    auto [field_has_setting, field_mmap_enabled] =
+        schema_->MmapEnabled(field_id);
+    bool enable_mmap = field_has_setting
+                           ? field_mmap_enabled
+                           : mmap_config.GetScalarFieldEnableMmap();
+    info->set_enable_mmap(enable_mmap);
+    info->set_index_size(text_index_stats.memory_size());
+    info->set_current_scalar_index_version(
+        text_index_stats.current_scalar_index_version());
+
+    // Text match index warmup policy based on scalar field's warmup
+    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+        field_id, /*is_vector=*/false, /*is_index=*/false);
+    if (field_has_warmup) {
+        info->set_warmup_policy(field_warmup_policy);
+    }
+
+    // Propagate base_path for unified (basePath + relativeFiles) model
+    if (!text_index_stats.base_path().empty()) {
+        info->set_base_path(text_index_stats.base_path());
+    }
+
+    return info;
+}
+
+std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>
+SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
+    const proto::segcore::JsonKeyStats& json_key_stats,
+    FieldId field_id) const {
+    auto info = std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+
+    info->set_fieldid(json_key_stats.fieldid());
+    info->set_version(json_key_stats.version());
+    info->set_buildid(json_key_stats.buildid());
+    for (const auto& f : json_key_stats.files()) {
+        info->add_files(f);
+    }
+
+    const auto& field_meta = schema_->operator[](field_id);
+    *info->mutable_schema() = field_meta.ToProto();
+
+    info->set_collectionid(GetCollectionID());
+    info->set_partitionid(GetPartitionID());
+    info->set_load_priority(GetPriority());
+    info->set_stats_size(json_key_stats.log_size());
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    info->set_enable_mmap(mmap_config.GetJsonStatsEnableMmap());
+    info->set_mmap_dir_path(mmap_config.GetJsonStatsMmapPath());
+
+    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+        field_id, /*is_vector=*/false, /*is_index=*/false);
+    if (field_has_warmup) {
+        info->set_warmup_policy(field_warmup_policy);
+    }
+
+    if (!json_key_stats.base_path().empty()) {
+        info->set_base_path(json_key_stats.base_path());
+    }
+
+    return info;
+}
+
 void
 SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     // Get current index IDs from converted cache
     std::set<int64_t> current_index_ids;
+    // Build a set of field IDs that currently have indexes loaded
+    std::set<FieldId> current_indexed_fields;
     for (const auto& load_index_info : converted_index_infos_) {
         current_index_ids.insert(load_index_info.index_id);
+        current_indexed_fields.insert(FieldId(load_index_info.field_id));
     }
 
     std::set<int64_t> new_index_ids;
-    // Find indexes to load: indexes in new_info but not in current
-    // Use converted_field_index_cache_ from new_info
+    // Find indexes to load/replace: indexes in new_info but not in current
+    // Only consider fields that exist in the current schema (skip dropped fields)
     for (const auto& [field_id, load_index_infos] :
          new_info.converted_field_index_cache_) {
+        // Schema-driven: skip indexes for fields not in current schema.
+        // Use new_info's schema (the latest) since this->schema_ may still
+        // contain dropped fields from a prior load.
+        if (!new_info.HasFieldInSchema(field_id)) {
+            continue;
+        }
         for (const auto& load_index_info : load_index_infos) {
             new_index_ids.insert(load_index_info.index_id);
             if (current_index_ids.find(load_index_info.index_id) ==
                 current_index_ids.end()) {
-                diff.indexes_to_load[field_id].push_back(load_index_info);
+                // New index_id: check if field already has an index loaded
+                if (current_indexed_fields.find(field_id) !=
+                    current_indexed_fields.end()) {
+                    diff.indexes_to_replace[field_id].push_back(
+                        load_index_info);
+                } else {
+                    diff.indexes_to_load[field_id].push_back(load_index_info);
+                }
             }
         }
     }
 
     // Find indexes to drop: fields that have indexes in current but not in new_info
     for (const auto& load_index_info : converted_index_infos_) {
-        if (new_index_ids.find(load_index_info.index_id) ==
-            new_index_ids.end()) {
-            diff.indexes_to_drop.insert(FieldId(load_index_info.field_id));
+        auto field_id = FieldId(load_index_info.field_id);
+        if (!new_info.HasFieldInSchema(field_id) ||
+            new_index_ids.find(load_index_info.index_id) ==
+                new_index_ids.end()) {
+            diff.indexes_to_drop.insert(field_id);
         }
     }
 }
 
 void
 SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
+    auto prefer_field_data =
+        SegcoreConfig::default_config()
+            .get_prefer_field_data_when_index_has_raw_data();
+
     // field id -> binlog group id
     std::map<int64_t, int64_t> current_fields;
     for (int i = 0; i < GetBinlogPathCount(); i++) {
@@ -199,10 +312,28 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         }
     }
 
+    // Two FieldBinlogs at the same group id are equivalent only when their
+    // underlying log files (log_path sequence) match. Compaction/version
+    // bumps can swap files under the same fieldid, and without detecting
+    // that here the loader never evicts the stale column cache.
+    auto same_binlog_files = [](const proto::segcore::FieldBinlog& a,
+                                const proto::segcore::FieldBinlog& b) -> bool {
+        if (a.binlogs_size() != b.binlogs_size()) {
+            return false;
+        }
+        for (int j = 0; j < a.binlogs_size(); j++) {
+            if (a.binlogs(j).log_path() != b.binlogs(j).log_path()) {
+                return false;
+            }
+        }
+        return true;
+    };
+
     std::map<int64_t, int64_t> new_binlog_fields;
     for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
         auto& new_field_binlog = new_info.GetBinlogPath(i);
         std::vector<FieldId> ids_to_load;
+        std::vector<FieldId> ids_to_replace;
         std::vector<int64_t> child_fields(
             new_field_binlog.child_fields().begin(),
             new_field_binlog.child_fields().end());
@@ -210,23 +341,65 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         if (child_fields.empty()) {
             child_fields.emplace_back(new_field_binlog.fieldid());
         }
+
+        auto* cur_field_binlog =
+            GetFieldBinlog(FieldId(new_field_binlog.fieldid()));
+        bool group_files_changed =
+            cur_field_binlog != nullptr &&
+            !same_binlog_files(*cur_field_binlog, new_field_binlog);
+
         for (auto child_id : child_fields) {
+            auto child_field_id = FieldId(child_id);
+            if (!new_info.HasFieldInSchema(child_field_id)) {
+                continue;
+            }
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
-            auto iter = current_fields.find(new_field_binlog.fieldid());
-            // Find binlogs to load: fields in new_info match current
-            if (iter == current_fields.end() ||
-                iter->second != new_field_binlog.fieldid()) {
+            // current_fields is keyed by child field id, so look up the
+            // child — keying by new_field_binlog.fieldid() misses multi-
+            // field groups (whose group id is not itself a map key) and
+            // spuriously classifies unchanged groups as moved.
+            auto iter = current_fields.find(child_id);
+            // A binlog entry needs (re)loading when either
+            //   (a) the group this child belongs to differs between
+            //       current and new, or
+            //   (b) the group maps the same way but the underlying log
+            //       files changed (e.g. compaction rewrote the segment).
+            bool group_mapping_differs =
+                iter == current_fields.end() ||
+                iter->second != new_field_binlog.fieldid();
+            if (!group_mapping_differs && !group_files_changed) {
+                continue;
+            }
+            // Pre-existing children go to replace (to evict stale cached
+            // columns); genuinely new children go to load.
+            if (current_fields.find(child_id) != current_fields.end() ||
+                fields_filled_with_default_.count(child_field_id) > 0) {
+                ids_to_replace.emplace_back(child_id);
+            } else {
                 ids_to_load.emplace_back(child_id);
             }
         }
         if (!ids_to_load.empty()) {
             diff.binlogs_to_load.emplace_back(ids_to_load, new_field_binlog);
         }
+        if (!ids_to_replace.empty()) {
+            diff.binlogs_to_replace.emplace_back(ids_to_replace,
+                                                 new_field_binlog);
+        }
     }
 
     // Find field data to drop: fields in current but not in new_info
     for (const auto& [field_id, group_id] : current_fields) {
+        auto fid = FieldId(field_id);
+        if (!new_info.HasFieldInSchema(fid)) {
+            diff.field_data_to_drop.emplace(field_id);
+            continue;
+        }
         if (new_binlog_fields.find(field_id) == new_binlog_fields.end()) {
+            if (prefer_field_data &&
+                new_info.field_index_has_raw_data_.count(fid) > 0) {
+                continue;
+            }
             diff.field_data_to_drop.emplace(field_id);
         }
     }
@@ -235,56 +408,150 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
 void
 SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                                          SegmentLoadInfo& new_info) {
+    auto prefer_field_data =
+        SegcoreConfig::default_config()
+            .get_prefer_field_data_when_index_has_raw_data();
     auto cur_column_group = GetColumnGroups();
     auto new_column_group = new_info.GetColumnGroups();
 
     AssertInfo(cur_column_group, "current column groups shall not be null");
     AssertInfo(new_column_group, "new column groups shall not be null");
 
-    // Build a set of current FieldIds from current column groups
-    std::map<int64_t, int> cur_field_ids;
-    for (int i = 0; i < cur_column_group->size(); i++) {
-        auto cg = cur_column_group->at(i);
+    // The loon manifest gives no ordering guarantee on the column-groups
+    // vector, so we don't try to pair cur/new groups by position or by a
+    // synthesized leader. For each field we only ask: "is it present in
+    // current, and did its backing files change?" — field-level existence
+    // plus per-field file-list comparison is enough to classify
+    // new/replace/unchanged without any group-identity assumption.
+    std::map<int64_t, const std::vector<milvus_storage::api::ColumnGroupFile>*>
+        cur_field_to_files;
+    for (const auto& cg : *cur_column_group) {
+        if (!cg) {
+            continue;
+        }
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            cur_field_ids.emplace(field_id, i);
+            cur_field_to_files[field_id] = &cg->files;
         }
     }
 
-    // Build a set of new FieldIds and find column groups to load
-    std::map<int64_t, int> new_field_ids;
+    // Compare path + row range: storage v2 packed files can share a path
+    // across compactions while the row window (start_index/end_index)
+    // changes, so path-only comparison would leave stale cache in place.
+    auto same_files =
+        [](const std::vector<milvus_storage::api::ColumnGroupFile>& a,
+           const std::vector<milvus_storage::api::ColumnGroupFile>& b) -> bool {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (size_t j = 0; j < a.size(); j++) {
+            if (a[j].path != b[j].path ||
+                a[j].start_index != b[j].start_index ||
+                a[j].end_index != b[j].end_index) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // Find column groups to load/replace on the new side
+    std::set<int64_t> new_seen_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
         auto cg = new_column_group->at(i);
+        if (!cg) {
+            continue;
+        }
         std::vector<FieldId> fields;
+        std::vector<FieldId> replace_fields;
         std::vector<FieldId> lazy_fields;
+        std::vector<FieldId> lazy_replace_fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            new_field_ids.emplace(field_id, i);
+            auto fid = FieldId(field_id);
+            if (!new_info.HasFieldInSchema(fid)) {
+                continue;
+            }
+            new_seen_field_ids.emplace(field_id);
 
-            auto iter = cur_field_ids.find(field_id);
-            // If this field doesn't exist in current, mark the column group for loading
-            if (iter == cur_field_ids.end() || iter->second != i) {
-                if (schema_->ShouldLoadField(FieldId(field_id)) &&
-                    field_index_has_raw_data_.find(FieldId(field_id)) ==
-                        field_index_has_raw_data_.end()) {
+            auto cur_iter = cur_field_to_files.find(field_id);
+            bool was_default_filled =
+                fields_filled_with_default_.count(fid) > 0;
+            bool is_new_field =
+                cur_iter == cur_field_to_files.end() && !was_default_filled;
+            // A field that was present in current must go to replace when
+            // its backing files changed — whether that's the same group
+            // rewriting its parquet (compaction) or the field landing in
+            // a different group with a different file set. Either way the
+            // cached chunks are stale.
+            bool files_changed = cur_iter != cur_field_to_files.end() &&
+                                 !same_files(*cur_iter->second, cg->files);
+            bool is_replace_field = was_default_filled || files_changed;
+            bool index_has_raw_data =
+                new_info.field_index_has_raw_data_.count(fid) > 0;
+            // Eager-load when: system field, OR schema says load AND
+            // (we want to keep field data alongside index, OR index can't serve raw).
+            bool should_eager_load =
+                field_id < START_USER_FIELDID ||
+                (new_info.schema_->ShouldLoadField(fid) &&
+                 (prefer_field_data || !index_has_raw_data));
+            if (is_new_field) {
+                // Field not in current and not default-filled → new load
+                if (should_eager_load) {
                     fields.emplace_back(field_id);
                 } else {
-                    // put lazy load & index_has_raw_data field in lazy_fields
                     lazy_fields.emplace_back(field_id);
+                }
+            } else if (is_replace_field) {
+                // Field was default-filled or moved between groups → replace
+                if (should_eager_load) {
+                    replace_fields.emplace_back(field_id);
+                } else {
+                    lazy_replace_fields.emplace_back(field_id);
+                }
+            } else {
+                // Field at same position — check if needs lazification
+                // (transitioning from no-raw-data-index to raw-data-index)
+                if (!prefer_field_data &&
+                    new_info.field_index_has_raw_data_.count(fid) > 0 &&
+                    field_index_has_raw_data_.count(fid) == 0) {
+                    lazy_replace_fields.emplace_back(field_id);
                 }
             }
         }
         if (!fields.empty()) {
             diff.column_groups_to_load.emplace_back(i, fields);
         }
-        if (!lazy_fields.empty()) {
-            diff.column_groups_to_lazyload.emplace_back(i, lazy_fields);
+        if (!replace_fields.empty()) {
+            diff.column_groups_to_replace.emplace_back(i, replace_fields);
+        }
+        // Lazy entries are emitted one-per-field on purpose: each entry maps
+        // to a separate single-column projected ChunkReader in
+        // LoadColumnGroup, so touching one lazy field never co-loads chunks
+        // for sibling lazy fields in the same column group. Reader-sharing
+        // policy is therefore encoded in the diff entry shape itself rather
+        // than re-derived inside the loader.
+        for (const auto& fid : lazy_fields) {
+            diff.column_groups_to_lazyload.emplace_back(
+                i, std::vector<FieldId>{fid});
+        }
+        for (const auto& fid : lazy_replace_fields) {
+            diff.column_groups_to_lazyreplace.emplace_back(
+                i, std::vector<FieldId>{fid});
         }
     }
 
     // Find field data to drop: fields in current but not in new
-    for (const auto& [field_id, cg_index] : cur_field_ids) {
-        if (new_field_ids.find(field_id) == new_field_ids.end()) {
+    for (const auto& [field_id, files_ptr] : cur_field_to_files) {
+        auto fid = FieldId(field_id);
+        if (!new_info.HasFieldInSchema(fid)) {
+            diff.field_data_to_drop.emplace(field_id);
+            continue;
+        }
+        if (new_seen_field_ids.find(field_id) == new_seen_field_ids.end()) {
+            if (prefer_field_data &&
+                new_info.field_index_has_raw_data_.count(fid) > 0) {
+                continue;
+            }
             diff.field_data_to_drop.emplace(field_id);
         }
     }
@@ -294,60 +561,140 @@ void
 SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
                                          SegmentLoadInfo& new_info) {
     // Find fields that were previously skipped (index had raw data)
-    // but now need loading (index no longer has raw data or was dropped)
+    // but now need loading (index no longer has raw data or was dropped).
+    // These fields need their raw data restored since the index no longer
+    // provides it. We put them into load paths (binlogs/column_groups) so
+    // that ApplyLoadDiff can rebuild the data from storage.
+    // Collect fields that need reload (index no longer has raw data)
+    std::set<FieldId> fields_to_reload;
     for (const auto& field_id : field_index_has_raw_data_) {
-        // If new_info doesn't have this field in index_has_raw_data_,
-        // we need to reload the field data
+        if (!new_info.HasFieldInSchema(field_id)) {
+            continue;
+        }
         if (new_info.field_index_has_raw_data_.find(field_id) ==
             new_info.field_index_has_raw_data_.end()) {
-            diff.fields_to_reload.emplace_back(field_id);
+            fields_to_reload.emplace(field_id);
         }
     }
+
+    if (fields_to_reload.empty()) {
+        return;
+    }
+
+    if (!new_info.HasManifestPath()) {
+        // Binlog mode: find each field's binlog and add to binlogs_to_replace
+        for (const auto& field_id : fields_to_reload) {
+            for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
+                auto& binlog = new_info.GetBinlogPath(i);
+                std::vector<int64_t> child_fields(binlog.child_fields().begin(),
+                                                  binlog.child_fields().end());
+                if (child_fields.empty()) {
+                    child_fields.emplace_back(binlog.fieldid());
+                }
+                bool found = false;
+                for (auto child_id : child_fields) {
+                    if (FieldId(child_id) == field_id) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) {
+                    // Use replace since the field may still exist
+                    // (e.g. multi-field group where drop was skipped)
+                    diff.binlogs_to_replace.emplace_back(
+                        std::vector<FieldId>{field_id}, binlog);
+                    break;
+                }
+            }
+        }
+    } else {
+        if (schema_->is_external_collection()) {
+            diff.load_external_manifest = true;
+        } else {
+            // Manifest mode: collect fields per column group, emplace each
+            // group index only once
+            auto column_groups = new_info.GetColumnGroups();
+            if (column_groups) {
+                std::map<int, std::vector<FieldId>> cg_fields;
+                for (size_t i = 0; i < column_groups->size(); i++) {
+                    auto cg = column_groups->at(i);
+                    for (const auto& column : cg->columns) {
+                        FieldId fid(std::stoll(column));
+                        if (fields_to_reload.count(fid) > 0) {
+                            cg_fields[static_cast<int>(i)].emplace_back(fid);
+                        }
+                    }
+                }
+                for (auto& [cg_idx, fids] : cg_fields) {
+                    diff.column_groups_to_replace.emplace_back(cg_idx,
+                                                               std::move(fids));
+                }
+            }
+        }
+    }
+}
+
+std::set<FieldId>
+SegmentLoadInfo::CollectDataFields() const {
+    std::set<FieldId> fields;
+
+    for (int i = 0; i < GetBinlogPathCount(); i++) {
+        auto& binlog = GetBinlogPath(i);
+        std::vector<int64_t> child_fields(binlog.child_fields().begin(),
+                                          binlog.child_fields().end());
+        if (child_fields.empty()) {
+            child_fields.emplace_back(binlog.fieldid());
+        }
+        for (auto child_id : child_fields) {
+            fields.emplace(child_id);
+        }
+    }
+
+    for (const auto& field_id : field_index_has_raw_data_) {
+        fields.insert(field_id);
+    }
+
+    if (HasManifestPath()) {
+        auto column_groups = GetColumnGroups();
+        if (column_groups) {
+            for (size_t i = 0; i < column_groups->size(); i++) {
+                auto cg = column_groups->at(i);
+                for (const auto& column : cg->columns) {
+                    fields.emplace(std::stoll(column));
+                }
+            }
+        }
+    }
+    return fields;
+}
+
+std::set<FieldId>
+SegmentLoadInfo::GetDefaultFilledFieldsForNewInfo(
+    const SegmentLoadInfo& new_info) const {
+    if (schema_->is_external_collection() ||
+        new_info.schema_->is_external_collection()) {
+        return {};
+    }
+
+    auto new_info_fields = new_info.CollectDataFields();
+    std::set<FieldId> fields;
+    for (const auto& field_id : fields_filled_with_default_) {
+        if (!new_info.HasFieldInSchema(field_id)) {
+            continue;
+        }
+        if (new_info_fields.count(field_id) > 0) {
+            continue;
+        }
+        fields.insert(field_id);
+    }
+    return fields;
 }
 
 void
 SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
                                           SegmentLoadInfo& new_info) {
-    // Helper lambda to collect all field ids with data source
-    auto collect_data_fields = [](SegmentLoadInfo& info) -> std::set<FieldId> {
-        std::set<FieldId> fields;
-
-        // From binlog paths
-        for (int i = 0; i < info.GetBinlogPathCount(); i++) {
-            auto& binlog = info.GetBinlogPath(i);
-            std::vector<int64_t> child_fields(binlog.child_fields().begin(),
-                                              binlog.child_fields().end());
-            if (child_fields.empty()) {
-                child_fields.emplace_back(binlog.fieldid());
-            }
-            for (auto child_id : child_fields) {
-                fields.emplace(child_id);
-            }
-        }
-
-        // From index with raw data
-        for (const auto& field_id : info.field_index_has_raw_data_) {
-            fields.insert(field_id);
-        }
-
-        // From column groups (manifest mode)
-        if (info.HasManifestPath()) {
-            auto column_groups = info.GetColumnGroups();
-            if (column_groups) {
-                for (size_t i = 0; i < column_groups->size(); i++) {
-                    auto cg = column_groups->at(i);
-                    for (const auto& column : cg->columns) {
-                        fields.emplace(std::stoll(column));
-                    }
-                }
-            }
-        }
-        return fields;
-    };
-
-    // Collect field ids with data source
-    std::set<FieldId> new_info_fields = collect_data_fields(new_info);
-    std::set<FieldId> current_fields = collect_data_fields(*this);
+    std::set<FieldId> new_info_fields = new_info.CollectDataFields();
+    std::set<FieldId> current_fields = CollectDataFields();
 
     // Build "current handled" set:
     // - Fields with data source in current
@@ -356,8 +703,8 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
     current_handled.insert(fields_filled_with_default_.begin(),
                            fields_filled_with_default_.end());
 
-    // Compute: schema_fields - new_info_fields - current_handled
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    // Compute: new schema fields - new_info_fields - current_handled
+    for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
@@ -367,14 +714,199 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
         }
 
         if (current_handled.count(field_id)) {
-            new_info.fields_filled_with_default_.insert(field_id);
+            continue;
+        }
+
+        if (new_info.schema_->is_function_output(field_id)) {
             continue;
         }
 
         diff.fields_to_fill_default.push_back(field_id);
-        new_info.fields_filled_with_default_.insert(field_id);
     }
 }
+
+namespace {
+
+int64_t
+CurrentJsonStatsDataFormatVersion() {
+    return std::stoll(JSON_STATS_DATA_FORMAT_VERSION);
+}
+
+bool
+JsonStatsFilesEqual(const proto::segcore::JsonKeyStats& lhs,
+                    const proto::segcore::JsonKeyStats& rhs) {
+    if (lhs.files_size() != rhs.files_size()) {
+        return false;
+    }
+    for (int i = 0; i < lhs.files_size(); ++i) {
+        if (lhs.files(i) != rhs.files(i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
+JsonStatsLoadIdentityEqual(const proto::segcore::JsonKeyStats& lhs,
+                           const proto::segcore::JsonKeyStats& rhs) {
+    return lhs.version() == rhs.version() && lhs.buildid() == rhs.buildid() &&
+           lhs.json_key_stats_data_format() ==
+               rhs.json_key_stats_data_format() &&
+           lhs.base_path() == rhs.base_path() &&
+           lhs.log_size() == rhs.log_size() &&
+           lhs.memory_size() == rhs.memory_size() &&
+           JsonStatsFilesEqual(lhs, rhs);
+}
+
+}  // namespace
+
+void
+SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
+                                        SegmentLoadInfo& new_info) {
+    // Build current text indexed fields (fields with loaded text index stats)
+    std::set<FieldId> current_text_indexed;
+    for (const auto& [field_id, stats] : GetTextStatsLogs()) {
+        current_text_indexed.insert(FieldId(field_id));
+    }
+    // Also include text indexes created from raw data
+    for (const auto& field_id : created_text_indexes_) {
+        current_text_indexed.insert(field_id);
+    }
+
+    // Build new text indexed info (like Go textIndexedInfo)
+    // Keep higher version if duplicate field_id
+    std::unordered_map<FieldId, const proto::segcore::TextIndexStats*>
+        new_text_indexed;
+    for (const auto& [field_id, stats] : new_info.GetTextStatsLogs()) {
+        auto fid = FieldId(field_id);
+        if (!new_info.HasFieldInSchema(fid)) {
+            continue;
+        }
+        auto it = new_text_indexed.find(fid);
+        if (it == new_text_indexed.end() ||
+            stats.version() > it->second->version()) {
+            new_text_indexed[fid] = &stats;
+        }
+    }
+
+    // Find text indexes to load: in new_info but not in current
+    // Convert TextIndexStats -> LoadTextIndexInfo using new_info's context
+    for (const auto& [field_id, stats] : new_text_indexed) {
+        if (current_text_indexed.find(field_id) == current_text_indexed.end()) {
+            diff.text_indexes_to_load[field_id] =
+                new_info.ConvertTextIndexStatsToLoadTextIndexInfo(*stats,
+                                                                  field_id);
+        }
+    }
+
+    // Find text indexes to create: enable_match fields without pre-built index
+    for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
+        if (!field_meta.enable_match()) {
+            continue;
+        }
+        // Skip if has pre-built index in new_info
+        if (new_text_indexed.find(field_id) != new_text_indexed.end()) {
+            continue;
+        }
+        // Skip if already created from raw data
+        if (created_text_indexes_.find(field_id) !=
+            created_text_indexes_.end()) {
+            continue;
+        }
+        diff.text_indexes_to_create.insert(field_id);
+    }
+}
+
+void
+SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
+                                         SegmentLoadInfo& new_info) {
+    if (!JSON_KEY_STATS_ENABLED.load()) {
+        auto stats_count = GetJsonKeyStatsLogs().size() +
+                           new_info.GetJsonKeyStatsLogs().size();
+        if (stats_count > 0) {
+            LOG_WARN(
+                "skip json key stats diff because json key stats is disabled, "
+                "segment:{}, json_stats_count:{}",
+                new_info.GetSegmentID(),
+                stats_count);
+        }
+        return;
+    }
+
+    const auto expected_format = CurrentJsonStatsDataFormatVersion();
+    std::set<FieldId> current_fields;
+    for (const auto& [field_id, stats] : GetJsonKeyStatsLogs()) {
+        current_fields.insert(FieldId(field_id));
+    }
+
+    std::set<FieldId> new_fields;
+    for (const auto& [field_id, stats] : new_info.GetJsonKeyStatsLogs()) {
+        auto fid = FieldId(field_id);
+        if (!new_info.HasFieldInSchema(fid)) {
+            continue;
+        }
+        new_fields.insert(fid);
+        auto current_stats = GetJsonKeyStatsLog(field_id);
+        if (stats.json_key_stats_data_format() != expected_format) {
+            LOG_WARN(
+                "skip json key stats diff because data format is invalid, "
+                "segment:{}, field:{}, build:{}, version:{}, format:{}, "
+                "expected_format:{}, file_count:{}",
+                new_info.GetSegmentID(),
+                field_id,
+                stats.buildid(),
+                stats.version(),
+                stats.json_key_stats_data_format(),
+                expected_format,
+                stats.files_size());
+            if (current_stats != nullptr) {
+                diff.json_stats_to_drop.insert(fid);
+                LOG_INFO(
+                    "json key stats diff drop invalid format, segment:{}, "
+                    "field:{}",
+                    new_info.GetSegmentID(),
+                    field_id);
+            }
+            continue;
+        }
+
+        if (current_stats == nullptr) {
+            diff.json_stats_to_load[fid] =
+                new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(stats, fid);
+            LOG_INFO(
+                "json key stats diff load, segment:{}, field:{}, build:{}, "
+                "version:{}",
+                new_info.GetSegmentID(),
+                field_id,
+                stats.buildid(),
+                stats.version());
+            continue;
+        }
+
+        if (!JsonStatsLoadIdentityEqual(*current_stats, stats)) {
+            diff.json_stats_to_replace[fid] =
+                new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(stats, fid);
+            LOG_INFO(
+                "json key stats diff replace, segment:{}, field:{}, build:{}, "
+                "version:{}",
+                new_info.GetSegmentID(),
+                field_id,
+                stats.buildid(),
+                stats.version());
+        }
+    }
+
+    for (const auto& field_id : current_fields) {
+        if (new_fields.find(field_id) == new_fields.end()) {
+            diff.json_stats_to_drop.insert(field_id);
+            LOG_INFO("json key stats diff drop, segment:{}, field:{}",
+                     new_info.GetSegmentID(),
+                     field_id.get());
+        }
+    }
+}
+
+// std::unique_ptr<typename Tp>
 
 LoadDiff
 SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
@@ -386,6 +918,12 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     // Compute fields that need to be reloaded due to index raw data changes
     ComputeDiffReloadFields(diff, new_info);
 
+    // Compute text index changes
+    ComputeDiffTextIndexes(diff, new_info);
+
+    // Compute JSON key stats changes
+    ComputeDiffJsonKeyStats(diff, new_info);
+
     // Handle field data changes
     // Note: Updates can only happen within the same category:
     // - binlog -> binlog
@@ -394,7 +932,17 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     if (HasManifestPath()) {
         AssertInfo(new_info.HasManifestPath(),
                    "manifest could only be updated with other manifest");
-        ComputeDiffColumnGroups(diff, new_info);
+        if (GetManifestPath() != new_info.GetManifestPath()) {
+            diff.manifest_updated = true;
+            diff.new_manifest_path = new_info.GetManifestPath();
+        }
+        if (schema_->is_external_collection()) {
+            if (diff.manifest_updated) {
+                diff.load_external_manifest = true;
+            }
+        } else {
+            ComputeDiffColumnGroups(diff, new_info);
+        }
     } else {
         AssertInfo(
             !new_info.HasManifestPath(),
@@ -403,7 +951,9 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     }
 
     // Compute fields that need default value filling (schema evolution)
-    ComputeDiffDefaultFields(diff, new_info);
+    if (!schema_->is_external_collection()) {
+        ComputeDiffDefaultFields(diff, new_info);
+    }
 
     return diff;
 }
@@ -424,23 +974,42 @@ SegmentLoadInfo::GetLoadDiff() {
     // Handle index changes
     empty_info.ComputeDiffIndexes(diff, *this);
 
+    // Handle text index changes
+    empty_info.ComputeDiffTextIndexes(diff, *this);
+
+    // Handle JSON key stats changes
+    empty_info.ComputeDiffJsonKeyStats(diff, *this);
+
     // Handle field data changes
     // Note: Updates can only happen within the same category:
     // - binlog -> binlog
     // - manifest -> manifest
     // Cross-category changes are not supported.
     if (HasManifestPath()) {
-        // set mock path for null check
-        empty_info.info_.set_manifest_path("mocked manifest path");
-        empty_info.column_groups_ =
-            std::make_shared<milvus_storage::api::ColumnGroups>();
-        empty_info.ComputeDiffColumnGroups(diff, *this);
+        if (schema_->is_external_collection()) {
+            // External collections use parquet field names (e.g., "id",
+            // "value") as column group column names, not numeric field IDs.
+            // ComputeDiffColumnGroups calls std::stoll which would crash.
+            // Flag for direct manifest loading in ApplyLoadDiff.
+            diff.load_external_manifest = true;
+        } else {
+            // set mock path for null check
+            empty_info.info_.set_manifest_path("mocked manifest path");
+            empty_info.column_groups_ =
+                std::make_shared<milvus_storage::api::ColumnGroups>();
+            empty_info.ComputeDiffColumnGroups(diff, *this);
+        }
     } else {
         empty_info.ComputeDiffBinlogs(diff, *this);
     }
 
     // Compute fields that need default value filling (schema evolution)
-    empty_info.ComputeDiffDefaultFields(diff, *this);
+    // Skip for external collections: collect_data_fields() calls std::stoll
+    // on column group names, and external collections don't need default fills
+    // (all fields are either external or virtual PK).
+    if (!schema_->is_external_collection()) {
+        empty_info.ComputeDiffDefaultFields(diff, *this);
+    }
 
     return diff;
 }

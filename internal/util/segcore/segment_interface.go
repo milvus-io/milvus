@@ -35,9 +35,6 @@ type SealedSegment interface {
 	// LoadFieldData loads field data into the segment.
 	LoadFieldData(ctx context.Context, request *LoadFieldDataRequest) (*LoadFieldDataResult, error)
 
-	// AddFieldDataInfo adds field data info into the segment.
-	AddFieldDataInfo(ctx context.Context, request *AddFieldDataInfoRequest) (*AddFieldDataInfoResult, error)
-
 	// DropIndex drops the index of the segment.
 	DropIndex(ctx context.Context, fieldID int64) error
 
@@ -68,6 +65,7 @@ type basicSegmentMethodSet interface {
 	HasFieldData(fieldID int64) bool
 
 	// Search requests a search on the segment.
+	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 
 	// Retrieve retrieves entities from the segment.

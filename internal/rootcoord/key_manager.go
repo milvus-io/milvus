@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/samber/lo"
@@ -26,9 +25,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type KeyManager struct {
@@ -55,7 +55,7 @@ func NewKeyManager(
 func (km *KeyManager) GetRevokedDatabases() ([]int64, error) {
 	currentStates, err := hookutil.GetEzStates()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get cipher states: %w", err)
+		return nil, merr.Wrap(err, "failed to get cipher states")
 	}
 
 	abnormalDB := make(map[int64]struct{})
@@ -88,7 +88,7 @@ func (km *KeyManager) getDatabaseByEzID(ezID int64) (*model.Database, error) {
 
 	// verify the ezID matches the retrieved DB
 	if db.GetProperty(common.EncryptionEzIDKey) != strconv.FormatInt(ezID, 10) {
-		return nil, fmt.Errorf("db for ezID %d not found", ezID)
+		return nil, merr.WrapErrServiceInternalMsg("db for ezID %d not found", ezID)
 	}
 
 	return db, nil

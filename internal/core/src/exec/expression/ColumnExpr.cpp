@@ -66,7 +66,8 @@ PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::DOUBLE:
             result = DoEval<double>(input);
             break;
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             result = DoEval<std::string>(input);
             break;
         }
@@ -97,20 +98,19 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
-        auto data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
-            expr_->GetColumn().field_id_);
-
         int64_t processed_rows = 0;
-        const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
             auto [chunk_id,
                   chunk_offset] = [&]() -> std::pair<int64_t, int64_t> {
                 if (segment_chunk_reader_.segment_->type() ==
                     SegmentType::Growing) {
+                    const auto size_per_chunk =
+                        segment_chunk_reader_.SizePerChunk();
                     return {offset / size_per_chunk, offset % size_per_chunk};
                 } else if (segment_chunk_reader_.segment_->is_chunked() &&
-                           data_barrier > 0) {
+                           segment_chunk_reader_.segment_->num_chunk_data(
+                               expr_->GetColumn().field_id_) > 0) {
                     return segment_chunk_reader_.segment_->get_chunk_by_offset(
                         expr_->GetColumn().field_id_, offset);
                 } else {
@@ -121,14 +121,13 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 expr_->GetColumn().data_type_,
                 expr_->GetColumn().field_id_,
                 chunk_id,
-                data_barrier,
-                pinned_index_);
+                PinnedIndexForRawLookup());
             auto chunk_data_by_offset = cda(chunk_offset);
             if (!chunk_data_by_offset.has_value()) {
                 valid_res[processed_rows] = false;
             } else {
                 res_value[processed_rows] =
-                    boost::get<T>(chunk_data_by_offset.value());
+                    segcore::get_from_variant<T>(chunk_data_by_offset);
             }
             processed_rows++;
         }
@@ -152,14 +151,14 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             expr_->GetColumn().field_id_,
             current_chunk_id_,
             current_chunk_pos_,
-            pinned_index_);
+            PinnedIndexForRawLookup());
         for (int i = 0; i < real_batch_size; ++i) {
             auto data = cda();
             if (!data.has_value()) {
                 valid_res[i] = false;
                 continue;
             }
-            res_value[i] = boost::get<T>(data.value());
+            res_value[i] = segcore::get_from_variant<T>(data);
         }
         return res_vec;
     } else {
@@ -174,9 +173,6 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
-        auto data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
-            expr_->GetColumn().field_id_);
-
         int64_t processed_rows = 0;
         for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;
              ++chunk_id) {
@@ -189,16 +185,17 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 expr_->GetColumn().data_type_,
                 expr_->GetColumn().field_id_,
                 chunk_id,
-                data_barrier,
-                pinned_index_);
+                PinnedIndexForRawLookup());
 
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
                  ++i) {
-                if (!cda(i).has_value()) {
+                auto val = cda(i);
+                if (!val.has_value()) {
                     valid_res[processed_rows] = false;
                 } else {
-                    res_value[processed_rows] = boost::get<T>(cda(i).value());
+                    res_value[processed_rows] =
+                        segcore::get_from_variant<T>(val);
                 }
                 processed_rows++;
 

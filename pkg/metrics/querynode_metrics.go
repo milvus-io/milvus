@@ -18,10 +18,11 @@ package metrics
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -65,7 +66,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "apply_bf_latency",
 			Help:      "apply bf cost in ms",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			functionLabelName,
 			nodeIDLabelName,
@@ -77,7 +78,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "forward_delete_latency",
 			Help:      "forward delete cost in ms",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			functionLabelName,
 			nodeIDLabelName,
@@ -194,7 +195,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_queue_latency",
 			Help:      "latency of search or query in queue",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -208,7 +209,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_queue_user_latency",
 			Help:      "latency per user of search or query in queue",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -222,7 +223,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_segment_latency",
 			Help:      "latency of search or query per segment",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -235,7 +236,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_core_latency",
 			Help:      "latency of search or query latency in segcore",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -247,7 +248,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_reduce_latency",
 			Help:      "latency of reduce search or query result",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -266,16 +267,6 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeReadTaskUnsolveLen = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "read_task_unsolved_len",
-			Help:      "number of unsolved read tasks in unsolvedQueue",
-		}, []string{
-			nodeIDLabelName,
-		})
-
 	QueryNodeReadTaskReadyLen = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -284,6 +275,40 @@ var (
 			Help:      "number of ready read tasks in readyQueue",
 		}, []string{
 			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskReadyNQ = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_ready_nq",
+			Help:      "total NQ of ready read tasks in scheduler queue",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskQueueDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_queue_duration",
+			Help:      "duration in milliseconds that read tasks stay in scheduler policy queue",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			outcomeLabelName,
+		})
+
+	QueryNodeReadTaskExecuteDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_execute_duration",
+			Help:      "duration in milliseconds that read tasks spend in scheduler execution pool",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			outcomeLabelName,
 		})
 
 	QueryNodeReadTaskConcurrency = prometheus.NewGaugeVec(
@@ -380,6 +405,45 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "search_hit_segment_num",
 			Help:      "the number of segments actually involved in search task",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
+	QueryNodeSegmentFilterHitSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_filter_hit_segment_num",
+			Help:      "the number of segments with bloom filter hits",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
+	QueryNodeSegmentFilterSkippedSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_filter_skipped_segment_num",
+			Help:      "the number of segments skipped by segment filter optimization",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
+	QueryNodeSegmentFilterTotalSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_filter_total_segment_num",
+			Help:      "the total number of segments considered by segment filter optimization",
+			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
 			collectionIDLabelName,
@@ -516,7 +580,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "segment_latency_per_vector",
 			Help:      "one vector's search latency per segment",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -826,6 +890,69 @@ var (
 			queryTypeLabelName,
 			collectionIDLabelName,
 		})
+
+	QueryNodeTwoStageFilterLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "two_stage_search_stage1_latency",
+			Help:      "latency of the filter-only stage (stage 1) in two-stage search in milliseconds",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
+	QueryNodeTwoStageSearchLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "two_stage_search_stage2_latency",
+			Help:      "latency of the vector search stage (stage 2) in two-stage search in milliseconds",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
+	QueryNodeTwoStageSearchFallbackCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "two_stage_search_fallback_total",
+			Help:      "total number of two-stage search fallbacks to single-stage search",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			reasonLabelName,
+		})
+
+	QueryNodeGlobalRefineCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "global_refine_total",
+			Help:      "total number of search requests for which global refine was applied",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
+	// Pool metric descriptors (used by PoolMetricsCollector)
+	QueryNodePoolCapacityDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.QueryNodeRole, "pool_capacity"),
+		"Configured capacity (max goroutines) of the pool",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
+
+	QueryNodePoolActiveThreadsDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.QueryNodeRole, "pool_active_threads"),
+		"Number of currently running goroutines in the pool",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
+
+	QueryNodePoolQueueDepthDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.QueryNodeRole, "pool_queue_depth"),
+		"Number of tasks waiting in the pool queue",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -844,8 +971,10 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
 	registry.MustRegister(QueryNodeReduceLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
-	registry.MustRegister(QueryNodeReadTaskUnsolveLen)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
+	registry.MustRegister(QueryNodeReadTaskReadyNQ)
+	registry.MustRegister(QueryNodeReadTaskQueueDuration)
+	registry.MustRegister(QueryNodeReadTaskExecuteDuration)
 	registry.MustRegister(QueryNodeReadTaskConcurrency)
 	registry.MustRegister(QueryNodeEstimateCPUUsage)
 	registry.MustRegister(QueryNodeSearchGroupNQ)
@@ -894,10 +1023,19 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeApplyBFCost)
 	registry.MustRegister(QueryNodeForwardDeleteCost)
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
+	registry.MustRegister(QueryNodeSegmentFilterHitSegmentNum)
+	registry.MustRegister(QueryNodeSegmentFilterSkippedSegmentNum)
+	registry.MustRegister(QueryNodeSegmentFilterTotalSegmentNum)
 	registry.MustRegister(QueryNodeDeleteBufferSize)
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
 	registry.MustRegister(QueryNodeCGOCallLatency)
 	registry.MustRegister(QueryNodePartialResultCount)
+	registry.MustRegister(QueryNodeTwoStageFilterLatency)
+	registry.MustRegister(QueryNodeTwoStageSearchLatency)
+	registry.MustRegister(QueryNodeTwoStageSearchFallbackCount)
+	registry.MustRegister(QueryNodeGlobalRefineCount)
+	// Pool metrics collector (pull model — collectFn set later via SetPoolCollectFn)
+	registry.MustRegister(&poolMetricsCollector{})
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
 
@@ -906,93 +1044,79 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
-	nodeIDLabel := fmt.Sprint(nodeID)
-	collectionIDLabel := fmt.Sprint(collectionID)
-	QueryNodeConsumerMsgCount.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+	// Reuse a single labels map to avoid allocations; DeletePartialMatch does not mutate it.
+	labels := prometheus.Labels{
+		nodeIDLabelName:       fmt.Sprint(nodeID),
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	}
+	QueryNodeConsumerMsgCount.DeletePartialMatch(labels)
+	QueryNodeConsumeTimeTickLag.DeletePartialMatch(labels)
+	QueryNodeNumEntities.DeletePartialMatch(labels)
+	QueryNodeEntitiesSize.DeletePartialMatch(labels)
+	QueryNodeNumSegments.DeletePartialMatch(labels)
+	QueryNodeSQCount.DeletePartialMatch(labels)
+	QueryNodePartialResultCount.DeletePartialMatch(labels)
+	QueryNodeSearchHitSegmentNum.DeletePartialMatch(labels)
+	QueryNodeSegmentFilterHitSegmentNum.DeletePartialMatch(labels)
+	QueryNodeSegmentFilterSkippedSegmentNum.DeletePartialMatch(labels)
+	QueryNodeSegmentFilterTotalSegmentNum.DeletePartialMatch(labels)
+	QueryNodeSegmentPruneRatio.DeletePartialMatch(labels)
+	QueryNodeSegmentPruneBias.DeletePartialMatch(labels)
+	QueryNodeSegmentPruneLatency.DeletePartialMatch(labels)
+	QueryNodeLevelZeroSize.DeletePartialMatch(labels)
+	QueryNodeTwoStageFilterLatency.DeletePartialMatch(labels)
+	QueryNodeTwoStageSearchLatency.DeletePartialMatch(labels)
+	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
+	QueryNodeGlobalRefineCount.DeletePartialMatch(labels)
+}
 
-	QueryNodeConsumeTimeTickLag.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-	QueryNodeNumEntities.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-	QueryNodeEntitiesSize.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-	QueryNodeNumSegments.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+// PoolStats holds the snapshot of a single pool's state.
+type PoolStats struct {
+	Name    string
+	Cap     int
+	Running int
+	Waiting int
+}
 
-	QueryNodeSQCount.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+// poolCollectFn is the function set later by SetPoolCollectFn.
+// Accessed atomically via sync.Once guard in SetPoolCollectFn and nil check in Collect.
+var (
+	poolCollectorNodeID    string
+	poolCollectorCollectFn func() []PoolStats
+	poolCollectorMu        sync.Mutex
+)
 
-	QueryNodePartialResultCount.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+// SetPoolCollectFn sets the callback used by the poolMetricsCollector.
+// Called from QueryNode.Start() after pools are initialized.
+func SetPoolCollectFn(nodeID string, fn func() []PoolStats) {
+	poolCollectorMu.Lock()
+	defer poolCollectorMu.Unlock()
+	poolCollectorNodeID = nodeID
+	poolCollectorCollectFn = fn
+}
 
-	QueryNodeSearchHitSegmentNum.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+// poolMetricsCollector implements prometheus.Collector using pull model.
+// Registered once in RegisterQueryNode. collectFn is set later via SetPoolCollectFn.
+type poolMetricsCollector struct{}
 
-	QueryNodeSegmentPruneRatio.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+func (c *poolMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- QueryNodePoolCapacityDesc
+	ch <- QueryNodePoolActiveThreadsDesc
+	ch <- QueryNodePoolQueueDepthDesc
+}
 
-	QueryNodeSegmentPruneBias.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+func (c *poolMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+	poolCollectorMu.Lock()
+	fn := poolCollectorCollectFn
+	nodeID := poolCollectorNodeID
+	poolCollectorMu.Unlock()
 
-	QueryNodeSegmentPruneLatency.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeEntitiesSize.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeLevelZeroSize.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+	if fn == nil {
+		return
+	}
+	for _, s := range fn() {
+		ch <- prometheus.MustNewConstMetric(QueryNodePoolCapacityDesc, prometheus.GaugeValue, float64(s.Cap), nodeID, s.Name)
+		ch <- prometheus.MustNewConstMetric(QueryNodePoolActiveThreadsDesc, prometheus.GaugeValue, float64(s.Running), nodeID, s.Name)
+		ch <- prometheus.MustNewConstMetric(QueryNodePoolQueueDepthDesc, prometheus.GaugeValue, float64(s.Waiting), nodeID, s.Name)
+	}
 }

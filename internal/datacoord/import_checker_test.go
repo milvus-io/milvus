@@ -28,19 +28,19 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type ImportCheckerSuite struct {
@@ -59,12 +59,14 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	s.alloc = allocator.NewMockAllocator(s.T())
 
@@ -79,11 +81,6 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.importMeta = importMeta
 
 	ci := NewMockCompactionInspector(s.T())
-	l0CompactionTrigger := NewMockTriggerManager(s.T())
-	compactionChan := make(chan struct{}, 1)
-	close(compactionChan)
-	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
-	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collID int64) (*collectionInfo, error) {
@@ -92,7 +89,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 		}, nil
 	}).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, l0CompactionTrigger).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, nil).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -225,7 +222,9 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		}
 	}
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	// AlterSegments is no longer called from checkIndexBuildingJob (unsetSegmentImporting removed);
+	// the upstream checkImportingJob path may still invoke it. Loosen to .Maybe().
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	targetSegmentIDs := make([]int64, 0)
 	for _, t := range importTasks {
@@ -276,16 +275,17 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.checker.checkSortingJob(job)
 	s.Equal(internalpb.ImportJobState_IndexBuilding, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
-	// test check IndexBuilding job
+	// test check IndexBuilding job — transitions to Uncommitted, segments keep is_importing=true
+	// until HandleCommitVchannel runs after the WAL commit fence.
 	s.checker.checkIndexBuildingJob(job)
 	for _, t := range importTasks {
 		task := s.importMeta.GetTask(context.TODO(), t.GetTaskID())
 		for _, id := range task.(*importTask).GetSegmentIDs() {
 			segment := s.checker.meta.GetSegment(context.TODO(), id)
-			s.Equal(false, segment.GetIsImporting())
+			s.Equal(true, segment.GetIsImporting(), "is_importing must stay true until HandleCommitVchannel")
 		}
 	}
-	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 }
 
 func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...UpdateJobAction) {
@@ -581,12 +581,14 @@ func TestImportCheckerCompaction(t *testing.T) {
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
 
@@ -601,13 +603,8 @@ func TestImportCheckerCompaction(t *testing.T) {
 
 	cim := NewMockCompactionInspector(t)
 	handler := NewNMockHandler(t)
-	l0CompactionTrigger := NewMockTriggerManager(t)
-	compactionChan := make(chan struct{}, 1)
-	close(compactionChan)
-	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
-	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, l0CompactionTrigger).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, nil).(*importChecker)
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -739,7 +736,9 @@ func TestImportCheckerCompaction(t *testing.T) {
 
 	// check importing
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	// AlterSegments was previously driven by unsetSegmentImporting (removed in 2PC);
+	// the remaining segment writes in this flow may or may not hit it.
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
@@ -791,27 +790,197 @@ func TestImportCheckerCompaction(t *testing.T) {
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job index building")
 
-	// wait l0 import task
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
-	taskProto := &datapb.ImportTaskV2{
-		JobID:  jobID,
-		TaskID: 100000,
-		Source: datapb.ImportTaskSourceV2_L0Compaction,
-		State:  datapb.ImportTaskStateV2_InProgress,
-	}
-	task := &importTask{}
-	task.task.Store(taskProto)
-	importMeta.AddTask(context.TODO(), task)
-	time.Sleep(1200 * time.Millisecond)
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
-	importMeta.UpdateTask(context.TODO(), 100000, UpdateState(datapb.ImportTaskStateV2_Completed))
-	log.Info("job l0 compaction")
-
-	// check index building
+	// check index building → Uncommitted (2PC: no longer transitions directly to Completed;
+	// the test does not wire up a CommitImport broadcaster, so the job stops at Uncommitted).
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	assert.Eventually(t, func() bool {
 		job := importMeta.GetJob(context.TODO(), jobID)
-		return job.GetState() == internalpb.ImportJobState_Completed
+		return job.GetState() == internalpb.ImportJobState_Uncommitted
 	}, 2*time.Second, 100*time.Millisecond)
-	log.Info("job completed")
+	log.Info("job uncommitted (awaiting CommitImport WAL fence)")
+}
+
+// ---------------------------------------------------------------------------
+// Tests for checkUncommittedJob
+// ---------------------------------------------------------------------------
+
+func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitTrue() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+
+	// Put the job into Uncommitted state with auto_commit=true (default).
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).AutoCommit = true
+	})
+
+	commitCalled := false
+	s.checker.commitImportFn = func(ctx context.Context, job ImportJob) error {
+		commitCalled = true
+		return nil
+	}
+
+	s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.True(commitCalled, "commitImportFn should be called when auto_commit=true")
+}
+
+func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitFalse() {
+	// Put the job into Uncommitted state with auto_commit=false.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).AutoCommit = false
+	})
+
+	commitCalled := false
+	s.checker.commitImportFn = func(ctx context.Context, job ImportJob) error {
+		commitCalled = true
+		return nil
+	}
+
+	s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.False(commitCalled, "commitImportFn must NOT be called when auto_commit=false")
+	// Job state must remain Uncommitted.
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
+	// commitImportFn=nil with auto_commit=true is a programming error; the checker
+	// must log an error and return without crashing (no panic in the ticker goroutine).
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).AutoCommit = true
+	})
+	s.checker.commitImportFn = nil
+
+	s.NotPanics(func() {
+		s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	})
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+// TestCheckUncommittedJob_RepeatedTicks_Safe verifies that ticker re-entry into
+// checkUncommittedJob before the ack callback transitions the job state is safe.
+// commitImportFn is invoked once per tick; correctness against the resulting
+// duplicate broadcasts is guaranteed by the broadcaster's resource-key lock,
+// the ack callback's state guard, and HandleCommitVchannel's idempotency.
+func (s *ImportCheckerSuite) TestCheckUncommittedJob_RepeatedTicks_Safe() {
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).AutoCommit = true
+	})
+
+	callCount := 0
+	s.checker.commitImportFn = func(ctx context.Context, job ImportJob) error {
+		callCount++
+		return nil
+	}
+
+	for i := 0; i < 3; i++ {
+		s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	}
+	s.Equal(3, callCount, "each tick must call commitImportFn; broadcaster handles dedup")
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState(),
+		"state must remain Uncommitted until the ack callback fires")
+}
+
+// ---------------------------------------------------------------------------
+// Tests for checkCommittingJob
+// ---------------------------------------------------------------------------
+
+func (s *ImportCheckerSuite) TestCheckCommittingJob_AllVchannelsDone() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	// All vchannels committed → expect transition to Completed.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).State = internalpb.ImportJobState_Committing
+		job.(*importJob).Vchannels = []string{"ch0"}
+		job.(*importJob).CommittedVchannels = []string{"ch0"}
+	})
+
+	s.checker.checkCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckCommittingJob_Partial() {
+	// Only some vchannels committed → job should stay Committing.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).State = internalpb.ImportJobState_Committing
+		job.(*importJob).Vchannels = []string{"ch0", "ch1"}
+		job.(*importJob).CommittedVchannels = []string{"ch0"}
+	})
+
+	s.checker.checkCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_Committing, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+// ---------------------------------------------------------------------------
+// Tests for checkPreImportingJob — empty-import fast path
+// ---------------------------------------------------------------------------
+
+func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitFalse() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+
+	// First, advance job to PreImporting by creating pre-import tasks.
+	alloc := s.alloc
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	})
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+
+	// Mark all pre-import tasks completed with totalRows == 0 (empty import).
+	preimportTasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(s.jobID), WithType(PreImportTaskType))
+	for _, t := range preimportTasks {
+		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed),
+			UpdateFileStats([]*datapb.ImportFileStats{{TotalRows: 0}}))
+		s.NoError(err)
+	}
+
+	// Set auto_commit=false on the job.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).AutoCommit = false
+	})
+
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	// With auto_commit=false, empty import should land in Uncommitted, not Completed.
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+
+	// First, advance job to PreImporting.
+	alloc := s.alloc
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	})
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+
+	// Mark all pre-import tasks completed with totalRows == 0 (empty import).
+	preimportTasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(s.jobID), WithType(PreImportTaskType))
+	for _, t := range preimportTasks {
+		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed),
+			UpdateFileStats([]*datapb.ImportFileStats{{TotalRows: 0}}))
+		s.NoError(err)
+	}
+
+	// auto_commit=true (the default), so job should go directly to Completed.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).AutoCommit = true
+	})
+
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }

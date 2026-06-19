@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 type DeleteLogSuite struct {
@@ -69,6 +69,41 @@ func (s *DeleteLogSuite) TestParse() {
 		{
 			tag:       "bad_legacy_ts",
 			input:     "100,timestamp",
+			expectErr: true,
+		},
+		{
+			tag:       "bare_number",
+			input:     "123",
+			expectErr: true,
+		},
+		{
+			tag:       "missing_pkType",
+			input:     `{"ts":1000,"pk":100}`,
+			expectErr: true,
+		},
+		{
+			tag:       "missing_ts",
+			input:     `{"pkType":5,"pk":100}`,
+			expectErr: true,
+		},
+		{
+			tag:       "missing_pk",
+			input:     `{"pkType":5,"ts":1000}`,
+			expectErr: true,
+		},
+		{
+			tag:       "unknown_pkType",
+			input:     `{"pkType":999,"ts":1000,"pk":100}`,
+			expectErr: true,
+		},
+		{
+			tag:       "int64_pk_with_string_value",
+			input:     `{"pkType":5,"ts":1000,"pk":"not_a_number"}`,
+			expectErr: true,
+		},
+		{
+			tag:       "varchar_pk_with_number_value",
+			input:     `{"pkType":21,"ts":1000,"pk":42}`,
 			expectErr: true,
 		},
 	}

@@ -26,9 +26,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -36,22 +38,22 @@ import (
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func generateMetaTable(_ *testing.T) *MetaTable {
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10)
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
-	return &MetaTable{catalog: rootcoord.NewCatalog(catalogKV, nil)}
+	return &MetaTable{catalog: rootcoord.NewCatalog(catalogKV)}
 }
 
 func buildAlterUserMessage(credInfo *internalpb.CredentialInfo, timetick uint64) message.BroadcastResultAlterUserMessageV2 {
@@ -160,6 +162,90 @@ func TestRbacCredential(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRbacCredentialAlterCredentialMergesPartialUpdates(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	ptr := func(s string) *string {
+		return &s
+	}
+
+	username := "user" + funcutil.RandomString(10)
+	err := mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "old-password",
+		Description:       ptr("initial description"),
+	}, 1))
+	require.NoError(t, err)
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "new-password",
+	}, 2))
+	require.NoError(t, err)
+	cred, err := mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "initial description", cred.GetDescription())
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:    username,
+		Description: ptr("updated description"),
+	}, 3))
+	require.NoError(t, err)
+	cred, err = mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "updated description", cred.GetDescription())
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:    username,
+		Description: ptr(""),
+	}, 4))
+	require.NoError(t, err)
+	cred, err = mt.GetCredential(context.TODO(), username)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", cred.GetEncryptedPassword())
+	assert.Equal(t, "", cred.GetDescription())
+}
+
+func TestRbacCredentialRejectsInconsistentPasswordUpdate(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	username := "user" + funcutil.RandomString(10)
+	err := mt.AlterCredential(context.TODO(), buildAlterUserMessage(&internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "old-password",
+	}, 1))
+	require.NoError(t, err)
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: "new-password",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "must include both encrypted and sha256 password")
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:       username,
+		Sha256Password: "sha256",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "must include both encrypted and sha256 password")
+
+	description := "description-only update"
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username:    username,
+		Description: &description,
+	})
+	require.NoError(t, err)
+
+	err = mt.CheckIfUpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+		Username: username,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "credential update must change password or description")
+}
+
 func TestRbacCreateRole(t *testing.T) {
 	mt := generateMetaTable(t)
 
@@ -207,6 +293,239 @@ func TestRbacCreateRole(t *testing.T) {
 		err := mockMt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role1"}})
 		assert.Error(t, err)
 	}
+}
+
+func TestRbacAlterRoleDescription(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	roleName := "role" + funcutil.RandomString(10)
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        roleName,
+		Description: "old description",
+	})
+	require.NoError(t, err)
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        roleName,
+		Description: "new description",
+	})
+	require.NoError(t, err)
+
+	roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+	require.NoError(t, err)
+	require.Len(t, roles, 1)
+	assert.Equal(t, "new description", roles[0].GetRole().GetDescription())
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        "role_not_exist",
+		Description: "ignored",
+	})
+	require.ErrorIs(t, err, errRoleNotExists)
+
+	err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+		Name:        util.RoleAdmin,
+		Description: "ignored",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+	err = mt.CheckIfAlterRole(context.TODO(), &milvuspb.AlterRoleRequest{
+		RoleName:    util.RolePublic,
+		Description: "ignored",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+}
+
+func TestRbacAlterRoleDescriptionErrors(t *testing.T) {
+	ctx := context.TODO()
+
+	t.Run("check empty role name", func(t *testing.T) {
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.CheckIfAlterRole(ctx, &milvuspb.AlterRoleRequest{
+			RoleName:    "",
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("check list role error", func(t *testing.T) {
+		targetErr := errors.New("mock list role error")
+		roleName := "role_check_list_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return(nil, targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.CheckIfAlterRole(ctx, &milvuspb.AlterRoleRequest{
+			RoleName:    roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+
+	t.Run("alter empty role name", func(t *testing.T) {
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        "",
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("alter list role error", func(t *testing.T) {
+		targetErr := errors.New("mock list role error")
+		roleName := "role_alter_list_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return(nil, targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+
+	t.Run("alter catalog error", func(t *testing.T) {
+		targetErr := errors.New("mock alter role error")
+		roleName := "role_alter_catalog_error"
+		mockCata := mocks.NewRootCoordCatalog(t)
+		mockCata.EXPECT().ListRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName
+			}),
+			false,
+		).Return([]*milvuspb.RoleResult{{Role: &milvuspb.RoleEntity{Name: roleName}}}, nil)
+		mockCata.EXPECT().AlterRole(
+			mock.Anything,
+			util.DefaultTenant,
+			mock.MatchedBy(func(entity *milvuspb.RoleEntity) bool {
+				return entity.GetName() == roleName && entity.GetDescription() == "description"
+			}),
+		).Return(targetErr)
+		mockMt := &MetaTable{catalog: mockCata}
+
+		err := mockMt.AlterRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, targetErr)
+	})
+}
+
+func TestRbacCreateRoleToleratesMalformedStoredRoleValue(t *testing.T) {
+	ctx := context.TODO()
+	mt := generateMetaTable(t)
+	catalog := mt.catalog.(*rootcoord.Catalog)
+
+	require.NoError(t, catalog.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: "existing_role"}))
+	require.NoError(t, catalog.Txn.Save(ctx, rootcoord.RolePrefix+"/malformed_role", "{"))
+
+	err := mt.CheckIfCreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{Name: "new_role"},
+	})
+	require.NoError(t, err)
+}
+
+func TestRbacRoleDescriptionLengthLimit(t *testing.T) {
+	mt := generateMetaTable(t)
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+	err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{
+			Name:        "role_desc_limit_create",
+			Description: "12345",
+		},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	err = mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role_desc_limit_alter"})
+	require.NoError(t, err)
+	err = mt.CheckIfAlterRole(context.TODO(), &milvuspb.AlterRoleRequest{
+		RoleName:    "role_desc_limit_alter",
+		Description: "12345",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	err = mt.CheckIfRBACRestorable(context.TODO(), &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Roles: []*milvuspb.RoleEntity{
+				{
+					Name:        "role_desc_limit_restore",
+					Description: "12345",
+				},
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestRbacRoleDescriptionApplyPathSkipsLengthLimit(t *testing.T) {
+	t.Run("create role apply path", func(t *testing.T) {
+		mt := generateMetaTable(t)
+		roleName := "role_desc_apply_create"
+
+		paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+		defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "12345",
+		})
+		require.NoError(t, err)
+
+		roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "12345", roles[0].GetRole().GetDescription())
+	})
+
+	t.Run("alter role apply path", func(t *testing.T) {
+		mt := generateMetaTable(t)
+		roleName := "role_desc_apply_alter"
+
+		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName})
+		require.NoError(t, err)
+
+		paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+		defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+		err = mt.AlterRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "12345",
+		})
+		require.NoError(t, err)
+
+		roles, err := mt.SelectRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "12345", roles[0].GetRole().GetDescription())
+	})
 }
 
 func TestRbacDropRole(t *testing.T) {
@@ -621,6 +940,79 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
 		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
 	})
+
+	t.Run("UpdateTimestamp > ts triggers catalog fallback (time-travel correctness)", func(t *testing.T) {
+		// Regression test for the bug fix in getCollectionByIDInternal:
+		// cache invalidation was changed from CreateTime to UpdateTimestamp.
+		// Scenario: collection created at T=50, schema altered at T=100.
+		// A time-travel query at ts=80 (50 < 80 < 100) must NOT use the in-memory
+		// cache (which holds the post-alteration schema) — it must fall back to catalog.
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			uint64(80),
+			int64(100),
+		).Return(&model.Collection{
+			State:           pb.CollectionState_CollectionCreated,
+			CreateTime:      50,
+			UpdateTimestamp: 100,
+			Partitions: []*model.Partition{
+				{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+			},
+		}, nil)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:           pb.CollectionState_CollectionCreated,
+					CreateTime:      50,
+					UpdateTimestamp: 100, // schema was altered at T=100
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+
+		// ts=80 is between CreateTime(50) and UpdateTimestamp(100):
+		// UpdateTimestamp(100) > ts(80) → cache bypass → catalog must be called.
+		coll, err := meta.getCollectionByIDInternal(ctx, util.DefaultDBName, 100, 80, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, coll)
+		catalog.AssertCalled(t, "GetCollectionByID", mock.Anything, mock.Anything, uint64(80), int64(100))
+	})
+
+	t.Run("UpdateTimestamp <= ts uses in-memory cache (no catalog call)", func(t *testing.T) {
+		// ts=150 >= UpdateTimestamp(100) → the in-memory cache is fresh enough → no catalog call.
+		catalog := mocks.NewRootCoordCatalog(t)
+		// No expectations set — testify mock will fail if GetCollectionByID is called.
+
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:           pb.CollectionState_CollectionCreated,
+					CreateTime:      50,
+					UpdateTimestamp: 100,
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+
+		coll, err := meta.getCollectionByIDInternal(ctx, "", 100, 150, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, coll)
+		catalog.AssertNotCalled(t, "GetCollectionByID")
+	})
 }
 
 func TestMetaTable_GetCollectionByName(t *testing.T) {
@@ -639,7 +1031,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			},
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, "not_exist", "name", 101)
+		_, err := meta.GetCollectionByName(ctx, "not_exist", "name", 101, false)
 		assert.Error(t, err)
 	})
 	t.Run("get by alias", func(t *testing.T) {
@@ -661,7 +1053,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		}
 		meta.aliases.insert(util.DefaultDBName, "alias", 100)
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "", "alias", 101)
+		coll, err := meta.GetCollectionByName(ctx, "", "alias", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -688,7 +1080,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		}
 		meta.names.insert(util.DefaultDBName, "name", 100)
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "", "name", 101)
+		coll, err := meta.GetCollectionByName(ctx, "", "name", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -713,7 +1105,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.Error(t, err)
 	})
 
@@ -735,7 +1127,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
@@ -766,7 +1158,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		coll, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -782,7 +1174,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 		}
-		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp)
+		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp, false)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
@@ -1101,7 +1493,7 @@ func Test_filterUnavailable(t *testing.T) {
 		}
 		coll.Partitions = append(coll.Partitions, partition)
 	}
-	clone := filterUnavailable(coll)
+	clone := filterUnavailablePartition(coll)
 	assert.Equal(t, nAvailablePartition, len(clone.Partitions))
 	for _, p := range clone.Partitions {
 		assert.True(t, p.Available())
@@ -1194,6 +1586,9 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
 		).Return(nil)
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1211,6 +1606,153 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 		err := meta.RemoveCollection(ctx, 100, 9999)
 		assert.NoError(t, err)
 	})
+}
+
+func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
+	// When DeleteGrantByCollectionName fails, RemoveCollection should still succeed (best-effort)
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.On("DropCollection",
+		mock.Anything,
+		mock.Anything,
+		mock.AnythingOfType("uint64"),
+	).Return(nil)
+	catalog.On("DeleteGrantByCollectionName",
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	).Return(errors.New("grant delete failed"))
+
+	meta := &MetaTable{
+		catalog:            catalog,
+		names:              newNameDb(),
+		aliases:            newNameDb(),
+		fileResourceRefCnt: make(map[int64]int),
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			100: {Name: "collection", State: pb.CollectionState_CollectionDropping},
+		},
+	}
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	meta.names.insert("", "collection", 100)
+	ctx := context.Background()
+	err := meta.RemoveCollection(ctx, 100, 9999)
+	assert.NoError(t, err)
+}
+
+func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
+	t.Run("grant cleanup on drop", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, "testdb", "collection",
+		).Return(nil)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "collection", DBID: 1, State: pb.CollectionState_CollectionCreated},
+			},
+			dbName2Meta: map[string]*model.Database{
+				"testdb": {ID: 1, Name: "testdb"},
+			},
+			fileResourceRefCnt: make(map[int64]int),
+		}
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+		meta.names.insert("testdb", "collection", 100)
+		ctx := context.Background()
+		err := meta.DropCollection(ctx, 100, 9999)
+		assert.NoError(t, err)
+		catalog.AssertCalled(t, "DeleteGrantByCollectionName", mock.Anything, mock.Anything, "testdb", "collection")
+	})
+
+	t.Run("grant cleanup best-effort on drop", func(t *testing.T) {
+		// When DeleteGrantByCollectionName fails, DropCollection should still succeed
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(errors.New("grant delete failed"))
+
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "collection", DBID: 1, State: pb.CollectionState_CollectionCreated},
+			},
+			dbName2Meta: map[string]*model.Database{
+				"default": {ID: 1, Name: "default"},
+			},
+			fileResourceRefCnt: make(map[int64]int),
+		}
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+		meta.names.insert("default", "collection", 100)
+		ctx := context.Background()
+		err := meta.DropCollection(ctx, 100, 9999)
+		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_DropPartition_CopyOnWrite(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	originalPart := &model.Partition{
+		PartitionID:   100,
+		PartitionName: "p1",
+		CollectionID:  100,
+		State:         pb.PartitionState_PartitionCreated,
+	}
+	catalog.On("AlterPartition",
+		mock.Anything,
+		int64(10),
+		originalPart,
+		mock.MatchedBy(func(newPart *model.Partition) bool {
+			return newPart != nil &&
+				newPart != originalPart &&
+				newPart.PartitionID == originalPart.PartitionID &&
+				newPart.PartitionName == originalPart.PartitionName &&
+				newPart.CollectionID == originalPart.CollectionID &&
+				newPart.State == pb.PartitionState_PartitionDropping
+		}),
+		metastore.MODIFY,
+		uint64(9999),
+	).Return(nil).Once()
+
+	meta := &MetaTable{
+		catalog: catalog,
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			100: {
+				CollectionID: 100,
+				DBID:         10,
+				State:        pb.CollectionState_CollectionCreated,
+				Partitions:   []*model.Partition{originalPart},
+			},
+		},
+		partitionName2ID: map[int64]map[string]int64{
+			100: {"p1": 100},
+		},
+	}
+
+	snapshot, err := meta.GetCollectionByID(context.Background(), "", 100, typeutil.MaxTimestamp, true)
+	require.NoError(t, err)
+	require.Same(t, originalPart, snapshot.Partitions[0])
+
+	err = meta.DropPartition(context.Background(), 100, 100, 9999)
+	require.NoError(t, err)
+
+	require.Same(t, originalPart, snapshot.Partitions[0])
+	assert.Equal(t, pb.PartitionState_PartitionCreated, snapshot.Partitions[0].State)
+
+	require.Len(t, meta.collID2Meta[100].Partitions, 1)
+	assert.NotSame(t, originalPart, meta.collID2Meta[100].Partitions[0])
+	assert.Equal(t, pb.PartitionState_PartitionDropping, meta.collID2Meta[100].Partitions[0].State)
+	assert.Equal(t, pb.PartitionState_PartitionCreated, originalPart.State)
+	assert.NotContains(t, meta.partitionName2ID[100], "p1")
 }
 
 func TestMetaTable_RemovePartition(t *testing.T) {
@@ -1598,6 +2140,7 @@ func TestMetaTable_AddPartition(t *testing.T) {
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				100: {Name: "test", CollectionID: 100},
 			},
+			partitionName2ID: make(map[int64]map[string]int64),
 		}
 		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
 		assert.NoError(t, err)
@@ -2169,7 +2712,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 		}
 
 		mt.aliases.insert(util.DefaultDBName, "aliases", 1)
-		ret, err := mt.getCollectionByNameInternal(context.TODO(), "", "aliases", typeutil.MaxTimestamp)
+		ret, err := mt.getCollectionByNameInternal(context.TODO(), "", "aliases", typeutil.MaxTimestamp, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), ret.CollectionID)
 	})
@@ -2362,6 +2905,44 @@ func TestMetaTable_RestoreRBAC(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestMetaTable_CheckIfRBACRestorable_Wildcard(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().ListRole(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+	catalog.EXPECT().ListPrivilegeGroups(mock.Anything).
+		Return(nil, nil)
+	catalog.EXPECT().ListUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		catalog: catalog,
+	}
+
+	req := &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Roles: []*milvuspb.RoleEntity{{Name: "wildcard_role"}},
+			Grants: []*milvuspb.GrantEntity{
+				{
+					Role:       &milvuspb.RoleEntity{Name: "wildcard_role"},
+					Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+					ObjectName: util.AnyWord,
+					DbName:     util.AnyWord,
+					Grantor: &milvuspb.GrantorEntity{
+						User:      &milvuspb.UserEntity{Name: util.UserRoot},
+						Privilege: &milvuspb.PrivilegeEntity{Name: util.AnyWord},
+					},
+				},
+			},
+		},
+	}
+	assert.NoError(t, mt.CheckIfRBACRestorable(context.TODO(), req))
+}
+
 func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	catalog.EXPECT().ListPrivilegeGroups(mock.Anything).Return([]*milvuspb.PrivilegeGroupInfo{
@@ -2443,9 +3024,7 @@ func TestMetaTable_TruncateCollection(t *testing.T) {
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
-	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
-	require.NoError(t, err)
-	catalog := rootcoord.NewCatalog(catalogKV, ss)
+	catalog := rootcoord.NewCatalog(catalogKV)
 
 	allocator := mocktso.NewAllocator(t)
 	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
@@ -2526,4 +3105,53 @@ func TestMetaTable_TruncateCollection(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, 1, len(coll.ShardInfos))
 	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
+}
+
+func TestMetaTableReloadNormalizesMaxFieldIDProperty(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+
+	kv, _ := kvfactory.GetEtcdAndPath()
+	path := funcutil.RandomString(10) + "/meta"
+	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	catalog := rootcoord.NewCatalog(catalogKV)
+
+	allocator := mocktso.NewAllocator(t)
+	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
+
+	meta, err := NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+
+	err = meta.AddCollection(context.Background(), &model.Collection{
+		CollectionID:         1,
+		DBID:                 util.DefaultDBID,
+		DBName:               util.DefaultDBName,
+		Name:                 "test_reload_max_field_id",
+		PhysicalChannelNames: []string{"pchannel1"},
+		VirtualChannelNames:  []string{"vchannel1"},
+		State:                pb.CollectionState_CollectionCreated,
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+			{FieldID: 105, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+		Properties: common.NewKeyValuePairs(map[string]string{
+			common.CollectionReplicaNumber: "1",
+		}),
+		ShardInfos: map[string]*model.ShardInfo{
+			"vchannel1": {
+				VChannelName:         "vchannel1",
+				PChannelName:         "pchannel1",
+				LastTruncateTimeTick: 0,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	channel.ResetStaticPChannelStatsManager()
+	meta, err = NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+
+	coll, err := meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	props := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "105", props[common.MaxFieldIDKey])
 }

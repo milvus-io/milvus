@@ -42,6 +42,7 @@
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 #include "prometheus/histogram.h"
+#include "rescores/BoostScoreRunner.h"
 #include "rescores/Scorer.h"
 
 namespace milvus::exec {
@@ -120,81 +121,13 @@ PhyRescoresNode::GetOutput() {
 
     std::vector<std::optional<float>> boost_scores(offsets.size());
     auto function_mode = option_->function_mode();
-
-    for (auto& scorer : scorers_) {
-        auto filter = scorer->filter();
-        // boost for all result if no filter
-        if (!filter) {
-            scorer->batch_score(
-                op_context, segment, function_mode, offsets, boost_scores);
-            continue;
-        }
-
-        std::vector<expr::TypedExprPtr> filters;
-        filters.emplace_back(filter);
-        auto expr_set = std::make_unique<ExprSet>(filters, exec_context);
-        std::vector<VectorPtr> results;
-        EvalCtx eval_ctx(exec_context);
-
-        const auto& exprs = expr_set->exprs();
-        bool is_native_supported = true;
-        for (const auto& expr : exprs) {
-            is_native_supported =
-                (is_native_supported && (expr->SupportOffsetInput()));
-        }
-
-        if (is_native_supported) {
-            // could set input offset if expr was native supported
-            eval_ctx.set_offset_input(&offsets);
-            expr_set->Eval(0, 1, true, eval_ctx, results);
-
-            // filter result for offsets[i] was resut bitset[i]
-            AssertInfo(!results.empty() && results[0] != nullptr,
-                       "PhyRescoresNode: filter expr returned null result, "
-                       "offsets size: {}, filter: {}",
-                       offsets.size(),
-                       filter->ToString());
-            auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-            AssertInfo(
-                col_vec != nullptr,
-                "PhyRescoresNode: failed to cast result to ColumnVector, "
-                "filter: {}",
-                filter->ToString());
-            auto col_vec_size = col_vec->size();
-            TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
-            scorer->batch_score(op_context,
-                                segment,
-                                function_mode,
-                                offsets,
-                                bitsetview,
-                                boost_scores);
-        } else {
-            // query all segment if expr not native
-            expr_set->Eval(0, 1, true, eval_ctx, results);
-
-            // filter result for offsets[i] was bitset[offset[i]]
-            AssertInfo(!results.empty() && results[0] != nullptr,
-                       "PhyRescoresNode: filter expr returned null result, "
-                       "filter: {}",
-                       filter->ToString());
-            auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-            AssertInfo(
-                col_vec != nullptr,
-                "PhyRescoresNode: failed to cast result to ColumnVector, "
-                "filter: {}",
-                filter->ToString());
-            TargetBitmap bitset;
-            auto col_vec_size = col_vec->size();
-            TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-            bitset.append(view);
-            scorer->batch_score(op_context,
-                                segment,
-                                function_mode,
-                                offsets,
-                                bitset,
-                                boost_scores);
-        }
-    }
+    rescores::ComputeFunctionScores(exec_context,
+                                    op_context,
+                                    segment,
+                                    scorers_,
+                                    function_mode,
+                                    offsets,
+                                    boost_scores);
 
     // calculate final score
     auto boost_mode = option_->boost_mode();
@@ -218,7 +151,8 @@ PhyRescoresNode::GetOutput() {
             break;
         default:
             ThrowInfo(ErrorCode::UnexpectedError,
-                      fmt::format("unknown boost boost mode: {}", boost_mode));
+                      fmt::format("unknown boost boost mode: {}",
+                                  static_cast<int>(boost_mode)));
     }
 
     knowhere::MetricType metric_type = query_context_->get_metric_type();

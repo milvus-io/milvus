@@ -7,20 +7,21 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	storage "github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // MetaWriter is the interface for SyncManager to write segment sync meta.
 type MetaWriter interface {
 	UpdateSync(context.Context, *SyncTask) error
+	UpdateGrowingSourceSync(context.Context, *GrowingSourceSyncTask) error
 	DropChannel(context.Context, string) error
 }
 
@@ -159,6 +160,76 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		metacache.UpdateDeltalogs(deltaFieldBinlogs),
 		metacache.UpdateBm25logs(deltaBm25StatsBinlogs),
 	), metacache.WithSegmentIDs(pack.segmentID))
+	return nil
+}
+
+func (b *brokerMetaWriter) UpdateGrowingSourceSync(ctx context.Context, task *GrowingSourceSyncTask) error {
+	segment, ok := task.metacache.GetSegmentByID(task.segmentID)
+	if !ok {
+		return merr.WrapErrSegmentNotFound(task.segmentID)
+	}
+
+	startPos := task.startPositions()
+	checkPoints := []*datapb.CheckPoint{{
+		SegmentID: task.segmentID,
+		NumOfRows: segment.FlushedRows() + task.batchRows,
+		Position:  task.checkpoint,
+	}}
+
+	log.Info("SaveBinlogPath for growing source sync",
+		zap.Int64("SegmentID", task.segmentID),
+		zap.Int64("CollectionID", task.collectionID),
+		zap.Int64("ParitionID", task.partitionID),
+		zap.Any("startPos", startPos),
+		zap.Any("checkPoints", checkPoints),
+		zap.String("manifestPath", task.manifestPath),
+		zap.String("vChannelName", task.channelName),
+	)
+
+	req := &datapb.SaveBinlogPathsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(0),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithSourceID(b.serverID),
+		),
+		SegmentID:       task.segmentID,
+		CollectionID:    task.collectionID,
+		PartitionID:     task.partitionID,
+		CheckPoints:     checkPoints,
+		StartPositions:  startPos,
+		Flushed:         task.IsFlush(),
+		Dropped:         task.IsDrop(),
+		Channel:         task.channelName,
+		SegLevel:        task.level,
+		StorageVersion:  storage.StorageV3,
+		WithFullBinlogs: false,
+		ManifestPath:    task.manifestPath,
+	}
+
+	err := retry.Handle(ctx, func() (bool, error) {
+		err := b.broker.SaveBinlogPaths(ctx, req)
+		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+			log.Warn("meta error found, fail growing source sync",
+				zap.String("channel", task.channelName),
+				zap.Int64("segmentID", task.segmentID),
+				zap.Error(err))
+			return false, err
+		}
+		if err != nil {
+			return !merr.IsCanceledOrTimeout(err), err
+		}
+		return false, nil
+	}, b.opts...)
+	if err != nil {
+		log.Warn("failed to SaveBinlogPaths for growing source sync",
+			zap.Int64("segmentID", task.segmentID),
+			zap.Error(err))
+		return err
+	}
+
+	task.metacache.UpdateSegments(metacache.SetStartPosRecorded(true), metacache.WithSegmentIDs(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) int64 {
+		return pos.GetSegmentID()
+	})...))
 	return nil
 }
 

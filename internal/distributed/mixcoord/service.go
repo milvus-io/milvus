@@ -29,9 +29,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mixcoord "github.com/milvus-io/milvus/internal/coordinator"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
@@ -39,22 +38,22 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/netutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
 )
 
 // Server grpc wrapper
@@ -411,9 +410,17 @@ func (s *Server) AddCollectionField(ctx context.Context, in *milvuspb.AddCollect
 	return s.mixCoord.AddCollectionField(ctx, in)
 }
 
+func (s *Server) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AddCollectionStructField(ctx, in)
+}
+
 // CreatePartition creates a partition in a collection
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.mixCoord.CreatePartition(ctx, in)
+}
+
+func (s *Server) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	return s.mixCoord.CreatePartitionV2(ctx, in)
 }
 
 // DropPartition drops the specified partition.
@@ -500,6 +507,10 @@ func (s *Server) CreateRole(ctx context.Context, request *milvuspb.CreateRoleReq
 	return s.mixCoord.CreateRole(ctx, request)
 }
 
+func (s *Server) AlterRole(ctx context.Context, request *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AlterRole(ctx, request)
+}
+
 func (s *Server) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	return s.mixCoord.DropRole(ctx, request)
 }
@@ -534,6 +545,10 @@ func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 
 func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.mixCoord.AlterCollectionField(ctx, request)
+}
+
+func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return s.mixCoord.AlterCollectionSchema(ctx, request)
 }
 
 func (s *Server) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
@@ -684,6 +699,10 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 	return s.mixCoord.GetQueryNodeDistribution(ctx, req)
 }
 
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.mixCoord.ClearReadTaskQueue(ctx, req)
+}
+
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
 	return s.mixCoord.SuspendBalance(ctx, req)
 }
@@ -734,9 +753,16 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	return s.mixCoord.FlushAll(ctx, req)
 }
 
-// CreateExternalCollection creates an external collection
-func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
-	return s.mixCoord.CreateExternalCollection(ctx, req)
+func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
+	return s.mixCoord.RefreshExternalCollection(ctx, req)
+}
+
+func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return s.mixCoord.GetRefreshExternalCollectionProgress(ctx, req)
+}
+
+func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return s.mixCoord.ListRefreshExternalCollectionJobs(ctx, req)
 }
 
 // AssignSegmentID requests to allocate segment space for insert
@@ -931,6 +957,18 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 	return s.mixCoord.ListImports(ctx, in)
 }
 
+func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CommitImport(ctx, req)
+}
+
+func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AbortImport(ctx, req)
+}
+
+func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	return s.mixCoord.HandleCommitVchannel(ctx, req)
+}
+
 func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
 	return s.mixCoord.ListIndexes(ctx, in)
 }
@@ -1003,6 +1041,22 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRes
 
 func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
 	return s.mixCoord.ListRestoreSnapshotJobs(ctx, req)
+}
+
+func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	return s.mixCoord.PinSnapshotData(ctx, req)
+}
+
+func (s *Server) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	return s.mixCoord.UnpinSnapshotData(ctx, req)
+}
+
+func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	return s.mixCoord.BatchUpdateManifest(ctx, req)
+}
+
+func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
+	return s.mixCoord.CommitBackfillResult(ctx, req)
 }
 
 // ClientHeartbeat handles client telemetry heartbeat requests

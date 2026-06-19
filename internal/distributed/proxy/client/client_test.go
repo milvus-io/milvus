@@ -24,12 +24,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func Test_NewClient(t *testing.T) {
@@ -62,6 +62,9 @@ func Test_GetComponentStates(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -103,6 +106,9 @@ func Test_GetStatisticsChannel(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -145,6 +151,9 @@ func Test_InvalidateCollectionMetaCache(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -183,6 +192,9 @@ func Test_InvalidateCredentialCache(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -221,6 +233,9 @@ func Test_UpdateCredentialCache(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -259,6 +274,9 @@ func Test_RefreshPolicyInfoCache(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -297,6 +315,9 @@ func Test_GetProxyMetrics(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -335,6 +356,9 @@ func Test_SetRates(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -373,6 +397,9 @@ func Test_ListClientInfos(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -410,6 +437,9 @@ func Test_GetDdChannel(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -446,6 +476,9 @@ func Test_ImportV2(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -476,6 +509,9 @@ func Test_InvalidateShardLeaderCache(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -512,6 +548,9 @@ func Test_GetSegmentsInfo(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return f(mockProxy)
 	})
 	client.(*Client).grpcClient = mockGrpcClient

@@ -26,21 +26,21 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type StreamingForwardSuite struct {
@@ -67,6 +67,11 @@ func (s *StreamingForwardSuite) SetupSuite() {
 }
 
 func (s *StreamingForwardSuite) SetupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	})
+
 	s.collectionID = 1000
 	s.partitionIDs = []int64{500, 501}
 	s.replicaID = 65535
@@ -86,6 +91,7 @@ func (s *StreamingForwardSuite) SetupTest() {
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
+			ms.EXPECT().LoadInfo().Return(info)
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			return ms
 		})
@@ -151,7 +157,7 @@ func (s *StreamingForwardSuite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
 
 	sd, ok := delegator.(*shardDelegator)
@@ -300,6 +306,11 @@ func (s *GrowingMergeL0Suite) SetupSuite() {
 }
 
 func (s *GrowingMergeL0Suite) SetupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	})
+
 	s.collectionID = 1000
 	s.partitionIDs = []int64{500, 501}
 	s.replicaID = 65535
@@ -319,6 +330,7 @@ func (s *GrowingMergeL0Suite) SetupTest() {
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
+			ms.EXPECT().LoadInfo().Return(info)
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			return ms
 		})
@@ -385,7 +397,7 @@ func (s *GrowingMergeL0Suite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
 
 	sd, ok := delegator.(*shardDelegator)
@@ -419,6 +431,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {
 
 	seg.EXPECT().ID().Return(1)
 	seg.EXPECT().Partition().Return(100)
+	seg.EXPECT().PkCandidateExist().Return(true)
 	seg.EXPECT().BatchPkExist(mock.Anything).Return(lo.RepeatBy(n, func(i int) bool { return true }))
 	seg.EXPECT().LoadDeltaData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dd *storage.DeltaData) error {
 		s.Equal(deltaData.DeletePks(), dd.DeletePks())
@@ -466,8 +479,10 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	s.delegator.deleteBuffer.RegisterL0(l0Segment)
 
 	seg.EXPECT().ID().Return(10000)
+	seg.EXPECT().Collection().Return(s.collectionID)
 	seg.EXPECT().Partition().Return(100)
-	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, fb []*datapb.FieldBinlog) error {
+	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, loadInfo *querypb.SegmentLoadInfo) error {
+		fb := loadInfo.GetDeltalogs()
 		s.ElementsMatch([]string{"mocked_log_path"}, lo.Flatten(lo.Map(fb, func(fbl *datapb.FieldBinlog, _ int) []string {
 			return lo.Map(fbl.Binlogs, func(bl *datapb.Binlog, _ int) string { return bl.LogPath })
 		})))
@@ -477,7 +492,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	err = sd.addL0ForGrowing(context.Background(), seg)
 	s.NoError(err)
 
-	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, fb []*datapb.FieldBinlog) error {
+	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, loadInfo *querypb.SegmentLoadInfo) error {
 		return errors.New("mocked")
 	}).Once()
 	err = sd.addL0ForGrowing(context.Background(), seg)

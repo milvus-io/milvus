@@ -7,8 +7,8 @@ import (
 	"github.com/cockroachdb/errors"
 	wp "github.com/zilliztech/woodpecker/woodpecker/log"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func NewWpID(id *wp.LogMessageId) message.MessageID {
@@ -44,10 +44,6 @@ type wpID struct {
 }
 
 func (id wpID) WoodpeckerID() *wp.LogMessageId {
-	return id.logMsgId
-}
-
-func (id wpID) WoodpeckerMsgId() *wp.LogMessageId {
 	return id.logMsgId
 }
 

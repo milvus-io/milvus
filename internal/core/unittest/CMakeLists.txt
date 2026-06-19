@@ -16,8 +16,6 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
-    ${CONAN_INCLUDE_DIRS}
-    ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
@@ -59,6 +57,19 @@ set(MILVUS_TEST_FILES
         test_element_filter.cpp
         test_query_group_by.cpp
         test_minhash.cpp
+        test_async_warmup.cpp
+        test_boost_score_c.cpp
+        test_sort_buffer.cpp
+        test_row_container.cpp
+        test_query_order_by.cpp
+        test_determine_use_index.cpp
+        test_virtual_pk.cpp
+        test_mvcc_fast_path.cpp
+        test_external_take.cpp
+        test_arrow_canonicalize.cpp
+        TextLobSpilloverTest.cpp
+        test_commit_timestamp.cpp
+        test_schema_reopen.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
@@ -109,21 +120,26 @@ if (LINUX)
     endif()
 endif()
 
+add_compile_definitions(
+        MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output"
+        MILVUS_UNIT_TEST)
+
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
         )
 
 target_link_libraries(all_tests
-        gtest
-        gmock
+        GTest::gtest
+        GTest::gmock
         milvus_core
+        milvus_conan_deps
         knowhere
         milvus-storage
-        milvus-common
-        milvus-planparser-cpp
         )
 
-# Add RPATH for plan parser library to find libmilvus-planparser.so at runtime
+# Link plan parser library using full path and set RPATH
+target_link_options(all_tests PRIVATE "-L${PLANPARSER_LIB_DIR}")
+target_link_libraries(all_tests milvus-planparser-cpp)
 set_target_properties(all_tests PROPERTIES
         BUILD_RPATH "${PLANPARSER_LIB_DIR}"
         INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
@@ -155,7 +171,19 @@ endif()
 
 target_link_libraries(bitset_test
         milvus_bitset
-        gtest
-        ${CONAN_LIBS}
+        GTest::gtest
 )
+if (LINUX)
+    # folly shared library requires libaio; use --no-as-needed to ensure
+    # the linker pulls it in even when bitset_test doesn't reference aio directly
+    target_link_options(bitset_test PRIVATE "LINKER:--no-as-needed")
+    target_link_libraries(bitset_test aio)
+endif()
 install(TARGETS bitset_test DESTINATION unittest)
+
+add_executable(test_json_uint64 ${CMAKE_HOME_DIRECTORY}/src/exec/expression/ExprJsonUint64Test.cpp)
+target_link_libraries(test_json_uint64 GTest::gtest GTest::gtest_main milvus_core milvus_conan_deps knowhere milvus-storage)
+target_link_options(test_json_uint64 PRIVATE "-L${PLANPARSER_LIB_DIR}")
+target_link_libraries(test_json_uint64 milvus-planparser-cpp)
+set_target_properties(test_json_uint64 PROPERTIES BUILD_RPATH "${PLANPARSER_LIB_DIR}" INSTALL_RPATH "${PLANPARSER_LIB_DIR}")
+install(TARGETS test_json_uint64 DESTINATION unittest)

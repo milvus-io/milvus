@@ -40,6 +40,8 @@ struct CreateIndexInfo {
     std::string json_path;
     std::string json_cast_function{UNKNOW_CAST_FUNCTION_NAME};
     std::optional<NgramParams> ngram_params{std::nullopt};
+    bool is_text_match{false};
+    std::string analyzer_extra_info;
 };
 
 }  // namespace milvus::index

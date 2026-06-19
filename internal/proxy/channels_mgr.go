@@ -18,21 +18,20 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // channelsMgr manages the pchans, vchans and related message stream of collections.
@@ -67,7 +66,9 @@ func removeDuplicate(ss []string) []string {
 func newChannels(vchans []vChan, pchans []pChan) (channelInfos, error) {
 	if len(vchans) != len(pchans) {
 		log.Error("physical channels mismatch virtual channels", zap.Int("len(VirtualChannelNames)", len(vchans)), zap.Int("len(PhysicalChannelNames)", len(pchans)))
-		return channelInfos{}, fmt.Errorf("physical channels mismatch virtual channels, len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v", len(vchans), len(pchans))
+		// Channel lists come from DescribeCollection (coordinator-allocated
+		// metadata), never from the caller: a mismatch is a server-side bug.
+		return channelInfos{}, merr.WrapErrServiceInternalMsg("physical channels mismatch virtual channels, len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v", len(vchans), len(pchans))
 	}
 	/*
 		// remove duplicate physical channels.
@@ -124,7 +125,7 @@ func (mgr *singleTypeChannelsMgr) getAllChannels(collectionID UniqueID) (channel
 		return infos.channelInfos, nil
 	}
 
-	return channelInfos{}, fmt.Errorf("collection not found in channels manager: %d", collectionID)
+	return channelInfos{}, merr.WrapErrParameterInvalidMsg("collection not found in channels manager: %d", collectionID)
 }
 
 func (mgr *singleTypeChannelsMgr) ensureChannels(collectionID UniqueID) (channelInfos, error) {

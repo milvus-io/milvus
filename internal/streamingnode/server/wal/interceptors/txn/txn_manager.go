@@ -10,11 +10,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // NewTxnManager creates a new transaction manager.
@@ -114,7 +114,7 @@ func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeg
 		keepalive = paramtable.Get().StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse()
 	}
 	if keepalive < 1*time.Millisecond {
-		return nil, status.NewInvaildArgument("keepalive must be greater than 1ms")
+		return nil, status.NewInvalidArgument("keepalive must be greater than 1ms")
 	}
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
@@ -186,6 +186,38 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 		return nil, status.NewTransactionExpired("txn %d not found in manager", id)
 	}
 	return session, nil
+}
+
+// RollbackAllInFlightTransactions rolls back all active transaction sessions.
+// Called ONLY in the failover scenario.
+func (m *TxnManager) RollbackAllInFlightTransactions() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.sessions) == 0 {
+		m.Logger().Info("No in-flight transactions to rollback")
+		return
+	}
+
+	m.Logger().Info("Rolling back all in-flight transactions", zap.Int("sessionCount", len(m.sessions)))
+
+	ids := make([]int64, 0, len(m.sessions))
+	for txnID, session := range m.sessions {
+		ids = append(ids, int64(txnID))
+		session.Cleanup()
+		delete(m.sessions, txnID)
+		delete(m.recoveredSessions, txnID)
+	}
+
+	m.Logger().Info("Rolled back in-flight transactions",
+		zap.Int64s("txnIDs", ids))
+
+	// Signal GracefulClose if it's already waiting and all sessions are now cleared.
+	if len(m.sessions) == 0 && m.closed != nil {
+		m.closed.Close()
+	}
+
+	m.notifyRecoverDone()
 }
 
 // GracefulClose waits for all transactions to be cleaned up.

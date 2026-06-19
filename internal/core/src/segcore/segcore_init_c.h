@@ -30,6 +30,12 @@ void
 SegcoreSetEnableInterminSegmentIndex(const bool);
 
 void
+SegcoreSetStorageV3Enabled(const bool);
+
+void
+SegcoreSetEnableGrowingSourceFlush(const bool);
+
+void
 SegcoreSetEnableGeometryCache(const bool);
 
 void
@@ -62,6 +68,9 @@ SegcoreSetDenseVectorInterminIndexRefineWithQuantFlag(const bool);
 void
 SegcoreSetInterimIndexMemExpansionRate(const float);
 
+void
+SegcoreSetMaxGroupByGroups(const int64_t);
+
 // return value must be freed by the caller
 char*
 SegcoreSetSimdType(const char*);
@@ -81,6 +90,12 @@ SegcoreSetKnowhereFetchThreadPoolNum(const uint32_t num_threads);
 void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
                                     const uint32_t max_size);
+
+void
+SegcoreSetVisibilityFilterEnabled(const bool value);
+
+void
+SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
 
 void
 SegcoreCloseGlog();
@@ -124,7 +139,19 @@ ConfigureTieredStorage(
     const float loading_resource_factor,
     const float max_disk_usage_percentage,
     const char* disk_path,
-    const int64_t loading_timeout_ms);
+    const int64_t loading_timeout_ms,
+    const int64_t warmup_loading_timeout_ms,
+    // async warmup prefetch pool threads
+    const uint32_t prefetch_pool_threads);
+
+void
+UpdateTieredStorageConfig(const int64_t loading_timeout_ms,
+                          const int64_t warmup_loading_timeout_ms,
+                          const bool storage_usage_tracking_enabled,
+                          const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+                          const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+                          const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+                          const CacheWarmupPolicy vectorIndexCacheWarmupPolicy);
 
 #ifdef __cplusplus
 }

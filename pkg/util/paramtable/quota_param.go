@@ -22,7 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 const (
@@ -124,8 +124,10 @@ type quotaConfig struct {
 	MaxCollectionNum               ParamItem `refreshable:"true"`
 	MaxCollectionNumPerDB          ParamItem `refreshable:"true"`
 	TopKLimit                      ParamItem `refreshable:"true"`
+	LargeTopKLimit                 ParamItem `refreshable:"true"`
 	NQLimit                        ParamItem `refreshable:"true"`
 	MaxQueryResultWindow           ParamItem `refreshable:"true"`
+	LargeMaxQueryResultWindow      ParamItem `refreshable:"true"`
 	MaxOutputSize                  ParamItem `refreshable:"true"`
 	MaxInsertSize                  ParamItem `refreshable:"true"`
 	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
@@ -1454,6 +1456,15 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 	}
 	p.TopKLimit.Init(base.mgr)
 
+	p.LargeTopKLimit = ParamItem{
+		Key:          "quotaAndLimits.limits.largeTopK",
+		Version:      "2.6.14",
+		DefaultValue: "1000000",
+		Doc: `Search limit for collections with query_mode=large_topk, which applies on:
+maximum # of results to return (topK).`,
+	}
+	p.LargeTopKLimit.Init(base.mgr)
+
 	p.NQLimit = ParamItem{
 		Key:          "quotaAndLimits.limits.nq",
 		Version:      "2.3.0",
@@ -1473,6 +1484,14 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 		Doc:          `Query limit, which applies on: maximum of offset + limit`,
 	}
 	p.MaxQueryResultWindow.Init(base.mgr)
+
+	p.LargeMaxQueryResultWindow = ParamItem{
+		Key:          "quotaAndLimits.limits.largeMaxQueryResultWindow",
+		Version:      "2.6.14",
+		DefaultValue: "1000000",
+		Doc:          `Query limit for collections with query_mode=large_topk, which applies on: maximum of offset + limit`,
+	}
+	p.LargeMaxQueryResultWindow.Init(base.mgr)
 
 	p.MaxOutputSize = ParamItem{
 		Key:          "quotaAndLimits.limits.maxOutputSize",

@@ -7,18 +7,19 @@ import (
 	rawKafka "github.com/confluentinc/confluent-kafka-go/kafka"
 	rawWP "github.com/zilliztech/woodpecker/woodpecker/log"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/mq/common"
-	rawRocksmq "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
-	mqkafka "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/kafka"
-	mqpulsar "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/pulsar"
-	mqwoodpecker "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/wp"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	msgkafka "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
-	msgpulsar "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
-	msgwoodpecker "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/wp"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/mq/common"
+	rawRocksmq "github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
+	mqkafka "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/kafka"
+	mqpulsar "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/pulsar"
+	mqwoodpecker "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/wp"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	msgkafka "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/kafka"
+	msgpulsar "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	msgwoodpecker "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/wp"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // MustGetMQWrapperIDFromMessage converts message.MessageID to common.MessageID
@@ -88,7 +89,7 @@ func DeserializeToMQWrapperID(msgID []byte, walName string) (common.MessageID, e
 		}
 		return mqwoodpecker.NewWoodpeckerID(wID), nil
 	default:
-		return nil, fmt.Errorf("unsupported mq type %s", walName)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported mq type %s", walName)
 	}
 }
 

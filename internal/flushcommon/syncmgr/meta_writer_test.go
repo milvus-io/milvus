@@ -8,12 +8,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 type MetaWriterSuite struct {
@@ -98,6 +100,55 @@ func (s *MetaWriterSuite) TestReturnError() {
 	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
 	err := s.writer.UpdateSync(ctx, task)
 	s.Error(err)
+}
+
+func (s *MetaWriterSuite) TestGrowingSourceSyncMetaErrorsReturnError() {
+	testCases := []struct {
+		name      string
+		err       error
+		targetErr error
+	}{
+		{
+			name:      "segment_not_found",
+			err:       merr.WrapErrSegmentNotFound(1),
+			targetErr: merr.ErrSegmentNotFound,
+		},
+		{
+			name:      "channel_not_found",
+			err:       merr.WrapErrChannelNotFound("ch"),
+			targetErr: merr.ErrChannelNotFound,
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			bfs := pkoracle.NewBloomFilterSet()
+			seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+				ID:          1,
+				PartitionID: 2,
+			}, bfs, nil)
+			s.metacache.EXPECT().GetSegmentByID(int64(1)).Return(seg, true).Once()
+			s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+			s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(tc.err).Once()
+
+			task := NewGrowingSourceSyncTask().
+				WithCollectionID(3).
+				WithPartitionID(2).
+				WithSegmentID(1).
+				WithChannelName("ch").
+				WithCheckpoint(&msgpb.MsgPosition{Timestamp: 100}).
+				WithBatchRows(10).
+				WithTargetOffset(10).
+				WithMetaCache(s.metacache)
+			task.manifestPath = "manifest"
+
+			err := s.writer.UpdateGrowingSourceSync(ctx, task)
+			s.ErrorIs(err, tc.targetErr)
+		})
+	}
 }
 
 func TestMetaWriter(t *testing.T) {

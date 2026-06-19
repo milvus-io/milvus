@@ -5,20 +5,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // RecoverBroadcaster recovers the broadcaster from the recovery info.
@@ -87,6 +86,9 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		ackScheduler:       ackScheduler,
 	}
 
+	// Set the broadcast task manager reference for accessing incomplete tasks.
+	ackScheduler.bm = m
+
 	// add the pending ack callback tasks into the ack scheduler.
 	ackScheduler.Initialize(pendingAckCallbackTasks, tombstoneIDs, m)
 	m.SetLogger(logger)
@@ -108,17 +110,47 @@ type broadcastTaskManager struct {
 
 // WithResourceKeys acquires the resource keys for the broadcast task.
 func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
-	id, err := resource.Resource().IDAllocator().Allocate(ctx)
-	if err != nil {
-		return nil, errors.Wrapf(err, "allocate new id failed")
-	}
-
 	startLockInstant := time.Now()
 	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
 
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		guards.Unlock()
+		return nil, merr.Wrapf(err, "allocate new id failed")
+	}
+
 	if err := bm.checkClusterRole(ctx); err != nil {
 		// unlock the guards if the cluster role is not primary.
+		guards.Unlock()
+		return nil, err
+	}
+	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
+
+	return &broadcasterWithRK{
+		broadcaster: bm,
+		broadcastID: id,
+		guards:      guards,
+	}, nil
+}
+
+// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
+// and verifies the cluster is secondary. Returns error if the cluster is primary.
+// This is used for force promote operations that should only be executed on secondary clusters.
+func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		return nil, merr.Wrapf(err, "allocate new id failed")
+	}
+
+	startLockInstant := time.Now()
+	// Acquire an exclusive cluster resource key to block all other broadcasts
+	resourceKeys := []message.ResourceKey{message.NewExclusiveClusterResourceKey()}
+	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
+
+	// Check if the cluster is secondary
+	if err := bm.checkClusterRoleSecondary(ctx); err != nil {
+		// unlock the guards if the cluster role is not secondary.
 		guards.Unlock()
 		return nil, err
 	}
@@ -148,6 +180,24 @@ func (bm *broadcastTaskManager) checkClusterRole(ctx context.Context) error {
 	return nil
 }
 
+// checkClusterRoleSecondary checks if the cluster status is secondary, otherwise return error.
+// This is used for force promote operations that should only be executed on secondary clusters.
+func (bm *broadcastTaskManager) checkClusterRoleSecondary(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	// Check if the cluster status is secondary, otherwise return error.
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	if b.ReplicateRole() != replicateutil.RoleSecondary {
+		// Force promote can only be performed on a secondary cluster.
+		return ErrNotSecondary
+	}
+	return nil
+}
+
 // appendSharedClusterRK appends the shared cluster resource key to the resource keys.
 // shared cluster resource key is required for all broadcast messages.
 func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.ResourceKey) []message.ResourceKey {
@@ -168,13 +218,8 @@ func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.Broad
 	}
 	defer bm.lifetime.Done()
 
-	// check if the message is valid to be broadcasted.
-	// TODO: the message check callback should not be an component of broadcaster,
-	// it should be removed after the import operation refactory.
-	if err := registry.CallMessageCheckCallback(ctx, msg); err != nil {
-		guards.Unlock()
-		return nil, err
-	}
+	// Validation is now done before calling broadcast (in DataCoord for import operations)
+	// CheckCallback mechanism has been removed as part of the import refactoring
 
 	task := bm.addBroadcastTask(msg, broadcastID, guards)
 	pendingTask := newPendingBroadcastTask(task)
@@ -296,4 +341,54 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	defer bm.mu.Unlock()
 
 	delete(bm.tasks, broadcastID)
+}
+
+// getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
+// Tasks in PENDING or REPLICATED state with pending messages are considered incomplete.
+func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	var result []*broadcastTask
+	for _, task := range bm.tasks {
+		state := task.State()
+		if state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
+			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
+			continue
+		}
+		msgs := task.PendingBroadcastMessages()
+		if len(msgs) == 0 {
+			continue
+		}
+		result = append(result, task)
+	}
+	return result
+}
+
+// GetPendingCreateCollectionResources returns collection ID → file resource IDs
+// for all non-tombstone CreateCollection broadcast tasks. Used during recovery to
+// rebuild file resource refCnt for collections whose AddCollection hasn't run yet.
+func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64][]int64 {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	result := make(map[int64][]int64)
+	for _, task := range bm.tasks {
+		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+			continue
+		}
+		if task.msg.MessageType() != message.MessageTypeCreateCollection {
+			continue
+		}
+		createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
+		if err != nil {
+			continue
+		}
+		body := createMsg.MustBody()
+		ids := body.CollectionSchema.GetFileResourceIds()
+		if len(ids) > 0 {
+			result[createMsg.Header().CollectionId] = ids
+		}
+	}
+	return result
 }

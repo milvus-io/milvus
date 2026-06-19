@@ -7,12 +7,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 const replicateRespChanLength = 128
@@ -133,6 +133,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	}
 	if status.AsStreamingError(err).IsIgnoredOperation() {
 		log.Info("append replicate message to wal ignored", log.FieldMessage(msg), zap.Error(err))
+		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
 	// unexpected error, will close the stream and wait for client to reconnect.

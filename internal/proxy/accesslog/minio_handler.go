@@ -18,7 +18,6 @@ package accesslog
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -29,9 +28,10 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 type config struct {
@@ -144,7 +144,7 @@ func newMinioClient(ctx context.Context, cfg config) (*minio.Client, error) {
 					return err
 				}
 			} else {
-				return fmt.Errorf("bucket %s not Existed", cfg.bucketName)
+				return merr.WrapErrParameterInvalidMsg("bucket %s not Existed", cfg.bucketName)
 			}
 		}
 		return nil

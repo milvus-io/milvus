@@ -3,8 +3,9 @@ package producer
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 var _ Producer = (*producerImpl)(nil)
@@ -13,6 +14,8 @@ var _ Producer = (*producerImpl)(nil)
 // Producer is work on a single stream on grpc,
 // so Producer cannot recover from failure because of the stream is broken.
 type Producer interface {
+	ratelimit.RateLimitObserverRegistry
+
 	// Append sends the produce message to server.
 	// TODO: Support Batch produce here.
 	Append(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error)

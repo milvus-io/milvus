@@ -21,7 +21,7 @@ package msgstream
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
 // LoadCollectionMsg is a message pack that contains load collection request

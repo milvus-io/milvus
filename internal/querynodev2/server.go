@@ -32,19 +32,19 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"plugin"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -60,24 +60,26 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -144,6 +146,9 @@ type QueryNode struct {
 	lastModifyTs   int64
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// binlogSaver for growing-source segment flush
+	binlogSaver segments.BinlogSaver
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -162,15 +167,18 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 }
 
 func (node *QueryNode) initSession() error {
-	minimalIndexVersion, currentIndexVersion := getIndexEngineVersion()
+	minimalIndexVersion, currentIndexVersion, maximumIndexVersion := getIndexEngineVersion()
 	node.session = sessionutil.NewSession(node.ctx,
-		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion),
-		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion),
+		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion, maximumIndexVersion),
+		sessionutil.WithScalarIndexEngineVersion(
+			common.MinimalScalarIndexEngineVersion,
+			common.CurrentScalarIndexEngineVersion,
+			common.MaximumScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
-	node.session.Init(typeutil.QueryNodeRole, node.address, false, true)
+	node.session.Init(typeutil.QueryNodeRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
 	paramtable.SetNodeID(node.session.ServerID)
 	node.serverID = node.session.ServerID
@@ -191,6 +199,33 @@ func ResizeHighPriorityPool(evt *config.Event) {
 		pt := paramtable.Get()
 		newRatio := pt.CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat()
 		C.ResizeTheadPool(C.int64_t(0), C.float(newRatio))
+	}
+}
+
+func ResizeMiddlePriorityPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newRatio := pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat()
+		C.ResizeTheadPool(C.int64_t(1), C.float(newRatio))
+	}
+}
+
+func ResizeLowPriorityPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newRatio := pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat()
+		C.ResizeTheadPool(C.int64_t(2), C.float(newRatio))
+	}
+}
+
+func ResizeAllPools(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		// Update the max threads size first to ensure the new limit is applied during resize
+		C.SetThreadPoolMaxThreadsSize(C.int(pt.CommonCfg.ThreadPoolMaxThreadsSize.GetAsInt()))
+		C.ResizeTheadPool(C.int64_t(0), C.float(pt.CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat()))
+		C.ResizeTheadPool(C.int64_t(1), C.float(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat()))
+		C.ResizeTheadPool(C.int64_t(2), C.float(pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat()))
 	}
 }
 
@@ -217,6 +252,12 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt := paramtable.Get()
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
 		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
+	pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key,
+		config.NewHandler("common.threadCoreCoefficient.middlePriority", ResizeMiddlePriorityPool))
+	pt.Watch(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key,
+		config.NewHandler("common.threadCoreCoefficient.lowPriority", ResizeLowPriorityPool))
+	pt.Watch(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key,
+		config.NewHandler("common.threadCoreCoefficient.maxThreadsSize", ResizeAllPools))
 	pt.Watch(pt.CommonCfg.DiskWriteMode.Key,
 		config.NewHandler("common.diskWriteMode", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteBufferSizeKb.Key,
@@ -235,11 +276,23 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
+	initcore.RegisterArrowIOThreadPoolWatchers(pt, "querynode")
+	pt.Watch(pt.QueryNodeCfg.StorageV2CellTargetSizeBytes.Key,
+		config.NewHandler("queryNode.segcore.storageV2.cellTargetSizeBytes", func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newBytes := paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64()
+			initcore.UpdateStorageV2CellTargetSizeBytes(newBytes)
+			log.Info("queryNode.segcore.storageV2.cellTargetSizeBytes updated",
+				zap.Int64("bytes", newBytes))
+		}))
+	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
 }
 
-func getIndexEngineVersion() (minimal, current int32) {
-	cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
-	return int32(cMinimal), int32(cCurrent)
+func getIndexEngineVersion() (minimal, current, maximum int32) {
+	cMinimal, cCurrent, cMaximum := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion(), C.GetMaximumIndexVersion()
+	return int32(cMinimal), int32(cCurrent), int32(cMaximum)
 }
 
 func (node *QueryNode) GetNodeID() int64 {
@@ -365,6 +418,8 @@ func (node *QueryNode) Init() error {
 		}
 		node.RegisterSegcoreConfigWatcher()
 
+		cleanupOrphanedSpilloverFiles(node.GetNodeID())
+
 		log.Info("query node init successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),
 			zap.String("Address", node.address),
@@ -390,6 +445,11 @@ func (node *QueryNode) Start() error {
 		mmapScalarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		metrics.SetPoolCollectFn(
+			fmt.Sprint(node.GetNodeID()),
+			segments.CollectPoolStats,
+		)
 
 		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)
 		log.Info("query node start successfully",
@@ -509,6 +569,11 @@ func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
 }
 
+// SetBinlogSaver sets the BinlogSaver for growing-source segment flush.
+func (node *QueryNode) SetBinlogSaver(saver segments.BinlogSaver) {
+	node.binlogSaver = saver
+}
+
 func (node *QueryNode) GetAddress() string {
 	return node.address
 }
@@ -519,35 +584,21 @@ func (node *QueryNode) SetAddress(address string) {
 
 // initHook initializes parameter tuning hook.
 func (node *QueryNode) initHook() error {
-	log := log.Ctx(node.ctx)
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 	if path == "" {
-		return errors.New("fail to set the plugin path")
+		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
 	}
-	log.Info("start to load plugin", zap.String("path", path))
 
-	hookutil.LockHookInit()
-	defer hookutil.UnlockHookInit()
-	p, err := plugin.Open(path)
+	hoo, err := hookutil.LoadPlugin[optimizers.QueryHook](path, "QueryNodePlugin")
 	if err != nil {
-		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
-	}
-	log.Info("plugin open")
-
-	h, err := p.Lookup("QueryNodePlugin")
-	if err != nil {
-		return fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
+		return err
 	}
 
-	hoo, ok := h.(optimizers.QueryHook)
-	if !ok {
-		return errors.New("fail to convert the `Hook` interface")
-	}
 	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
-		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
+		return merr.Wrap(err, "fail to init configs for the hook")
 	}
 	if err = hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
-		return fmt.Errorf("fail to init tuning configs for the hook, error: %s", err.Error())
+		return merr.Wrap(err, "fail to init tuning configs for the hook")
 	}
 
 	node.queryHook = hoo
@@ -568,11 +619,12 @@ func (node *QueryNode) handleQueryHookEvent() {
 	onEvent2 := func(event *config.Event) {
 		if node.queryHook != nil && strings.HasPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix) {
 			realKey := strings.TrimPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix)
-			if event.EventType == config.CreateType || event.EventType == config.UpdateType {
+			switch event.EventType {
+			case config.CreateType, config.UpdateType:
 				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
 					log.Warn("failed to refresh hook tuning config", zap.Error(err))
 				}
-			} else if event.EventType == config.DeleteType {
+			case config.DeleteType:
 				if err := node.queryHook.DeleteTuningConfig(realKey); err != nil {
 					log.Warn("failed to delete hook tuning config", zap.Error(err))
 				}
@@ -582,4 +634,28 @@ func (node *QueryNode) handleQueryHookEvent() {
 	paramtable.Get().Watch(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.Key, config.NewHandler("queryHook", onEvent))
 
 	paramtable.Get().WatchKeyPrefix(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
+}
+
+// cleanupOrphanedSpilloverFiles removes leftover TEXT LOB spillover files
+// from previous QueryNode runs
+func cleanupOrphanedSpilloverFiles(nodeID int64) {
+	mmapDir := pathutil.GetPath(pathutil.GrowingMMapPath, nodeID)
+	spilloverDir := filepath.Join(mmapDir, "growing_lob")
+
+	if _, err := os.Stat(spilloverDir); os.IsNotExist(err) {
+		return
+	}
+
+	log.Info("cleaning up orphaned TEXT LOB spillover files",
+		zap.String("path", spilloverDir))
+
+	if err := os.RemoveAll(spilloverDir); err != nil {
+		log.Warn("failed to clean up orphaned TEXT LOB spillover files",
+			zap.String("path", spilloverDir),
+			zap.Error(err))
+		return
+	}
+
+	log.Info("orphaned TEXT LOB spillover files cleaned up",
+		zap.String("path", spilloverDir))
 }

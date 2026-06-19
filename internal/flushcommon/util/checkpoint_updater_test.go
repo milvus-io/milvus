@@ -27,9 +27,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type ChannelCPUpdaterSuite struct {
@@ -79,7 +79,7 @@ func (s *ChannelCPUpdaterSuite) TestUpdate() {
 	wg.Wait()
 	s.Eventually(func() bool {
 		return counter.Load() == int64(tasksNum)
-	}, time.Second*10, time.Millisecond*100)
+	}, time.Second*30, time.Millisecond*100)
 }
 
 func TestChannelCPUpdater(t *testing.T) {

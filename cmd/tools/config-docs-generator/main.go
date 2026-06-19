@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -174,9 +174,9 @@ For the convenience of maintenance, Milvus classifies its configurations into %s
 	for _, sec := range secs {
 		fileContent += sec.systemConfiguratinContent()
 		sectionFileContent := sec.sectionPageContent()
-		os.WriteFile(filepath.Join(outputPath, sec.fileName()), []byte(sectionFileContent), 0o644)
+		os.WriteFile(filepath.Join(outputPath, sec.fileName()), []byte(sectionFileContent), 0o600)
 	}
-	err := os.WriteFile(filepath.Join(outputPath, fileName), []byte(fileContent), 0o644)
+	err := os.WriteFile(filepath.Join(outputPath, fileName), []byte(fileContent), 0o600)
 	return errors.Wrapf(err, "writefile %s", fileName)
 }
 

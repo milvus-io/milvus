@@ -23,8 +23,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // JobScheduler schedules jobs,
@@ -56,7 +56,7 @@ func NewScheduler() *Scheduler {
 }
 
 func (scheduler *Scheduler) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored and called in Stop()
 	scheduler.cancel = cancel
 
 	scheduler.wg.Add(1)

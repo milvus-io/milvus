@@ -3,10 +3,9 @@ package storage
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type ChunkManagerFactory struct {
@@ -25,6 +24,7 @@ func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkMa
 		objectstorage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
 		objectstorage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
 		objectstorage.SslCACert(params.MinioCfg.SslCACert.GetValue()),
+		objectstorage.SslTLSMinVersion(params.MinioCfg.SslTLSMinVersion.GetValue()),
 		objectstorage.BucketName(params.MinioCfg.BucketName.GetValue()),
 		objectstorage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
 		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
@@ -54,7 +54,7 @@ func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string
 	case "remote", "minio", "opendal":
 		return NewRemoteChunkManager(ctx, f.config)
 	default:
-		return nil, errors.New("no chunk manager implemented with engine: " + engine)
+		return nil, merr.WrapErrServiceInternalMsg("no chunk manager implemented with engine: " + engine)
 	}
 }
 

@@ -20,29 +20,28 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type upsertTask struct {
@@ -71,6 +70,7 @@ type upsertTask struct {
 	// delete task need use the oldIDs
 	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
+	schemaVersion   int32
 
 	// write after read, generate write part by queryPreExecute
 	node types.ProxyComponent
@@ -216,6 +216,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     partitionIDs,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			QueryLabel:       metrics.UpsertQueryLabel,
 		},
 		request:        queryReq,
 		plan:           plan,
@@ -247,7 +248,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	primaryFieldData, err := typeutil.GetPrimaryFieldData(it.req.GetFieldsData(), primaryFieldSchema)
 	if err != nil {
 		log.Error("get primary field data failed", zap.Error(err))
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name))
+		return merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name)
 	}
 
 	upsertIDs, err := parsePrimaryFieldData2IDs(primaryFieldData)
@@ -308,11 +309,31 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		fieldData.FieldId = fieldSchema.GetFieldID()
 		fieldData.FieldName = fieldName
 
-		// compatible with different nullable data format from sdk
+		// Ensure dynamic field has ValidData before merge logic, but only when
+		// the field schema actually requires it (nullable or has default value).
+		// For 2.5 collections where $meta is non-nullable with no default,
+		// ValidData must remain empty — CheckValidData expects len==0 for
+		// non-nullable fields.
+		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 &&
+			(fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil) {
+			nRows := int(it.upsertMsg.InsertMsg.NRows())
+			validData := make([]bool, nRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			fieldData.ValidData = validData
+		}
+
+		// compatible with different nullable/default_value data format from sdk
 		if len(fieldData.GetValidData()) != 0 {
-			err := FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			var err error
+			if fieldSchema.GetDefaultValue() != nil {
+				err = FillWithDefaultValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			} else {
+				err = FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			}
 			if err != nil {
-				log.Info("unify null field data format failed", zap.Error(err))
+				log.Info("unify field data format failed", zap.Error(err))
 				return err
 			}
 		}
@@ -324,21 +345,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// Two nullable data formats are supported:
-	//
-	//	COMPRESSED FORMAT (SDK format, before validateUtil.fillWithValue processing):
-	//		Logical data: [1, null, 2]
-	//		Storage: Data=[1, 2] + ValidData=[true, false, true]
-	//		- Data array contains only non-null values (compressed)
-	//		- ValidData array tracks null positions for all rows
-	//
-	//	FULL FORMAT (Milvus internal format, after validateUtil.fillWithValue processing):
-	//		Logical data: [1, null, 2]
-	//		Storage: Data=[1, 0, 2] + ValidData=[true, false, true]
-	//		- Data array contains values for all rows (nulls filled with zero/default)
-	//		- ValidData array still tracks null positions
-	//
-	// Note: we will unify the nullable format to FULL FORMAT before executing the merge logic
+	// Scalar nullable payloads are expanded before merge. Nullable vector payloads
+	// must remain compact: ValidData tracks logical rows, and vector data stores
+	// only valid rows.
 	insertIdxInUpsert := make([]int, 0)
 	updateIdxInUpsert := make([]int, 0)
 	// 1. split upsert data into insert and update by query result
@@ -368,88 +377,113 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (int64, *schemapb.FieldData) {
 			return field.FieldId, field
 		})
-		nullableVectorContexts := make(map[int64]*nullableVectorMergeContext)
-		for _, fieldData := range existFieldData {
-			fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(fieldData.GetFieldName())
-			if err != nil {
-				log.Info("get field schema failed", zap.Error(err))
-				return err
-			}
-
-			if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
-				ctx := &nullableVectorMergeContext{
-					existIdxMap: buildNullableVectorIdxMap(fieldData.GetValidData()),
-					existField:  fieldData,
-					mergedValid: make([]bool, 0, len(updateIdxInUpsert)),
-				}
-
-				if upsertField, ok := upsertFieldMap[fieldData.FieldId]; ok {
-					ctx.upsertIdxMap = buildNullableVectorIdxMap(upsertField.GetValidData())
-					ctx.upsertField = upsertField
-					ctx.hasUpsertData = true
-				}
-
-				nullableVectorContexts[fieldData.FieldId] = ctx
-			} else if fieldSchema.GetDefaultValue() != nil {
-				// Note: For fields containing default values, default values need to be set according to valid data during insertion,
-				// but query results fields do not set valid data when returning default value fields,
-				// therefore valid data needs to be manually set to true
-				if len(fieldData.GetValidData()) == 0 {
-					fieldData.ValidData = make([]bool, upsertIDSize)
-					for i := range fieldData.ValidData {
-						fieldData.ValidData[i] = true
-					}
-				}
-			}
-		}
+		// fieldOpMap resolves per-field FieldPartialUpdateOp directives
+		// attached to UpsertRequest.field_ops. Empty / missing entries
+		// fall back to REPLACE.
+		fieldOpMap := buildFieldOpMap(it.req)
 
 		// Build mapping from existing primary keys to their positions in query result
 		// This ensures we can correctly locate data even if query results are not in the same order as request
 		existIDsLen := typeutil.GetSizeOfIDs(existIDs)
 		existPKToIndex := make(map[interface{}]int, existIDsLen)
-		for j := 0; j < existIDsLen; j++ {
-			pk := typeutil.GetPK(existIDs, int64(j))
-			existPKToIndex[pk] = j
+		for i := 0; i < existIDsLen; i++ {
+			pk := typeutil.GetPK(existIDs, int64(i))
+			existPKToIndex[pk] = i
 		}
 
-		baseIdx := 0
-		idxComputer := typeutil.NewFieldDataIdxComputer(existFieldData)
-		for _, idx := range updateIdxInUpsert {
-			typeutil.AppendIDs(it.deletePKs, upsertIDs, idx)
-			oldPK := typeutil.GetPK(upsertIDs, int64(idx))
-			existIndex, ok := existPKToIndex[oldPK]
+		existIndices := make([]int64, len(updateIdxInUpsert))
+		for i, upsertIdx := range updateIdxInUpsert {
+			typeutil.AppendIDs(it.deletePKs, upsertIDs, upsertIdx)
+			oldPK := typeutil.GetPK(upsertIDs, int64(upsertIdx))
+			idx, ok := existPKToIndex[oldPK]
 			if !ok {
-				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
+				return merr.WrapErrParameterInvalidMsg("upsert pk %v not found in query result", oldPK)
 			}
-			fieldIdxs := idxComputer.Compute(int64(existIndex))
-			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex), fieldIdxs...)
-			err := typeutil.UpdateFieldData(it.insertFieldData, it.upsertMsg.InsertMsg.GetFieldsData(), int64(baseIdx), int64(idx))
-			baseIdx += 1
+			existIndices[i] = int64(idx)
+		}
+
+		for fieldIdx, existField := range existFieldData {
+			fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(existField.GetFieldName())
 			if err != nil {
-				log.Info("update field data failed", zap.Error(err))
+				log.Info("get field schema failed", zap.Error(err))
 				return err
 			}
 
-			// Collect merged validity for nullable vector fields
-			for _, ctx := range nullableVectorContexts {
-				if ctx.hasUpsertData {
-					ctx.mergedValid = append(ctx.mergedValid, ctx.upsertField.GetValidData()[idx])
-				} else {
-					ctx.mergedValid = append(ctx.mergedValid, ctx.existField.GetValidData()[existIndex])
+			// Note: For fields containing default values, default values need to be set according to valid data during insertion,
+			// but query results fields do not set valid data when returning default value fields,
+			// therefore valid data needs to be manually set to true
+			if fieldSchema.GetDefaultValue() != nil && len(existField.GetValidData()) == 0 {
+				existField.ValidData = make([]bool, existIDsLen)
+				for i := range existField.ValidData {
+					existField.ValidData[i] = true
 				}
 			}
-		}
 
-		// Rebuild nullable vector fields
-		for i, fieldData := range it.insertFieldData {
-			ctx, ok := nullableVectorContexts[fieldData.FieldId]
-			if !ok {
-				continue
+			dstField := it.insertFieldData[fieldIdx]
+			upsertField := upsertFieldMap[existField.FieldId]
+			isNullableVector := typeutil.IsCompactNullableVectorFieldData(existField)
+			existComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{existField})
+			existSrcIndices := make([]int64, len(updateIdxInUpsert))
+			for i, existIdx := range existIndices {
+				existSrcIndices[i] = existComputer.Compute(existIdx)[0]
 			}
 
-			newFieldData := rebuildNullableVectorFieldData(ctx, updateIdxInUpsert, upsertIDs, existPKToIndex)
-			if newFieldData != nil {
-				it.insertFieldData[i] = newFieldData
+			if upsertField != nil {
+				upsertComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{upsertField})
+				upsertSrcIndices := make([]int64, len(updateIdxInUpsert))
+				for i, upsertIdx := range updateIdxInUpsert {
+					upsertSrcIndices[i] = upsertComputer.Compute(int64(upsertIdx))[0]
+				}
+				if isNullableVector {
+					// For nullable vector: only copy data for non-null rows
+					upsertRowIndices := make([]int64, len(updateIdxInUpsert))
+					validDataIndices := make([]int64, 0, len(updateIdxInUpsert))
+					for i, upsertIdx := range updateIdxInUpsert {
+						upsertRowIndices[i] = int64(upsertIdx)
+						if upsertField.ValidData[upsertIdx] {
+							validDataIndices = append(validDataIndices, upsertSrcIndices[i])
+						}
+					}
+					typeutil.AppendFieldDataByColumn(dstField, upsertField, validDataIndices, upsertRowIndices)
+				} else {
+					typeutil.AppendFieldDataByColumn(dstField, existField, existSrcIndices)
+					dstIndices := make([]int64, len(updateIdxInUpsert))
+					for i := range dstIndices {
+						dstIndices[i] = int64(i)
+					}
+					// Resolve the field-level op; REPLACE is the default
+					// and is equivalent to the legacy merge path.
+					op := schemapb.FieldPartialUpdateOp_REPLACE
+					if fieldOpMap != nil {
+						if resolved, ok := fieldOpMap[existField.GetFieldName()]; ok {
+							op = resolved
+						}
+					}
+					if op == schemapb.FieldPartialUpdateOp_REPLACE {
+						if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices); err != nil {
+							return err
+						}
+					} else {
+						maxCap := readMaxCapacity(fieldSchema)
+						if err := typeutil.UpdateArrayFieldByColumnWithOp(
+							dstField, upsertField, dstIndices, upsertSrcIndices, op, maxCap,
+						); err != nil {
+							return err
+						}
+					}
+				}
+			} else {
+				if isNullableVector {
+					validDataIndices := make([]int64, 0, len(existIndices))
+					for i, existIdx := range existIndices {
+						if existField.ValidData[int(existIdx)] {
+							validDataIndices = append(validDataIndices, existSrcIndices[i])
+						}
+					}
+					typeutil.AppendFieldDataByColumn(dstField, existField, validDataIndices, existIndices)
+				} else {
+					typeutil.AppendFieldDataByColumn(dstField, existField, existSrcIndices)
+				}
 			}
 		}
 	}
@@ -469,7 +503,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (string, *schemapb.FieldData) {
 			return field.GetFieldName(), field
 		})
-		for _, fieldSchema := range it.schema.CollectionSchema.Fields {
+		for _, fieldSchema := range it.schema.Fields {
 			if fieldData, ok := upsertFieldMap[fieldSchema.Name]; !ok {
 				if fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil {
 					fieldData, err := GenNullableFieldData(fieldSchema, upsertIDSize)
@@ -483,32 +517,47 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				insertWithNullField = append(insertWithNullField, fieldData)
 			}
 		}
-		vectorIdxMap := make([][]int64, len(insertIdxInUpsert))
-		for rowIdx, offset := range insertIdxInUpsert {
-			vectorIdxMap[rowIdx] = make([]int64, len(insertWithNullField))
-			for fieldIdx := range insertWithNullField {
-				vectorIdxMap[rowIdx][fieldIdx] = int64(offset)
-			}
-		}
-		for fieldIdx, fieldData := range insertWithNullField {
-			validData := fieldData.GetValidData()
-			if len(validData) > 0 && typeutil.IsVectorType(fieldData.Type) {
-				dataIdx := int64(0)
-				rowIdx := 0
-				for i := 0; i < len(validData) && rowIdx < len(insertIdxInUpsert); i++ {
-					if i == insertIdxInUpsert[rowIdx] {
-						vectorIdxMap[rowIdx][fieldIdx] = dataIdx
-						rowIdx++
-					}
-					if validData[i] {
-						dataIdx++
-					}
-				}
-			}
+
+		// Build mapping from FieldId to index in it.insertFieldData
+		insertFieldDataMap := make(map[int64]int, len(it.insertFieldData))
+		for i, fd := range it.insertFieldData {
+			insertFieldDataMap[fd.FieldId] = i
 		}
 
-		for rowIdx, idx := range insertIdxInUpsert {
-			typeutil.AppendFieldData(it.insertFieldData, insertWithNullField, int64(idx), vectorIdxMap[rowIdx]...)
+		// Process insert data by column (field), similar to update path
+		for _, srcField := range insertWithNullField {
+			isNullableVector := typeutil.IsCompactNullableVectorFieldData(srcField)
+			srcComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{srcField})
+
+			// Find or create destination field in it.insertFieldData
+			var dstField *schemapb.FieldData
+			if idx, ok := insertFieldDataMap[srcField.FieldId]; ok {
+				dstField = it.insertFieldData[idx]
+			} else {
+				// New field not in existFieldData, create empty field data and append
+				newFields := typeutil.PrepareResultFieldData([]*schemapb.FieldData{srcField}, int64(len(insertIdxInUpsert)))
+				dstField = newFields[0]
+				it.insertFieldData = append(it.insertFieldData, dstField)
+			}
+
+			if isNullableVector {
+				rowIndices := make([]int64, len(insertIdxInUpsert))
+				validDataIndices := make([]int64, 0, len(insertIdxInUpsert))
+				for i, upsertIdx := range insertIdxInUpsert {
+					rowIndices[i] = int64(upsertIdx)
+					srcIdx := srcComputer.Compute(int64(upsertIdx))[0]
+					if srcField.ValidData[upsertIdx] {
+						validDataIndices = append(validDataIndices, srcIdx)
+					}
+				}
+				typeutil.AppendFieldDataByColumn(dstField, srcField, validDataIndices, rowIndices)
+			} else {
+				srcIndices := make([]int64, len(insertIdxInUpsert))
+				for i, upsertIdx := range insertIdxInUpsert {
+					srcIndices[i] = srcComputer.Compute(int64(upsertIdx))[0]
+				}
+				typeutil.AppendFieldDataByColumn(dstField, srcField, srcIndices)
+			}
 		}
 	}
 
@@ -522,196 +571,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func buildNullableVectorIdxMap(validData []bool) []int64 {
-	if len(validData) == 0 {
-		return nil
-	}
-	idxMap := make([]int64, len(validData))
-	dataIdx := int64(0)
-	for i, valid := range validData {
-		if valid {
-			idxMap[i] = dataIdx
-			dataIdx++
-		} else {
-			idxMap[i] = -1
-		}
-	}
-	return idxMap
-}
-
-type nullableVectorMergeContext struct {
-	existIdxMap   []int64 // row index -> data index for exist data
-	upsertIdxMap  []int64 // row index -> data index for upsert data
-	mergedValid   []bool  // merged validity for the output
-	existField    *schemapb.FieldData
-	upsertField   *schemapb.FieldData
-	hasUpsertData bool // whether upsert request contains this field
-}
-
-func rebuildNullableVectorFieldData(
-	ctx *nullableVectorMergeContext,
-	updateIdxInUpsert []int,
-	upsertIDs *schemapb.IDs,
-	existPKToIndex map[interface{}]int,
-) *schemapb.FieldData {
-	var sourceField *schemapb.FieldData
-	var sourceIdxMap []int64
-
-	if ctx.hasUpsertData {
-		sourceField = ctx.upsertField
-		sourceIdxMap = ctx.upsertIdxMap
-	} else {
-		sourceField = ctx.existField
-		sourceIdxMap = ctx.existIdxMap
-	}
-
-	if sourceField == nil {
-		return nil
-	}
-
-	newFieldData := prepareNullableVectorFieldData(sourceField, int64(len(updateIdxInUpsert)))
-	newFieldData.ValidData = ctx.mergedValid
-
-	// Append vectors from source using the correct indices
-	for rowIdx, idx := range updateIdxInUpsert {
-		var sourceRowIdx int
-		if ctx.hasUpsertData {
-			sourceRowIdx = idx // upsertMsg uses updateIdxInUpsert
-		} else {
-			// existFieldData uses existIndex
-			oldPK := typeutil.GetPK(upsertIDs, int64(idx))
-			sourceRowIdx = existPKToIndex[oldPK]
-		}
-
-		// Check if this row is valid (has vector data)
-		if rowIdx < len(ctx.mergedValid) && ctx.mergedValid[rowIdx] {
-			dataIdx := int64(sourceRowIdx)
-			if len(sourceIdxMap) > 0 && sourceRowIdx < len(sourceIdxMap) {
-				dataIdx = sourceIdxMap[sourceRowIdx]
-			}
-			if dataIdx >= 0 {
-				appendSingleVector(newFieldData, sourceField, dataIdx)
-			}
-		}
-	}
-
-	return newFieldData
-}
-
-func prepareNullableVectorFieldData(sample *schemapb.FieldData, capacity int64) *schemapb.FieldData {
-	fd := &schemapb.FieldData{
-		Type:      sample.Type,
-		FieldName: sample.FieldName,
-		FieldId:   sample.FieldId,
-		IsDynamic: sample.IsDynamic,
-		ValidData: make([]bool, 0, capacity),
-	}
-
-	vectorField := sample.GetVectors()
-	if vectorField == nil {
-		return fd
-	}
-	dim := vectorField.GetDim()
-	vectors := &schemapb.FieldData_Vectors{
-		Vectors: &schemapb.VectorField{
-			Dim: dim,
-		},
-	}
-
-	switch vectorField.Data.(type) {
-	case *schemapb.VectorField_FloatVector:
-		vectors.Vectors.Data = &schemapb.VectorField_FloatVector{
-			FloatVector: &schemapb.FloatArray{
-				Data: make([]float32, 0, dim*capacity),
-			},
-		}
-	case *schemapb.VectorField_Float16Vector:
-		vectors.Vectors.Data = &schemapb.VectorField_Float16Vector{
-			Float16Vector: make([]byte, 0, dim*2*capacity),
-		}
-	case *schemapb.VectorField_Bfloat16Vector:
-		vectors.Vectors.Data = &schemapb.VectorField_Bfloat16Vector{
-			Bfloat16Vector: make([]byte, 0, dim*2*capacity),
-		}
-	case *schemapb.VectorField_BinaryVector:
-		vectors.Vectors.Data = &schemapb.VectorField_BinaryVector{
-			BinaryVector: make([]byte, 0, dim/8*capacity),
-		}
-	case *schemapb.VectorField_Int8Vector:
-		vectors.Vectors.Data = &schemapb.VectorField_Int8Vector{
-			Int8Vector: make([]byte, 0, dim*capacity),
-		}
-	case *schemapb.VectorField_SparseFloatVector:
-		vectors.Vectors.Data = &schemapb.VectorField_SparseFloatVector{
-			SparseFloatVector: &schemapb.SparseFloatArray{
-				Contents: make([][]byte, 0, capacity),
-				Dim:      vectorField.GetSparseFloatVector().GetDim(),
-			},
-		}
-	}
-	fd.Field = vectors
-	return fd
-}
-
-func appendSingleVector(target *schemapb.FieldData, source *schemapb.FieldData, dataIdx int64) {
-	targetVectors := target.GetVectors()
-	sourceVectors := source.GetVectors()
-	if targetVectors == nil || sourceVectors == nil {
-		return
-	}
-	dim := sourceVectors.GetDim()
-
-	switch sv := sourceVectors.Data.(type) {
-	case *schemapb.VectorField_FloatVector:
-		tv := targetVectors.Data.(*schemapb.VectorField_FloatVector)
-		start := dataIdx * dim
-		end := start + dim
-		if end <= int64(len(sv.FloatVector.Data)) {
-			tv.FloatVector.Data = append(tv.FloatVector.Data, sv.FloatVector.Data[start:end]...)
-		}
-	case *schemapb.VectorField_Float16Vector:
-		tv := targetVectors.Data.(*schemapb.VectorField_Float16Vector)
-		unitSize := dim * 2
-		start := dataIdx * unitSize
-		end := start + unitSize
-		if end <= int64(len(sv.Float16Vector)) {
-			tv.Float16Vector = append(tv.Float16Vector, sv.Float16Vector[start:end]...)
-		}
-	case *schemapb.VectorField_Bfloat16Vector:
-		tv := targetVectors.Data.(*schemapb.VectorField_Bfloat16Vector)
-		unitSize := dim * 2
-		start := dataIdx * unitSize
-		end := start + unitSize
-		if end <= int64(len(sv.Bfloat16Vector)) {
-			tv.Bfloat16Vector = append(tv.Bfloat16Vector, sv.Bfloat16Vector[start:end]...)
-		}
-	case *schemapb.VectorField_BinaryVector:
-		tv := targetVectors.Data.(*schemapb.VectorField_BinaryVector)
-		unitSize := dim / 8
-		start := dataIdx * unitSize
-		end := start + unitSize
-		if end <= int64(len(sv.BinaryVector)) {
-			tv.BinaryVector = append(tv.BinaryVector, sv.BinaryVector[start:end]...)
-		}
-	case *schemapb.VectorField_Int8Vector:
-		tv := targetVectors.Data.(*schemapb.VectorField_Int8Vector)
-		start := dataIdx * dim
-		end := start + dim
-		if end <= int64(len(sv.Int8Vector)) {
-			tv.Int8Vector = append(tv.Int8Vector, sv.Int8Vector[start:end]...)
-		}
-	case *schemapb.VectorField_SparseFloatVector:
-		tv := targetVectors.Data.(*schemapb.VectorField_SparseFloatVector)
-		if dataIdx < int64(len(sv.SparseFloatVector.Contents)) {
-			tv.SparseFloatVector.Contents = append(tv.SparseFloatVector.Contents, sv.SparseFloatVector.Contents[dataIdx])
-			// Update dimension if necessary
-			if sv.SparseFloatVector.Dim > tv.SparseFloatVector.Dim {
-				tv.SparseFloatVector.Dim = sv.SparseFloatVector.Dim
-			}
-		}
-	}
 }
 
 // ToCompressedFormatNullable converts the field data from full format nullable to compressed format nullable
@@ -876,7 +735,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		default:
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
 
 	case *schemapb.FieldData_Vectors:
@@ -884,13 +743,14 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 		return nil
 
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 	}
 
 	return nil
 }
 
-// GenNullableFieldData generates nullable field data in FULL FORMAT
+// GenNullableFieldData generates all-null nullable field data.
+// Scalar fields use expanded zero values; vector fields use compact empty data.
 func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
 	switch field.DataType {
 	case schemapb.DataType_Bool:
@@ -1073,8 +933,115 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 				},
 			},
 		}, nil
+
+	// Nullable vector types
+	case schemapb.DataType_FloatVector:
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return nil, err
+		}
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			ValidData: make([]bool, upsertIDSize), // all false = all null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_Float16Vector:
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return nil, err
+		}
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			ValidData: make([]bool, upsertIDSize), // all false = all null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_BFloat16Vector:
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return nil, err
+		}
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			ValidData: make([]bool, upsertIDSize), // all false = all null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_BinaryVector:
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return nil, err
+		}
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			ValidData: make([]bool, upsertIDSize), // all false = all null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_SparseFloatVector:
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			ValidData: make([]bool, upsertIDSize), // all false = all null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+						Contents: [][]byte{},
+					}},
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_Int8Vector:
+		dim, err := typeutil.GetDim(field)
+		if err != nil {
+			return nil, err
+		}
+		return &schemapb.FieldData{
+			FieldId:   field.FieldID,
+			FieldName: field.Name,
+			Type:      field.DataType,
+			ValidData: make([]bool, upsertIDSize), // all false = all null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
+				},
+			},
+		}, nil
+
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined scalar data type:%s", field.DataType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.DataType.String())
 	}
 }
 
@@ -1087,12 +1054,16 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	bm25Fields := typeutil.NewSet[string](GetBM25FunctionOutputFields(it.schema.CollectionSchema)...)
+	bm25Fields := GetBM25FunctionOutputFields(it.schema.CollectionSchema)
+	minHashFields := GetMinHashFunctionOutputFields(it.schema.CollectionSchema)
+	fieldsToFilter := typeutil.NewSet[string](append(bm25Fields, minHashFields...)...)
 	if it.req.PartialUpdate {
-		// remove the old bm25 fields
+		// remove old BM25 and MinHash function output fields, which will be regenerated downstream
+		// Note: do NOT filter other function outputs (e.g. text embedding) as they are generated
+		// by genFunctionFields and expected by validateFieldDataColumns
 		ret := make([]*schemapb.FieldData, 0)
 		for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
-			if bm25Fields.Contain(fieldData.GetFieldName()) {
+			if fieldsToFilter.Contain(fieldData.GetFieldName()) {
 				continue
 			}
 			ret = append(ret, fieldData)
@@ -1105,7 +1076,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder("applyPK")
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
 	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if allocateErr != nil {
 		log.Ctx(ctx).Warn("failed to allocate auto id for upsert",
 			zap.String("collectionName", collectionName),
@@ -1137,21 +1108,25 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 	it.result.SuccIndex = sliceIndex
 
+	var err error
 	if it.schema.EnableDynamicField {
-		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		var err error
+		if it.req.GetPartialUpdate() {
+			err = checkDynamicFieldDataForPartialUpdate(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		} else {
+			err = checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		}
 		if err != nil {
 			return err
 		}
 	}
 
-	if Params.CommonCfg.EnableNamespace.GetAsBool() {
-		err := addNamespaceData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
-		if err != nil {
-			return err
-		}
+	err = addNamespaceData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	if err != nil {
+		return err
 	}
 
-	if err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg); err != nil {
+	if err = checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg); err != nil {
 		return err
 	}
 
@@ -1159,7 +1134,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
-	var err error
 	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
@@ -1186,6 +1160,11 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		log.Warn("fill field properties failed when upsert", zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
+	err = normalizeFP32ToFP16BF16VectorFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
+	if err != nil {
+		log.Warn("normalize fp32 to fp16/bf16 vector field data failed when upsert", zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
+	}
 
 	if it.partitionKeyMode {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema.CollectionSchema)
@@ -1204,7 +1183,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck()).
+	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
@@ -1309,10 +1288,30 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema
+	it.schemaVersion = schema.Version
+	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
+		return err
+	}
+
+	// Validate any FieldPartialUpdateOp directives attached to FieldData.
+	// A non-REPLACE op implicitly promotes the request to partial_update=true
+	// so users do not need to set both fields explicitly.
+	nonReplaceSeen, err := validateFieldPartialUpdateOps(it.req, schema.CollectionSchema)
+	if err != nil {
+		log.Warn("validate field partial update ops failed", zap.Error(err))
+		return err
+	}
+	if nonReplaceSeen && !it.req.GetPartialUpdate() {
+		it.req.PartialUpdate = true
+	}
 
 	err = common.CheckNamespace(schema.CollectionSchema, it.req.Namespace)
 	if err != nil {
 		return err
+	}
+
+	if it.req.GetPartialUpdate() && len(schema.GetStructArrayFields()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("partial upsert is not supported for collections with struct array fields")
 	}
 
 	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)
@@ -1324,7 +1323,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	if it.partitionKeyMode {
 		if len(it.req.GetPartitionName()) > 0 {
-			return errors.New("not support manually specifying the partition names if partition key mode is used")
+			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 		}
 	} else {
 		// set default partition name if not use partition key

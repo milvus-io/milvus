@@ -5,23 +5,19 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
 var (
-	errEmptyUsername     = errors.New("username is empty")
 	errUserNotFound      = errors.New("user not found")
 	errUserAlreadyExists = errors.New("user already exists")
 
-	errEmptyRoleName     = errors.New("role name is empty")
 	errRoleAlreadyExists = errors.New("role already exists")
 	errRoleNotExists     = errors.New("role not exists")
 
 	errEmptyRBACMeta           = errors.New("rbac meta is empty")
 	errNotCustomPrivilegeGroup = errors.New("not a custom privilege group")
-
-	errEmptyPrivilegeGroupName = errors.New("privilege group name is empty")
 )
 
 type RBACChecker interface {
@@ -40,6 +36,10 @@ type RBACChecker interface {
 	// CheckIfCreateRole checks if the role can be created.
 	// if the role already exists, it will return errRoleAlreadyExists.
 	CheckIfCreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) error
+
+	// CheckIfAlterRole checks if the role can be altered.
+	// if the role not exists, it will return errRoleNotExists.
+	CheckIfAlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) error
 
 	// CheckIfDropRole checks if the role can be dropped.
 	// if the role not exists, it will return errRoleNotExists.

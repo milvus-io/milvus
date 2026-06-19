@@ -13,17 +13,18 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ wal.WAL = (*walAdaptorImpl)(nil)
@@ -39,8 +40,10 @@ func adaptImplsToROWAL(
 		log.FieldComponent("wal"),
 		zap.String("channel", basicWAL.Channel().String()),
 	)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored in availableCancel and called in Close()
 	roWAL := &roWALAdaptorImpl{
+		WALRateLimitComponent: rate.NewWALRateLimitComponent(basicWAL.Channel()),
+
 		roWALImpls:      basicWAL,
 		lifetime:        typeutil.NewLifetime(),
 		availableCtx:    ctx,
@@ -79,9 +82,12 @@ func adaptImplsToRWWAL(
 		flusher:                flusher,
 		writeMetrics:           metricsutil.NewWriteMetrics(roWAL.Channel(), roWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
+		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
-	wal.writeMetrics.SetLogger(wal.roWALAdaptorImpl.Logger())
+	wal.writeMetrics.SetLogger(wal.Logger())
 	interceptorParam.WAL.Set(wal)
+	wal.RegisterMemoryObserver()
+	wal.RegisterAppendRateObserver(wal.appendRateCounter)
 	return wal
 }
 
@@ -96,6 +102,7 @@ type walAdaptorImpl struct {
 	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
+	appendRateCounter      *utility.AverageRateCounter // tracks append rate (bytes/sec)
 }
 
 // Metrics returns the metrics of the wal.
@@ -133,6 +140,16 @@ func (w *walAdaptorImpl) GetReplicateCheckpoint() (*utility.ReplicateCheckpoint,
 	return w.param.ReplicateManager.GetReplicateCheckpoint()
 }
 
+// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
+func (w *walAdaptorImpl) GetSalvageCheckpoint() []*utility.ReplicateCheckpoint {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil
+	}
+	defer w.lifetime.Done()
+
+	return w.param.ReplicateManager.GetSalvageCheckpoint()
+}
+
 // Append writes a record to the log.
 func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -143,6 +160,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	if w.isFenced.Load() {
 		// if the wal is fenced, we should reject all append operations.
 		return nil, status.NewChannelFenced(w.Channel().String())
+	}
+
+	if msg.MessageType().IsDMLMessageType() && w.IsRejected() {
+		// if the wal is rate limit rejected, we reject all the DML operation to protect the wal from being overloaded.
+		return nil, status.NewRateLimitRejected("")
 	}
 
 	// Check if interceptor is ready.
@@ -204,6 +226,8 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		w.forceCancelAfterGracefulTimeout()
 		w.Logger().Info("WAL marked as fenced for WAL switch, all append operations will be rejected")
 	}
+	w.appendRateCounter.Add(int64(msg.EstimateSize()))
+
 	var extra *anypb.Any
 	if extraAppendResult.Extra != nil {
 		var err error
@@ -222,6 +246,13 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	}
 	appendMetrics.Done(r, nil)
 	return r, nil
+}
+
+// Read overrides the roWALAdaptorImpl.Read to automatically add the append rate counter.
+func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Scanner, error) {
+	// Automatically add the append rate counter to the read options.
+	opts.AppendRateCounter = w.appendRateCounter
+	return w.roWALAdaptorImpl.Read(ctx, opts)
 }
 
 // retryAppendWhenRecoverableError retries the append operation when recoverable error occurs.
@@ -309,7 +340,6 @@ func (w *walAdaptorImpl) Close() {
 
 	w.Logger().Info("wal close done, close interceptors...")
 	w.interceptorBuildResult.Close()
-	w.appendExecutionPool.Free()
 
 	w.Logger().Info("close the write ahead buffer...")
 	w.param.WriteAheadBuffer.Close()
@@ -324,6 +354,9 @@ func (w *walAdaptorImpl) Close() {
 	// close all metrics.
 	w.scanMetrics.Close()
 	w.writeMetrics.Close()
+
+	// close the rate limit component.
+	w.WALRateLimitComponent.Close()
 
 	if w.appendExecutionPool != nil {
 		w.appendExecutionPool.Release()

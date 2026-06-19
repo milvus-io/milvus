@@ -15,6 +15,7 @@ const (
 	messageTxnContext                       = "_tx"  // transaction context.
 	messageCipherHeader                     = "_ch"  // message cipher header.
 	messageNotPersisteted                   = "_np"  // check if the message is unpersisted.
+	messagePChannelLevel                    = "_pcl" // mark the message as pchannel level message.
 	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
 )
 

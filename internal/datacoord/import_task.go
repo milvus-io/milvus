@@ -18,8 +18,8 @@ package datacoord
 
 import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 type TaskType int
@@ -66,12 +66,6 @@ func WithStates(states ...datapb.ImportTaskStateV2) ImportTaskFilter {
 func WithRequestSource() ImportTaskFilter {
 	return func(task ImportTask) bool {
 		return task.GetSource() == datapb.ImportTaskSourceV2_Request
-	}
-}
-
-func WithL0CompactionSource() ImportTaskFilter {
-	return func(task ImportTask) bool {
-		return task.GetSource() == datapb.ImportTaskSourceV2_L0Compaction
 	}
 }
 

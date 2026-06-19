@@ -27,6 +27,7 @@
 #include "common/EasyAssert.h"
 #include "gtest/gtest.h"
 #include "storage/FileWriter.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus;
 using namespace milvus::storage;
@@ -35,7 +36,7 @@ class FileWriterTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        test_dir_ = std::filesystem::temp_directory_path() / "file_writer_test";
+        test_dir_ = std::filesystem::path(TestLocalPath) / "file_writer_test";
         std::filesystem::create_directories(test_dir_);
     }
 
@@ -381,6 +382,139 @@ TEST_F(FileWriterTest, ExistingFileWithDirectIO) {
     std::string content((std::istreambuf_iterator<char>(file)),
                         std::istreambuf_iterator<char>());
     EXPECT_EQ(content, new_data);
+}
+
+TEST_F(FileWriterTest, PositionedWriterBufferedWritesOutOfOrder) {
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+
+    std::string filename =
+        (test_dir_ / "positioned_buffered_out_of_order.txt").string();
+    std::vector<char> data(kBufferSize * 3 + 17);
+    std::generate(data.begin(), data.end(), std::rand);
+
+    {
+        PositionedFileWriter writer(filename, data.size());
+        writer.WriteAt(kBufferSize * 2, data.data() + kBufferSize * 2, 17);
+        writer.WriteAt(0, data.data(), kBufferSize);
+        writer.WriteAt(kBufferSize, data.data() + kBufferSize, kBufferSize);
+        writer.WriteAt(kBufferSize * 2 + 17,
+                       data.data() + kBufferSize * 2 + 17,
+                       kBufferSize);
+        writer.Finish();
+    }
+
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+    EXPECT_EQ(read_data, data);
+}
+
+TEST_F(FileWriterTest, PositionedWriterDirectIOHandlesUnalignedInputAndTail) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::string filename =
+        (test_dir_ / "positioned_direct_unaligned_tail.txt").string();
+    std::vector<char> storage(kBufferSize * 2 + 18);
+    std::generate(storage.begin(), storage.end(), std::rand);
+    auto* data = storage.data() + 1;
+    const size_t data_size = kBufferSize * 2 + 17;
+
+    {
+        PositionedFileWriter writer(filename, data_size);
+        writer.WriteAt(kBufferSize, data + kBufferSize, kBufferSize);
+        writer.WriteAt(0, data, kBufferSize);
+        writer.WriteAt(kBufferSize * 2, data + kBufferSize * 2, 17);
+        writer.Finish();
+    }
+
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+    ASSERT_EQ(read_data.size(), data_size);
+    EXPECT_EQ(read_data, std::vector<char>(data, data + data_size));
+}
+
+TEST_F(FileWriterTest, PositionedWriterDirectIORejectsUnalignedOffset) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::string filename =
+        (test_dir_ / "positioned_direct_unaligned_offset.txt").string();
+    std::vector<char> data(kBufferSize);
+
+    PositionedFileWriter writer(filename, data.size());
+    EXPECT_THROW(writer.WriteAt(1, data.data(), data.size()),
+                 std::runtime_error);
+}
+
+TEST_F(FileWriterTest, PositionedWriterDirectIORejectsMiddleUnalignedWrite) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::string filename =
+        (test_dir_ / "positioned_direct_middle_tail.txt").string();
+    std::vector<char> data(kBufferSize * 2 + 17);
+
+    PositionedFileWriter writer(filename, data.size());
+    EXPECT_THROW(writer.WriteAt(kBufferSize, data.data(), 17),
+                 std::runtime_error);
+}
+
+TEST_F(FileWriterTest, PositionedWriterKeepsFileOpenAfterWriteAtError) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::string filename =
+        (test_dir_ / "positioned_direct_error_recovery.txt").string();
+    std::vector<char> data(kBufferSize * 2);
+    std::generate(data.begin(), data.end(), std::rand);
+
+    {
+        PositionedFileWriter writer(filename, data.size());
+        EXPECT_THROW(writer.WriteAt(kBufferSize, data.data(), 17),
+                     std::runtime_error);
+        writer.WriteAt(0, data.data(), kBufferSize);
+        writer.WriteAt(kBufferSize, data.data() + kBufferSize, kBufferSize);
+        writer.Finish();
+    }
+
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+    ASSERT_EQ(read_data.size(), data.size());
+    EXPECT_EQ(read_data, data);
+}
+
+TEST_F(FileWriterTest, PositionedWriterDirectIOSupportsConcurrentWrites) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::string filename =
+        (test_dir_ / "positioned_direct_concurrent.txt").string();
+    std::vector<char> data(kBufferSize * 8);
+    std::generate(data.begin(), data.end(), std::rand);
+
+    {
+        PositionedFileWriter writer(filename, data.size());
+        std::vector<std::thread> threads;
+        for (size_t i = 0; i < 8; ++i) {
+            threads.emplace_back([&, i]() {
+                writer.WriteAt(i * kBufferSize,
+                               data.data() + i * kBufferSize,
+                               kBufferSize);
+            });
+        }
+        for (auto& thread : threads) {
+            thread.join();
+        }
+        writer.Finish();
+    }
+
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+    EXPECT_EQ(read_data, data);
 }
 
 // Test rate limiter basic behavior: alignment and refill period
@@ -959,17 +1093,12 @@ TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
 
     // Verify that the configuration is still valid
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
-    std::string filename =
-        (std::filesystem::temp_directory_path() / "concurrent_config_test.txt")
-            .string();
+    std::string filename = (test_dir_ / "concurrent_config_test.txt").string();
 
     FileWriter writer(filename);
     std::string test_data = "Concurrent config test";
     writer.Write(test_data.data(), test_data.size());
     writer.Finish();
-
-    // Clean up
-    std::filesystem::remove(filename);
 }
 // Test that changing FileWriterConfig during FileWriter operations doesn't affect existing instances
 TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
@@ -977,12 +1106,8 @@ TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
     FileWriteWorkerPool::GetInstance().Configure(2);
 
-    std::string filename1 =
-        (std::filesystem::temp_directory_path() / "config_change_test1.txt")
-            .string();
-    std::string filename2 =
-        (std::filesystem::temp_directory_path() / "config_change_test2.txt")
-            .string();
+    std::string filename1 = (test_dir_ / "config_change_test1.txt").string();
+    std::string filename2 = (test_dir_ / "config_change_test2.txt").string();
 
     // Create first FileWriter
     FileWriter writer1(filename1);
@@ -1024,8 +1149,4 @@ TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     std::string content2((std::istreambuf_iterator<char>(file2)),
                          std::istreambuf_iterator<char>());
     EXPECT_EQ(content2, test_data2);
-
-    // Clean up
-    std::filesystem::remove(filename1);
-    std::filesystem::remove(filename2);
 }

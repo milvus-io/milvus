@@ -25,10 +25,7 @@ mkdir milvus-deb/milvus/milvus-lib
 cp milvus/bin/milvus milvus-deb/milvus/milvus-bin/
 ## lib
 cp -d milvus/lib/* milvus-deb/milvus/milvus-lib/
-cp /usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0 milvus-deb/milvus/milvus-lib/libgfortran.so.4
 cp /usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0 milvus-deb/milvus/milvus-lib/libgomp.so.1
-cp /usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0 milvus-deb/milvus/milvus-lib/libquadmath.so.0
-cp /usr/lib/x86_64-linux-gnu/libopenblas.so.0  milvus-deb/milvus/milvus-lib/libopenblas.so.0
 ## script
 cp -r scripts milvus-deb/milvus/
 ## config
@@ -36,7 +33,7 @@ cp -r milvus/configs milvus-deb/milvus/
 
 # set env
 apt update
-apt install gnupg pbuilder ubuntu-dev-tools apt-file dh-make build-essential libopenblas-dev brz-debian -y
+apt install gnupg pbuilder ubuntu-dev-tools apt-file dh-make build-essential brz-debian -y
 ## $3 is name, $4 is email
 bzr whoami "$3 $4"
 export DEBFULLNAME="$3"

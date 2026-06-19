@@ -3,7 +3,7 @@ package allocator
 import (
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (

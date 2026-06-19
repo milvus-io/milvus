@@ -25,14 +25,14 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CostMetrics struct {
@@ -110,9 +110,10 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 	idx := b.idx.Load()
 	if idx%b.checkWorkloadRequestNum != 0 {
 		for i := 0; i < len(availableNodes); i++ {
-			targetNode = availableNodes[int(idx)%len(availableNodes)]
-			targetMetrics, ok := b.metricsMap.Get(targetNode)
+			node := availableNodes[(int(idx)+i)%len(availableNodes)]
+			targetMetrics, ok := b.metricsMap.Get(node)
 			if !ok || !targetMetrics.unavailable.Load() {
+				targetNode = node
 				break
 			}
 		}
@@ -156,7 +157,7 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 		}
 	}
 
-	if float64(maxScore-minScore)/float64(minScore) <= b.workloadToleranceFactor {
+	if minScore <= 0 || float64(maxScore-minScore)/float64(minScore) <= b.workloadToleranceFactor {
 		// if all query node has nearly same workload, just fall back to round_robin
 		b.idx.Inc()
 	}

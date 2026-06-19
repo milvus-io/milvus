@@ -13,7 +13,6 @@
 #include <string>
 #include <boost/filesystem.hpp>
 #include <optional>
-#include "index/JsonInvertedIndex.h"
 #include "index/InvertedIndexTantivy.h"
 
 namespace milvus::exec {
@@ -21,6 +20,13 @@ class SegmentExpr;
 }  // namespace milvus::exec
 
 namespace milvus::index {
+
+// Extract runs of literal bytes from a regex pattern that are GUARANTEED to
+// appear in any matching string.  Used by ngram index for coarse filtering.
+// Returns empty vector if no safe literals can be extracted (e.g. alternation,
+// case-insensitive flag).  Exposed in header for direct unit testing.
+std::vector<std::string>
+extract_literals_from_regex(const std::string& pattern);
 
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
@@ -104,6 +110,13 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
         this->wrapper_->create_reader(set_bitset);
     }
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  private:
     void
     ApplyIterativeNgramFilter(const std::vector<std::string>& sorted_terms,
@@ -121,6 +134,5 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
 
     // for json type
     std::string nested_path_;
-    JsonInvertedIndexParseErrorRecorder error_recorder_;
 };
 }  // namespace milvus::index

@@ -17,16 +17,14 @@
 package httpserver
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // We wrap original protobuf structure for 2 reasons:
@@ -70,7 +68,7 @@ type WrappedInsertRequest struct {
 func (w *WrappedInsertRequest) AsInsertRequest() (*milvuspb.InsertRequest, error) {
 	fieldData, err := convertFieldDataArray(w.FieldsData)
 	if err != nil {
-		return nil, fmt.Errorf("%w: convert field data failed: %v", errBadRequest, err)
+		return nil, badRequestf(err, "convert field data failed")
 	}
 	return &milvuspb.InsertRequest{
 		Base:           w.Base,
@@ -98,12 +96,12 @@ func (f *FieldData) makePbFloat16OrBfloat16Array(raw json.RawMessage, serializeF
 		return nil, 0, newFieldDataError(f.FieldName, err)
 	}
 	if len(wrappedData) < 1 {
-		return nil, 0, errors.New("at least one row for insert")
+		return nil, 0, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 	}
 	array0 := wrappedData[0]
 	dim := len(array0)
 	if dim < 1 {
-		return nil, 0, errors.New("dim must >= 1")
+		return nil, 0, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 	}
 	data := make([]byte, 0, len(wrappedData)*dim*2)
 	for _, fp32Array := range wrappedData {
@@ -238,12 +236,12 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		array0 := wrappedData[0]
 		dim := len(array0)
 		if dim < 1 {
-			return nil, errors.New("dim must >= 1")
+			return nil, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 		}
 		data := make([]float32, len(wrappedData)*dim)
 
@@ -299,7 +297,7 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		data := make([][]byte, len(wrappedData))
 		dim := int64(0)
@@ -333,12 +331,12 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		array0 := wrappedData[0]
 		dim := len(array0)
 		if dim < 1 {
-			return nil, errors.New("dim must >= 1")
+			return nil, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 		}
 		data := make([]byte, len(wrappedData)*dim)
 
@@ -358,13 +356,13 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			},
 		}
 	default:
-		return nil, errors.New("unsupported data type")
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type")
 	}
 	return &ret, nil
 }
 
 func newFieldDataError(field string, err error) error {
-	return fmt.Errorf("parse field[%s]: %s", field, err.Error())
+	return merr.WrapErrParameterInvalidErr(err, "parse field[%s]", field)
 }
 
 func convertFieldDataArray(input []*FieldData) ([]*schemapb.FieldData, error) {
@@ -381,19 +379,25 @@ func convertFieldDataArray(input []*FieldData) ([]*schemapb.FieldData, error) {
 
 // SearchRequest is the RESTful request body for search
 type SearchRequest struct {
-	Base               *commonpb.MsgBase        `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName             string                   `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName     string                   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	PartitionNames     []string                 `protobuf:"bytes,4,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
-	Dsl                string                   `protobuf:"bytes,5,opt,name=dsl,proto3" json:"dsl,omitempty"`
-	DslType            commonpb.DslType         `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
-	BinaryVectors      [][]byte                 `json:"binary_vectors,omitempty"`
-	Vectors            [][]float32              `json:"vectors,omitempty"`
-	OutputFields       []string                 `protobuf:"bytes,8,rep,name=output_fields,json=outputFields,proto3" json:"output_fields,omitempty"`
-	SearchParams       []*commonpb.KeyValuePair `protobuf:"bytes,9,rep,name=search_params,json=searchParams,proto3" json:"search_params,omitempty"`
-	TravelTimestamp    uint64                   `protobuf:"varint,10,opt,name=travel_timestamp,json=travelTimestamp,proto3" json:"travel_timestamp,omitempty"`
-	GuaranteeTimestamp uint64                   `protobuf:"varint,11,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
-	Nq                 int64                    `protobuf:"varint,12,opt,name=nq,proto3" json:"nq,omitempty"`
+	Base                   *commonpb.MsgBase        `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName                 string                   `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	CollectionName         string                   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	PartitionNames         []string                 `protobuf:"bytes,4,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
+	Dsl                    string                   `protobuf:"bytes,5,opt,name=dsl,proto3" json:"dsl,omitempty"`
+	DslType                commonpb.DslType         `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
+	BinaryVectors          [][]byte                 `json:"binary_vectors,omitempty"`
+	Vectors                [][]float32              `json:"vectors,omitempty"`
+	OutputFields           []string                 `protobuf:"bytes,8,rep,name=output_fields,json=outputFields,proto3" json:"output_fields,omitempty"`
+	SearchParams           []*commonpb.KeyValuePair `protobuf:"bytes,9,rep,name=search_params,json=searchParams,proto3" json:"search_params,omitempty"`
+	TravelTimestamp        uint64                   `protobuf:"varint,10,opt,name=travel_timestamp,json=travelTimestamp,proto3" json:"travel_timestamp,omitempty"`
+	GuaranteeTimestamp     uint64                   `protobuf:"varint,11,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
+	Nq                     int64                    `protobuf:"varint,12,opt,name=nq,proto3" json:"nq,omitempty"`
+	SearchAggregation      *SearchAggregationReq    `json:"searchAggregation,omitempty"`
+	SearchAggregationSnake *SearchAggregationReq    `json:"search_aggregation,omitempty"`
+}
+
+func (r *SearchRequest) HasSearchAggregation() bool {
+	return r.SearchAggregation != nil || r.SearchAggregationSnake != nil
 }
 
 func binaryVector2Bytes(vectors [][]byte) []byte {

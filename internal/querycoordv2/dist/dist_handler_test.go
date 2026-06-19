@@ -33,11 +33,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type DistHandlerSuite struct {
@@ -52,7 +52,6 @@ type DistHandlerSuite struct {
 	nodeManager      *session.NodeManager
 	scheduler        *task.MockScheduler
 	dispatchMockCall *mock.Call
-	executedFlagChan chan struct{}
 	dist             *meta.DistributionManager
 	target           *meta.MockTargetManager
 	handler          *distHandler
@@ -69,8 +68,6 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.target = meta.NewMockTargetManager(suite.T())
 	suite.ctx = context.Background()
 
-	suite.executedFlagChan = make(chan struct{}, 1)
-	suite.scheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(suite.executedFlagChan).Maybe()
 	suite.target.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
@@ -145,54 +142,6 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 	time.Sleep(3 * time.Second)
 }
 
-func (suite *DistHandlerSuite) TestForcePullDist() {
-	if suite.dispatchMockCall != nil {
-		suite.dispatchMockCall.Unset()
-		suite.dispatchMockCall = nil
-	}
-
-	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
-
-	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.client.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{
-		Status: merr.Success(),
-		NodeID: 1,
-		Channels: []*querypb.ChannelVersionInfo{
-			{
-				Channel:    "test-channel-1",
-				Collection: 1,
-				Version:    1,
-			},
-		},
-		Segments: []*querypb.SegmentVersionInfo{
-			{
-				ID:         1,
-				Collection: 1,
-				Partition:  1,
-				Channel:    "test-channel-1",
-				Version:    1,
-			},
-		},
-
-		LeaderViews: []*querypb.LeaderView{
-			{
-				Collection: 1,
-				Channel:    "test-channel-1",
-			},
-		},
-		LastModifyTs: 1,
-	}, nil)
-	suite.executedFlagChan <- struct{}{}
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
-	defer suite.handler.stop()
-
-	time.Sleep(300 * time.Millisecond)
-}
-
 func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 	if suite.dispatchMockCall != nil {
 		suite.dispatchMockCall.Unset()
@@ -256,11 +205,11 @@ func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 	// Verify that the distributions were updated correctly
 	segments := suite.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(1))
 	suite.Require().Equal(1, len(segments))
-	suite.Require().Equal(int64(1), segments[0].SegmentInfo.ID)
+	suite.Require().Equal(int64(1), segments[0].ID)
 
 	channels := suite.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(1))
 	suite.Require().Equal(1, len(channels))
-	suite.Require().Equal("test-channel-1", channels[0].VchannelInfo.ChannelName)
+	suite.Require().Equal("test-channel-1", channels[0].ChannelName)
 
 	// Verify that the notification was called
 	suite.Require().Greater(notifyCounter.Load(), int32(0))
@@ -304,7 +253,7 @@ func TestHeartbeatMetricsRecording(t *testing.T) {
 	}
 
 	// Act: Handle distribution response
-	handler.handleDistResp(ctx, resp, false)
+	handler.handleDistResp(ctx, resp)
 
 	// Assert: Verify our specific metric was recorded with the expected value
 	finalMetricValue := getMetricValueForNode(fmt.Sprint(nodeID))
@@ -340,6 +289,40 @@ func getMetricValueForNode(nodeID string) float64 {
 		}
 	}
 	return 0 // Return 0 if metric not found (default value)
+}
+
+func TestDispatchLoopUsesDispatchInterval(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.QueryCoordCfg.DistPullInterval.Key, "60000")
+	params.Save(params.QueryCoordCfg.DispatchInterval.Key, "10")
+	defer params.Reset(params.QueryCoordCfg.DistPullInterval.Key)
+	defer params.Reset(params.QueryCoordCfg.DispatchInterval.Key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dispatched := atomic.NewBool(false)
+	scheduler := task.NewMockScheduler(t)
+	scheduler.EXPECT().Dispatch(int64(1)).Run(func(nodeID int64) {
+		dispatched.Store(true)
+		cancel()
+	})
+
+	handler := &distHandler{
+		nodeID:    1,
+		c:         make(chan struct{}),
+		scheduler: scheduler,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.startDispatchLoop(ctx)
+	}()
+
+	assert.Eventually(t, dispatched.Load, time.Second, 10*time.Millisecond)
+	<-done
 }
 
 func TestDistHandlerSuite(t *testing.T) {

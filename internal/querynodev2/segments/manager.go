@@ -31,21 +31,18 @@ import (
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
-	"github.com/milvus-io/milvus/pkg/v2/eventlog"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/cache"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/eventlog"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // TODO maybe move to manager and change segment constructor
@@ -74,95 +71,15 @@ func IncreaseVersion(version int64) SegmentAction {
 type Manager struct {
 	Collection CollectionManager
 	Segment    SegmentManager
-	DiskCache  cache.Cache[int64, Segment]
 	Loader     Loader
 }
 
 func NewManager() *Manager {
-	diskCap := paramtable.Get().QueryNodeCfg.DiskCacheCapacityLimit.GetAsSize()
-
 	segMgr := NewSegmentManager()
-	sf := singleflight.Group{}
 	manager := &Manager{
 		Collection: NewCollectionManager(),
 		Segment:    segMgr,
 	}
-
-	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithLazyScavenger(func(key int64) int64 {
-		segment := segMgr.GetWithType(key, SegmentTypeSealed)
-		if segment == nil {
-			return 0
-		}
-		return int64(segment.ResourceUsageEstimate().DiskSize)
-	}, diskCap).WithLoader(func(ctx context.Context, key int64) (Segment, error) {
-		log := log.Ctx(ctx)
-		log.Debug("cache missed segment", zap.Int64("segmentID", key))
-		segment := segMgr.GetWithType(key, SegmentTypeSealed)
-		if segment == nil {
-			// the segment has been released, just ignore it
-			log.Warn("segment is not found when loading", zap.Int64("segmentID", key))
-			return nil, merr.ErrSegmentNotFound
-		}
-		info := segment.LoadInfo()
-		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (nop interface{}, err error) {
-			cacheLoadRecord := metricsutil.NewCacheLoadRecord(getSegmentMetricLabel(segment))
-			cacheLoadRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
-			defer func() {
-				cacheLoadRecord.Finish(err)
-			}()
-
-			collection := manager.Collection.Get(segment.Collection())
-			if collection == nil {
-				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
-			}
-
-			err = manager.Loader.LoadLazySegment(ctx, segment, info)
-			return nil, err
-		})
-		if err != nil {
-			log.Warn("cache sealed segment failed", zap.Error(err))
-			return nil, err
-		}
-		return segment, nil
-	}).WithFinalizer(func(ctx context.Context, key int64, segment Segment) error {
-		log := log.Ctx(ctx)
-		log.Debug("evict segment from cache", zap.Int64("segmentID", key))
-		cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
-		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
-		defer cacheEvictRecord.Finish(nil)
-		segment.Release(ctx, WithReleaseScope(ReleaseScopeData))
-		return nil
-	}).WithReloader(func(ctx context.Context, key int64) (Segment, error) {
-		log := log.Ctx(ctx)
-		segment := segMgr.GetWithType(key, SegmentTypeSealed)
-		if segment == nil {
-			// the segment has been released, just ignore it
-			log.Debug("segment is not found when reloading", zap.Int64("segmentID", key))
-			return nil, merr.ErrSegmentNotFound
-		}
-
-		localSegment := segment.(*LocalSegment)
-		err := manager.Loader.LoadIndex(ctx, localSegment, segment.LoadInfo(), segment.NeedUpdatedVersion())
-		if err != nil {
-			log.Warn("reload segment failed", zap.Int64("segmentID", key), zap.Error(err))
-			return nil, merr.ErrSegmentLoadFailed
-		}
-		if err := localSegment.RemoveUnusedFieldFiles(); err != nil {
-			log.Warn("remove unused field files failed", zap.Int64("segmentID", key), zap.Error(err))
-			return nil, merr.ErrSegmentReduplicate
-		}
-
-		return segment, nil
-	}).Build()
-
-	segMgr.registerReleaseCallback(func(s Segment) {
-		if s.Type() == SegmentTypeSealed {
-			// !!! We cannot use ctx of request to call Remove,
-			// Once context canceled, the segment will be leak in cache forever.
-			// Because it has been cleaned from segment manager.
-			manager.DiskCache.Remove(context.Background(), s.ID())
-		}
-	})
 
 	return manager
 }
@@ -195,6 +112,12 @@ type SegmentManager interface {
 	Remove(ctx context.Context, segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int)
 	RemoveBy(ctx context.Context, filters ...SegmentFilter) (int, int)
 	Clear(ctx context.Context)
+
+	// ReleaseDetached completes the release of a segment previously taken out of
+	// the active maps via DetachStreaming. It runs the same bookkeeping as the
+	// normal release path (release callback, segment teardown, metric Dec and
+	// clearing the on-releasing set).
+	ReleaseDetached(ctx context.Context, segment Segment)
 
 	// Deprecated: quick fix critical issue: #30857
 	// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
@@ -495,7 +418,7 @@ func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, seg
 
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Segment %d[%d] loaded", segment.ID(), segment.Collection())))
 		metrics.QueryNodeNumSegments.WithLabelValues(
-			fmt.Sprint(paramtable.GetNodeID()),
+			paramtable.GetStringNodeID(),
 			fmt.Sprint(segment.Collection()),
 			segment.Type().String(),
 			segment.Level().String(),
@@ -740,6 +663,37 @@ func (mgr *segmentManager) Remove(ctx context.Context, segmentID typeutil.Unique
 	return removeGrowing, removeSealed
 }
 
+// DetachStreaming removes the given growing segment from the active maps
+// WITHOUT releasing it. The segment is staged into the on-releasing set so
+// Exist() keeps reporting it while growing-source flush handoff keeps the
+// segment alive. The owner MUST call ReleaseDetached once it is done,
+// otherwise the on-releasing set entry, the segment gauge and the release
+// callback are never reconciled.
+func (mgr *segmentManager) DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int {
+	removeGrowing := 0
+	if mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID) != nil {
+		removeGrowing = 1
+	}
+	log.Ctx(ctx).Info("detached segment from active segment manager",
+		zap.Int64("segmentID", segmentID),
+		zap.Int("growingCount", removeGrowing))
+	return removeGrowing
+}
+
+// ReleaseDetached completes the release of a segment previously taken out of the
+// active maps via DetachStreaming. DetachStreaming deliberately skips release()
+// so an out-of-band owner (growing-source flush handoff) can keep the segment
+// alive; that owner MUST call ReleaseDetached when it is done. Otherwise the
+// on-releasing set entry, the segment gauge (QueryNodeNumSegments) and the
+// release callback are never reconciled, and Exist() would keep returning true
+// for the segmentID.
+func (mgr *segmentManager) ReleaseDetached(ctx context.Context, segment Segment) {
+	if segment == nil {
+		return
+	}
+	mgr.release(ctx, segment)
+}
+
 func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID typeutil.UniqueID) Segment {
 	segment, ok := mgr.globalSegments.RemoveWithType(segmentID, typ)
 	if !ok {
@@ -820,7 +774,7 @@ func (mgr *segmentManager) release(ctx context.Context, segment Segment) {
 	segment.Release(ctx)
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		fmt.Sprint(segment.Collection()),
 		segment.Type().String(),
 		segment.Level().String(),

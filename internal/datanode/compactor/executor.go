@@ -24,11 +24,12 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/internal/storagev2"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -90,6 +91,8 @@ func getTaskSlotUsage(task Compactor) int64 {
 			taskSlotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 		case datapb.CompactionType_Level0DeleteCompaction:
 			taskSlotUsage = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
+		case datapb.CompactionType_BumpSchemaVersionCompaction:
+			taskSlotUsage = paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64()
 		}
 		log.Warn("illegal task slot usage, change it to a default value",
 			zap.Int64("illegalSlotUsage", task.GetSlotUsage()),
@@ -147,6 +150,12 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 			task.result = result
 		} else {
 			task.state = datapb.CompactionTaskState_failed
+		}
+
+		// Publish filesystem metrics after compaction task completion
+		storageConfig := task.compactor.GetStorageConfig()
+		if _, err := storagev2.PublishFilesystemMetricsWithConfig(storageConfig); err != nil {
+			log.Warn("failed to publish filesystem metrics", zap.Error(err))
 		}
 
 		// Adjust slot usage
@@ -225,12 +234,12 @@ func (e *executor) executeTask(task Compactor) {
 		deleteCount += getDataCount(seg.GetDeltalogs())
 	})
 	metrics.DataNodeWriteDataCount.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		metrics.CompactionDataSourceLabel,
 		metrics.InsertLabel,
 		fmt.Sprint(task.GetCollection())).Add(float64(entityCount))
 	metrics.DataNodeWriteDataCount.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		metrics.CompactionDataSourceLabel,
 		metrics.DeleteLabel,
 		fmt.Sprint(task.GetCollection())).Add(float64(deleteCount))

@@ -23,12 +23,16 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestAzureObjectStorage(t *testing.T) {
@@ -190,15 +194,29 @@ func TestAzureObjectStorage(t *testing.T) {
 	})
 
 	t.Run("test useIAM", func(t *testing.T) {
+		// newAzureObjectStorageWithConfig probes the Azure managed-identity
+		// IMDS endpoint (link-local 169.254.169.254). On hosts without an
+		// IMDS responder (bare-metal dev machines) the SDK blocks on the
+		// TCP connect until the 10min testing.M timeout. Bound each call
+		// with a short context so it fail-fast regardless of environment;
+		// the test only asserts that an error is returned.
 		var err error
 		config.UseIAM = true
-		_, err = newAzureObjectStorageWithConfig(ctx, &config)
+
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err = newAzureObjectStorageWithConfig(cctx, &config)
+		cancel()
 		assert.Error(t, err)
+
 		os.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-00000000000")
 		os.Setenv("AZURE_TENANT_ID", "00000000-0000-0000-0000-00000000000")
 		os.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/var/run/secrets/tokens/azure-identity-token")
-		_, err = newAzureObjectStorageWithConfig(ctx, &config)
+
+		cctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		_, err = newAzureObjectStorageWithConfig(cctx, &config)
+		cancel()
 		assert.Error(t, err)
+
 		config.UseIAM = false
 	})
 
@@ -573,4 +591,51 @@ func TestReadFile(t *testing.T) {
 		err = reader.Close()
 		assert.NoError(t, err)
 	})
+}
+
+func TestMapObjectStorageError_Azure_NewErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		inputError    error
+		expectedError error
+	}{
+		{
+			name:          "AuthenticationFailed",
+			inputError:    &azcore.ResponseError{ErrorCode: "AuthenticationFailed"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "AuthorizationFailure",
+			inputError:    &azcore.ResponseError{ErrorCode: "AuthorizationFailure"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "ContainerNotFound",
+			inputError:    &azcore.ResponseError{ErrorCode: "ContainerNotFound"},
+			expectedError: merr.ErrIoBucketNotFound,
+		},
+		{
+			name:          "InvalidParameterValue",
+			inputError:    &azcore.ResponseError{ErrorCode: "InvalidParameterValue"},
+			expectedError: merr.ErrIoInvalidArgument,
+		},
+		{
+			name:          "InvalidRange",
+			inputError:    &azcore.ResponseError{ErrorCode: "InvalidRange"},
+			expectedError: merr.ErrIoInvalidRange,
+		},
+		{
+			name:          "RequestBodyTooLarge",
+			inputError:    &azcore.ResponseError{ErrorCode: "RequestBodyTooLarge"},
+			expectedError: merr.ErrIoEntityTooLarge,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapObjectStorageError("test/path", tt.inputError)
+			assert.True(t, errors.Is(result, tt.expectedError),
+				"expected %v, got %v", tt.expectedError, result)
+		})
+	}
 }

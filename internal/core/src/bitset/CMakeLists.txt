@@ -13,7 +13,8 @@ set(BITSET_SRCS
     detail/platform/dynamic.cpp
 )
 
-add_library(milvus_bitset)
+add_library(milvus_bitset STATIC)
+target_link_libraries(milvus_bitset PUBLIC milvus_conan_deps)
 
 if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
     list(APPEND BITSET_SRCS

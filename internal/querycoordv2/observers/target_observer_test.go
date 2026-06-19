@@ -21,13 +21,14 @@ import (
 	"testing"
 	"time"
 
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -35,13 +36,14 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type TargetObserverSuite struct {
@@ -106,14 +108,14 @@ func (suite *TargetObserverSuite) SetupTest() {
 
 	testCollection := utils.CreateTestCollection(suite.collectionID, 1)
 	testCollection.Status = querypb.LoadStatus_Loaded
-	err = suite.meta.CollectionManager.PutCollection(suite.ctx, testCollection)
+	err = suite.meta.PutCollection(suite.ctx, testCollection)
 	suite.NoError(err)
-	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	err = suite.meta.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
+	replicas, err := suite.meta.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
-	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
+	err = suite.meta.Put(suite.ctx, replicas...)
 	suite.NoError(err)
 
 	suite.nextTargetChannels = []*datapb.VchannelInfo{
@@ -263,17 +265,18 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
-	// Wait for observer to automatically discover the new segment
-	// The background goroutine should detect segment 13 and update NextTarget
+	// Manually trigger update so the observer discovers the new segment immediately
+	// instead of waiting for the background ticker (default interval 10s, which would
+	// make Eventually flaky when timeout < ticker interval).
+	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	suite.NoError(err)
+
+	// Verify the observer picked up segment 13 in NextTarget
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 	suite.broker.AssertExpectations(suite.T())
-
-	// Manually trigger update to ensure NextTarget is ready
-	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
-	suite.NoError(err)
 
 	// Simulate nodes loading the new segment 13
 	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
@@ -366,7 +369,7 @@ func (suite *TargetObserverSuite) TestTriggerRelease() {
 	suite.NoError(err)
 
 	// manually release partition
-	partitions := suite.meta.CollectionManager.GetPartitionsByCollection(ctx, suite.collectionID)
+	partitions := suite.meta.GetPartitionsByCollection(ctx, suite.collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *meta.Partition, _ int) int64 { return partition.PartitionID })
 	suite.observer.ReleasePartition(suite.collectionID, partitionIDs[0])
 
@@ -437,14 +440,14 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 
-	err = suite.meta.CollectionManager.PutCollection(suite.ctx, utils.CreateTestCollection(suite.collectionID, 1))
+	err = suite.meta.PutCollection(suite.ctx, utils.CreateTestCollection(suite.collectionID, 1))
 	suite.NoError(err)
-	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	err = suite.meta.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
+	replicas, err := suite.meta.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
-	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
+	err = suite.meta.Put(suite.ctx, replicas...)
 	suite.NoError(err)
 }
 
@@ -1089,6 +1092,127 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	// channelNames keys = ["channel-1"]
 	// lo.Every([], ["channel-1"]) = false (empty does not contain all)
 	assert.False(t, result, "Expected false when NO ready delegators exist")
+}
+
+// TestUpdateAllReplicasCheckpointMetric tests the all-replicas checkpoint metric behavior
+func TestUpdateAllReplicasCheckpointMetric(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	collectionID := int64(1000)
+	currentVersion := int64(100)
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2}))
+
+	targetMgr := meta.NewMockTargetManager(t)
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	broker := meta.NewMockBroker(t)
+	cluster := session.NewMockCluster(t)
+
+	// Create two replicas: replica1 on node1, replica2 on node2
+	replica1 := meta.NewReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  collectionID,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         []int64{1},
+	})
+	replica2 := meta.NewReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  collectionID,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         []int64{2},
+	})
+
+	mockCatalog := mocks.NewQueryCoordCatalog(t)
+	mockCatalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockCatalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
+	replicaMgr := meta.NewReplicaManager(nil, mockCatalog)
+	err := replicaMgr.Put(ctx, replica1, replica2)
+	assert.NoError(t, err)
+
+	metaInstance := &meta.Meta{
+		CollectionManager: meta.NewCollectionManager(nil),
+		ReplicaManager:    replicaMgr,
+	}
+
+	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, broker, cluster, nodeMgr)
+
+	channelName := "channel-1"
+	seekTimestamp := uint64(1000 << 18) // some timestamp
+	channels := map[string]*meta.DmChannel{
+		channelName: {
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: collectionID,
+				ChannelName:  channelName,
+				SeekPosition: &msgpb.MsgPosition{
+					Timestamp: seekTimestamp,
+				},
+			},
+		},
+	}
+
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(channels)
+	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.CurrentTarget).Return(currentVersion)
+
+	// Reset metric before test
+	metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.Reset()
+
+	// Case 1: Only replica1 ready, replica2 not ready -> metric should NOT update
+	distMgr.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channelName,
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:            1,
+			CollectionID:  collectionID,
+			Channel:       channelName,
+			TargetVersion: currentVersion,
+			Status:        &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	// Node 2 has no delegator for channel-1
+
+	observer.updateAllReplicasCheckpointMetric(ctx, collectionID)
+
+	// Metric should not have been set (no gauge value or still 0)
+	gauge, err := metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.GetMetricWithLabelValues(
+		paramtable.GetStringNodeID(), channelName,
+	)
+	assert.NoError(t, err)
+	dto := &io_prometheus_client.Metric{}
+	gauge.Write(dto)
+	assert.Equal(t, float64(0), dto.GetGauge().GetValue(),
+		"metric should not update when not all replicas are ready")
+
+	// Case 2: Both replicas ready -> metric should update
+	distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channelName,
+		},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  collectionID,
+			Channel:       channelName,
+			TargetVersion: currentVersion,
+			Status:        &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	observer.updateAllReplicasCheckpointMetric(ctx, collectionID)
+
+	gauge, err = metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.GetMetricWithLabelValues(
+		paramtable.GetStringNodeID(), channelName,
+	)
+	assert.NoError(t, err)
+	dto = &io_prometheus_client.Metric{}
+	gauge.Write(dto)
+	assert.Greater(t, dto.GetGauge().GetValue(), float64(0),
+		"metric should update when all replicas are ready")
 }
 
 func TestTargetObserver(t *testing.T) {

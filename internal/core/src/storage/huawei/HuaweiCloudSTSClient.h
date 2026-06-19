@@ -18,7 +18,6 @@
 #include "aws/core/client/ClientConfiguration.h"
 #include "aws/core/internal/AWSHttpResourceClient.h"
 #include "aws/core/utils/memory/stl/AWSString.h"
-#include "storage/huawei/HuaweiCloudSTSClient.h"
 
 namespace Aws {
 namespace Http {
@@ -26,11 +25,16 @@ enum class HttpResponseCode;
 }  // namespace Http
 
 namespace Internal {
+class HuaweiCloudSTSClientTestHelper;
 class AWS_CORE_API HuaweiCloudSTSCredentialsClient
     : public AWSHttpResourceClient {
+    friend class ::Aws::Internal::HuaweiCloudSTSClientTestHelper;
+
  public:
     explicit HuaweiCloudSTSCredentialsClient(
         const Aws::Client::ClientConfiguration& clientConfiguration);
+
+    virtual ~HuaweiCloudSTSCredentialsClient() = default;
 
     HuaweiCloudSTSCredentialsClient&
     operator=(HuaweiCloudSTSCredentialsClient& rhs) = delete;
@@ -50,10 +54,11 @@ class AWS_CORE_API HuaweiCloudSTSCredentialsClient
     };
 
     struct STSAssumeRoleWithWebIdentityResult {
+        bool success = false;
         Aws::Auth::AWSCredentials creds;
     };
 
-    STSAssumeRoleWithWebIdentityResult
+    virtual STSAssumeRoleWithWebIdentityResult
     GetAssumeRoleWithWebIdentityCredentials(
         const STSAssumeRoleWithWebIdentityRequest& request);
 
@@ -62,7 +67,7 @@ class AWS_CORE_API HuaweiCloudSTSCredentialsClient
     std::shared_ptr<Aws::Http::HttpClient> m_httpClient;
 
     struct STSCallResult {
-        bool success;
+        bool success = false;
         Aws::Auth::AWSCredentials credentials;
         Aws::String errorMessage;
     };
@@ -70,6 +75,10 @@ class AWS_CORE_API HuaweiCloudSTSCredentialsClient
     STSCallResult
     callHuaweiCloudSTS(const Aws::String& userToken,
                        const STSAssumeRoleWithWebIdentityRequest& request);
+
+    static STSCallResult
+    parseSTSResponse(Aws::Http::HttpResponseCode httpResponseCode,
+                     const Aws::String& responseBody);
 };
 }  // namespace Internal
 }  // namespace Aws

@@ -14,6 +14,7 @@
 #include <fmt/core.h>
 #include <tbb/concurrent_vector.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <deque>
@@ -100,8 +101,9 @@ class ThreadSafeValidData {
         return &data_[offset];
     }
 
-    const FixedVector<bool>&
+    FixedVector<bool>
     get_data() const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
         return data_;
     }
 
@@ -190,10 +192,9 @@ class VectorBase {
         return 0;
     }
 
-    virtual const FixedVector<bool>&
+    virtual FixedVector<bool>
     get_valid_data() const {
-        static const FixedVector<bool> empty;
-        return empty;
+        return FixedVector<bool>{};
     }
 
     virtual const OffsetMapping&
@@ -291,7 +292,7 @@ class ConcurrentVectorImpl : public VectorBase {
         ssize_t storage_offset = 0;
         if (use_mapping_storage_) {
             if constexpr (!std::is_same_v<Type, bool>) {
-                storage_offset = offset_mapping_.GetNextPhysicalOffset();
+                storage_offset = offset_mapping_.GetValidCount();
                 // Build valid_data array for offset mapping
                 std::unique_ptr<bool[]> valid_data(new bool[element_count]);
                 for (ssize_t i = 0; i < element_count; ++i) {
@@ -302,10 +303,10 @@ class ConcurrentVectorImpl : public VectorBase {
                         valid_count++;
                     }
                 }
-                offset_mapping_.BuildIncremental(valid_data.get(),
-                                                 element_count,
-                                                 element_offset,
-                                                 storage_offset);
+                offset_mapping_.Append(valid_data.get(),
+                                       element_count,
+                                       element_offset,
+                                       storage_offset);
             }
         } else {
             valid_count = element_count;
@@ -445,13 +446,12 @@ class ConcurrentVectorImpl : public VectorBase {
         return offset_mapping_;
     }
 
-    const FixedVector<bool>&
+    FixedVector<bool>
     get_valid_data() const override {
         if (valid_data_ptr_ != nullptr) {
             return valid_data_ptr_->get_data();
         }
-        static const FixedVector<bool> empty;
-        return empty;
+        return FixedVector<bool>{};
     }
 
  private:
@@ -527,7 +527,7 @@ class ConcurrentVectorImpl : public VectorBase {
     ThreadSafeValidDataPtr valid_data_ptr_ = nullptr;
 
     const bool use_mapping_storage_;
-    milvus::OffsetMapping offset_mapping_;
+    milvus::GrowingOffsetMapping offset_mapping_;
 };
 
 template <typename Type>
@@ -766,7 +766,7 @@ class ConcurrentVector<Int8Vector> : public ConcurrentVectorImpl<int8, false> {
     }
 };
 
-static bool
+[[maybe_unused]] static bool
 ConcurrentDenseVectorCheck(const VectorBase* vec_base, DataType data_type) {
     if (data_type == DataType::VECTOR_FLOAT) {
         return dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);

@@ -18,26 +18,23 @@ package segments
 
 import (
 	"encoding/base64"
-	"fmt"
 	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CollectionManager interface {
@@ -93,16 +90,23 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	m.mut.Lock()
 	defer m.mut.Unlock()
 	if collection, ok := m.collections[collectionID]; ok {
-		if loadMeta.GetSchemaVersion() > collection.schemaVersion {
-			// the schema may be changed even the collection is loaded
-			collection.schema.Store(schema)
-			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
-			collection.schemaVersion = loadMeta.GetSchemaVersion()
+		if loadMeta.GetSchemaVersion() > collection.SchemaVersion() {
+			if err := collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion()); err != nil {
+				return err
+			}
+			collection.setSchema(schema, loadMeta.GetSchemaVersion())
 			log.Info("update collection schema",
 				zap.Int64("collectionID", collectionID),
 				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
 				zap.Any("schema", schema),
 			)
+		}
+		// Always update index meta to ensure newly indexed fields are visible
+		// for search plan creation (CollectionIndexMeta::HasField check).
+		if meta != nil {
+			if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
+				return err
+			}
 		}
 		collection.Ref(1)
 		return nil
@@ -130,15 +134,19 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
+	if version <= collection.SchemaVersion() {
+		return nil
+	}
+
 	if err := collection.ccollection.UpdateSchema(schema, version); err != nil {
 		return err
 	}
-	collection.schema.Store(schema)
+	collection.setSchema(schema, version)
 	return nil
 }
 
 func (m *collectionManager) updateMetric() {
-	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(m.collections)))
+	metrics.QueryNodeNumCollections.WithLabelValues(paramtable.GetStringNodeID()).Set(float64(len(m.collections)))
 }
 
 func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
@@ -163,7 +171,9 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 				zap.Int64("nodeID", paramtable.GetNodeID()), zap.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
 			DeleteCollection(collection)
-			metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), collectionID)
+			// Run metrics cleanup in background; DeletePartialMatch is CPU-heavy and should not block Unref.
+			nodeID := paramtable.GetNodeID()
+			go metrics.CleanupQueryNodeCollectionMetrics(nodeID, collectionID)
 			m.updateMetric()
 			return true
 		}
@@ -171,6 +181,11 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 	}
 
 	return true
+}
+
+type collectionSchemaSnapshot struct {
+	schema  *schemapb.CollectionSchema
+	version uint64
 }
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
@@ -188,11 +203,10 @@ type Collection struct {
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
 	// so we don't need to update resource group in Collection.
 	// if resource group is not updated, the reference count of collection manager works failed.
-	metricType    atomic.String // deprecated
-	schema        atomic.Pointer[schemapb.CollectionSchema]
-	isGpuIndex    bool
-	loadFields    typeutil.Set[int64]
-	schemaVersion uint64
+	metricType atomic.String // deprecated
+	schema     atomic.Pointer[collectionSchemaSnapshot]
+	isGpuIndex bool
+	loadFields typeutil.Set[int64]
 
 	refCount *atomic.Uint32
 }
@@ -221,9 +235,27 @@ func (c *Collection) GetCCollection() *segcore.CCollection {
 	return c.ccollection
 }
 
+func (c *Collection) setSchema(schema *schemapb.CollectionSchema, version uint64) {
+	c.schema.Store(&collectionSchemaSnapshot{schema: schema, version: version})
+}
+
+func (c *Collection) SchemaAndVersion() (*schemapb.CollectionSchema, uint64) {
+	snapshot := c.schema.Load()
+	if snapshot == nil {
+		return nil, 0
+	}
+	return snapshot.schema, snapshot.version
+}
+
 // Schema returns the schema of collection
 func (c *Collection) Schema() *schemapb.CollectionSchema {
-	return c.schema.Load()
+	schema, _ := c.SchemaAndVersion()
+	return schema
+}
+
+func (c *Collection) SchemaVersion() uint64 {
+	_, version := c.SchemaAndVersion()
+	return version
 }
 
 // IsGpuIndex returns a boolean value indicating whether the collection is using a GPU index.
@@ -300,9 +332,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		req.IndexMeta = indexMeta
 		for _, indexMeta := range indexMeta.GetIndexMetas() {
-			isGpuIndex = lo.ContainsBy(indexMeta.GetIndexParams(), func(param *commonpb.KeyValuePair) bool {
-				return param.Key == common.IndexTypeKey && vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(param.Value)
-			})
+			isGpuIndex = gpuIndexRequiresGpu(indexMeta.GetIndexParams())
 			if isGpuIndex {
 				break
 			}
@@ -322,7 +352,6 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		dbName:        loadMetaInfo.GetDbName(),
 		dbProperties:  loadMetaInfo.GetDbProperties(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
-		schemaVersion: loadMetaInfo.GetSchemaVersion(),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
@@ -330,7 +359,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
 	}
-	coll.schema.Store(schema)
+	coll.setSchema(schema, loadMetaInfo.GetSchemaVersion())
 
 	return coll, nil
 }
@@ -343,7 +372,7 @@ func NewTestCollection(collectionID int64, loadType querypb.LoadType, schema *sc
 		loadType:   loadType,
 		refCount:   atomic.NewUint32(0),
 	}
-	col.schema.Store(schema)
+	col.setSchema(schema, 0)
 	return col
 }
 
@@ -355,7 +384,7 @@ func NewCollectionWithoutSegcoreForTest(collectionID int64, schema *schemapb.Col
 		partitions: typeutil.NewConcurrentSet[int64](),
 		refCount:   atomic.NewUint32(0),
 	}
-	coll.schema.Store(schema)
+	coll.setSchema(schema, 0)
 	return coll
 }
 

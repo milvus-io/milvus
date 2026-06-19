@@ -39,6 +39,10 @@
 #include "index/IndexInfo.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "pb/common.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "index/StringIndexMarisa.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/schema.pb.h"
@@ -46,6 +50,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -79,11 +84,15 @@ auto
 GetTempFileManagerCtx(CDataType data_type) {
     milvus::storage::StorageConfig storage_config;
     storage_config.storage_type = "local";
-    storage_config.root_path = "/tmp/local/";
+    storage_config.root_path = TestLocalPath;
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
-    auto ctx = milvus::storage::FileManagerContext(chunk_manager);
-    ctx.fieldDataMeta.field_schema.set_data_type(
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(
         static_cast<milvus::proto::schema::DataType>(data_type));
+    milvus::storage::IndexMeta index_meta{3, 101, 1000, 10000};
+    auto ctx = milvus::storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
     return ctx;
 }
 
@@ -138,6 +147,32 @@ TYPED_TEST_P(TypedScalarIndexTest, HasRawData) {
         ASSERT_EQ(nb, scalar_index->Count());
         ASSERT_TRUE(scalar_index->HasRawData());
     }
+}
+
+TEST(ScalarIndexPlannerPolicy, PatternOpsRequireString) {
+    milvus::index::BitmapIndex<int64_t> int_index;
+    EXPECT_FALSE(int_index.ShouldUseOp(milvus::proto::plan::OpType::Match));
+    EXPECT_FALSE(
+        int_index.ShouldUseOp(milvus::proto::plan::OpType::PrefixMatch));
+    EXPECT_FALSE(
+        int_index.ShouldUseOp(milvus::proto::plan::OpType::PostfixMatch));
+    EXPECT_FALSE(
+        int_index.ShouldUseOp(milvus::proto::plan::OpType::InnerMatch));
+    EXPECT_FALSE(
+        int_index.ShouldUseOp(milvus::proto::plan::OpType::RegexMatch));
+    EXPECT_TRUE(int_index.ShouldUseOp(milvus::proto::plan::OpType::Equal));
+
+    milvus::index::BitmapIndex<std::string> string_index;
+    EXPECT_TRUE(string_index.ShouldUseOp(milvus::proto::plan::OpType::Match));
+    EXPECT_TRUE(
+        string_index.ShouldUseOp(milvus::proto::plan::OpType::PrefixMatch));
+    EXPECT_TRUE(
+        string_index.ShouldUseOp(milvus::proto::plan::OpType::PostfixMatch));
+    EXPECT_TRUE(
+        string_index.ShouldUseOp(milvus::proto::plan::OpType::InnerMatch));
+    EXPECT_TRUE(
+        string_index.ShouldUseOp(milvus::proto::plan::OpType::RegexMatch));
+    EXPECT_TRUE(string_index.ShouldUseOp(milvus::proto::plan::OpType::Equal));
 }
 
 TYPED_TEST_P(TypedScalarIndexTest, In) {
@@ -232,11 +267,16 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
 
-        auto binary_set = index->Serialize(nullptr);
+        auto create_index_result = index->UploadUnified({});
+        auto index_files = create_index_result->GetIndexFiles();
         auto copy_index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
                 create_index_info, GetTempFileManagerCtx(dtype));
-        copy_index->Load(binary_set);
+        milvus::Config load_config;
+        load_config["index_files"] = index_files;
+        load_config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        copy_index->LoadUnified(load_config);
 
         auto copy_scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(copy_index.get());
@@ -391,18 +431,19 @@ TestBuildIndex(int N, int cardinality, int index_type) {
     if (index_type == 0) {
         auto index = std::make_unique<milvus::index::BitmapIndex<T>>();
         index->Build(N, raw_data.data());
-        return std::move(index);
+        return index;
     } else if (index_type == 1) {
         if constexpr (std::is_same_v<T, std::string>) {
             auto index = std::make_unique<milvus::index::StringIndexMarisa>();
             index->Build(N, raw_data.data());
-            return std::move(index);
+            return index;
         } else {
             auto index = milvus::index::CreateScalarIndexSort<T>();
             index->Build(N, raw_data.data());
-            return std::move(index);
+            return index;
         }
     }
+    throw std::invalid_argument("unsupported index_type");
 }
 
 template <typename T>

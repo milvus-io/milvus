@@ -11,10 +11,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 // CreateConsumeServer create a new consumer.
@@ -38,7 +38,7 @@ import (
 func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb.StreamingNodeHandlerService_ConsumeServer) (*ConsumeServer, error) {
 	createReq, err := contextutil.GetCreateConsumer(streamServer.Context())
 	if err != nil {
-		return nil, status.NewInvaildArgument("create consumer request is required")
+		return nil, status.NewInvalidArgument("create consumer request is required")
 	}
 
 	l, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
@@ -56,11 +56,11 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 
 	req, err := streamServer.Recv()
 	if err != nil {
-		return nil, errors.New("receive create consumer request failed")
+		return nil, status.NewInvalidArgument("receive create consumer request failed")
 	}
 	createVChannelReq := req.GetCreateVchannelConsumer()
 	if createVChannelReq == nil {
-		return nil, errors.New("The first message must be  create vchannel consumer request")
+		return nil, status.NewInvalidArgument("The first message must be  create vchannel consumer request")
 	}
 	scanner, err := l.Read(streamServer.Context(), wal.ReadOption{
 		VChannel:               createVChannelReq.GetVchannel(),

@@ -19,15 +19,17 @@ package external
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // TaskKey uniquely identifies an external collection task.
@@ -215,8 +217,8 @@ func (m *ExternalCollectionManager) CancelTask(clusterID string, taskID int64) b
 // SubmitTask registers and runs a task asynchronously in the manager pool.
 func (m *ExternalCollectionManager) SubmitTask(
 	clusterID string,
-	req *datapb.UpdateExternalCollectionRequest,
-	taskFunc func(context.Context) (*datapb.UpdateExternalCollectionResponse, error),
+	req *datapb.RefreshExternalCollectionTaskRequest,
+	taskFunc func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error),
 ) error {
 	taskID := req.GetTaskID()
 
@@ -233,12 +235,35 @@ func (m *ExternalCollectionManager) SubmitTask(
 	}
 
 	if oldInfo := m.LoadOrStore(clusterID, taskID, info); oldInfo != nil {
-		return fmt.Errorf("task already exists: taskID=%d", taskID)
+		// Task already exists — this is a duplicate dispatch (e.g. from
+		// scheduler TOCTOU race between Enqueue dedup check and Push).
+		// Treat as idempotent success since the task is already running.
+		log.Info("task already exists, treating as idempotent success",
+			zap.Int64("taskID", taskID),
+			zap.Int64("collectionID", req.GetCollectionID()))
+		return nil
 	}
 
 	// Submit to pool
-	m.pool.Submit(func() (any, error) {
+	m.pool.Submit(func() (_ any, retErr error) {
 		defer cancel()
+		// Defense-in-depth: isolate panics in a single task so a buggy
+		// external source cannot crash the whole datanode process (e.g.
+		// divide-by-zero from a zero-row parquet, fix for #49225).
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				log.Error("external collection task panicked",
+					zap.Int64("taskID", taskID),
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Any("panic", r),
+					zap.ByteString("stack", stack))
+				reason := fmt.Sprintf("task panicked: %v", r)
+				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil)
+				// A recovered panic is a server-side failure, never caller input.
+				retErr = merr.WrapErrServiceInternalMsg("%s", reason)
+			}
+		}()
 		log.Info("executing external collection task in pool",
 			zap.Int64("taskID", taskID),
 			zap.Int64("collectionID", req.GetCollectionID()))
@@ -259,9 +284,6 @@ func (m *ExternalCollectionManager) SubmitTask(
 		}
 		failReason := resp.GetFailReason()
 		kept := resp.GetKeptSegments()
-		if len(kept) == 0 {
-			kept = info.KeptSegments
-		}
 		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
 		log.Info("external collection task completed",
 			zap.Int64("taskID", taskID))

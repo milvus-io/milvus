@@ -20,15 +20,15 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const waitCollectionReleasedTimeout = 30 * time.Second
@@ -46,19 +46,19 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return errors.Wrapf(err, "context error while waiting for release, collection=%d", collection)
+			return merr.Wrapf(err, "context error while waiting for release, collection=%d", collection)
 		}
 
 		var (
 			channels []*meta.DmChannel
-			segments []*meta.Segment = dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collection))
+			segments = dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collection))
 		)
 		if partitionSet.Len() > 0 {
 			segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
 				return partitionSet.Contain(segment.GetPartitionID())
 			})
 		} else {
-			channels = dist.ChannelDistManager.GetByCollectionAndFilter(collection)
+			channels = dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collection))
 		}
 
 		currentChannelCount := len(channels)
@@ -74,7 +74,7 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 
 		// If release is not in progress for a while, return error
 		if time.Since(lastChangeTime) > waitCollectionReleasedTimeout {
-			return errors.Errorf("wait collection released timeout, collection=%d, channels=%d, segments=%d",
+			return merr.WrapErrServiceUnavailableMsg("wait collection released timeout, collection=%d, channels=%d, segments=%d",
 				collection, currentChannelCount, currentSegmentCount)
 		}
 
@@ -99,18 +99,45 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 	// manual trigger update next target
 	ready, err := targetObserver.UpdateNextTarget(collection)
 	if err != nil {
-		return errors.Wrapf(err, "failed to update next target, collection=%d", collection)
+		return merr.Wrapf(err, "failed to update next target, collection=%d", collection)
 	}
 
 	// accelerate check
 	targetObserver.TriggerUpdateCurrentTarget(collection)
+
 	// wait current target ready
 	select {
 	case <-ready:
 		return nil
 	case <-ctx.Done():
-		return errors.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
+		return merr.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
 	case <-time.After(waitCollectionReleasedTimeout):
-		return errors.Errorf("wait current target updated timeout, collection=%d", collection)
+		return merr.WrapErrServiceUnavailableMsg("wait current target updated timeout, collection=%d", collection)
+	}
+}
+
+func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetObserver, collection int64, partition int64) error {
+	// manual trigger update next target
+	ready, err := targetObserver.UpdatePartition(collection, partition)
+	if err != nil {
+		return merr.Wrapf(err, "failed to update next target, collection=%d", collection)
+	}
+	select {
+	case <-ready:
+		return nil
+	default:
+	}
+
+	// accelerate check
+	targetObserver.TriggerUpdateCurrentTarget(collection)
+
+	// wait current target ready
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return merr.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
+	case <-time.After(waitCollectionReleasedTimeout):
+		return merr.WrapErrServiceUnavailableMsg("wait current target updated timeout, collection=%d", collection)
 	}
 }

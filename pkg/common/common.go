@@ -18,20 +18,19 @@ package common
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math/bits"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/twpayne/go-geom/encoding/wkb"
 	"github.com/twpayne/go-geom/encoding/wkbcommon"
 	"github.com/twpayne/go-geom/encoding/wkt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // system field id:
@@ -62,8 +61,17 @@ const (
 	// NamespaceFieldName defines the name of the Namespace field
 	NamespaceFieldName = "$namespace_id"
 
+	NamespaceModeKey          = "namespace.mode"
+	NamespaceModePartitionKey = "partition_key"
+	NamespaceModePartition    = "partition"
+	ValidNamespaceModes       = NamespaceModePartitionKey + ", " + NamespaceModePartition
+
 	// MetaFieldName is the field name of dynamic schema
 	MetaFieldName = "$meta"
+
+	// VirtualPKFieldName is the field name of virtual primary key for external collections
+	// Virtual PK format: (segmentID << 32) | offset
+	VirtualPKFieldName = "__virtual_pk__"
 
 	// DefaultShardsNum defines the default number of shards when creating a collection
 	DefaultShardsNum = int32(1)
@@ -76,6 +84,12 @@ const (
 
 	// AllPartitionsID indicates data applies to all partitions.
 	AllPartitionsID = int64(-1)
+
+	// PkFilter values for SearchRequest/RetrieveRequest.PkFilter field.
+	// Proxy sets this to let delegator skip plan unmarshal when no PK predicate exists.
+	PkFilterNotChecked  = int32(0) // old proxy or not checked (backward compat)
+	PkFilterHasPkFilter = int32(1) // plan contains optimizable PK predicate
+	PkFilterNoPkFilter  = int32(2) // plan has no PK predicate, skip segment filter
 
 	// InvalidFieldID indicates that the field does not exist . It will be set when the field is not found.
 	InvalidFieldID = int64(-1)
@@ -90,9 +104,45 @@ const (
 )
 
 const (
+	// Scalar index engine version tracks the *capability* of a Milvus node
+	// (which index types / features it supports). It is reported by QueryNodes
+	// in their session and aggregated by datacoord so that newly built indexes
+	// are clamped to a version every node in the cluster can load — this is
+	// what makes rolling upgrades safe.
+	//
+	// Engine version is distinct from the on-disk file format version
+	// (see MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h). Multiple engine
+	// versions can share the same file format; bumping the engine version
+	// does not necessarily imply a format change.
+	//
+	// Scalar index engine version 3:
+	// - Packed single-file index layout (file format v3) becomes the default
+	// - HYBRID/AUTOINDEX high-cardinality scalar indexes switched from
+	//   INVERTED to STL_SORT
+	//
+	// Scalar index engine version 4:
+	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
+	//   the existing INVERTED / NGRAM)
+	// - On-disk file format is unchanged from v3
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(2)
+	CurrentScalarIndexEngineVersion = int32(4)
+	MaximumScalarIndexEngineVersion = int32(4)
+
+	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
+	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
+	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
+	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
 )
+
+// ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
+// Used by DataNode to ensure the version written back to metadata does not exceed
+// what the cluster can handle.
+func ClampScalarIndexVersion(v int32) int32 {
+	if v > MaximumScalarIndexEngineVersion {
+		return MaximumScalarIndexEngineVersion
+	}
+	return v
+}
 
 const DefaultTimezone = "UTC"
 
@@ -110,8 +160,11 @@ const (
 	// SegmentStatslogPath storage path const for segment stats log.
 	SegmentStatslogPath = `stats_log`
 
-	// SegmentIndexPath storage path const for segment index files.
-	SegmentIndexPath = `index_files`
+	// SegmentIndexV0Path storage path const for legacy build-rooted segment index files.
+	SegmentIndexV0Path = `index_files`
+
+	// SegmentIndexV1Path storage path const for collection-rooted segment index files.
+	SegmentIndexV1Path = `index_v1`
 
 	// SegmentBm25LogPath storage path const for bm25 statistic
 	SegmentBm25LogPath = `bm25_stats`
@@ -132,6 +185,8 @@ const (
 
 	// JSONStatsPath storage path const for json stats
 	JSONStatsPath = "json_stats"
+
+	DefaultResourceGroupName = "__default_resource_group"
 )
 
 const (
@@ -151,6 +206,10 @@ const (
 	CollectionKey   = "collection"
 	RecallEvalKey   = "recall_eval"
 
+	GlobalRefineKey    = "global_refine"
+	SearchTopkRatioKey = "search_topk_ratio"
+	RefineTopkRatioKey = "refine_topk_ratio"
+
 	ParamsKey      = "params"
 	IndexTypeKey   = "index_type"
 	MetricTypeKey  = "metric_type"
@@ -160,16 +219,24 @@ const (
 
 	DropRatioBuildKey = "drop_ratio_build"
 
-	IsSparseKey               = "is_sparse"
-	AutoIndexName             = "AUTOINDEX"
-	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
-	IgnoreGrowing             = "ignore_growing"
-	ConsistencyLevel          = "consistency_level"
-	HintsKey                  = "hints"
+	IsSparseKey                       = "is_sparse"
+	AutoIndexName                     = "AUTOINDEX"
+	BitmapCardinalityLimitKey         = "bitmap_cardinality_limit"
+	HybridLowCardinalityIndexTypeKey  = "hybrid_low_cardinality_index_type"
+	HybridHighCardinalityIndexTypeKey = "hybrid_high_cardinality_index_type"
+	IgnoreGrowing                     = "ignore_growing"
+	ConsistencyLevel                  = "consistency_level"
+	HintsKey                          = "hints"
 
 	JSONCastTypeKey     = "json_cast_type"
 	JSONPathKey         = "json_path"
 	JSONCastFunctionKey = "json_cast_function"
+
+	SchemaVersionConsistencyProportionKey = "schema_version_consistency_proportion"
+	// SchemaVersionConsistentSegmentsKey and SchemaVersionTotalSegmentsKey are emitted by DataCoord
+	// GetCollectionStatistics to surface per-segment schema-version consistency progress.
+	SchemaVersionConsistentSegmentsKey = "schema_version_consistent_segments"
+	SchemaVersionTotalSegmentsKey      = "schema_version_total_segments"
 )
 
 // expr query params
@@ -189,6 +256,8 @@ const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
+	CollectionExternalSource    = "collection.external_source"
+	CollectionExternalSpec      = "collection.external_spec"
 	CollectionTTLFieldKey       = "ttl_field"
 	MaxTTLSeconds               = 3155760000 // 100 years
 
@@ -249,19 +318,26 @@ const (
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
-	LazyLoadEnableKey          = "lazyload.enabled" // deprecated by warmup related params
 	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
-	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
 	TimezoneKey             = "timezone"
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
+	MaxFieldIDKey           = "max_field_id"
+
+	// query mode
+	QueryModeKey       = "query_mode"
+	QueryModeLargeTopK = "large_topk"
+	ValidQueryModes    = QueryModeLargeTopK // comma-separated if more modes added later
+
+	// namespace sharding
+	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
 
 	// warmup related
 	WarmupKey            = "warmup"
@@ -271,6 +347,7 @@ const (
 	WarmupVectorIndexKey = "warmup.vectorIndex"
 	WarmupDisable        = "disable"
 	WarmupSync           = "sync"
+	WarmupAsync          = "async"
 )
 
 const (
@@ -354,8 +431,8 @@ func IsCollectionWarmupKey(key string) bool {
 
 // ValidateWarmupPolicy validates that the warmup policy value is valid
 func ValidateWarmupPolicy(value string) error {
-	if value != WarmupDisable && value != WarmupSync {
-		return fmt.Errorf("invalid warmup policy: %s, must be '%s' or '%s'", value, WarmupDisable, WarmupSync)
+	if value != WarmupDisable && value != WarmupSync && value != WarmupAsync {
+		return merr.WrapErrParameterInvalidMsg("invalid warmup policy: %s, must be '%s', '%s' or '%s'", value, WarmupDisable, WarmupSync, WarmupAsync)
 	}
 	return nil
 }
@@ -442,30 +519,12 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	return false
 }
 
-func HasLazyload(props []*commonpb.KeyValuePair) bool {
-	for _, kv := range props {
-		if kv.Key == LazyLoadEnableKey {
-			return true
-		}
-	}
-	return false
-}
-
-func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
-	for _, kv := range kvs {
-		if kv.Key == LazyLoadEnableKey && strings.ToLower(kv.Value) == "true" {
-			return true
-		}
-	}
-	return false
-}
-
 func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
 	for _, kv := range kvs {
 		if kv.Key == PartitionKeyIsolationKey {
 			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
 			if err != nil {
-				return false, errors.Wrap(err, "failed to parse partition key isolation")
+				return false, merr.WrapErrParameterInvalidMsg("failed to parse partition key isolation: %v", err)
 			}
 			return val, nil
 		}
@@ -473,12 +532,123 @@ func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, erro
 	return false, nil
 }
 
+// IsQueryModeKeyExists checks if the query_mode key exists in the key-value pairs.
+func IsQueryModeKeyExists(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == QueryModeKey {
+			return true
+		}
+	}
+	return false
+}
+
+// GetQueryMode extracts the query_mode value from properties.
+// Returns empty string if not set.
+func GetQueryMode(kvs ...*commonpb.KeyValuePair) string {
+	for _, kv := range kvs {
+		if kv.Key == QueryModeKey {
+			return kv.Value
+		}
+	}
+	return ""
+}
+
+// ValidateQueryMode validates the query_mode value. Returns nil if the value
+// is valid or if query_mode is not set. Also rejects case-variant keys
+// (e.g. "QUERY_MODE", "Query_Mode") that would be silently ignored.
+func ValidateQueryMode(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.Key == QueryModeKey {
+			mode := kv.Value
+			if mode != QueryModeLargeTopK {
+				return merr.WrapErrParameterInvalidMsg("invalid query_mode value %q, valid values: [%s]", kv.Value, ValidQueryModes)
+			}
+			return nil
+		}
+		if strings.EqualFold(kv.Key, QueryModeKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.Key, QueryModeKey)
+		}
+	}
+	return nil
+}
+
+// IsQueryModeLargeTopK checks if query_mode is set to "large_topk".
+func IsQueryModeLargeTopK(kvs ...*commonpb.KeyValuePair) bool {
+	return GetQueryMode(kvs...) == QueryModeLargeTopK
+}
+
+// IsNamespaceShardingEnabledKeyExists checks if namespace.sharding.enabled exists in the key-value pairs.
+func IsNamespaceShardingEnabledKeyExists(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			return true
+		}
+	}
+	return false
+}
+
+// IsNamespaceShardingEnabled extracts namespace.sharding.enabled from properties.
+// Returns false if not set.
+func IsNamespaceShardingEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			switch kv.Value {
+			case "true":
+				return true, nil
+			case "false":
+				return false, nil
+			default:
+				return false, merr.WrapErrParameterInvalidMsg("invalid namespace.sharding.enabled value %q, valid values: [true,false]", kv.Value)
+			}
+		}
+	}
+	return false, nil
+}
+
+// ValidateNamespaceShardingEnabled validates namespace.sharding.enabled. Returns nil if
+// the value is valid or if namespace.sharding.enabled is not set. Also rejects
+// case-variant keys that would be silently ignored.
+func ValidateNamespaceShardingEnabled(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			_, err := IsNamespaceShardingEnabled(kv)
+			return err
+		}
+		if strings.EqualFold(kv.Key, NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.Key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
+// ValidateNamespaceShardingEnabledNotAltered rejects attempts to update or
+// delete namespace.sharding.enabled after collection creation.
+func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == NamespaceShardingEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter %s after collection creation", NamespaceShardingEnabledKey)
+		}
+		if strings.EqualFold(property.GetKey(), NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", property.GetKey(), NamespaceShardingEnabledKey)
+		}
+	}
+	for _, key := range deleteKeys {
+		if key == NamespaceShardingEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete %s after collection creation", NamespaceShardingEnabledKey)
+		}
+		if strings.EqualFold(key, NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
 func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {
 	for _, kv := range kvs {
 		if kv.Key == DisableFuncRuntimeCheck {
 			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
 			if err != nil {
-				return false, errors.Wrap(err, "failed to parse disable_func_runtime_check param")
+				return false, merr.WrapErrParameterInvalidMsg("failed to parse disable_func_runtime_check param: %v", err)
 			}
 			return val, nil
 		}
@@ -493,9 +663,62 @@ func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, error) {
 	}
 	iso, parseErr := strconv.ParseBool(val)
 	if parseErr != nil {
-		return false, errors.Wrap(parseErr, "failed to parse partition key isolation property")
+		return false, merr.WrapErrParameterInvalidMsg("failed to parse partition key isolation property: %v", parseErr)
 	}
 	return iso, nil
+}
+
+func GetNamespaceMode(kvs ...*commonpb.KeyValuePair) string {
+	for _, kv := range kvs {
+		if kv.GetKey() == NamespaceModeKey {
+			mode, ok := normalizeNamespaceMode(kv.GetValue())
+			if ok {
+				return mode
+			}
+			return kv.GetValue()
+		}
+	}
+	return NamespaceModePartitionKey
+}
+
+func IsNamespaceModePartitionKey(kvs ...*commonpb.KeyValuePair) bool {
+	return GetNamespaceMode(kvs...) == NamespaceModePartitionKey
+}
+
+func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
+	return GetNamespaceMode(kvs...) == NamespaceModePartition
+}
+
+type namespaceModeError string
+
+func (e namespaceModeError) Error() string {
+	return string(e)
+}
+
+func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.GetKey() == NamespaceModeKey {
+			if _, ok := normalizeNamespaceMode(kv.GetValue()); !ok {
+				return namespaceModeError("invalid namespace.mode value " + strconv.Quote(kv.GetValue()) + ", valid values: [" + ValidNamespaceModes + "]")
+			}
+			return nil
+		}
+		if strings.EqualFold(kv.GetKey(), NamespaceModeKey) {
+			return namespaceModeError("invalid property key " + strconv.Quote(kv.GetKey()) + ", did you mean " + strconv.Quote(NamespaceModeKey) + "?")
+		}
+	}
+	return nil
+}
+
+func normalizeNamespaceMode(mode string) (string, bool) {
+	switch mode {
+	case "", NamespaceModePartitionKey:
+		return NamespaceModePartitionKey, true
+	case NamespaceModePartition:
+		return NamespaceModePartition, true
+	default:
+		return "", false
+	}
 }
 
 const (
@@ -508,20 +731,20 @@ func DatabaseLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
 		if kv.Key == DatabaseReplicaNumber {
 			replicaNum, err := strconv.ParseInt(kv.Value, 10, 64)
 			if err != nil {
-				return 0, fmt.Errorf("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
+				return 0, merr.WrapErrParameterInvalidMsg("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
 			}
 
 			return replicaNum, nil
 		}
 	}
 
-	return 0, fmt.Errorf("database property not found: %s", DatabaseReplicaNumber)
+	return 0, merr.WrapErrParameterInvalidMsg("database property not found: %s", DatabaseReplicaNumber)
 }
 
 func DatabaseLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error) {
 	for _, kv := range kvs {
 		if kv.Key == DatabaseResourceGroups {
-			invalidPropValue := fmt.Errorf("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			invalidPropValue := merr.WrapErrParameterInvalidMsg("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
 			if len(kv.Value) == 0 {
 				return nil, invalidPropValue
 			}
@@ -535,7 +758,7 @@ func DatabaseLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error)
 		}
 	}
 
-	return nil, fmt.Errorf("database property not found: %s", DatabaseResourceGroups)
+	return nil, merr.WrapErrParameterInvalidMsg("database property not found: %s", DatabaseResourceGroups)
 }
 
 func CollectionLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
@@ -543,20 +766,20 @@ func CollectionLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
 		if kv.Key == CollectionReplicaNumber {
 			replicaNum, err := strconv.ParseInt(kv.Value, 10, 64)
 			if err != nil {
-				return 0, fmt.Errorf("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
+				return 0, merr.WrapErrParameterInvalidMsg("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
 			}
 
 			return replicaNum, nil
 		}
 	}
 
-	return 0, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
+	return 0, merr.WrapErrParameterInvalidMsg("collection property not found: %s", CollectionReplicaNumber)
 }
 
 func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error) {
 	for _, kv := range kvs {
 		if kv.Key == CollectionResourceGroups {
-			invalidPropValue := fmt.Errorf("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			invalidPropValue := merr.WrapErrParameterInvalidMsg("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
 			if len(kv.Value) == 0 {
 				return nil, invalidPropValue
 			}
@@ -570,7 +793,7 @@ func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, erro
 		}
 	}
 
-	return nil, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
+	return nil, merr.WrapErrParameterInvalidMsg("collection property not found: %s", CollectionReplicaNumber)
 }
 
 // GetCollectionLoadFields returns the load field ids according to the type params.
@@ -634,22 +857,9 @@ func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, inde
 
 	_, ok := indexParams[MmapEnabledKey]
 	if ok && isVectorField {
-		return errors.New("mmap index is not supported to config for the collection in auto index mode")
+		return merr.WrapErrParameterInvalidMsg("mmap index is not supported to config for the collection in auto index mode")
 	}
 	return nil
-}
-
-func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
-	for _, p := range props {
-		if p.GetKey() == NamespaceEnabledKey {
-			value, err := strconv.ParseBool(p.GetValue())
-			if err != nil {
-				return false, false, fmt.Errorf("invalid namespace prop value: %s", p.GetValue())
-			}
-			return value, true, nil
-		}
-	}
-	return false, false, nil
 }
 
 func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, clusterID uint64) (int64, int64, error) {
@@ -737,16 +947,13 @@ func GetCollectionTTLFromMap(kvs map[string]string) (time.Duration, error) {
 }
 
 func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {
-	enabled, _, err := ParseNamespaceProp(schema.Properties...)
-	if err != nil {
-		return err
-	}
+	enabled := schema.GetEnableNamespace()
 	namespaceIsSet := namespace != nil
 	if enabled != namespaceIsSet {
 		if namespaceIsSet {
-			return fmt.Errorf("namespace data is set but namespace disabled")
+			return merr.WrapErrParameterInvalidMsg("namespace data is set but namespace disabled")
 		}
-		return fmt.Errorf("namespace data is not set but namespace enabled")
+		return merr.WrapErrParameterInvalidMsg("namespace data is not set but namespace enabled")
 	}
 	return nil
 }

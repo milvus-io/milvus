@@ -25,8 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
@@ -77,6 +77,12 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
+	if msg == nil {
+		// load config unchanged, the collection is already loaded as requested.
+		log.Ctx(ctx).Info("load collection ignored, load config is unchanged",
+			zap.Int64("collectionID", req.GetCollectionID()))
+		return nil
+	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
@@ -107,19 +113,19 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 }
 
 func (s *Server) getCurrentLoadConfig(ctx context.Context, collectionID int64) job.CurrentLoadConfig {
-	partitionList := s.meta.CollectionManager.GetPartitionsByCollection(ctx, collectionID)
+	partitionList := s.meta.GetPartitionsByCollection(ctx, collectionID)
 	loadedPartitions := make(map[int64]*meta.Partition)
 	for _, partitioin := range partitionList {
 		loadedPartitions[partitioin.PartitionID] = partitioin
 	}
 
-	replicas := s.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := s.meta.GetByCollection(ctx, collectionID)
 	loadedReplicas := make(map[int64]*meta.Replica)
 	for _, replica := range replicas {
 		loadedReplicas[replica.GetID()] = replica
 	}
 	return job.CurrentLoadConfig{
-		Collection: s.meta.CollectionManager.GetCollection(ctx, collectionID),
+		Collection: s.meta.GetCollection(ctx, collectionID),
 		Partitions: loadedPartitions,
 		Replicas:   loadedReplicas,
 	}

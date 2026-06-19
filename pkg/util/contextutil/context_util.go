@@ -22,11 +22,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type ctxTenantKey struct{}
@@ -59,7 +60,7 @@ func AppendToIncomingContext(ctx context.Context, kv ...string) context.Context 
 	}
 	for i, s := range kv {
 		if i%2 == 0 {
-			md.Append(s, kv[i+1])
+			md.Append(s, kv[i+1]) //nolint:gosec // G602: bounds guaranteed by even-length check above
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)
@@ -76,7 +77,7 @@ func SetToIncomingContext(ctx context.Context, kv ...string) context.Context {
 	}
 	for i, s := range kv {
 		if i%2 == 0 {
-			md.Set(s, kv[i+1])
+			md.Set(s, kv[i+1]) //nolint:gosec // G602: bounds guaranteed by even-length check above
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)
@@ -90,20 +91,20 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 func GetAuthInfoFromContext(ctx context.Context) (string, string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", "", errors.New("fail to get md from the context")
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get md from the context")
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {
-		return "", "", fmt.Errorf("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
 	}
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)
 	if err != nil {
-		return "", "", fmt.Errorf("fail to decode the token, token: %s", token)
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to decode the token, token: %s", token)
 	}
 	secrets := strings.SplitN(rawToken, util.CredentialSeparator, 2)
 	if len(secrets) < 2 {
-		return "", "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get user info from the raw token, raw token: %s", rawToken)
 	}
 	// username: secrets[0]
 	// password: secrets[1]
@@ -150,4 +151,19 @@ func MergeContext(ctx1 context.Context, ctx2 context.Context) (context.Context, 
 		stop()
 		cancel(context.Canceled)
 	}
+}
+
+type queryLabelKey struct{}
+
+// WithQueryLabel sets the query label in context for metrics differentiation.
+func WithQueryLabel(ctx context.Context, label string) context.Context {
+	return context.WithValue(ctx, queryLabelKey{}, label)
+}
+
+// GetQueryLabel returns the query label from context, defaulting to "query".
+func GetQueryLabel(ctx context.Context) string {
+	if v, ok := ctx.Value(queryLabelKey{}).(string); ok && v != "" {
+		return v
+	}
+	return metrics.QueryLabel
 }

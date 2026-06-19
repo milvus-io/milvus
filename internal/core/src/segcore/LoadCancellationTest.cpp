@@ -120,6 +120,42 @@ TEST(LoadCancellationSegment, CreateTextIndexCancellationGrowing) {
 // since the cancellation check happens before the analyzer validation. If cancellation
 // doesn't throw, the function continues and would need proper analyzer setup to succeed.
 
+TEST(LoadCancellationSegment, LoadExternalManifestPreCancelled) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = FieldId(100);
+    schema->AddField(FieldMeta(
+        FieldName("pk"), pk_fid, DataType::INT64, false, std::nullopt, "pk"));
+    schema->set_primary_field_id(pk_fid);
+    schema->set_external_source("s3://test-bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(1);
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(1);
+    load_info.set_manifest_path("invalid-manifest-path");
+
+    folly::CancellationSource source;
+    source.requestCancellation();
+    OpContext op_ctx(source.getToken());
+    milvus::tracer::TraceContext trace_ctx;
+    segment->SetLoadInfo(load_info);
+
+    EXPECT_THROW(
+        {
+            try {
+                segment->Load(trace_ctx, &op_ctx);
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+                throw;
+            }
+        },
+        SegcoreError);
+}
+
 // Test cancellation during loop operation
 TEST(LoadCancellationUtility, CancellationDuringLoop) {
     folly::CancellationSource source;

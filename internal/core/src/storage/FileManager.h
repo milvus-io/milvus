@@ -26,11 +26,21 @@
 
 #include "common/Consts.h"
 #include "common/type_c.h"
+#include "index/Meta.h"
 #include "filemanager/FileManager.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
 #include "storage/ChunkManager.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/IndexEntryDirectStreamWriter.h"
+#include "storage/IndexEntryEncryptedLocalWriter.h"
+#include "storage/IndexEntryWriter.h"
+#include "storage/PluginLoader.h"
+#include "storage/RemoteInputStream.h"
+#include "storage/RemoteOutputStream.h"
+#include "pb/index_coord.pb.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
@@ -95,6 +105,11 @@ struct FileManagerContext {
         loon_ffi_properties = std::move(properties);
     }
 
+    void
+    set_stats_base_path(const std::string& path) {
+        stats_base_path = path;
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
@@ -102,6 +117,7 @@ struct FileManagerContext {
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
+    std::string stats_base_path;
 };
 
 #define FILEMANAGER_TRY try {
@@ -163,11 +179,100 @@ class FileManagerImpl : public milvus::FileManager {
     virtual bool
     AddFileMeta(const FileMeta& file_meta) override = 0;
 
-    virtual std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename) override = 0;
+    /**
+     * @brief Open an input stream for loading an index file from remote storage.
+     *
+     * @param local_full_file_path Local full file path. The local file may not
+     * exist yet; FileManager uses its basename and index metadata to resolve the
+     * remote object path.
+     */
+    std::shared_ptr<InputStream>
+    OpenInputStream(const std::string& local_full_file_path) override final {
+        return OpenInputStream(local_full_file_path, /*is_index_file=*/true);
+    }
 
-    virtual std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename) override = 0;
+    /**
+     * @brief Open an output stream for uploading a built local index file to
+     * remote storage.
+     *
+     * @param local_full_file_path Local full path of the already-built index
+     * file. FileManager uses its basename and index metadata to resolve the
+     * remote object path.
+     */
+    std::shared_ptr<OutputStream>
+    OpenOutputStream(const std::string& local_full_file_path) override final {
+        return OpenOutputStream(local_full_file_path, /*is_index_file=*/true);
+    }
+
+    std::shared_ptr<InputStream>
+    OpenInputStream(const std::string& local_full_file_path,
+                    bool is_index_file) {
+        AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
+        auto local_file_name = GetFileName(local_full_file_path);
+        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                              : GetRemoteTextLogPrefix();
+        remote_file_path += "/" + local_file_name;
+        auto remote_file = fs_->OpenInputFile(remote_file_path);
+        AssertInfo(remote_file.ok(),
+                   "failed to open remote file, reason: {}",
+                   remote_file.status().ToString());
+        return std::static_pointer_cast<milvus::InputStream>(
+            std::make_shared<milvus::storage::RemoteInputStream>(
+                std::move(remote_file.ValueOrDie())));
+    }
+
+    std::shared_ptr<OutputStream>
+    OpenOutputStream(const std::string& local_full_file_path,
+                     bool is_index_file) {
+        AssertInfo(fs_, "fs_ is nullptr, cannot open output stream");
+        auto local_file_name = GetFileName(local_full_file_path);
+        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                              : GetRemoteTextLogPrefix();
+        remote_file_path += "/" + local_file_name;
+        // Ensure parent directory exists before opening the output stream.
+        // Only needed for local filesystems; object stores don't require
+        // explicit directory creation and the call would waste I/O.
+        if (milvus_storage::IsLocalFileSystem(fs_)) {
+            auto dir_path =
+                remote_file_path.substr(0, remote_file_path.find_last_of('/'));
+            if (!dir_path.empty()) {
+                auto status = fs_->CreateDir(dir_path, /*recursive=*/true);
+                AssertInfo(status.ok(),
+                           "failed to create directory {}, reason: {}",
+                           dir_path,
+                           status.ToString());
+            }
+        }
+        auto remote_stream = fs_->OpenOutputStream(remote_file_path);
+        AssertInfo(remote_stream.ok(),
+                   "failed to open remote stream, reason: {}",
+                   remote_stream.status().ToString());
+        return std::make_shared<milvus::storage::RemoteOutputStream>(
+            std::move(remote_stream.ValueOrDie()));
+    }
+
+    std::unique_ptr<IndexEntryWriter>
+    CreateIndexEntryWriterUnified(const std::string& filename,
+                                  bool is_index_file = true) {
+        if (plugin_context_) {
+            auto cipher_plugin = PluginLoader::GetInstance().getCipherPlugin();
+            if (cipher_plugin) {
+                auto local_file_name = GetFileName(filename);
+                auto remote_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                                 : GetRemoteTextLogPrefix();
+                remote_path += "/" + local_file_name;
+                return std::make_unique<IndexEntryEncryptedLocalWriter>(
+                    remote_path,
+                    fs_,
+                    cipher_plugin,
+                    plugin_context_->ez_id,
+                    plugin_context_->collection_id,
+                    GetLocalTempDir());
+            }
+        }
+        return std::make_unique<IndexEntryDirectStreamWriter>(
+            OpenOutputStream(filename, is_index_file));
+    }
 
  public:
     virtual std::string
@@ -190,33 +295,36 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        boost::filesystem::path prefix = rcm_->GetRootPath();
-        boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
-        boost::filesystem::path path1 =
-            std::to_string(index_meta_.build_id) + "/" +
-            std::to_string(index_meta_.index_version) + "/" +
-            std::to_string(field_meta_.partition_id) + "/" +
-            std::to_string(field_meta_.segment_id);
-        return NormalizePath(prefix / path / path1);
-    }
-
-    virtual std::string
-    GetRemoteIndexObjectPrefixV2() const {
-        return std::string(INDEX_ROOT_PATH) + "/" +
-               std::to_string(index_meta_.build_id) + "/" +
-               std::to_string(index_meta_.index_version) + "/" +
-               std::to_string(field_meta_.partition_id) + "/" +
-               std::to_string(field_meta_.segment_id);
-    }
-
-    virtual std::string
-    GetRemoteIndexFilePrefixV2() const {
-        return GetRemoteIndexObjectPrefixV2();
+        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
+                                             ? rcm_->GetRootPath()
+                                             : index::kOverrideRootPathForUT;
+        if (index_meta_.index_store_path_version >=
+            ::milvus::proto::index::IndexStorePathVersion::
+                INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
+            // {root}/index_v1/{coll}/{part}/{seg}/{build}/{ver}
+            return NormalizePath(prefix / std::string(INDEX_ROOT_PATH_V1) /
+                                 std::to_string(field_meta_.collection_id) /
+                                 std::to_string(field_meta_.partition_id) /
+                                 std::to_string(field_meta_.segment_id) /
+                                 std::to_string(index_meta_.build_id) /
+                                 std::to_string(index_meta_.index_version));
+        }
+        // {root}/index_files/{build}/{ver}/{part}/{seg}
+        return NormalizePath(prefix / std::string(INDEX_ROOT_PATH) /
+                             std::to_string(index_meta_.build_id) /
+                             std::to_string(index_meta_.index_version) /
+                             std::to_string(field_meta_.partition_id) /
+                             std::to_string(field_meta_.segment_id));
     }
 
     virtual std::string
     GetRemoteTextLogPrefix() const {
-        boost::filesystem::path prefix = rcm_->GetRootPath();
+        if (!stats_base_path_.empty()) {
+            return stats_base_path_;
+        }
+        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
+                                             ? rcm_->GetRootPath()
+                                             : index::kOverrideRootPathForUT;
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +
@@ -226,6 +334,21 @@ class FileManagerImpl : public milvus::FileManager {
             std::to_string(field_meta_.segment_id) + "/" +
             std::to_string(field_meta_.field_id);
         return NormalizePath(prefix / path / path1);
+    }
+
+    static std::string
+    GetFileName(const std::string& filepath) {
+        return boost::filesystem::path(filepath).filename().string();
+    }
+
+    std::string
+    GetLocalTempDir() const {
+        auto local_cm =
+            LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        if (local_cm) {
+            return local_cm->GetRootPath();
+        }
+        return "";
     }
 
  protected:
@@ -238,6 +361,10 @@ class FileManagerImpl : public milvus::FileManager {
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
+
+    // stats base path computed by Go caller; when non-empty, overrides
+    // the internally computed remote prefix for text/json stats files.
+    std::string stats_base_path_;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;

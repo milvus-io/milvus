@@ -21,20 +21,24 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
 
 var _ rootcoordpb.RootCoordClient = &GrpcRootCoordClient{}
 
 type GrpcRootCoordClient struct {
 	Err error
+}
+
+func (m *GrpcRootCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, m.Err
 }
 
 func (m *GrpcRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
@@ -65,6 +69,10 @@ func (m *GrpcRootCoordClient) CreateRole(ctx context.Context, in *milvuspb.Creat
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
@@ -90,6 +98,10 @@ func (m *GrpcRootCoordClient) SelectGrant(ctx context.Context, in *milvuspb.Sele
 }
 
 func (m *GrpcRootCoordClient) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
 
@@ -168,6 +180,10 @@ func (m *GrpcRootCoordClient) ShowCollectionIDs(ctx context.Context, in *rootcoo
 
 func (m *GrpcRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	return &rootcoordpb.CreatePartitionResponse{}, m.Err
 }
 
 func (m *GrpcRootCoordClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -272,6 +288,10 @@ func (m *GrpcRootCoordClient) AlterCollection(ctx context.Context, in *milvuspb.
 
 func (m *GrpcRootCoordClient) AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return &milvuspb.AlterCollectionSchemaResponse{}, m.Err
 }
 
 func (m *GrpcRootCoordClient) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

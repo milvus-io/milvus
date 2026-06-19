@@ -32,19 +32,19 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var ErrForwardDisabled = errors.New("forward disabled")
@@ -219,7 +219,7 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	opts = append(opts, grpc.WithResolvers(rb))
 
 	if paramtable.Get().ProxyGrpcServerCfg.TLSMode.GetAsInt() == 1 || paramtable.Get().ProxyGrpcServerCfg.TLSMode.GetAsInt() == 2 {
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})))
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
@@ -273,14 +273,26 @@ func (fs *forwardServiceImpl) markForwardDisabled() {
 // the dml cannot be executed at new 2.6.x proxy until all 2.5.x proxies are down.
 //
 // so we need to forward the request to the 2.5.x proxy.
+//
+// DQL requests (Search/HybridSearch/Query) are only forwarded in standalone mode,
+// because in cluster mode the 2.6.x proxy can execute DQL locally via query nodes
+// without depending on the streaming service readiness.
 func ForwardLegacyProxyUnaryServerInterceptor(opts ...ForwardOption) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		if info.FullMethod != milvuspb.MilvusService_Insert_FullMethodName &&
-			info.FullMethod != milvuspb.MilvusService_Delete_FullMethodName &&
-			info.FullMethod != milvuspb.MilvusService_Upsert_FullMethodName &&
-			info.FullMethod != milvuspb.MilvusService_Search_FullMethodName &&
-			info.FullMethod != milvuspb.MilvusService_HybridSearch_FullMethodName &&
-			info.FullMethod != milvuspb.MilvusService_Query_FullMethodName {
+		isDQL := info.FullMethod == milvuspb.MilvusService_Search_FullMethodName ||
+			info.FullMethod == milvuspb.MilvusService_HybridSearch_FullMethodName ||
+			info.FullMethod == milvuspb.MilvusService_Query_FullMethodName
+		isDML := info.FullMethod == milvuspb.MilvusService_Insert_FullMethodName ||
+			info.FullMethod == milvuspb.MilvusService_Delete_FullMethodName ||
+			info.FullMethod == milvuspb.MilvusService_Upsert_FullMethodName
+
+		if !isDML && !isDQL {
+			return handler(ctx, req)
+		}
+
+		// DQL is only forwarded in standalone mode; in cluster mode the current
+		// proxy can serve DQL directly without the streaming service being ready.
+		if isDQL && !paramtable.IsStandalone() {
 			return handler(ctx, req)
 		}
 

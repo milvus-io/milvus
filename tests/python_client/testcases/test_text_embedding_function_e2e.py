@@ -1,23 +1,24 @@
+# fmt: off
 import random
-import uuid
+
+import numpy as np
+import pandas as pd
+import pytest
+from base.client_base import TestcaseBase
+from common import common_func as cf
+from common.common_type import CaseLabel, CheckTasks
+from common.mock_tei_server import MockTEIServer, get_docker_host, get_local_ip
+from faker import Faker
 from pymilvus import (
-    FieldSchema,
+    AnnSearchRequest,
     CollectionSchema,
     DataType,
+    FieldSchema,
     Function,
     FunctionType,
-    AnnSearchRequest,
     WeightedRanker,
 )
-from common.common_type import CaseLabel, CheckTasks
-from common import common_func as cf
 from utils.util_log import test_log as log
-from base.client_base import TestcaseBase
-import numpy as np
-import pytest
-import pandas as pd
-from faker import Faker
-from common.mock_tei_server import MockTEIServer, get_local_ip, get_docker_host
 
 fake_zh = Faker("zh_CN")
 fake_jp = Faker("ja_JP")
@@ -31,6 +32,7 @@ prefix = "text_embedding_collection"
 # TEI: https://github.com/huggingface/text-embeddings-inference
 # model id:BAAI/bge-base-en-v1.5
 # dim: 768
+
 
 @pytest.mark.tags(CaseLabel.L1)
 class TestCreateCollectionWithTextEmbedding(TestcaseBase):
@@ -62,19 +64,15 @@ class TestCreateCollectionWithTextEmbedding(TestcaseBase):
             params={
                 "provider": "TEI",
                 "endpoint": tei_endpoint,
-            }
+            },
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         res, _ = collection_w.describe()
         assert len(res["functions"]) == 1
 
-    def test_create_collection_with_text_embedding_twice_with_same_schema(
-            self, tei_endpoint
-    ):
+    def test_create_collection_with_text_embedding_twice_with_same_schema(self, tei_endpoint):
         """
         target: test create collection with text embedding twice with same schema
         method: create collection with text embedding function, then create again
@@ -181,7 +179,7 @@ class TestCreateCollectionWithTextEmbeddingNegative(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 65535,
-                "err_msg": f"The required embedding dim is [{dim}], but the embedding obtained from the model is [768]",
+                "err_msg": f"the required embedding dim is [{dim}], but the embedding obtained from the model is [768]",
             },
         )
 
@@ -220,9 +218,7 @@ class TestInsertWithTextEmbedding(TestcaseBase):
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
 
         # prepare data
         nb = 10
@@ -278,31 +274,17 @@ class TestInsertWithTextEmbedding(TestcaseBase):
                 "provider": "TEI",
                 "endpoint": tei_endpoint,
                 "truncate": truncate,
-                "truncation_direction": truncation_direction
+                "truncation_direction": truncation_direction,
             },
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
 
         # prepare data
         left = " ".join([fake_en.word() for _ in range(512)])
         right = " ".join([fake_en.word() for _ in range(512)])
-        data = [
-            {
-                "id": 0,
-                "document": left + " " + right
-            },
-            {
-                "id": 1,
-                "document": left
-            },
-            {
-                "id": 2,
-                "document": right
-            }]
+        data = [{"id": 0, "document": left + " " + right}, {"id": 1, "document": left}, {"id": 2, "document": right}]
         res, result = collection_w.insert(data, check_task=CheckTasks.check_nothing)
 
         if not truncate:
@@ -325,13 +307,16 @@ class TestInsertWithTextEmbedding(TestcaseBase):
         )
         # compare similarity between left and right using cosine similarity
         import numpy as np
+
         # Calculate cosine similarity: cos(θ) = A·B / (||A|| * ||B||)
         # when direction is left, right part is reversed
         similarity_left = np.dot(res[0]["dense"], res[1]["dense"]) / (
-                    np.linalg.norm(res[0]["dense"]) * np.linalg.norm(res[1]["dense"]))
+            np.linalg.norm(res[0]["dense"]) * np.linalg.norm(res[1]["dense"])
+        )
         # when direction is right, left part is reversed
         similarity_right = np.dot(res[0]["dense"], res[2]["dense"]) / (
-                    np.linalg.norm(res[0]["dense"]) * np.linalg.norm(res[2]["dense"]))
+            np.linalg.norm(res[0]["dense"]) * np.linalg.norm(res[2]["dense"])
+        )
         if truncation_direction == "Left":
             assert similarity_left < similarity_right
         else:
@@ -374,9 +359,7 @@ class TestInsertWithTextEmbeddingNegative(TestcaseBase):
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
 
         # prepare data with empty document
         empty_data = [{"id": 1, "document": ""}]
@@ -418,9 +401,7 @@ class TestInsertWithTextEmbeddingNegative(TestcaseBase):
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
 
         # prepare data with empty document
         long_data = [{"id": 1, "document": " ".join([fake_en.word() for _ in range(8192)])}]
@@ -432,7 +413,7 @@ class TestInsertWithTextEmbeddingNegative(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 65535,
-                "err_msg": "Call service faild",
+                "err_msg": "call service failed",
             },
         )
         assert collection_w.num_entities == 0
@@ -474,9 +455,7 @@ class TestUpsertWithTextEmbedding(TestcaseBase):
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         # create index and load
         index_params = {
             "index_type": "AUTOINDEX",
@@ -507,9 +486,7 @@ class TestUpsertWithTextEmbedding(TestcaseBase):
         # verify embeddings are different
         assert not np.allclose(old_embedding, new_embedding)
         # caculate cosine similarity
-        sim = np.dot(old_embedding, new_embedding) / (
-                np.linalg.norm(old_embedding) * np.linalg.norm(new_embedding)
-        )
+        sim = np.dot(old_embedding, new_embedding) / (np.linalg.norm(old_embedding) * np.linalg.norm(new_embedding))
         log.info(f"cosine similarity: {sim}")
         assert sim < 0.99
 
@@ -550,9 +527,7 @@ class TestDeleteWithTextEmbedding(TestcaseBase):
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
 
         # insert data
         nb = 3
@@ -619,9 +594,7 @@ class TestSearchWithTextEmbedding(TestcaseBase):
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
 
         # prepare data
         nb = 10
@@ -690,16 +663,11 @@ class TestSearchWithTextEmbeddingNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={
-                "provider": "TEI",
-                "endpoint": tei_endpoint
-            }
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
 
         # prepare data
         nb = 10
@@ -727,7 +695,7 @@ class TestSearchWithTextEmbeddingNegative(TestcaseBase):
             limit=3,
             output_fields=["document"],
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": "Call service faild"},
+            check_items={"err_code": 65535, "err_msg": "call service failed"},
         )
 
 
@@ -768,10 +736,7 @@ class TestHybridSearch(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={
-                "provider": "TEI",
-                "endpoint": tei_endpoint
-            }
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -785,16 +750,14 @@ class TestHybridSearch(TestcaseBase):
         )
         schema.add_function(bm25_function)
 
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix), schema=schema
-        )
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
 
         # insert test data
         data_size = 1000
         data = [{"id": i, "document": fake_en.text()} for i in range(data_size)]
 
         for batch in range(0, data_size, 100):
-            collection_w.insert(data[batch: batch + 100])
+            collection_w.insert(data[batch : batch + 100])
 
         # create index and load
         dense_index_params = {
@@ -881,12 +844,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
-        self.client.add_collection_function(
-            collection_name=c_name,
-            function=embedding_function
-        )
+        self.client.add_collection_function(collection_name=c_name, function=embedding_function)
 
         # Verify function is added
         res, _ = collection_w.describe()
@@ -916,12 +876,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
-        self.client.add_collection_function(
-            collection_name=c_name,
-            function=embedding_function
-        )
+        self.client.add_collection_function(collection_name=c_name, function=embedding_function)
 
         # === INSERT ===
         nb = 10
@@ -1024,12 +981,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["title"],
             output_field_names="title_vector",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
-        self.client.add_collection_function(
-            collection_name=c_name,
-            function=title_embedding_function
-        )
+        self.client.add_collection_function(collection_name=c_name, function=title_embedding_function)
 
         # Add text embedding function for content
         content_embedding_function = Function(
@@ -1037,12 +991,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["content"],
             output_field_names="content_vector",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
-        self.client.add_collection_function(
-            collection_name=c_name,
-            function=content_embedding_function
-        )
+        self.client.add_collection_function(collection_name=c_name, function=content_embedding_function)
 
         # Verify both functions are added
         res, _ = collection_w.describe()
@@ -1110,7 +1061,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -1123,13 +1074,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
-        self.client.alter_collection_function(
-            collection_name=c_name,
-            function_name="tei",
-            function=new_function
-        )
+        self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
 
         # Verify function still exists and params are correct
         res, _ = collection_w.describe()
@@ -1159,7 +1106,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -1172,18 +1119,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={
-                "provider": "TEI",
-                "endpoint": tei_endpoint,
-                "truncate": True,
-                "truncation_direction": "Left"
-            }
+            params={"provider": "TEI", "endpoint": tei_endpoint, "truncate": True, "truncation_direction": "Left"},
         )
-        self.client.alter_collection_function(
-            collection_name=c_name,
-            function_name="tei",
-            function=new_function
-        )
+        self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
 
         # Verify function params are updated correctly
         res, _ = collection_w.describe()
@@ -1216,7 +1154,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -1246,17 +1184,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={
-                "provider": "TEI",
-                "endpoint": tei_endpoint,
-                "truncate": True
-            }
+            params={"provider": "TEI", "endpoint": tei_endpoint, "truncate": True},
         )
-        self.client.alter_collection_function(
-            collection_name=c_name,
-            function_name="tei",
-            function=new_function
-        )
+        self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
 
         # === INSERT after alter ===
         data2 = [{"id": i + 5, "document": f"Document after alter {i}"} for i in range(5)]
@@ -1340,7 +1270,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -1362,13 +1292,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint_2}
+            params={"provider": "TEI", "endpoint": tei_endpoint_2},
         )
-        self.client.alter_collection_function(
-            collection_name=c_name,
-            function_name="tei",
-            function=new_function
-        )
+        self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
 
         # Insert data with new endpoint
         data2 = [{"id": i + 10, "document": f"Document with endpoint2 {i}"} for i in range(3)]
@@ -1412,17 +1338,19 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         # Skip if Milvus is on remote host (network may not be reachable)
         local_ip = get_local_ip()
         docker_host = get_docker_host()
-        if host not in ['localhost', '127.0.0.1', local_ip, docker_host]:
-            pytest.skip(f"Skipping: Milvus host ({host}) may not be able to access local mock server. "
-                       "Run this test with Milvus on localhost or in the same network.")
+        if host not in ["localhost", "127.0.0.1", local_ip, docker_host]:
+            pytest.skip(
+                f"Skipping: Milvus host ({host}) may not be able to access local mock server. "
+                "Run this test with Milvus on localhost or in the same network."
+            )
 
         self._connect()
         dim = 768
 
         # Start two mock TEI servers with external access enabled
         # host='0.0.0.0' binds to all interfaces, external_host='docker' uses host.docker.internal
-        mock_server_1 = MockTEIServer(dim=dim, host='0.0.0.0', external_host='docker')
-        mock_server_2 = MockTEIServer(dim=dim, host='0.0.0.0', external_host='docker')
+        mock_server_1 = MockTEIServer(dim=dim, host="0.0.0.0", external_host="docker")
+        mock_server_2 = MockTEIServer(dim=dim, host="0.0.0.0", external_host="docker")
 
         try:
             endpoint_1 = mock_server_1.start()
@@ -1444,7 +1372,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
                 function_type=FunctionType.TEXTEMBEDDING,
                 input_field_names=["title"],
                 output_field_names="title_vector",
-                params={"provider": "TEI", "endpoint": endpoint_1}
+                params={"provider": "TEI", "endpoint": endpoint_1},
             )
             schema.add_function(title_embedding)
 
@@ -1453,7 +1381,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
                 function_type=FunctionType.TEXTEMBEDDING,
                 input_field_names=["content"],
                 output_field_names="content_vector",
-                params={"provider": "TEI", "endpoint": endpoint_2}
+                params={"provider": "TEI", "endpoint": endpoint_2},
             )
             schema.add_function(content_embedding)
 
@@ -1465,11 +1393,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             assert len(res["functions"]) == 2
 
             # Make server_1 return errors (simulate "Model integration is not active")
-            mock_server_1.set_error_mode(
-                enabled=True,
-                status_code=400,
-                message="Model integration is not active"
-            )
+            mock_server_1.set_error_mode(enabled=True, status_code=400, message="Model integration is not active")
 
             # Now title_embedding function is invalid, but we should still be able to
             # alter content_embedding function (PR #46984 fix)
@@ -1478,19 +1402,13 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
                 function_type=FunctionType.TEXTEMBEDDING,
                 input_field_names=["content"],
                 output_field_names="content_vector",
-                params={
-                    "provider": "TEI",
-                    "endpoint": endpoint_2,
-                    "truncate": True
-                }
+                params={"provider": "TEI", "endpoint": endpoint_2, "truncate": True},
             )
 
             # This should succeed after PR #46984 fix
             # Before the fix, this would fail because it validated ALL functions
             self.client.alter_collection_function(
-                collection_name=c_name,
-                function_name="content_embedding",
-                function=new_content_embedding
+                collection_name=c_name, function_name="content_embedding", function=new_content_embedding
             )
 
             # Verify function params are updated
@@ -1523,16 +1441,18 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         # Skip if Milvus is on remote host (network may not be reachable)
         local_ip = get_local_ip()
         docker_host = get_docker_host()
-        if host not in ['localhost', '127.0.0.1', local_ip, docker_host]:
-            pytest.skip(f"Skipping: Milvus host ({host}) may not be able to access local mock server. "
-                       "Run this test with Milvus on localhost or in the same network.")
+        if host not in ["localhost", "127.0.0.1", local_ip, docker_host]:
+            pytest.skip(
+                f"Skipping: Milvus host ({host}) may not be able to access local mock server. "
+                "Run this test with Milvus on localhost or in the same network."
+            )
 
         self._connect()
         dim = 768
 
         # Start mock servers with external access enabled
-        mock_server = MockTEIServer(dim=dim, host='0.0.0.0', external_host='docker')
-        backup_server = MockTEIServer(dim=dim, host='0.0.0.0', external_host='docker')
+        mock_server = MockTEIServer(dim=dim, host="0.0.0.0", external_host="docker")
+        backup_server = MockTEIServer(dim=dim, host="0.0.0.0", external_host="docker")
 
         try:
             endpoint = mock_server.start()
@@ -1551,7 +1471,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
                 function_type=FunctionType.TEXTEMBEDDING,
                 input_field_names=["document"],
                 output_field_names="dense",
-                params={"provider": "TEI", "endpoint": endpoint}
+                params={"provider": "TEI", "endpoint": endpoint},
             )
             schema.add_function(text_embedding)
 
@@ -1568,11 +1488,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             collection_w.load()
 
             # Simulate the original endpoint becoming unavailable
-            mock_server.set_error_mode(
-                enabled=True,
-                status_code=400,
-                message="Model integration is not active"
-            )
+            mock_server.set_error_mode(enabled=True, status_code=400, message="Model integration is not active")
 
             # User wants to fix the function by switching to backup endpoint
             # This is the exact scenario from issue #46949
@@ -1581,15 +1497,11 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
                 function_type=FunctionType.TEXTEMBEDDING,
                 input_field_names=["document"],
                 output_field_names="dense",
-                params={"provider": "TEI", "endpoint": backup_endpoint}
+                params={"provider": "TEI", "endpoint": backup_endpoint},
             )
 
             # After PR #46984, this should succeed
-            self.client.alter_collection_function(
-                collection_name=c_name,
-                function_name="tei",
-                function=new_function
-            )
+            self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
 
             # Verify function is updated
             res, _ = collection_w.describe()
@@ -1639,7 +1551,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -1666,10 +1578,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             assert len(row["dense"]) == dim
 
         # === DROP FUNCTION ===
-        self.client.drop_collection_function(
-            collection_name=c_name,
-            function_name="tei"
-        )
+        self.client.drop_collection_function(collection_name=c_name, function_name="tei")
 
         # Verify function is removed
         res, _ = collection_w.describe()
@@ -1749,7 +1658,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["title"],
             output_field_names="title_vector",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(title_embedding)
 
@@ -1758,7 +1667,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["content"],
             output_field_names="content_vector",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(content_embedding)
 
@@ -1787,10 +1696,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             assert len(row["content_vector"]) == dim
 
         # === DROP one function (title_embedding) ===
-        self.client.drop_collection_function(
-            collection_name=c_name,
-            function_name="title_embedding"
-        )
+        self.client.drop_collection_function(collection_name=c_name, function_name="title_embedding")
 
         # Verify only content_embedding remains
         res, _ = collection_w.describe()
@@ -1799,12 +1705,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
 
         # === INSERT after drop - content_vector auto-generated, title_vector manual ===
         manual_title_vector = [random.random() for _ in range(dim)]
-        data_after_drop = [{
-            "id": 10,
-            "title": "New title",
-            "content": "New content",
-            "title_vector": manual_title_vector
-        }]
+        data_after_drop = [
+            {"id": 10, "title": "New title", "content": "New content", "title_vector": manual_title_vector}
+        ]
         collection_w.insert(data_after_drop)
         assert collection_w.num_entities == 4
 
@@ -1835,12 +1738,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
 
         # === UPSERT - content function still works ===
         upsert_title_vector = [random.random() for _ in range(dim)]
-        upsert_data = [{
-            "id": 0,
-            "title": "Updated title",
-            "content": "Updated content",
-            "title_vector": upsert_title_vector
-        }]
+        upsert_data = [
+            {"id": 0, "title": "Updated title", "content": "Updated content", "title_vector": upsert_title_vector}
+        ]
         collection_w.upsert(upsert_data)
 
         res, _ = collection_w.query(expr="id == 0", output_fields=["title_vector", "content_vector"])
@@ -1871,7 +1771,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -1879,10 +1779,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
 
         # Drop function
-        self.client.drop_collection_function(
-            collection_name=c_name,
-            function_name="tei"
-        )
+        self.client.drop_collection_function(collection_name=c_name, function_name="tei")
 
         # Verify function is removed
         res, _ = collection_w.describe()
@@ -1894,12 +1791,9 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
-        self.client.add_collection_function(
-            collection_name=c_name,
-            function=new_function
-        )
+        self.client.add_collection_function(collection_name=c_name, function=new_function)
 
         # Verify function is added
         res, _ = collection_w.describe()
@@ -1929,13 +1823,12 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
 
         try:
             self.client.add_collection_function(
-                collection_name="nonexistent_collection_12345",
-                function=embedding_function
+                collection_name="nonexistent_collection_12345", function=embedding_function
             )
             assert False, "Expected exception for nonexistent collection"
         except Exception as e:
@@ -1947,7 +1840,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         """
         target: test add function with duplicate name
         method: create collection with function, try to add another function with same name
-        expected: error indicating duplicate function name (code=65535)
+        expected: error indicating duplicate function name (code=1100)
         """
         self._connect()
         dim = 768
@@ -1964,7 +1857,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -1977,25 +1870,22 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
 
         try:
-            self.client.add_collection_function(
-                collection_name=c_name,
-                function=duplicate_function
-            )
+            self.client.add_collection_function(collection_name=c_name, function=duplicate_function)
             assert False, "Expected exception for duplicate function name"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 1100
             assert "duplicate function name" in str(e)
 
     def test_add_collection_function_missing_input_field(self, tei_endpoint):
         """
         target: test add function with input field that doesn't exist
         method: add function referencing non-existent input field
-        expected: error indicating input field not found (code=65535)
+        expected: error indicating input field not found (code=1100)
         """
         self._connect()
         dim = 768
@@ -2014,25 +1904,22 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["nonexistent_field"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
 
         try:
-            self.client.add_collection_function(
-                collection_name=c_name,
-                function=embedding_function
-            )
+            self.client.add_collection_function(collection_name=c_name, function=embedding_function)
             assert False, "Expected exception for missing input field"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 1100
             assert "function input field not found" in str(e)
 
     def test_add_collection_function_missing_output_field(self, tei_endpoint):
         """
         target: test add function with output field that doesn't exist
         method: add function referencing non-existent output field
-        expected: error indicating output field not found (code=65535)
+        expected: error indicating output field not found (code=1100)
         """
         self._connect()
         dim = 768
@@ -2051,25 +1938,22 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="nonexistent_vector_field",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
 
         try:
-            self.client.add_collection_function(
-                collection_name=c_name,
-                function=embedding_function
-            )
+            self.client.add_collection_function(collection_name=c_name, function=embedding_function)
             assert False, "Expected exception for missing output field"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 1100
             assert "function output field not found" in str(e)
 
     def test_add_collection_function_dim_mismatch(self, tei_endpoint):
         """
         target: test add function with dimension mismatch
         method: create collection with vector field dim=512, add function for model that outputs dim=768
-        expected: error indicating dimension mismatch (code=65535)
+        expected: error indicating dimension mismatch (code=2400)
         """
         self._connect()
         dim = 512  # Mismatched dimension (TEI model outputs 768)
@@ -2088,18 +1972,15 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
 
         try:
-            self.client.add_collection_function(
-                collection_name=c_name,
-                function=embedding_function
-            )
+            self.client.add_collection_function(collection_name=c_name, function=embedding_function)
             assert False, "Expected exception for dimension mismatch"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 2400
             assert "embedding dim" in str(e)
 
     # ==================== alter_collection_function negative tests ====================
@@ -2116,14 +1997,12 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
 
         try:
             self.client.alter_collection_function(
-                collection_name="nonexistent_collection_12345",
-                function_name="tei",
-                function=new_function
+                collection_name="nonexistent_collection_12345", function_name="tei", function=new_function
             )
             assert False, "Expected exception for nonexistent collection"
         except Exception as e:
@@ -2135,7 +2014,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         """
         target: test alter function that doesn't exist
         method: create collection without function, try to alter non-existent function
-        expected: error indicating function not found (code=65535)
+        expected: error indicating function not found (code=1100)
         """
         self._connect()
         dim = 768
@@ -2153,26 +2032,25 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
 
         try:
             self.client.alter_collection_function(
-                collection_name=c_name,
-                function_name="nonexistent_function",
-                function=new_function
+                collection_name=c_name, function_name="nonexistent_function", function=new_function
             )
             assert False, "Expected exception for nonexistent function"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
+            assert e.code == 1100
             assert "not found" in str(e)
 
     def test_alter_collection_function_invalid_new_endpoint(self, tei_endpoint):
         """
         target: test alter function with invalid endpoint
         method: create collection with valid function, alter to use invalid endpoint
-        expected: error indicating endpoint unreachable (code=65535)
+        expected: error indicating endpoint unreachable (code=2, ServiceUnavailable:
+                  a transport/connect failure to the model backend is retryable)
         """
         self._connect()
         dim = 768
@@ -2188,7 +2066,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": tei_endpoint}
+            params={"provider": "TEI", "endpoint": tei_endpoint},
         )
         schema.add_function(text_embedding_function)
 
@@ -2201,20 +2079,18 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             function_type=FunctionType.TEXTEMBEDDING,
             input_field_names=["document"],
             output_field_names="dense",
-            params={"provider": "TEI", "endpoint": "http://invalid_endpoint_12345"}
+            params={"provider": "TEI", "endpoint": "http://invalid_endpoint_12345"},
         )
 
         try:
-            self.client.alter_collection_function(
-                collection_name=c_name,
-                function_name="tei",
-                function=new_function
-            )
+            self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
             assert False, "Expected exception for invalid endpoint"
         except Exception as e:
             log.info(f"Expected error: {e}")
-            assert e.code == 65535
-            assert "Check function" in str(e) and "failed" in str(e)
+            # transport/connect failure to the model backend is now classified as
+            # ServiceUnavailable (2, retryable) rather than FunctionFailed (2400)
+            assert e.code == 2
+            assert "invalid_endpoint_12345" in str(e).lower()
 
     # ==================== drop_collection_function negative tests ====================
 
@@ -2227,10 +2103,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         self._connect()
 
         try:
-            self.client.drop_collection_function(
-                collection_name="nonexistent_collection_12345",
-                function_name="tei"
-            )
+            self.client.drop_collection_function(collection_name="nonexistent_collection_12345", function_name="tei")
             assert False, "Expected exception for nonexistent collection"
         except Exception as e:
             log.info(f"Expected error: {e}")
@@ -2255,10 +2128,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         self.init_collection_wrap(name=c_name, schema=schema)
 
         # Drop nonexistent function should not raise error (idempotent)
-        self.client.drop_collection_function(
-            collection_name=c_name,
-            function_name="nonexistent_function"
-        )
+        self.client.drop_collection_function(collection_name=c_name, function_name="nonexistent_function")
         log.info("Drop nonexistent function succeeded (idempotent behavior)")
 
     def test_drop_collection_function_empty_name(self):
@@ -2279,8 +2149,5 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         self.init_collection_wrap(name=c_name, schema=schema)
 
         # Drop with empty name should not raise error (idempotent)
-        self.client.drop_collection_function(
-            collection_name=c_name,
-            function_name=""
-        )
+        self.client.drop_collection_function(collection_name=c_name, function_name="")
         log.info("Drop with empty function name succeeded (idempotent behavior)")

@@ -20,9 +20,9 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
 type TaskType int
@@ -72,13 +72,13 @@ func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 	return func(t Task) {
 		switch t.GetType() {
 		case PreImportTaskType:
-			t.(*PreImportTask).PreImportTask.State = state
+			t.(*PreImportTask).State = state
 		case ImportTaskType:
-			t.(*ImportTask).ImportTaskV2.State = state
+			t.(*ImportTask).State = state
 		case L0PreImportTaskType:
-			t.(*L0PreImportTask).PreImportTask.State = state
+			t.(*L0PreImportTask).State = state
 		case L0ImportTaskType:
-			t.(*L0ImportTask).ImportTaskV2.State = state
+			t.(*L0ImportTask).State = state
 		case CopySegmentTaskType:
 			t.(*CopySegmentTask).state = state
 		}
@@ -89,13 +89,13 @@ func UpdateReason(reason string) UpdateAction {
 	return func(t Task) {
 		switch t.GetType() {
 		case PreImportTaskType:
-			t.(*PreImportTask).PreImportTask.Reason = reason
+			t.(*PreImportTask).Reason = reason
 		case ImportTaskType:
-			t.(*ImportTask).ImportTaskV2.Reason = reason
+			t.(*ImportTask).Reason = reason
 		case L0PreImportTaskType:
-			t.(*L0PreImportTask).PreImportTask.Reason = reason
+			t.(*L0PreImportTask).Reason = reason
 		case L0ImportTaskType:
-			t.(*L0ImportTask).ImportTaskV2.Reason = reason
+			t.(*L0ImportTask).Reason = reason
 		case CopySegmentTaskType:
 			t.(*CopySegmentTask).reason = reason
 		}
@@ -150,6 +150,7 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 				segmentsInfo[segment].Statslogs = mergeFn(segmentsInfo[segment].Statslogs, info.GetStatslogs())
 				segmentsInfo[segment].Deltalogs = mergeFn(segmentsInfo[segment].Deltalogs, info.GetDeltalogs())
 				segmentsInfo[segment].Bm25Logs = mergeFn(segmentsInfo[segment].Bm25Logs, info.GetBm25Logs())
+				segmentsInfo[segment].ManifestPath = info.GetManifestPath()
 				return
 			}
 			segmentsInfo[segment] = info

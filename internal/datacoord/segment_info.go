@@ -27,11 +27,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
@@ -55,8 +55,14 @@ type SegmentInfo struct {
 	lastFlushTime time.Time
 	isCompacting  bool
 	// a cache to avoid calculate twice
-	size            atomic.Int64
-	deltaRowcount   atomic.Int64
+	size          atomic.Int64
+	deltaRowcount atomic.Int64
+	// earliestTs caches the minimum TimestampFrom across all binlogs. It is
+	// intentionally NOT copied by Clone()/ShadowClone(): the only path that
+	// transitions commit_timestamp from non-zero to zero is compaction
+	// completion, which also replaces the binlogs on the cloned segment; a
+	// carried-over cache would be stale against the new binlogs. The cache is
+	// recomputed lazily on the first GetEarliestTs() call after clone.
 	earliestTs      atomic.Uint64
 	lastWrittenTime time.Time
 }
@@ -82,6 +88,12 @@ func (s *SegmentInfo) GetResidualSegmentSize() int64 {
 }
 
 func (s *SegmentInfo) GetEarliestTs() uint64 {
+	// For import segments, row timestamps predate the actual commit time.
+	// Use commit_timestamp as the effective data age so compaction priority
+	// and TTL decisions are not distorted by stale row timestamps.
+	if commitTs := s.GetCommitTimestamp(); commitTs != 0 {
+		return commitTs
+	}
 	if s.earliestTs.Load() == 0 {
 		var earliestFromTs uint64 = math.MaxUint64
 		for _, binlogs := range s.GetBinlogs() {
@@ -304,12 +316,23 @@ func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 	}
 }
 
-// SetIsCompacting sets compaction status for segment
+// SetIsCompacting sets compaction status for segment.
+// NOTE: This method manually updates secondary indexes after ShadowClone.
+// Other Set methods (SetRowCount, SetLevel, SetFlushTime, etc.) have the same
+// stale-index problem but are not yet fixed. See #48593 for the tracking issue
+// to extract a common updateSegment helper for all Set methods.
 func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
-	st := fmt.Sprintf("%s", debug.Stack())
+	st := string(debug.Stack())
 	log.Info("set compacting", zap.Int64("segmentID", segmentID), zap.Bool("isCompacting", isCompacting), zap.Any("stacktrace", st))
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetIsCompacting(isCompacting))
+		newSegment := segment.ShadowClone(SetIsCompacting(isCompacting))
+		s.segments[segmentID] = newSegment
+		if collSegs, ok := s.secondaryIndexes.coll2Segments[segment.GetCollectionID()]; ok {
+			collSegs[segmentID] = newSegment
+		}
+		if chSegs, ok := s.secondaryIndexes.channel2Segments[segment.GetInsertChannel()]; ok {
+			chSegs[segmentID] = newSegment
+		}
 	}
 }
 
@@ -342,15 +365,17 @@ func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
 	}
 }
 
-// Clone deep clone the segment info and return a new instance
+// Clone deep clone the segment info and return a new instance.
+// The size and earliestTs caches are intentionally NOT copied because opts
+// may replace the binlogs (e.g. compaction completion), which would make the
+// cached values stale. See the earliestTs field comment for details.
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
-		SegmentInfo:   info,
-		allocations:   s.allocations,
-		lastFlushTime: s.lastFlushTime,
-		isCompacting:  s.isCompacting,
-		// cannot copy size, since binlog may be changed
+		SegmentInfo:     info,
+		allocations:     s.allocations,
+		lastFlushTime:   s.lastFlushTime,
+		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
 	}
 	for _, opt := range opts {
@@ -572,3 +597,53 @@ func (s *SegmentInfo) getDeltaCount() int64 {
 
 // SegmentInfoSelector is the function type to select SegmentInfo from meta
 type SegmentInfoSelector func(*SegmentInfo) bool
+
+// ValidateManifestSegment checks that segments with manifest_path have empty
+// legacy stats fields. Returns a descriptive message if validation fails,
+// or empty string if the segment is valid.
+func ValidateManifestSegment(info *SegmentInfo) string {
+	if info.GetManifestPath() == "" {
+		return ""
+	}
+
+	var nonEmpty []string
+	if len(info.GetStatslogs()) > 0 {
+		nonEmpty = append(nonEmpty, fmt.Sprintf("statslogs(%d)", len(info.GetStatslogs())))
+	}
+	if len(info.GetBm25Statslogs()) > 0 {
+		nonEmpty = append(nonEmpty, fmt.Sprintf("bm25statslogs(%d)", len(info.GetBm25Statslogs())))
+	}
+	if len(info.GetTextStatsLogs()) > 0 {
+		nonEmpty = append(nonEmpty, fmt.Sprintf("textStatsLogs(%d)", len(info.GetTextStatsLogs())))
+	}
+	if len(info.GetJsonKeyStats()) > 0 {
+		nonEmpty = append(nonEmpty, fmt.Sprintf("jsonKeyStats(%d)", len(info.GetJsonKeyStats())))
+	}
+
+	if len(nonEmpty) > 0 {
+		return fmt.Sprintf("segment %d has manifest_path but non-empty legacy stats fields: %v",
+			info.GetID(), nonEmpty)
+	}
+	return ""
+}
+
+// segmentEffectiveTs returns the start-position timestamp that governs temporal
+// decisions for a segment. For import segments with a non-zero commit_timestamp,
+// commit_timestamp overrides start_position.Timestamp because the data was not
+// "officially present" until the import was committed.
+func segmentEffectiveTs(seg *datapb.SegmentInfo) uint64 {
+	if ts := seg.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return seg.GetStartPosition().GetTimestamp()
+}
+
+// segmentEffectiveDmlTs returns the DML-position timestamp for temporal decisions.
+// Same override logic as segmentEffectiveTs but for dml_position consumers
+// (GC eligibility, TruncateChannelByTime).
+func segmentEffectiveDmlTs(seg *datapb.SegmentInfo) uint64 {
+	if ts := seg.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return seg.GetDmlPosition().GetTimestamp()
+}

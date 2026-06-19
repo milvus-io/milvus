@@ -20,23 +20,23 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()
@@ -51,11 +51,11 @@ type Client struct {
 // NewClient creates a new QueryNode client.
 func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
 	if addr == "" {
-		return nil, errors.New("addr is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("addr is empty")
 	}
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
-		err := errors.New("new session error, maybe can not connect to etcd")
+		err := merr.WrapErrServiceUnavailable("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("QueryNodeClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
@@ -391,6 +391,17 @@ func (c *Client) DropIndex(ctx context.Context, req *querypb.DropIndexRequest, _
 	})
 }
 
+func (c *Client) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
+		return client.UpdateIndex(ctx, req)
+	})
+}
+
 func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, _ ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
@@ -417,6 +428,13 @@ func (c *Client) SyncFileResource(ctx context.Context, req *internalpb.SyncFileR
 	req = typeutil.Clone(req)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
 		return client.SyncFileResource(ctx, req)
+	})
+}
+
+func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest, _ ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	req = typeutil.Clone(req)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.ClearReadTaskQueueResponse, error) {
+		return client.ClearReadTaskQueue(ctx, req)
 	})
 }
 

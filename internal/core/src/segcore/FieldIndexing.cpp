@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string.h>
+#include "common/FastMem.h"
 #include <algorithm>
 #include <cstddef>
 #include <exception>
@@ -18,6 +19,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "segcore/default_fs.h"
 
 #include "IndexConfigGenerator.h"
 #include "common/EasyAssert.h"
@@ -191,7 +193,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp32_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float>>(
             DataType::NONE,
@@ -208,7 +210,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp16_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float16>>(
             DataType::NONE,
@@ -225,7 +227,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_bf16_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<bfloat16>>(
             DataType::NONE,
@@ -257,7 +259,8 @@ VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
             reinterpret_cast<milvus::proto::schema::SparseFloatArray*>(output));
     } else {
         auto vector = index_->GetVector(ids_ds);
-        std::memcpy(output, vector.data(), count * element_size);
+        milvus::fastmem::FastMemcpy(
+            output, vector.data(), count * element_size);
     }
 }
 
@@ -284,7 +287,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto& valid_data = field_raw_data->get_valid_data();
+    auto valid_data = field_raw_data->get_valid_data();
 
     if (!built_) {
         const void* data_ptr = nullptr;
@@ -411,7 +414,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto& valid_data = field_raw_data->get_valid_data();
+    auto valid_data = field_raw_data->get_valid_data();
 
     AssertInfo(ConcurrentDenseVectorCheck(field_raw_data, get_data_type()),
                "vec_base can't cast to ConcurrentVector type");
@@ -449,9 +452,10 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                 auto src =
                     chunk_data +
                     (copy_start - chunk_id * size_per_chunk) * vec_length;
-                std::memcpy(data_buf.get() + actual_copy_count * vec_length,
-                            src,
-                            copy_count * vec_length);
+                milvus::fastmem::FastMemcpy(
+                    data_buf.get() + actual_copy_count * vec_length,
+                    src,
+                    copy_count * vec_length);
                 actual_copy_count += copy_count;
             }
             data_ptr = data_buf.get();
@@ -499,7 +503,6 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
         // Nullable dense vectors: data_source (proto) contains valid vectors compactly
         auto index_total_count = index_->GetOffsetMapping().GetTotalCount();
         auto add_valid_data_count = reserved_offset + size - index_total_count;
-        auto index_cur_val = index_cur_.load();
         // Count valid vectors in this batch range
         for (auto i = reserved_offset; i < reserved_offset + size; i++) {
             if (valid_data[i]) {
@@ -586,8 +589,7 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
             auto chunk_manager =
                 milvus::storage::LocalChunkManagerSingleton::GetInstance()
                     .GetChunkManager();
-            auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+            auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
             // Create FieldDataMeta for RTree index
             storage::FieldDataMeta field_data_meta;

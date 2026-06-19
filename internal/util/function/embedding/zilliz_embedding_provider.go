@@ -22,10 +22,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/zilliz"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ZillizEmbeddingProvider struct {
@@ -51,12 +51,16 @@ func NewZillizEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		switch strings.ToLower(param.Key) {
 		case models.ModelDeploymentIDKey:
 			modelDeploymentID = param.Value
+		case models.TimeoutMsParamKey:
+			// consumed by ResolveTimeoutMs; not a model-service param
 		default:
 			modelParams[param.Key] = param.Value
 		}
 	}
 
-	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, params)
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
+	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, params, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

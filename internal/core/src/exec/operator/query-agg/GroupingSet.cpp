@@ -27,6 +27,7 @@
 #include "exec/operator/query-agg/AggregateInfo.h"
 #include "exec/operator/query-agg/RowContainer.h"
 #include "folly/Range.h"
+#include "segcore/SegcoreConfig.h"
 
 namespace milvus {
 namespace exec {
@@ -109,10 +110,11 @@ void
 GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input) {
     initializeGlobalAggregation();
     auto* group = lookup_->hits_[0];
+    auto numRows = input->size();
     for (auto i = 0; i < aggregates_.size(); i++) {
         auto& function = aggregates_[i].function_;
         populateTempVectors(i, input);
-        function->addSingleGroupRawInput(group, tempVectors_);
+        function->addSingleGroupRawInput(group, numRows, tempVectors_);
     }
     tempVectors_.clear();
 }
@@ -215,19 +217,17 @@ void
 GroupingSet::populateTempVectors(int32_t aggregateIndex,
                                  const milvus::RowVectorPtr& input) {
     const auto& channel_idxes = aggregates_[aggregateIndex].input_column_idxes_;
-    if (channel_idxes.empty() && input->childrens().size() == 1) {
-        tempVectors_.resize(1);
-        tempVectors_[0] = input->child(0);
-    } else {
-        tempVectors_.resize(channel_idxes.size());
-        for (auto i = 0; i < channel_idxes.size(); i++) {
-            tempVectors_[i] = input->child(channel_idxes[i]);
-        }
+    tempVectors_.resize(channel_idxes.size());
+    for (auto i = 0; i < channel_idxes.size(); i++) {
+        tempVectors_[i] = input->child(channel_idxes[i]);
     }
 }
 
 int32_t
 GroupingSet::outputRowCount() const {
+    if (!lookup_) {
+        return 0;
+    }
     return lookup_->newGroups_.size();
 }
 
@@ -249,8 +249,10 @@ initializeAggregates(const std::vector<AggregateInfo>& aggregates,
 
 void
 GroupingSet::createHashTable() {
-    hash_table_ =
-        std::make_unique<HashTable>(std::move(hashers_), accumulators());
+    auto maxGroups =
+        segcore::SegcoreConfig::default_config().get_max_group_by_groups();
+    hash_table_ = std::make_unique<HashTable>(
+        std::move(hashers_), accumulators(), maxGroups);
     auto& rows = *(hash_table_->rows());
     initializeAggregates(aggregates_, rows);
     lookup_ = std::make_unique<HashLookup>(hash_table_->hashers());

@@ -18,9 +18,7 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"math"
-	"path"
 	"strconv"
 	"time"
 
@@ -28,22 +26,22 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Handler handles some channel method for ChannelManager
@@ -80,6 +78,10 @@ func newServerHandler(s *Server) *ServerHandler {
 }
 
 // GetDataVChanPositions gets vchannel latest positions with provided dml channel names for DataNode.
+// unflushend segmentIDs ---> L1, growing segments
+// flushend segmentIDs   ---> L1&L2, flushed segments
+// dropped segmentIDs    ---> dropped segments
+// level zero segmentIDs ---> L0 segments
 func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 	log.Info("GetDataVChanPositions",
@@ -88,6 +90,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 		zap.Int("numOfSegments", len(segments)),
 	)
 	var (
+		levelZeroIDs = make(typeutil.UniqueSet)
 		flushedIDs   = make(typeutil.UniqueSet)
 		unflushedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
@@ -104,12 +107,14 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 			continue
 		}
 
-		if s.GetState() == commonpb.SegmentState_Dropped {
+		switch {
+		case s.GetState() == commonpb.SegmentState_Dropped:
 			droppedIDs.Insert(s.GetID())
-			continue
-		} else if s.GetState() == commonpb.SegmentState_Flushing || s.GetState() == commonpb.SegmentState_Flushed {
+		case s.GetLevel() == datapb.SegmentLevel_L0:
+			levelZeroIDs.Insert(s.GetID())
+		case isFlushState(s.GetState()):
 			flushedIDs.Insert(s.GetID())
-		} else {
+		default:
 			unflushedIDs.Insert(s.GetID())
 		}
 	}
@@ -121,6 +126,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 		FlushedSegmentIds:   flushedIDs.Collect(),
 		UnflushedSegmentIds: unflushedIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
+		LevelZeroSegmentIds: levelZeroIDs.Collect(),
 	}
 }
 
@@ -163,7 +169,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
+		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
 			continue
 		}
 		if s.GetIsImporting() {
@@ -214,20 +220,10 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// ================================================
 
 	segmentIndexed := func(segID UniqueID) bool {
-		return indexed.Contain(segID) || (validSegmentInfos[segID].GetIsSorted() && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
+		return indexed.Contain(segID) || ((validSegmentInfos[segID].GetIsSorted() || validSegmentInfos[segID].GetIsSortedByNamespace()) && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
 	}
 
 	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed)
-
-	log.Info("GetQueryVChanPositions",
-		zap.Int64("collectionID", channel.GetCollectionID()),
-		zap.String("channel", channel.GetName()),
-		zap.Int("numOfSegments", len(segments)),
-		zap.Int("result flushed", len(flushedIDs)),
-		zap.Int("result growing", len(growingIDs)),
-		zap.Int("result L0", len(levelZeroIDs)),
-		zap.Any("partition stats", partStatsVersionsMap),
-	)
 
 	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
 	// if no l0 segment exist, use checkpoint as delete checkpoint
@@ -275,8 +271,7 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 		}, ids...)
 	}
 
-	var compactionFromExistWithCache func(segID UniqueID) bool
-	compactionFromExistWithCache = func(segID UniqueID) bool {
+	compactionFromExistWithCache := func(segID UniqueID) bool {
 		var compactionFromExist func(segID UniqueID) bool
 		compactionFromExistMap := make(map[UniqueID]bool)
 
@@ -477,10 +472,6 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 	var seekPosition *msgpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.GetName())
 	if seekPosition != nil {
-		log.Info("channel seek position set from channel checkpoint meta",
-			zap.Uint64("posTs", seekPosition.Timestamp),
-			zap.Stringer("posWALName", seekPosition.WALName),
-			zap.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
 		return seekPosition
 	}
 
@@ -741,7 +732,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	// get segment info
 	segments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-		return segmentHasData && info.GetStartPosition().GetTimestamp() < snapshotTs && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
+		return segmentHasData && segmentEffectiveTs(info.SegmentInfo) < snapshotTs && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
 	}))
 
 	if len(segments) == 0 {
@@ -780,9 +771,9 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	segDescList := lo.Map(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) *datapb.SegmentDescription {
 		segID := segInfo.GetID()
 		indexesFiles := uncompressIndexFiles(h, collectionID, segID)
-		uncompressedJsonStats := make(map[int64]*datapb.JsonKeyStats)
+		uncompressedJSONStats := make(map[int64]*datapb.JsonKeyStats)
 		for id, jsonStats := range segInfo.GetJsonKeyStats() {
-			uncompressedJsonStats[id] = uncompressJsonStats(h, segInfo, jsonStats)
+			uncompressedJSONStats[id] = uncompressJSONStats(h, segInfo, jsonStats)
 		}
 		return &datapb.SegmentDescription{
 			SegmentId:         segInfo.GetID(),
@@ -799,7 +790,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			Statslogs:         segInfo.GetStatslogs(),
 			Bm25Statslogs:     segInfo.GetBm25Statslogs(),
 			IndexFiles:        indexesFiles,
-			JsonKeyIndexFiles: uncompressedJsonStats,
+			JsonKeyIndexFiles: uncompressedJSONStats,
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 		}
@@ -822,7 +813,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		Collection: &datapb.CollectionDescription{
 			Schema:              schema,
 			NumShards:           int64(resp.GetShardsNum()),
-			NumPartitions:       int64(resp.GetNumPartitions()),
+			NumPartitions:       resp.GetNumPartitions(),
 			Partitions:          partitionMapping,
 			VirtualChannelNames: resp.GetVirtualChannelNames(),
 		},
@@ -831,16 +822,11 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	}, nil
 }
 
-func uncompressJsonStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
-	prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d/%d", h.s.meta.chunkManager.RootPath(), common.JSONStatsPath, jsonStats.GetJsonKeyStatsDataFormat(),
-		jsonStats.GetBuildID(), jsonStats.GetVersion(), segInfo.GetCollectionID(), segInfo.GetPartitionID(), segInfo.GetID(), jsonStats.GetFieldID())
-	uncompressedFiles := make([]string, 0)
-	for _, file := range jsonStats.GetFiles() {
-		uncompressedFiles = append(uncompressedFiles, path.Join(prefix, file))
-	}
-	uncompressedJsonStats := proto.Clone(jsonStats).(*datapb.JsonKeyStats)
-	uncompressedJsonStats.Files = uncompressedFiles
-	return uncompressedJsonStats
+func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
+	uncompressedJSONStats := proto.Clone(jsonStats).(*datapb.JsonKeyStats)
+	statsMap := map[int64]*datapb.JsonKeyStats{jsonStats.GetFieldID(): uncompressedJSONStats}
+	metautil.BuildJSONKeyStatsPaths(h.s.meta.chunkManager.RootPath(), segInfo, statsMap)
+	return uncompressedJSONStats
 }
 
 func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*indexpb.IndexFilePathInfo {
@@ -851,8 +837,11 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 			fieldID := h.s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 			indexName := h.s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 
-			indexFilePaths := metautil.BuildSegmentIndexFilePaths(h.s.meta.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
-				segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+			builder := metautil.NewIndexPathBuilder(h.s.meta.chunkManager.RootPath(),
+				segIdx.IndexStorePathVersion, segIdx.CollectionID,
+				segIdx.PartitionID, segIdx.SegmentID,
+				segIdx.BuildID, segIdx.IndexVersion)
+			indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
 			indexParams := h.s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 
@@ -870,6 +859,7 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 				NumRows:                   segIdx.NumRows,
 				CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 				CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+				IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 			})
 		}
 	}

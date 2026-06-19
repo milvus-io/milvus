@@ -23,16 +23,16 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // filterNode filter the invalid message of pipeline
@@ -64,11 +64,11 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 	}
 
 	metrics.QueryNodeConsumerMsgCount.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.AllLabel, fmt.Sprint(fNode.collectionID)).
+		WithLabelValues(paramtable.GetStringNodeID(), metrics.AllLabel, fmt.Sprint(fNode.collectionID)).
 		Inc()
 
 	metrics.QueryNodeConsumeTimeTickLag.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TimetickLabel, fmt.Sprint(fNode.collectionID)).
+		WithLabelValues(paramtable.GetStringNodeID(), metrics.TimetickLabel, fmt.Sprint(fNode.collectionID)).
 		Set(float64(tsoutil.SubByNow(streamMsgPack.EndTs)))
 
 	// Get collection from collection manager
@@ -101,7 +101,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 		}
 	}
 	fNode.delegator.TryCleanExcludedSegments(streamMsgPack.EndTs)
-	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Inc()
+	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).Inc()
 	return out
 }
 
@@ -110,7 +110,7 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 	switch msg.Type() {
 	case commonpb.MsgType_Insert:
 		insertMsg := msg.(*msgstream.InsertMsg)
-		metrics.QueryNodeConsumeCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(insertMsg.Size()))
+		metrics.QueryNodeConsumeCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).Add(float64(insertMsg.Size()))
 		for _, policy := range fNode.InsertMsgPolicys {
 			err := policy(fNode, c, insertMsg)
 			if err != nil {
@@ -128,7 +128,7 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 
 	case commonpb.MsgType_Delete:
 		deleteMsg := msg.(*msgstream.DeleteMsg)
-		metrics.QueryNodeConsumeCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Add(float64(deleteMsg.Size()))
+		metrics.QueryNodeConsumeCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).Add(float64(deleteMsg.Size()))
 		for _, policy := range fNode.DeleteMsgPolicys {
 			err := policy(fNode, c, deleteMsg)
 			if err != nil {
@@ -145,6 +145,15 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 	case commonpb.MsgType_AlterCollection:
 		putCollectionMsg := msg.(*adaptor.AlterCollectionMessageBody)
 		header := putCollectionMsg.AlterCollectionMessage.Header()
+		if header.GetCollectionId() != fNode.collectionID {
+			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
+		}
+		return nil
+	case commonpb.MsgType_ManualFlush:
+		// ManualFlush is handled by StreamingNode WAL flusher (fence + persist).
+		// QueryNode only consumes the barrier so the pipeline advances.
+		manualFlushMsg := msg.(*adaptor.ManualFlushMessageBody)
+		header := manualFlushMsg.ManualFlushMessage.Header()
 		if header.GetCollectionId() != fNode.collectionID {
 			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
 		}

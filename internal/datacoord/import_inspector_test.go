@@ -24,15 +24,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 type ImportInspectorSuite struct {
@@ -58,12 +58,14 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	s.alloc = allocator.NewMockAllocator(s.T())
 	broker := broker.NewMockBroker(s.T())
@@ -321,7 +323,7 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 		State:        datapb.ImportTaskStateV2_Pending,
 	})
 	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
-	err = s.importMeta.AddTask(context.TODO(), pendingImportTask)
+	_ = s.importMeta.AddTask(context.TODO(), pendingImportTask)
 
 	// Mock scheduler expectations
 	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)

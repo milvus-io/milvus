@@ -3,10 +3,10 @@ package rmq
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)

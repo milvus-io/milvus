@@ -39,10 +39,9 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
 	grpcmixcoord "github.com/milvus-io/milvus/internal/distributed/mixcoord"
 	mixc "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
@@ -58,26 +57,26 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	_ "github.com/milvus-io/milvus/pkg/v2/util/symbolizer" // support symbolizer and crash dump
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	_ "github.com/milvus-io/milvus/pkg/v3/util/symbolizer" // support symbolizer and crash dump
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -212,6 +211,7 @@ type proxyTestServer struct {
 	*Proxy
 	grpcServer *grpc.Server
 	ch         chan error
+	lisAddr    string // actual listen address (set after startGrpc binds to :0)
 }
 
 func newProxyTestServer(node *Proxy) *proxyTestServer {
@@ -251,14 +251,15 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("Proxy server listen on tcp", zap.Int("port", p.Port.GetAsInt()))
-	lis, err := net.Listen("tcp", ":"+p.Port.GetValue())
+	log.Debug("Proxy server about to listen on localhost:0")
+	lis, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
-		log.Warn("Proxy server failed to listen on", zap.Error(err), zap.Int("port", p.Port.GetAsInt()))
+		log.Warn("Proxy server failed to listen on", zap.Error(err))
 		s.ch <- err
 		return
 	}
-	log.Debug("Proxy server already listen on tcp", zap.Int("port", p.Port.GetAsInt()))
+	s.lisAddr = lis.Addr().String()
+	log.Debug("Proxy server listening on", zap.String("addr", s.lisAddr))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -984,11 +985,11 @@ func TestProxy(t *testing.T) {
 	base.Init(bt)
 	var p paramtable.GrpcServerConfig
 	p.Init(typeutil.ProxyRole, bt)
-	testServer.Proxy.SetAddress(p.GetAddress())
-	assert.Equal(t, p.GetAddress(), testServer.Proxy.GetAddress())
 
 	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
+	testServer.SetAddress(testServer.lisAddr)
+	assert.Equal(t, testServer.lisAddr, testServer.GetAddress())
 
 	rootCoordClient, err := mixc.NewClient(ctx)
 	assert.NoError(t, err)
@@ -1073,6 +1074,15 @@ func TestProxy(t *testing.T) {
 
 	// an int64 field (pk) & a float vector field
 	schema := constructTestCollectionSchema(collectionName, int64Field, floatVecField, binaryVecField, structField, dim)
+	// Mark the struct field nullable so we can exercise the "struct column omitted" insert path below.
+	// ValidateStructArrayField propagates Nullable=true to sub-fields server-side; mirror that here
+	// so DescribeCollection's response matches the local schema under proto.Equal.
+	for _, s := range schema.StructArrayFields {
+		s.Nullable = true
+		for _, sub := range s.Fields {
+			sub.Nullable = true
+		}
+	}
 	createCollectionReq := constructTestCreateCollectionRequest(dbName, collectionName, schema, shardsNum)
 
 	t.Run("create collection", func(t *testing.T) {
@@ -1445,6 +1455,9 @@ func TestProxy(t *testing.T) {
 	})
 
 	var insertedIDs []int64
+	var omittedStructIDs []int64
+	var mixedStructIDs []int64
+	mixedValidHalf := rowNum / 2 // rows [0, mixedValidHalf) valid; [mixedValidHalf, rowNum) null
 	t.Run("insert", func(t *testing.T) {
 		req := constructTestCollectionInsertRequest(dbName, collectionName, floatVecField, binaryVecField, structField, schema, rowNum, dim)
 
@@ -1461,6 +1474,60 @@ func TestProxy(t *testing.T) {
 		default:
 			t.Fatalf("Unexpected ID type")
 		}
+
+		// Second insert: omit the nullable struct column entirely (Go-SDK scenario).
+		// Exercises checkAndFlattenStructFieldData's "skip + let downstream backfill" path.
+		omitReq := &milvuspb.InsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData: []*schemapb.FieldData{
+				newFloatVectorFieldData(floatVecField, rowNum, dim),
+				newBinaryVectorFieldData(binaryVecField, rowNum, dim),
+			},
+			HashKeys: testutils.GenerateHashKeys(rowNum),
+			NumRows:  uint32(rowNum),
+		}
+		omitResp, err := proxy.Insert(ctx, omitReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, omitResp.GetStatus().GetErrorCode(),
+			"reason: %s", omitResp.GetStatus().GetReason())
+		assert.Equal(t, int64(rowNum), omitResp.InsertCnt)
+		omittedStructIDs = omitResp.GetIDs().GetIntId().GetData()
+		assert.NotEmpty(t, omittedStructIDs)
+
+		// Third insert: struct present, but row-level ValidData mask marks half of
+		// the rows null. Exercises the hasDataCount > 0 path + user-supplied ValidData,
+		// which is the default pymilvus traffic shape.
+		//
+		// Wire convention is compact: each sub-field carries Data for only the valid
+		// rows (len == mixedValidHalf) while ValidData has length == NumRows with
+		// true/false per row. Proxy-side FillWithNullValue expands it to dense.
+		mixedStruct := newStructArrayFieldData(schema.StructArrayFields[0], structField, mixedValidHalf, dim)
+		mask := make([]bool, rowNum)
+		for i := 0; i < mixedValidHalf; i++ {
+			mask[i] = true
+		}
+		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
+			sf.ValidData = mask
+		}
+		mixedReq := &milvuspb.InsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData: []*schemapb.FieldData{
+				newFloatVectorFieldData(floatVecField, rowNum, dim),
+				newBinaryVectorFieldData(binaryVecField, rowNum, dim),
+				mixedStruct,
+			},
+			HashKeys: testutils.GenerateHashKeys(rowNum),
+			NumRows:  uint32(rowNum),
+		}
+		mixedResp, err := proxy.Insert(ctx, mixedReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, mixedResp.GetStatus().GetErrorCode(),
+			"reason: %s", mixedResp.GetStatus().GetReason())
+		assert.Equal(t, int64(rowNum), mixedResp.InsertCnt)
+		mixedStructIDs = mixedResp.GetIDs().GetIntId().GetData()
+		assert.Len(t, mixedStructIDs, rowNum)
 	})
 
 	// TODO(dragondriver): proxy.Delete()
@@ -1509,7 +1576,8 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		rowNumStr := funcutil.KeyValuePair2Map(resp.Stats)["row_count"]
-		assert.Equal(t, strconv.Itoa(rowNum), rowNumStr)
+		// Two inserts above: one with full struct data + one with the struct column omitted.
+		assert.Equal(t, strconv.Itoa(3*rowNum), rowNumStr)
 
 		// get statistics of other collection -> fail
 		resp, err = proxy.GetStatistics(ctx, &milvuspb.GetStatisticsRequest{
@@ -1789,6 +1857,63 @@ func TestProxy(t *testing.T) {
 		assert.True(t, loaded)
 	})
 
+	t.Run("query rows with omitted struct return null", func(t *testing.T) {
+		if !loaded {
+			t.Skip("collection not loaded")
+		}
+		subI32Name := typeutil.ConcatStructFieldName(structField, subFieldI32)
+		subFVecName := typeutil.ConcatStructFieldName(structField, subFieldFVec)
+
+		// Row from the "struct column omitted" insert must come back null.
+		resp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Expr:           fmt.Sprintf("%s in [%d]", int64Field, omittedStructIDs[0]),
+			OutputFields:   []string{subI32Name, subFVecName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode(),
+			"reason: %s", resp.GetStatus().GetReason())
+		for _, fd := range resp.GetFieldsData() {
+			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
+				continue
+			}
+			for i, v := range fd.GetValidData() {
+				assert.False(t, v, "row %d of sub-field %s should be null", i, fd.GetFieldName())
+			}
+		}
+
+		// Row-level mixed-null batch: first half valid, second half null via ValidData.
+		cases := []struct {
+			pk         int64
+			expectNull bool
+			label      string
+		}{
+			{mixedStructIDs[0], false, "mixed-valid row"},
+			{mixedStructIDs[rowNum-1], true, "mixed-null row"},
+		}
+		for _, c := range cases {
+			qresp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Expr:           fmt.Sprintf("%s in [%d]", int64Field, c.pk),
+				OutputFields:   []string{subI32Name, subFVecName},
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, qresp.GetStatus().GetErrorCode(),
+				"%s reason: %s", c.label, qresp.GetStatus().GetReason())
+			for _, fd := range qresp.GetFieldsData() {
+				if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
+					continue
+				}
+				for i, v := range fd.GetValidData() {
+					assert.Equal(t, !c.expectNull, v,
+						"%s: sub-field %s row %d ValidData", c.label, fd.GetFieldName(), i)
+				}
+			}
+		}
+	})
+
 	t.Run("show in-memory collections", func(t *testing.T) {
 		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 			Base:            nil,
@@ -1880,7 +2005,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		rowNumStr := funcutil.KeyValuePair2Map(resp.Stats)["row_count"]
-		assert.Equal(t, strconv.Itoa(rowNum), rowNumStr)
+		assert.Equal(t, strconv.Itoa(3*rowNum), rowNumStr)
 
 		// get statistics of other collection -> fail
 		resp, err = proxy.GetStatistics(ctx, &milvuspb.GetStatisticsRequest{
@@ -2309,7 +2434,8 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		rowNumStr := funcutil.KeyValuePair2Map(resp.Stats)["row_count"]
-		assert.Equal(t, strconv.Itoa(rowNum*2), rowNumStr)
+		// 3 inserts in "insert" subtest (full/omit-struct/mixed-null) + 1 in "insert partition".
+		assert.Equal(t, strconv.Itoa(rowNum*4), rowNumStr)
 
 		// get statistics of other collection -> fail
 		resp, err = proxy.GetStatistics(ctx, &milvuspb.GetStatisticsRequest{
@@ -2341,6 +2467,81 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, rowNum, len(resp.SuccIndex))
 		assert.Equal(t, 0, len(resp.ErrIndex))
 		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+
+		// Upsert an existing row with the nullable struct column omitted. The row
+		// previously had full struct data; after this upsert it should come back null.
+		// task_upsert.go also calls checkAndFlattenStructFieldData — same code path as insert.
+		pkCol := newScalarFieldData(schema.Fields[0], int64Field, 1)
+		pkCol.GetScalars().GetLongData().Data = []int64{insertedIDs[0]}
+		omitUpsertReq := &milvuspb.UpsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData: []*schemapb.FieldData{
+				pkCol,
+				newFloatVectorFieldData(floatVecField, 1, dim),
+				newBinaryVectorFieldData(binaryVecField, 1, dim),
+			},
+			HashKeys: testutils.GenerateHashKeys(1),
+			NumRows:  uint32(1),
+		}
+		omitUpsertResp, err := proxy.Upsert(ctx, omitUpsertReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, omitUpsertResp.GetStatus().GetErrorCode(),
+			"reason: %s", omitUpsertResp.GetStatus().GetReason())
+		assert.Equal(t, int64(1), omitUpsertResp.UpsertCnt)
+
+		subI32Name := typeutil.ConcatStructFieldName(structField, subFieldI32)
+		subFVecName := typeutil.ConcatStructFieldName(structField, subFieldFVec)
+		qresp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Expr:           fmt.Sprintf("%s in [%d]", int64Field, insertedIDs[0]),
+			OutputFields:   []string{subI32Name, subFVecName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, qresp.GetStatus().GetErrorCode(),
+			"reason: %s", qresp.GetStatus().GetReason())
+		for _, fd := range qresp.GetFieldsData() {
+			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
+				continue
+			}
+			for i, v := range fd.GetValidData() {
+				assert.False(t, v, "upserted row %d sub-field %s should be null", i, fd.GetFieldName())
+			}
+		}
+
+		// Upsert with struct column present but half the rows null via a compact
+		// ValidData mask — mirrors insert scenario 3, confirming Upsert goes through
+		// the same FillWithNullValue path for ArrayOfVector sub-fields.
+		halfRows := 2
+		validHalf := halfRows / 2
+		pkMixed := newScalarFieldData(schema.Fields[0], int64Field, halfRows)
+		pkMixed.GetScalars().GetLongData().Data = insertedIDs[:halfRows]
+		mixedStruct := newStructArrayFieldData(schema.StructArrayFields[0], structField, validHalf, dim)
+		mask := make([]bool, halfRows)
+		for i := 0; i < validHalf; i++ {
+			mask[i] = true
+		}
+		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
+			sf.ValidData = mask
+		}
+		mixedUpsertReq := &milvuspb.UpsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData: []*schemapb.FieldData{
+				pkMixed,
+				newFloatVectorFieldData(floatVecField, halfRows, dim),
+				newBinaryVectorFieldData(binaryVecField, halfRows, dim),
+				mixedStruct,
+			},
+			HashKeys: testutils.GenerateHashKeys(halfRows),
+			NumRows:  uint32(halfRows),
+		}
+		mixedUpsertResp, err := proxy.Upsert(ctx, mixedUpsertReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, mixedUpsertResp.GetStatus().GetErrorCode(),
+			"reason: %s", mixedUpsertResp.GetStatus().GetReason())
+		assert.Equal(t, int64(halfRows), mixedUpsertResp.UpsertCnt)
 	})
 
 	t.Run("release partition", func(t *testing.T) {
@@ -3551,7 +3752,7 @@ func TestProxy(t *testing.T) {
 
 		resp, err := proxy.Upsert(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 0, len(resp.SuccIndex))
 		assert.Equal(t, rowNum, len(resp.ErrIndex))
 		assert.Equal(t, int64(0), resp.UpsertCnt)
@@ -4284,25 +4485,25 @@ func TestProxy_Import(t *testing.T) {
 		mc := NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{},
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID: 1,
+		}, nil)
 		globalMetaCache = mc
 
 		chMgr := NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
 		proxy.chMgr = chMgr
 
-		rc := mocks.NewMockRootCoordClient(t)
-		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-			ID:    rand.Int63(),
-			Count: 1,
-		}, nil).Once()
-		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
-		assert.NoError(t, err)
-		err = idAllocator.Start()
-		assert.NoError(t, err)
-		proxy.rowIDAllocator = idAllocator
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			JobID:  "123456789",
+		}, nil)
+		proxy.mixCoord = mixCoord
+
 		proxy.tsoAllocator = &timestampAllocator{
 			tso: newMockTimestampAllocatorInterface(),
 		}

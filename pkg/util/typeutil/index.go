@@ -17,7 +17,7 @@
 package typeutil
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 // CompareIndexParams compares indexParam1 with indexParam2. When all keys of indexParam1 exist in indexParam2,

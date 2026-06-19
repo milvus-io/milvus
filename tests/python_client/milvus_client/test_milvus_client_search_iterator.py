@@ -1,3 +1,7 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
+import random
+
 import pytest
 from common import common_func as cf
 from common import common_type as ct
@@ -56,7 +60,9 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         """
         target: test search iterator(high level api) case about mul db
         method: create connection, collection, insert and search iterator
-        expected: search iterator error after switch to another db
+        expected: SearchIteratorV2 captures db_name at creation time, so switching db after
+                  iterator creation does NOT affect the iterator — it continues to return results
+                  from the original db without error.
         """
         batch_size = 20
         client = self._client()
@@ -64,31 +70,32 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         my_db = cf.gen_unique_str(prefix)
         self.create_database(client, my_db)
         self.using_database(client, my_db)
-        # 1. create collection
+        # 1. create collection in my_db
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        # 2. insert
+        # 2. insert into my_db collection
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.using_database(client, "default")
-        # 3. create collection
+        # 3. create same-named collection in default db
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        # 4. insert
+        # 4. insert into default db collection
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        # 5. search_iterator
+        # 5. search_iterator: created on default db; switch to my_db after creation.
+        #    With SearchIteratorV2, db_name is captured at creation — the switch has no effect
+        #    and the iterator continues to return results from the default db collection.
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}
-        error_msg = "alias or database may have been changed"
         self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
                              use_mul_db=True, another_db=my_db,
                              check_task=CheckTasks.check_search_iterator,
-                             check_items={ct.err_code: 1, ct.err_msg: error_msg})
+                             check_items={"batch_size": batch_size})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -291,8 +298,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: predicate is not a boolean expression: invalidexpr, "
-                             f"data type: JSON: invalid parameter"}
+                 ct.err_msg: "predicate is not a boolean expression"}
         self.search_iterator(client, collection_name, vectors_to_search,
                              filter=expr,
                              batch_size=20,
@@ -629,6 +635,18 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
             it.next()
 
 
+_json_path_index_params = [
+    ("INVERTED", "BOOL"),
+    ("INVERTED", "DOUBLE"),
+    ("INVERTED", "VARCHAR"),
+    ("INVERTED", "JSON"),
+    ("STL_SORT", "DOUBLE"),
+    ("STL_SORT", "VARCHAR"),
+    ("BITMAP", "BOOL"),
+    ("BITMAP", "VARCHAR"),
+]
+
+
 class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     """ Test case of search iterator interface """
 
@@ -640,13 +658,17 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     def metric_type(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["INVERTED"])
-    def supported_varchar_scalar_index(self, request):
+    @pytest.fixture(scope="function", params=_json_path_index_params, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params])
+    def json_index_params(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "JSON", "varchar", "bool"])
-    def supported_json_cast_type(self, request):
-        yield request.param
+    @pytest.fixture(scope="function")
+    def supported_varchar_scalar_index(self, json_index_params):
+        yield json_index_params[0]
+
+    @pytest.fixture(scope="function")
+    def supported_json_cast_type(self, json_index_params):
+        yield json_index_params[1]
 
     """
     ******************************************************************
@@ -854,7 +876,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, id_type=id_type, max_length=128,
                                consistency_level="Strong")
         # 2. insert
-        default_nb = 2000
+        default_nb = ct.default_nb
         if id_type == 'int':
             rows = [{default_primary_key_field_name: i,
                      default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
@@ -921,7 +943,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim, nullable=True)
         schema.add_field(default_float_field_name, DataType.FLOAT)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
         if not enable_dynamic_field:
@@ -950,7 +972,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                                index_params=index_params, metric_type=metric_type)
         # 2. insert
         rows = [{default_primary_key_field_name: i,
-                 default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                 default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]) if random.random() >= 0.2 else None,
                  default_float_field_name: i * 1.0,
                  default_string_field_name: str(i),
                  json_field_name: {'a': {"b": i}}} for i in range(default_nb)]

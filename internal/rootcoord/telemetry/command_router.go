@@ -19,7 +19,7 @@ package telemetry
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 // CommandRouter routes commands to appropriate handlers based on command type

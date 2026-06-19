@@ -20,14 +20,14 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type cohereProvider struct {
@@ -36,9 +36,10 @@ type cohereProvider struct {
 	url          string
 	modelName    string
 	params       map[string]any
+	timeoutMs    int64
 }
 
-func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
+func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
 	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.CohereAIAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
@@ -65,7 +66,7 @@ func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 		case models.MaxTKsPerDocParamKey:
 			maxTokensPerDoc, err := strconv.Atoi(param.Value)
 			if err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxTKsPerDocParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not a valid number", models.MaxTKsPerDocParamKey, param.Value)
 			} else {
 				modelParams[models.MaxTKsPerDocParamKey] = maxTokensPerDoc
 			}
@@ -73,20 +74,23 @@ func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("cohere rerank model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("cohere rerank model name is required")
 	}
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := cohereProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
 		cohereClient: cohereClient,
 		url:          url,
 		modelName:    modelName,
 		params:       nil,
+		timeoutMs:    timeoutMs,
 	}
 	return &provider, nil
 }
 
-func (provider *cohereProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.cohereClient.Rerank(provider.url, provider.modelName, query, docs, nil, 30)
+func (provider *cohereProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+	rerankResp, err := provider.cohereClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

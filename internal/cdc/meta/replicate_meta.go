@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const requestTimeout = 30 * time.Second
@@ -44,7 +44,7 @@ func ListReplicatePChannels(ctx context.Context, etcdCli *clientv3.Client, prefi
 		meta := &streamingpb.ReplicatePChannelMeta{}
 		err = proto.Unmarshal([]byte(value), meta)
 		if err != nil {
-			return nil, errors.Wrapf(err, "unmarshal replicate pchannel meta %s failed", keys[k])
+			return nil, merr.Wrapf(err, "unmarshal replicate pchannel meta %s failed", keys[k])
 		}
 		channel := &ReplicateChannel{
 			Key:         keys[k],

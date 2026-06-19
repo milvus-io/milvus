@@ -5,11 +5,14 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
-var ErrNotPrimary = errors.New("cluster is not primary, cannot do any DDL/DCL")
+var (
+	ErrNotPrimary   = errors.New("cluster is not primary, cannot do any DDL/DCL")
+	ErrNotSecondary = errors.New("cluster is not secondary, cannot perform force promote")
+)
 
 type Broadcaster interface {
 	// WithResourceKeys sets the resource keys of the broadcast operation.
@@ -18,11 +21,21 @@ type Broadcaster interface {
 	// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 	WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
 
+	// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
+	// and verifies the cluster is secondary. Returns error if the cluster is primary.
+	// This is used for force promote operations that should only be executed on secondary clusters.
+	WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error)
+
 	// LegacyAck is the legacy ack interface for the 2.6.0 import message.
 	LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error
 
 	// Ack acknowledges the message at the specified vchannel.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
+
+	// GetPendingCreateCollectionResources returns collection ID → file resource IDs
+	// for all pending CreateCollection broadcast tasks that haven't completed
+	// their ack callback yet. Used during recovery to rebuild file resource refCnt.
+	GetPendingCreateCollectionResources() map[int64][]int64
 
 	// Close closes the broadcaster.
 	Close()

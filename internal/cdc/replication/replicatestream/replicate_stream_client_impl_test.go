@@ -26,18 +26,21 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
-	mock_message "github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
-	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
+	streamingpb "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestReplicateStreamClient_Replicate(t *testing.T) {
@@ -74,7 +77,7 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 	defer replicateClient.Close()
 
 	// Test Replicate method
-	const msgCount = pendingMessageQueueLength * 10
+	msgCount := paramtable.Get().StreamingCfg.ReplicationPendingMessagesQueueLength.GetAsInt() * 10
 	go func() {
 		for i := 0; i < msgCount; i++ {
 			mockMsg := mock_message.NewMockImmutableMessage(t)
@@ -331,4 +334,20 @@ func (m *mockReplicateStreamClient) Close() {
 	m.closeOnce.Do(func() {
 		close(m.closeCh)
 	})
+}
+
+func TestIsStreamIdleTimeout(t *testing.T) {
+	// nil error
+	assert.False(t, isStreamIdleTimeout(nil))
+
+	// Exact error from envoy sidecar stream_idle_timeout
+	assert.True(t, isStreamIdleTimeout(status.Error(codes.Unknown, "stream timeout")))
+
+	// Other gRPC errors should not match
+	assert.False(t, isStreamIdleTimeout(status.Error(codes.Unavailable, "connection refused")))
+	assert.False(t, isStreamIdleTimeout(status.Error(codes.Unknown, "some other error")))
+	assert.False(t, isStreamIdleTimeout(status.Error(codes.DeadlineExceeded, "stream timeout")))
+
+	// Non-gRPC errors should not match
+	assert.False(t, isStreamIdleTimeout(assert.AnError))
 }

@@ -24,14 +24,15 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/clustering"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type clusteringCompactionPolicy struct {
@@ -39,6 +40,9 @@ type clusteringCompactionPolicy struct {
 	allocator allocator.Allocator
 	handler   Handler
 }
+
+// Ensure clusteringCompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*clusteringCompactionPolicy)(nil)
 
 func newClusteringCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *clusteringCompactionPolicy {
 	return &clusteringCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
@@ -50,13 +54,16 @@ func (policy *clusteringCompactionPolicy) Enable() bool {
 		Params.DataCoordCfg.ClusteringCompactionAutoEnable.GetAsBool()
 }
 
+func (policy *clusteringCompactionPolicy) Name() string {
+	return "ClusteringCompactionPolicy"
+}
+
 func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
 	log.Info("start trigger clusteringCompactionPolicy...")
 	collections := policy.meta.GetCollections()
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	views := make([]CompactionView, 0)
-	partitionKeySortViews := make([]CompactionView, 0)
 	for _, collection := range collections {
 		if collection == nil {
 			continue
@@ -65,20 +72,19 @@ func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 			log.Info("skip clustering compaction for external collection", zap.Int64("collectionID", collection.ID))
 			continue
 		}
+		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+			log.Info("skip clustering compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("collectionID", collection.ID))
+			continue
+		}
 		collectionViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
 			log.Warn("fail to trigger collection clustering compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 		}
-		isPartitionKeySorted := IsPartitionKeySortCompactionEnabled(collection.Properties)
-		if isPartitionKeySorted {
-			partitionKeySortViews = append(partitionKeySortViews, collectionViews...)
-		} else {
-			views = append(views, collectionViews...)
-		}
+		views = append(views, collectionViews...)
 	}
 	events[TriggerTypeClustering] = views
-	events[TriggerTypeClusteringPartitionKeySort] = partitionKeySortViews
 	return events, nil
 }
 
@@ -138,15 +144,16 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		return nil, 0, err
 	}
 
+	namespaceEnabled := collection.Schema.GetEnableNamespace()
 	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		isPartitionKeySorted := IsPartitionKeySortCompactionEnabled(collection.Properties)
 		return isSegmentHealthy(segment) &&
 			isFlushed(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 			!segment.GetIsInvisible() &&
-			(!isPartitionKeySorted || segment.IsPartitionKeySorted)
+			(!namespaceEnabled || segment.GetIsSortedByNamespace()) &&
+			!policy.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 
 	views := make([]CompactionView, 0)
@@ -235,7 +242,7 @@ func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionVi
 
 func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int64) (int64, error) {
 	if expectedSegmentSize <= 0 {
-		return 0, fmt.Errorf("invalid expected segment size %d", expectedSegmentSize)
+		return 0, merr.WrapErrServiceInternalMsg("invalid expected segment size %d", expectedSegmentSize)
 	}
 
 	var totalSize float64
@@ -252,17 +259,17 @@ func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int6
 	}
 
 	if totalRows == 0 || totalSize == 0 {
-		return 0, fmt.Errorf("segment view does not contain size info to estimate row count")
+		return 0, merr.WrapErrServiceInternalMsg("segment view does not contain size info to estimate row count")
 	}
 
 	rowSize := totalSize / float64(totalRows)
 	if rowSize <= 0 {
-		return 0, fmt.Errorf("invalid row size calculated from segment view")
+		return 0, merr.WrapErrServiceInternalMsg("invalid row size calculated from segment view")
 	}
 
 	rows := float64(expectedSegmentSize) / rowSize
 	if rows <= 0 {
-		return 0, fmt.Errorf("estimated max row count is not positive")
+		return 0, merr.WrapErrServiceInternalMsg("estimated max row count is not positive")
 	}
 
 	return int64(rows), nil
@@ -341,6 +348,20 @@ func (v *ClusteringSegmentsView) GetSegmentsView() []*SegmentView {
 		return nil
 	}
 	return v.segments
+}
+
+func (v *ClusteringSegmentsView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return sumSegmentSize(v.segments)
+}
+
+func (v *ClusteringSegmentsView) GetCollectionTTL() time.Duration {
+	if v == nil {
+		return 0
+	}
+	return v.collectionTTL
 }
 
 func (v *ClusteringSegmentsView) Append(segments ...*SegmentView) {

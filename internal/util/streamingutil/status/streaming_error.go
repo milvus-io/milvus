@@ -6,8 +6,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/redact"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 var _ error = (*StreamingError)(nil)
@@ -57,7 +57,7 @@ func (e *StreamingError) IsSkippedOperation() bool {
 func (e *StreamingError) IsUnrecoverable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
 		e.IsReplicateViolation() ||
-		e.IsTxnUnavilable()
+		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch()
 }
 
 // IsReplicateViolation returns true if the error is caused by replicate violation.
@@ -86,9 +86,19 @@ func (e *StreamingError) IsResourceAcquired() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED
 }
 
+// IsSchemaVersionMismatch returns true if the error is caused by schema version mismatch.
+func (e *StreamingError) IsSchemaVersionMismatch() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_SCHEMA_VERSION_MISMATCH
+}
+
 // IsOnShutdown returns true if the error is caused by on shutdown.
 func (e *StreamingError) IsOnShutdown() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN
+}
+
+// IsRateLimitRejected returns true if the error is caused by rate limit rejected.
+func (e *StreamingError) IsRateLimitRejected() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED
 }
 
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
@@ -131,9 +141,15 @@ func NewInner(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INNER, format, args...)
 }
 
-// NewInvaildArgument creates a new StreamingError with code STREAMING_CODE_INVAILD_ARGUMENT.
-func NewInvaildArgument(format string, args ...interface{}) *StreamingError {
+// NewInvalidArgument creates a new StreamingError with code STREAMING_CODE_INVAILD_ARGUMENT.
+// (The proto enum still carries the historical typo INVAILD; only the Go factory uses the correct spelling.)
+func NewInvalidArgument(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, format, args...)
+}
+
+// NewSchemaVersionMismatch creates a new StreamingError with code STREAMING_CODE_SCHEMA_VERSION_MISMATCH.
+func NewSchemaVersionMismatch(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_SCHEMA_VERSION_MISMATCH, format, args...)
 }
 
 // NewTransactionExpired creates a new StreamingError with code STREAMING_CODE_TRANSACTION_EXPIRED.
@@ -164,6 +180,11 @@ func NewWALNameMismatchError(expectedWALName string, actualWALName string) *Stre
 // NewResourceAcquired creates a new StreamingError with code STREAMING_CODE_RESOURCE_ACQUIRED.
 func NewResourceAcquired(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED, format, args...)
+}
+
+// NewRateLimitRejected creates a new StreamingError with code STREAMING_CODE_RATE_LIMIT_REJECTED.
+func NewRateLimitRejected(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

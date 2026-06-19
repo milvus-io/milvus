@@ -2,7 +2,6 @@ package tasks
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -11,19 +10,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ scheduler.Task = &QueryTask{}
@@ -51,7 +51,7 @@ type QueryTask struct {
 	collection     *segments.Collection
 	segmentManager *segments.Manager
 	req            *querypb.QueryRequest
-	plan           *planpb.PlanNode // use to do the bloom filter
+	plan           *planpb.PlanNode // used by RunQNQueryPipeline for reduce
 	result         *internalpb.RetrieveResults
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
@@ -68,6 +68,10 @@ func (t *QueryTask) IsGpuIndex() bool {
 	return false
 }
 
+func (t *QueryTask) Context() context.Context {
+	return t.ctx
+}
+
 // PreExecute the task, only call once.
 func (t *QueryTask) PreExecute() error {
 	// Update task wait time metric before execute
@@ -76,9 +80,10 @@ func (t *QueryTask) PreExecute() error {
 	inQueueDurationMS := inQueueDuration.Seconds() * 1000
 
 	// Update in queue metric for prometheus.
+	queryLabel := contextutil.GetQueryLabel(t.ctx)
 	metrics.QueryNodeSQLatencyInQueue.WithLabelValues(
 		nodeID,
-		metrics.QueryLabel,
+		queryLabel,
 		t.collection.GetDBName(),
 		t.collection.GetResourceGroup(), // TODO: resource group and db name may be removed at runtime.
 		// should be refactor into metricsutil.observer in the future.
@@ -87,7 +92,7 @@ func (t *QueryTask) PreExecute() error {
 	username := t.Username()
 	metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
 		nodeID,
-		metrics.QueryLabel,
+		queryLabel,
 		username).
 		Observe(inQueueDurationMS)
 
@@ -117,23 +122,19 @@ func (t *QueryTask) Execute() error {
 		t.req.Req.Base.GetMsgID(),
 		t.req.Req.GetConsistencyLevel(),
 		t.req.Req.GetCollectionTtlTimestamps(),
+		t.req.Req.GetEntityTtlPhysicalTime(),
 	)
 	if err != nil {
 		return err
 	}
 	defer retrievePlan.Delete()
 
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req, t.plan)
+	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	if err != nil {
 		return err
 	}
 
-	reducer := segments.CreateSegCoreReducer(
-		t.req,
-		t.collection.Schema(),
-		t.segmentManager,
-	)
 	beforeReduce := time.Now()
 
 	reduceResults := make([]*segcorepb.RetrieveResults, 0, len(results))
@@ -142,13 +143,16 @@ func (t *QueryTask) Execute() error {
 		reduceResults = append(reduceResults, result.Result)
 		querySegments = append(querySegments, result.Segment)
 	}
-	reducedResult, err := reducer.Reduce(t.ctx, reduceResults, querySegments, retrievePlan)
+	reducedResult, err := segments.RunQNQueryPipeline(
+		t.ctx, t.req, t.collection.Schema(), t.plan,
+		reduceResults, querySegments, t.segmentManager, retrievePlan,
+	)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
-		metrics.QueryLabel,
+		paramtable.GetStringNodeID(),
+		contextutil.GetQueryLabel(t.ctx),
 		metrics.ReduceSegments,
-		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Milliseconds()))
+		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Microseconds()) / 1000.0)
 	if err != nil {
 		return err
 	}
@@ -172,16 +176,14 @@ func (t *QueryTask) Execute() error {
 		HasMoreResult:      reducedResult.HasMoreResult,
 		ScannedRemoteBytes: reducedResult.GetScannedRemoteBytes(),
 		ScannedTotalBytes:  reducedResult.GetScannedTotalBytes(),
+		ElementLevel:       reducedResult.GetElementLevel(),
+		ElementIndices:     convertSegcoreElementIndicesToInternal(reducedResult.GetElementIndices()),
 	}
 	return nil
 }
 
 func (t *QueryTask) Done(err error) {
 	t.notifier <- err
-}
-
-func (t *QueryTask) Canceled() error {
-	return t.ctx.Err()
 }
 
 func (t *QueryTask) Wait() error {
@@ -194,4 +196,18 @@ func (t *QueryTask) Result() *internalpb.RetrieveResults {
 
 func (t *QueryTask) NQ() int64 {
 	return 1
+}
+
+// convertSegcoreElementIndicesToInternal converts segcorepb.ElementIndices to internalpb.ElementIndices
+func convertSegcoreElementIndicesToInternal(src []*segcorepb.ElementIndices) []*internalpb.ElementIndices {
+	if src == nil {
+		return nil
+	}
+	dst := make([]*internalpb.ElementIndices, len(src))
+	for i, s := range src {
+		if s != nil {
+			dst[i] = &internalpb.ElementIndices{Indices: s.GetIndices()}
+		}
+	}
+	return dst
 }

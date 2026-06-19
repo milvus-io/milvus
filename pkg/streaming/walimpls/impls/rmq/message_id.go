@@ -5,8 +5,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 var _ message.MessageID = rmqID(0)
@@ -28,7 +28,7 @@ func UnmarshalMessageID(data string) (message.MessageID, error) {
 
 // unmashalMessageID unmarshal the message id.
 func unmarshalMessageID(data string) (rmqID, error) {
-	v, err := message.DecodeUint64(data)
+	v, err := message.DecodeInt64(data)
 	if err != nil {
 		return 0, errors.Wrapf(message.ErrInvalidMessageID, "decode rmqID fail with err: %s, id: %s", err.Error(), data)
 	}

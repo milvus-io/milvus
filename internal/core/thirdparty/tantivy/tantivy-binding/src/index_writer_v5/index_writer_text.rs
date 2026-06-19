@@ -43,12 +43,11 @@ impl IndexWriterWrapperImpl {
         let index = if in_ram {
             Index::create_in_ram(schema)
         } else {
-            Index::create_in_dir(path, schema).unwrap()
+            Index::create_in_dir(path, schema)?
         };
         index.tokenizers().register(tokenizer_name, tokenizer);
-        let index_writer = index
-            .writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)
-            .unwrap();
+        let index_writer =
+            index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
 
         Ok(IndexWriterWrapperImpl {
             field,

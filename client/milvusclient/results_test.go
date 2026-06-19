@@ -140,6 +140,90 @@ func (s *ResultSetSuite) TestSearchResultUnmarshal() {
 	s.Error(err)
 }
 
+func (s *ResultSetSuite) TestResultsetUnmarshalNullablePointer() {
+	type NullableData struct {
+		ID   int64   `milvus:"name:id"`
+		Name *string `milvus:"name:name"`
+		Age  *int32  `milvus:"name:age"`
+	}
+
+	// Create a nullable string column with mixed null/non-null values
+	nameCol := column.NewColumnVarChar("name", nil)
+	nameCol.SetNullable(true)
+	_ = nameCol.AppendValue("alice")
+	_ = nameCol.AppendNull()
+	_ = nameCol.AppendValue("charlie")
+
+	// Create a nullable int32 column
+	ageCol := column.NewColumnInt32("age", nil)
+	ageCol.SetNullable(true)
+	_ = ageCol.AppendValue(int32(30))
+	_ = ageCol.AppendValue(int32(25))
+	_ = ageCol.AppendNull()
+
+	rs := DataSet([]column.Column{
+		column.NewColumnInt64("id", []int64{1, 2, 3}),
+		nameCol,
+		ageCol,
+	})
+
+	var receiver []*NullableData
+	err := rs.Unmarshal(&receiver)
+	s.NoError(err)
+	s.Require().Len(receiver, 3)
+
+	// Row 0: Name="alice", Age=30
+	s.Require().NotNil(receiver[0].Name)
+	s.Equal("alice", *receiver[0].Name)
+	s.Require().NotNil(receiver[0].Age)
+	s.Equal(int32(30), *receiver[0].Age)
+
+	// Row 1: Name=nil, Age=25
+	s.Nil(receiver[1].Name)
+	s.Require().NotNil(receiver[1].Age)
+	s.Equal(int32(25), *receiver[1].Age)
+
+	// Row 2: Name="charlie", Age=nil
+	s.Require().NotNil(receiver[2].Name)
+	s.Equal("charlie", *receiver[2].Name)
+	s.Nil(receiver[2].Age)
+}
+
+func (s *ResultSetSuite) TestSearchResultUnmarshalPointerPK() {
+	type PtrPKData struct {
+		A *int64    `milvus:"name:id"`
+		V []float32 `milvus:"name:vector"`
+	}
+
+	idData := []int64{1, 2, 3}
+	vectorData := [][]float32{
+		{0.1, 0.2},
+		{0.1, 0.2},
+		{0.1, 0.2},
+	}
+
+	sr := ResultSet{
+		sch: entity.NewSchema().
+			WithField(entity.NewField().WithName("id").WithIsPrimaryKey(true).WithDataType(entity.FieldTypeInt64)).
+			WithField(entity.NewField().WithName("vector").WithDim(2).WithDataType(entity.FieldTypeFloatVector)),
+		IDs: column.NewColumnInt64("id", idData),
+		Fields: DataSet([]column.Column{
+			column.NewColumnFloatVector("vector", 2, vectorData),
+		}),
+	}
+
+	var receiver []*PtrPKData
+	err := sr.Unmarshal(&receiver)
+	s.NoError(err)
+	s.Require().Len(receiver, 3)
+
+	for idx, row := range receiver {
+		s.Require().NotNil(row.A)
+		s.Equal(idData[idx], *row.A)
+		s.Equal(vectorData[idx], row.V)
+	}
+}
+
 func TestResults(t *testing.T) {
 	suite.Run(t, new(ResultSetSuite))
 }

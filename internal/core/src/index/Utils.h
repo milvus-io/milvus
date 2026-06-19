@@ -34,6 +34,7 @@
 #include "common/QueryInfo.h"
 #include "common/RangeSearchHelper.h"
 #include "index/IndexInfo.h"
+#include "index/ScalarIndex.h"
 #include "storage/Types.h"
 #include "storage/DataCodec.h"
 #include "log/Log.h"
@@ -170,6 +171,12 @@ GetIndexEngineVersionFromConfig(const Config& config);
 int32_t
 GetBitmapCardinalityLimitFromConfig(const Config& config);
 
+ScalarIndexType
+GetHybridLowCardinalityIndexTypeFromConfig(const Config& config);
+
+ScalarIndexType
+GetHybridHighCardinalityIndexTypeFromConfig(const Config& config);
+
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config);
 
@@ -188,6 +195,18 @@ struct IndexDataCodec {
 std::map<std::string, IndexDataCodec>
 CompactIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas);
+
+IndexDataCodec
+CompactIndexDatasByKey(
+    const std::string& key,
+    std::unique_ptr<storage::DataCodec> slice_meta,
+    std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas);
+
+std::unique_ptr<storage::DataCodec>
+AssembleIndexDataCodec(const IndexDataCodec& index_slices);
+
+std::unique_ptr<storage::DataCodec>
+AssembleIndexDataCodec(IndexDataCodec&& index_slices);
 
 void
 AssembleIndexDatas(
@@ -220,10 +239,9 @@ void inline SetBitsetUnused(void* bitset, const uint32_t* doc_id, uintptr_t n) {
 // For sealed segment, the doc_id is guaranteed to be less than bitset size which equals to the doc count of tantivy before querying.
 void inline SetBitsetSealed(void* bitset, const uint32_t* doc_id, uintptr_t n) {
     TargetBitmap* bitmap = static_cast<TargetBitmap*>(bitset);
-    const auto bitmap_size = bitmap->size();
 
     for (uintptr_t i = 0; i < n; ++i) {
-        assert(doc_id[i] < bitmap_size);
+        assert(doc_id[i] < bitmap->size());
         (*bitmap)[doc_id[i]] = true;
     }
 }

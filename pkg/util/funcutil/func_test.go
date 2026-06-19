@@ -29,15 +29,16 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	grpcCodes "google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func setPreferIPv6ForTest(t *testing.T, prefer bool) {
@@ -252,12 +253,13 @@ func TestGetCollectionIDFromVChannel(t *testing.T) {
 func TestCheckCtxValid(t *testing.T) {
 	bgCtx := context.Background()
 	timeout := 20 * time.Millisecond
-	deltaTime := 5 * time.Millisecond
+
 	ctx1, cancel1 := context.WithTimeout(bgCtx, timeout)
 	defer cancel1()
 	assert.True(t, CheckCtxValid(ctx1))
-	time.Sleep(timeout + deltaTime)
-	assert.False(t, CheckCtxValid(ctx1))
+	assert.Eventually(t, func() bool {
+		return !CheckCtxValid(ctx1)
+	}, time.Second, time.Millisecond)
 
 	ctx2, cancel2 := context.WithTimeout(bgCtx, timeout)
 	assert.True(t, CheckCtxValid(ctx2))
@@ -268,8 +270,9 @@ func TestCheckCtxValid(t *testing.T) {
 	ctx3, cancel3 := context.WithDeadline(bgCtx, futureTime)
 	defer cancel3()
 	assert.True(t, CheckCtxValid(ctx3))
-	time.Sleep(timeout + deltaTime)
-	assert.False(t, CheckCtxValid(ctx3))
+	assert.Eventually(t, func() bool {
+		return !CheckCtxValid(ctx3)
+	}, time.Second, time.Millisecond)
 }
 
 func TestCheckPortAvailable(t *testing.T) {
@@ -377,6 +380,7 @@ func TestGetNumRowsOfFloat16VectorField(t *testing.T) {
 		{[]byte{}, 128, 0, true},
 		{[]byte{1.0, 2.0}, 1, 1, true},
 		{[]byte{1.0, 2.0, 3.0, 4.0}, 2, 1, true},
+		{[]byte{1.0, 2.0}, 2, 0, false}, // length % (dim * 2) != 0
 	}
 
 	for _, test := range cases {
@@ -405,6 +409,7 @@ func TestGetNumRowsOfBFloat16VectorField(t *testing.T) {
 		{[]byte{}, 128, 0, true},
 		{[]byte{1.0, 2.0}, 1, 1, true},
 		{[]byte{1.0, 2.0, 3.0, 4.0}, 2, 1, true},
+		{[]byte{1.0, 2.0}, 2, 0, false}, // length % (dim * 2) != 0
 	}
 
 	for _, test := range cases {
@@ -479,6 +484,101 @@ func TestGetNumRowsOfInt8VectorField(t *testing.T) {
 			assert.NotEqual(t, nil, err)
 		}
 	}
+}
+
+func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
+	t.Run("float vector compact valid", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_FloatVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+					Data: []float32{1, 2, 3, 4},
+				}},
+			}},
+		}
+		require.NoError(t, ValidateNullableVectorFieldDataCompact(fieldData, 3, true))
+	})
+
+	t.Run("full row payload rejected", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_FloatVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+					Data: []float32{1, 2, 3, 4, 5, 6},
+				}},
+			}},
+		}
+		err := ValidateNullableVectorFieldDataCompact(fieldData, 3, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "physical payload rows")
+	})
+
+	t.Run("partial dense row rejected", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_Float16Vector,
+			ValidData: []bool{true, false},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2}},
+			}},
+		}
+		err := ValidateNullableVectorFieldDataCompact(fieldData, 2, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "row width")
+	})
+
+	t.Run("sparse vector compact valid", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{false, true, true},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+					Contents: [][]byte{
+						typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
+						typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2}),
+					},
+				}},
+			}},
+		}
+		require.NoError(t, ValidateNullableVectorFieldDataCompact(fieldData, 3, true))
+	})
+
+	t.Run("missing valid data depends on caller boundary", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_FloatVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+					Data: []float32{1, 2},
+				}},
+			}},
+		}
+		require.NoError(t, ValidateNullableVectorFieldDataCompact(fieldData, 0, false))
+		err := ValidateNullableVectorFieldDataCompact(fieldData, 1, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires valid_data")
+	})
+
+	t.Run("schema dim fallback", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Type:      schemapb.DataType_BinaryVector,
+			ValidData: []bool{true, false},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xff}},
+			}},
+		}
+		require.NoError(t, ValidateNullableVectorFieldDataCompactWithDim(fieldData, 2, true, 8))
+	})
 }
 
 func Test_ReadBinary(t *testing.T) {
@@ -598,14 +698,12 @@ func TestIsEmptyString(t *testing.T) {
 	assert.Equal(t, IsEmptyString("hello"), false)
 }
 
-func TestHandleTenantForEtcdKey(t *testing.T) {
-	assert.Equal(t, "a/b/c", HandleTenantForEtcdKey("a", "b", "c"))
-
-	assert.Equal(t, "a/b", HandleTenantForEtcdKey("a", "", "b"))
-
-	assert.Equal(t, "a/b", HandleTenantForEtcdKey("a", "b", ""))
-
-	assert.Equal(t, "a", HandleTenantForEtcdKey("a", "", ""))
+func TestHandleTenantForEtcdPrefix(t *testing.T) {
+	assert.Equal(t, "a/b/c/", HandleTenantForEtcdPrefix("a", "b", "c"))
+	assert.Equal(t, "a/b/", HandleTenantForEtcdPrefix("a", "", "b"))
+	assert.Equal(t, "a/sub/", HandleTenantForEtcdPrefix("a", "", "sub"))
+	assert.Equal(t, "a/b/", HandleTenantForEtcdPrefix("a", "b"))
+	assert.Equal(t, "a/", HandleTenantForEtcdPrefix("a", ""))
 }
 
 func TestIsRevoke(t *testing.T) {
@@ -1020,6 +1118,29 @@ func TestChannelConvert(t *testing.T) {
 	t.Run("get virtual channel", func(t *testing.T) {
 		channel := GetVirtualChannel("by-dev-rootcoord-dml_2", 1001, 0)
 		assert.Equal(t, "by-dev-rootcoord-dml_2_1001v0", channel)
+	})
+
+	t.Run("is on physical channel with prefix ambiguity", func(t *testing.T) {
+		// Two pchannels where one is a prefix of the other:
+		// by-dev-rootcoord-dml_1 vs by-dev-rootcoord-dml_10
+		pchannel1 := "by-dev-rootcoord-dml_1"
+		pchannel10 := "by-dev-rootcoord-dml_10"
+
+		// vchannel on pchannel_1
+		vchannel1 := "by-dev-rootcoord-dml_1_1001v0"
+		assert.True(t, IsOnPhysicalChannel(vchannel1, pchannel1))
+		assert.False(t, IsOnPhysicalChannel(vchannel1, pchannel10))
+
+		// vchannel on pchannel_10
+		vchannel10 := "by-dev-rootcoord-dml_10_1001v0"
+		assert.False(t, IsOnPhysicalChannel(vchannel10, pchannel1))
+		assert.True(t, IsOnPhysicalChannel(vchannel10, pchannel10))
+
+		// pchannel matches itself
+		assert.True(t, IsOnPhysicalChannel(pchannel1, pchannel1))
+		assert.True(t, IsOnPhysicalChannel(pchannel10, pchannel10))
+		assert.False(t, IsOnPhysicalChannel(pchannel1, pchannel10))
+		assert.False(t, IsOnPhysicalChannel(pchannel10, pchannel1))
 	})
 }
 

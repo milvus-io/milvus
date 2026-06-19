@@ -11,9 +11,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
@@ -37,7 +37,7 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 		log.Info("hook mock", zap.String("user", userName),
 			zap.String("full method", fullMethod), zap.Error(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookMock, fullMethod).Inc()
-		updateProxyFunctionCallMetric(fullMethod)
+		updateProxyFunctionCallMetric(fullMethod, err)
 		if err != nil {
 			// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
 			err = status.Error(codes.InvalidArgument, "detail: "+err.Error())
@@ -49,7 +49,7 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 		log.Warn("hook before error", zap.String("user", userName), zap.String("full method", fullMethod),
 			zap.Any("request", req), zap.Error(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
-		updateProxyFunctionCallMetric(fullMethod)
+		updateProxyFunctionCallMetric(fullMethod, err)
 		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
 		return nil, status.Error(codes.InvalidArgument, "detail: "+err.Error())
 	}
@@ -58,19 +58,19 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 		log.Warn("hook after error", zap.String("user", userName), zap.String("full method", fullMethod),
 			zap.Any("request", req), zap.Error(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
-		updateProxyFunctionCallMetric(fullMethod)
+		updateProxyFunctionCallMetric(fullMethod, err)
 		// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
 		return nil, status.Error(codes.InvalidArgument, "detail: "+err.Error())
 	}
 	return realResp, realErr
 }
 
-func updateProxyFunctionCallMetric(fullMethod string) {
+func updateProxyFunctionCallMetric(fullMethod string, err error) {
 	strs := strings.Split(fullMethod, "/")
 	method := strs[len(strs)-1]
 	if method == "" {
 		return
 	}
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, "", "").Inc()
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, "", "").Inc()
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failMetricLabel(err), "", "").Inc()
 }

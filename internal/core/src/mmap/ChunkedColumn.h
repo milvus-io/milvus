@@ -33,6 +33,7 @@
 #include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/FieldMeta.h"
 #include "common/Span.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -126,18 +127,25 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         num_rows_ = GetNumRowsUntilChunk().back();
     }
 
-    virtual ~ChunkedColumnBase() = default;
+    virtual ~ChunkedColumnBase() {
+        slot_->CancelWarmup();
+    }
 
     void
     ManualEvictCache() const override {
         slot_->ManualEvictAll();
     }
 
+    void
+    CancelWarmup() override {
+        slot_->CancelWarmup();
+    }
+
     PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const override {
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
-        return PinWrapper<const char*>(ca, chunk->Data());
+        return PinWrapper<const char*>(std::move(ca), chunk->Data());
     }
 
     bool
@@ -342,7 +350,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
-        return PinWrapper<Chunk*>(ca, chunk);
+        return PinWrapper<Chunk*>(std::move(ca), chunk);
     }
 
     std::vector<PinWrapper<Chunk*>>
@@ -369,33 +377,6 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         return meta->num_rows_until_chunk_;
     }
 
-    void
-    BuildValidRowIds(milvus::OpContext* op_ctx) override {
-        if (!nullable_) {
-            return;
-        }
-        auto ca = SemiInlineGet(slot_->PinAllCells(op_ctx));
-        int64_t logical_offset = 0;
-        valid_data_.resize(num_rows_);
-        valid_count_per_chunk_.resize(num_chunks_);
-        for (size_t i = 0; i < num_chunks_; i++) {
-            auto chunk = ca->get_cell_of(i);
-            auto rows = chunk_row_nums(i);
-            int64_t valid_count = 0;
-            for (int64_t j = 0; j < rows; j++) {
-                if (chunk->isValid(j)) {
-                    valid_data_[logical_offset + j] = true;
-                    valid_count++;
-                } else {
-                    valid_data_[logical_offset + j] = false;
-                }
-            }
-            valid_count_per_chunk_[i] = valid_count;
-            logical_offset += rows;
-        }
-        BuildOffsetMapping();
-    }
-
  protected:
     bool nullable_{false};
     DataType data_type_{DataType::NONE};
@@ -420,7 +401,12 @@ class ChunkedColumn : public ChunkedColumnBase {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
-            fn(ca->get_cell_of(cids[i])->ValueAt(offsets_in_chunk[i]), i);
+            auto chunk = ca->get_cell_of(cids[i]);
+            auto offset = offsets_in_chunk[i];
+            if (nullable_ && IsVectorDataType(data_type_)) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
+            fn(chunk->ValueAt(offset), i);
         }
     }
 
@@ -520,8 +506,13 @@ class ChunkedColumn : public ChunkedColumnBase {
         auto dst_vec = reinterpret_cast<char*>(dst);
         for (int64_t i = 0; i < count; i++) {
             auto chunk = ca->get_cell_of(cids[i]);
-            auto value = chunk->ValueAt(offsets_in_chunk[i]);
-            memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
+            auto offset = offsets_in_chunk[i];
+            if (nullable_) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
+            auto value = chunk->ValueAt(offset);
+            milvus::fastmem::FastMemcpy(
+                dst_vec + i * element_sizeof, value, element_sizeof);
         }
     }
 
@@ -530,7 +521,7 @@ class ChunkedColumn : public ChunkedColumnBase {
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<SpanBase>(
-            ca, static_cast<FixedWidthChunk*>(chunk)->Span());
+            std::move(ca), static_cast<FixedWidthChunk*>(chunk)->Span());
     }
 };
 
@@ -555,7 +546,8 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
-            ca, static_cast<StringChunk*>(chunk)->StringViews(offset_len));
+            std::move(ca),
+            static_cast<StringChunk*>(chunk)->StringViews(offset_len));
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -566,7 +558,8 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
-            ca, static_cast<StringChunk*>(chunk)->ViewsByOffsets(offsets));
+            std::move(ca),
+            static_cast<StringChunk*>(chunk)->ViewsByOffsets(offsets));
     }
 
     void
@@ -685,7 +678,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
             slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
-            ca, static_cast<ArrayChunk*>(chunk)->Views(offset_len));
+            std::move(ca), static_cast<ArrayChunk*>(chunk)->Views(offset_len));
     }
 
     PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
@@ -695,7 +688,8 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
-            ca, static_cast<ArrayChunk*>(chunk)->ViewsByOffsets(offsets));
+            std::move(ca),
+            static_cast<ArrayChunk*>(chunk)->ViewsByOffsets(offsets));
     }
 };
 
@@ -714,10 +708,10 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
-            auto array =
-                static_cast<VectorArrayChunk*>(ca->get_cell_of(cids[i]))
-                    ->View(offsets_in_chunk[i])
-                    .output_data();
+            auto chunk =
+                static_cast<VectorArrayChunk*>(ca->get_cell_of(cids[i]));
+            auto offset = offsets_in_chunk[i];
+            auto array = chunk->View(offset).output_data();
             fn(std::move(array), i);
         }
     }
@@ -732,7 +726,8 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<
             std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
-            ca, static_cast<VectorArrayChunk*>(chunk)->Views(offset_len));
+            std::move(ca),
+            static_cast<VectorArrayChunk*>(chunk)->Views(offset_len));
     }
 
     PinWrapper<const size_t*>
@@ -742,7 +737,7 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
             slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<const size_t*>(
-            ca, static_cast<VectorArrayChunk*>(chunk)->Offsets());
+            std::move(ca), static_cast<VectorArrayChunk*>(chunk)->Offsets());
     }
 };
 

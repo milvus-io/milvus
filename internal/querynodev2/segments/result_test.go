@@ -22,741 +22,21 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-func getFieldData[T interface {
-	GetFieldsData() []*schemapb.FieldData
-}](rs T, fieldID int64) (*schemapb.FieldData, bool) {
-	fd, has := lo.Find(rs.GetFieldsData(), func(fd *schemapb.FieldData) bool {
-		return fd.GetFieldId() == fieldID
-	})
-	return fd, has
-}
 
 type ResultSuite struct {
 	suite.Suite
-}
-
-func MergeSegcoreRetrieveResultsV1(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, param *mergeParam) (*segcorepb.RetrieveResults, error) {
-	plan := &segcore.RetrievePlan{}
-	return MergeSegcoreRetrieveResults(ctx, retrieveResults, param, nil, plan, nil)
-}
-
-func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {
-	const (
-		Dim                  = 8
-		Int64FieldName       = "Int64Field"
-		FloatVectorFieldName = "FloatVectorField"
-		Int64FieldID         = common.StartOfUserFieldID + 1
-		FloatVectorFieldID   = common.StartOfUserFieldID + 2
-	)
-	Int64Array := []int64{11, 22}
-	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
-
-	var fieldDataArray1 []*schemapb.FieldData
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{1000, 2000}, 1))
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
-
-	var fieldDataArray2 []*schemapb.FieldData
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000, 3000}, 1))
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
-
-	suite.Run("test skip dupPK 2", func() {
-		result1 := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 1},
-					},
-				},
-			},
-			Offset:     []int64{0, 1},
-			FieldsData: fieldDataArray1,
-		}
-		result2 := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 1},
-					},
-				},
-			},
-			Offset:     []int64{0, 1},
-			FieldsData: fieldDataArray2,
-		}
-
-		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-		suite.NoError(err)
-		suite.Equal(3, len(result.GetFieldsData()))
-		suite.Equal([]int64{0, 1}, result.GetIds().GetIntId().GetData())
-		intFieldData, has := getFieldData(result, Int64FieldID)
-		suite.Require().True(has)
-		suite.Equal(Int64Array, intFieldData.GetScalars().GetLongData().Data)
-		vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-		suite.Require().True(has)
-		suite.InDeltaSlice(FloatVector, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-	})
-
-	suite.Run("test_duppk_multipke_segment", func() {
-		var fieldsData1 []*schemapb.FieldData
-		fieldsData1 = append(fieldsData1, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000, 3000}, 1))
-		fieldsData1 = append(fieldsData1, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{1, 1}, 1))
-		fieldsData1 = append(fieldsData1, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
-
-		var fieldsData2 []*schemapb.FieldData
-		fieldsData2 = append(fieldsData2, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2500}, 1))
-		fieldsData2 = append(fieldsData2, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{1}, 1))
-		fieldsData2 = append(fieldsData2, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:8], Dim))
-
-		result1 := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{1, 1},
-					},
-				},
-			},
-			Offset:     []int64{0, 1},
-			FieldsData: fieldsData1,
-		}
-		result2 := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{1},
-					},
-				},
-			},
-			Offset:     []int64{0},
-			FieldsData: fieldsData2,
-		}
-
-		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-		suite.NoError(err)
-		suite.Equal(3, len(result.GetFieldsData()))
-		suite.Equal([]int64{1}, result.GetIds().GetIntId().GetData())
-		intFieldData, has := getFieldData(result, Int64FieldID)
-		suite.Require().True(has)
-		suite.ElementsMatch([]int64{1}, intFieldData.GetScalars().GetLongData().Data)
-	})
-
-	suite.Run("test nil results", func() {
-		ret, err := MergeSegcoreRetrieveResultsV1(context.Background(), nil,
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-		suite.NoError(err)
-		suite.Empty(ret.GetIds())
-		suite.Empty(ret.GetFieldsData())
-	})
-
-	suite.Run("test no offset", func() {
-		r := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 1},
-					},
-				},
-			},
-			FieldsData: fieldDataArray1,
-		}
-
-		ret, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-		suite.NoError(err)
-		suite.Empty(ret.GetIds())
-		suite.Empty(ret.GetFieldsData())
-	})
-
-	suite.Run("test merge", func() {
-		r1 := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{1, 3},
-					},
-				},
-			},
-			Offset:     []int64{0, 1},
-			FieldsData: fieldDataArray1,
-		}
-		r2 := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{2, 4},
-					},
-				},
-			},
-			Offset:     []int64{0, 1},
-			FieldsData: fieldDataArray2,
-		}
-
-		resultFloat := []float32{
-			1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
-			1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
-			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
-			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
-		}
-
-		suite.Run("test limited", func() {
-			tests := []struct {
-				description string
-				limit       int64
-			}{
-				{"limit 1", 1},
-				{"limit 2", 2},
-				{"limit 3", 3},
-				{"limit 4", 4},
-			}
-			resultIDs := []int64{1, 2, 3, 4}
-			resultField0 := []int64{11, 11, 22, 22}
-			for _, test := range tests {
-				suite.Run(test.description, func() {
-					result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
-						NewMergeParam(test.limit, make([]int64, 0), nil, reduce.IReduceNoOrder))
-					suite.Equal(3, len(result.GetFieldsData()))
-					suite.Equal(int(test.limit), len(result.GetIds().GetIntId().GetData()))
-					suite.Equal(resultIDs[0:test.limit], result.GetIds().GetIntId().GetData())
-					intFieldData, has := getFieldData(result, Int64FieldID)
-					suite.Require().True(has)
-					suite.Equal(resultField0[0:test.limit], intFieldData.GetScalars().GetLongData().Data)
-					vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-					suite.Require().True(has)
-					suite.InDeltaSlice(resultFloat[0:test.limit*Dim], vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-					suite.NoError(err)
-				})
-			}
-		})
-
-		suite.Run("test unLimited and maxOutputSize", func() {
-			reqLimit := typeutil.Unlimited
-			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1")
-
-			ids := make([]int64, 100)
-			offsets := make([]int64, 100)
-			for i := range ids {
-				ids[i] = int64(i)
-				offsets[i] = int64(i)
-			}
-			fieldData := mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, ids, 1)
-
-			result := &segcorepb.RetrieveResults{
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: ids,
-						},
-					},
-				},
-				Offset:     offsets,
-				FieldsData: []*schemapb.FieldData{fieldData},
-			}
-
-			_, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result},
-				NewMergeParam(reqLimit, make([]int64, 0), nil, reduce.IReduceNoOrder))
-			suite.Error(err)
-			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
-		})
-
-		suite.Run("test int ID", func() {
-			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-			suite.Equal(3, len(result.GetFieldsData()))
-			suite.Equal([]int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-			intFieldData, has := getFieldData(result, Int64FieldID)
-			suite.Require().True(has)
-			suite.Equal([]int64{11, 11, 22, 22}, intFieldData.GetScalars().GetLongData().Data)
-			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-			suite.Require().True(has)
-			suite.InDeltaSlice(resultFloat, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-			suite.NoError(err)
-		})
-
-		suite.Run("test string ID", func() {
-			r1.Ids = &schemapb.IDs{
-				IdField: &schemapb.IDs_StrId{
-					StrId: &schemapb.StringArray{
-						Data: []string{"a", "c"},
-					},
-				},
-			}
-
-			r2.Ids = &schemapb.IDs{
-				IdField: &schemapb.IDs_StrId{
-					StrId: &schemapb.StringArray{
-						Data: []string{"b", "d"},
-					},
-				},
-			}
-
-			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-			suite.NoError(err)
-			suite.Equal(3, len(result.GetFieldsData()))
-			suite.Equal([]string{"a", "b", "c", "d"}, result.GetIds().GetStrId().GetData())
-			intFieldData, has := getFieldData(result, Int64FieldID)
-			suite.Require().True(has)
-			suite.Equal([]int64{11, 11, 22, 22}, intFieldData.GetScalars().GetLongData().Data)
-			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-			suite.Require().True(has)
-			suite.InDeltaSlice(resultFloat, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-			suite.NoError(err)
-		})
-	})
-}
-
-func (suite *ResultSuite) TestResult_MergeInternalRetrieveResults() {
-	const (
-		Dim                  = 8
-		Int64FieldName       = "Int64Field"
-		FloatVectorFieldName = "FloatVectorField"
-		Int64FieldID         = common.StartOfUserFieldID + 1
-		FloatVectorFieldID   = common.StartOfUserFieldID + 2
-	)
-	Int64Array := []int64{11, 22}
-	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
-
-	var fieldDataArray1 []*schemapb.FieldData
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{1000, 2000}, 1))
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
-
-	var fieldDataArray2 []*schemapb.FieldData
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000, 3000}, 1))
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:2], 1))
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:16], Dim))
-
-	suite.Run("test skip dupPK 2", func() {
-		result1 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 1},
-					},
-				},
-			},
-			FieldsData: fieldDataArray1,
-		}
-		result2 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 1},
-					},
-				},
-			},
-			FieldsData: fieldDataArray2,
-		}
-
-		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-		suite.NoError(err)
-		suite.Equal(3, len(result.GetFieldsData()))
-		suite.Equal([]int64{0, 1}, result.GetIds().GetIntId().GetData())
-		intFieldData, has := getFieldData(result, Int64FieldID)
-		suite.Require().True(has)
-		suite.Equal(Int64Array, intFieldData.GetScalars().GetLongData().GetData())
-		vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-		suite.Require().True(has)
-		suite.InDeltaSlice(FloatVector, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-	})
-
-	suite.Run("test nil results", func() {
-		ret, err := MergeInternalRetrieveResult(context.Background(), nil,
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-		suite.NoError(err)
-		suite.Empty(ret.GetIds())
-		suite.Empty(ret.GetFieldsData())
-	})
-
-	suite.Run("test timestamp decided", func() {
-		ret1 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 1},
-					},
-				},
-			},
-			FieldsData: []*schemapb.FieldData{
-				mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64,
-					[]int64{1, 2}, 1),
-				mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64,
-					[]int64{3, 4}, 1),
-			},
-		}
-		ret2 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 1},
-					},
-				},
-			},
-			FieldsData: []*schemapb.FieldData{
-				mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64,
-					[]int64{5, 6}, 1),
-				mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64,
-					[]int64{7, 8}, 1),
-			},
-		}
-		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{ret1, ret2},
-			NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-		suite.NoError(err)
-		suite.Equal(2, len(result.GetFieldsData()))
-		suite.Equal([]int64{0, 1}, result.GetIds().GetIntId().GetData())
-		suite.Equal([]int64{7, 8}, result.GetFieldsData()[1].GetScalars().GetLongData().Data)
-	})
-
-	suite.Run("test merge", func() {
-		r1 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{1, 3},
-					},
-				},
-			},
-			FieldsData: fieldDataArray1,
-		}
-		r2 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{2, 4},
-					},
-				},
-			},
-			FieldsData: fieldDataArray2,
-		}
-
-		resultFloat := []float32{
-			1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
-			1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
-			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
-			11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0,
-		}
-
-		suite.Run("test limited", func() {
-			tests := []struct {
-				description string
-				limit       int64
-			}{
-				{"limit 1", 1},
-				{"limit 2", 2},
-				{"limit 3", 3},
-				{"limit 4", 4},
-			}
-			resultIDs := []int64{1, 2, 3, 4}
-			resultField0 := []int64{11, 11, 22, 22}
-			for _, test := range tests {
-				suite.Run(test.description, func() {
-					result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
-						NewMergeParam(test.limit, make([]int64, 0), nil, reduce.IReduceNoOrder))
-					suite.Equal(3, len(result.GetFieldsData()))
-					suite.Equal(int(test.limit), len(result.GetIds().GetIntId().GetData()))
-					suite.Equal(resultIDs[0:test.limit], result.GetIds().GetIntId().GetData())
-
-					intFieldData, has := getFieldData(result, Int64FieldID)
-					suite.Require().True(has)
-					suite.Equal(resultField0[0:test.limit], intFieldData.GetScalars().GetLongData().Data)
-					vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-					suite.Require().True(has)
-					suite.InDeltaSlice(resultFloat[0:test.limit*Dim], vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-					suite.NoError(err)
-				})
-			}
-		})
-
-		suite.Run("test unLimited and maxOutputSize", func() {
-			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1")
-
-			ids := make([]int64, 100)
-			offsets := make([]int64, 100)
-			for i := range ids {
-				ids[i] = int64(i)
-				offsets[i] = int64(i)
-			}
-			fieldData := mock_segcore.GenFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, ids, 1)
-
-			result := &internalpb.RetrieveResults{
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: ids,
-						},
-					},
-				},
-				FieldsData: []*schemapb.FieldData{fieldData},
-			}
-
-			_, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result, result},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-			suite.Error(err)
-			paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxOutputSize.Key, "1104857600")
-		})
-
-		suite.Run("test int ID", func() {
-			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-			suite.Equal(3, len(result.GetFieldsData()))
-			suite.Equal([]int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-
-			intFieldData, has := getFieldData(result, Int64FieldID)
-			suite.Require().True(has)
-			suite.Equal([]int64{11, 11, 22, 22}, intFieldData.GetScalars().GetLongData().Data)
-			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-			suite.Require().True(has)
-			suite.InDeltaSlice(resultFloat, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-			suite.NoError(err)
-		})
-
-		suite.Run("test string ID", func() {
-			r1.Ids = &schemapb.IDs{
-				IdField: &schemapb.IDs_StrId{
-					StrId: &schemapb.StringArray{
-						Data: []string{"a", "c"},
-					},
-				},
-			}
-
-			r2.Ids = &schemapb.IDs{
-				IdField: &schemapb.IDs_StrId{
-					StrId: &schemapb.StringArray{
-						Data: []string{"b", "d"},
-					},
-				},
-			}
-
-			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceNoOrder))
-			suite.NoError(err)
-			suite.Equal(3, len(result.GetFieldsData()))
-			suite.Equal([]string{"a", "b", "c", "d"}, result.GetIds().GetStrId().GetData())
-			intFieldData, has := getFieldData(result, Int64FieldID)
-			suite.Require().True(has)
-			suite.Equal([]int64{11, 11, 22, 22}, intFieldData.GetScalars().GetLongData().Data)
-			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-			suite.Require().True(has)
-			suite.InDeltaSlice(resultFloat, vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-			suite.NoError(err)
-		})
-	})
-}
-
-func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
-	const (
-		Dim                  = 4
-		Int64FieldName       = "Int64Field"
-		FloatVectorFieldName = "FloatVectorField"
-		Int64FieldID         = common.StartOfUserFieldID + 1
-		FloatVectorFieldID   = common.StartOfUserFieldID + 2
-	)
-	Int64Array := []int64{11, 22, 33}
-	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0}
-
-	var fieldDataArray1 []*schemapb.FieldData
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{1000, 2000, 3000}, 1))
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID,
-		schemapb.DataType_Int64, Int64Array[0:3], 1))
-	fieldDataArray1 = append(fieldDataArray1, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID,
-		schemapb.DataType_FloatVector, FloatVector[0:12], Dim))
-
-	var fieldDataArray2 []*schemapb.FieldData
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000, 3000, 4000}, 1))
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID,
-		schemapb.DataType_Int64, Int64Array[0:3], 1))
-	fieldDataArray2 = append(fieldDataArray2, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID,
-		schemapb.DataType_FloatVector, FloatVector[0:12], Dim))
-
-	suite.Run("test stop seg core merge for best", func() {
-		result1 := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 1, 4},
-					},
-				},
-			},
-			Offset:     []int64{0, 1, 2},
-			FieldsData: fieldDataArray1,
-		}
-		result2 := &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{2, 3, 6},
-					},
-				},
-			},
-			Offset:     []int64{0, 1, 2},
-			FieldsData: fieldDataArray2,
-		}
-		suite.Run("merge stop finite limited", func() {
-			result1.HasMoreResult = true
-			result2.HasMoreResult = true
-			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-				NewMergeParam(3, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
-			suite.NoError(err)
-			suite.Equal(3, len(result.GetFieldsData()))
-			// has more result both, stop reduce when draining one result
-			// here, we can only get best result from 0 to 4 without 6, because result1 has more results
-			suite.Equal([]int64{0, 1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-			intFieldData, has := getFieldData(result, Int64FieldID)
-			suite.Require().True(has)
-			suite.Equal([]int64{11, 22, 11, 22, 33}, intFieldData.GetScalars().GetLongData().Data)
-			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-			suite.Require().True(has)
-			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44},
-				vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-		})
-		suite.Run("merge stop unlimited", func() {
-			result1.HasMoreResult = false
-			result2.HasMoreResult = false
-			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
-			suite.NoError(err)
-			suite.Equal(3, len(result.GetFieldsData()))
-			// as result1 and result2 don't have better results neither
-			// we can reduce all available result into the reduced result
-			suite.Equal([]int64{0, 1, 2, 3, 4, 6}, result.GetIds().GetIntId().GetData())
-			intFieldData, has := getFieldData(result, Int64FieldID)
-			suite.Require().True(has)
-			suite.Equal([]int64{11, 22, 11, 22, 33, 33}, intFieldData.GetScalars().GetLongData().Data)
-			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-			suite.Require().True(has)
-			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44, 11, 22, 33, 44},
-				vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-		})
-		suite.Run("merge stop one limited", func() {
-			result1.HasMoreResult = true
-			result2.HasMoreResult = false
-			result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{result1, result2},
-				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
-			suite.NoError(err)
-			suite.Equal(3, len(result.GetFieldsData()))
-			// as result1 may have better results, stop reducing when draining it
-			suite.Equal([]int64{0, 1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
-			intFieldData, has := getFieldData(result, Int64FieldID)
-			suite.Require().True(has)
-			suite.Equal([]int64{11, 22, 11, 22, 33}, intFieldData.GetScalars().GetLongData().Data)
-			vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-			suite.Require().True(has)
-			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44},
-				vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-		})
-	})
-
-	suite.Run("test stop internal merge for best", func() {
-		result1 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 4, 7},
-					},
-				},
-			},
-			FieldsData: fieldDataArray1,
-		}
-		result2 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{2, 6, 9},
-					},
-				},
-			},
-			FieldsData: fieldDataArray2,
-		}
-		result1.HasMoreResult = true
-		result2.HasMoreResult = false
-		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-			NewMergeParam(3, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
-		suite.NoError(err)
-		suite.Equal(3, len(result.GetFieldsData()))
-		suite.Equal([]int64{0, 2, 4, 6, 7}, result.GetIds().GetIntId().GetData())
-		intFieldData, has := getFieldData(result, Int64FieldID)
-		suite.Require().True(has)
-		suite.Equal([]int64{11, 11, 22, 22, 33}, intFieldData.GetScalars().GetLongData().Data)
-		vectorFieldData, has := getFieldData(result, FloatVectorFieldID)
-		suite.Require().True(has)
-		suite.InDeltaSlice([]float32{1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 5, 6, 7, 8, 11, 22, 33, 44},
-			vectorFieldData.GetVectors().GetFloatVector().Data, 10e-10)
-	})
-
-	suite.Run("test stop internal merge for best with early termination", func() {
-		result1 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{0, 4, 7},
-					},
-				},
-			},
-			FieldsData: fieldDataArray1,
-		}
-		var drainDataArray2 []*schemapb.FieldData
-		drainDataArray2 = append(drainDataArray2, mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, []int64{2000}, 1))
-		drainDataArray2 = append(drainDataArray2, mock_segcore.GenFieldData(Int64FieldName, Int64FieldID,
-			schemapb.DataType_Int64, Int64Array[0:1], 1))
-		drainDataArray2 = append(drainDataArray2, mock_segcore.GenFieldData(FloatVectorFieldName, FloatVectorFieldID,
-			schemapb.DataType_FloatVector, FloatVector[0:4], Dim))
-		result2 := &internalpb.RetrieveResults{
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{2},
-					},
-				},
-			},
-			FieldsData: drainDataArray2,
-		}
-		suite.Run("test drain one result without more results", func() {
-			result1.HasMoreResult = false
-			result2.HasMoreResult = false
-			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-				NewMergeParam(3, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
-			suite.NoError(err)
-			suite.Equal(3, len(result.GetFieldsData()))
-			suite.Equal([]int64{0, 2, 4, 7}, result.GetIds().GetIntId().GetData())
-		})
-		suite.Run("test drain one result with more results", func() {
-			result1.HasMoreResult = false
-			result2.HasMoreResult = true
-			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-				NewMergeParam(3, make([]int64, 0), nil, reduce.IReduceInOrderForBest))
-			suite.NoError(err)
-			suite.Equal(3, len(result.GetFieldsData()))
-			suite.Equal([]int64{0, 2}, result.GetIds().GetIntId().GetData())
-		})
-		suite.Run("test no stop reduce for best ", func() {
-			result1.HasMoreResult = true
-			result2.HasMoreResult = true
-			result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
-				NewMergeParam(1, make([]int64, 0), nil, reduce.IReduceInOrder))
-			suite.NoError(err)
-			suite.Equal(3, len(result.GetFieldsData()))
-			suite.Equal([]int64{0}, result.GetIds().GetIntId().GetData())
-		})
-	})
 }
 
 func (suite *ResultSuite) TestResult_SelectSearchResultData_int() {
@@ -1019,6 +299,297 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
 	// costs should aggregate across both included results
 	suite.Equal(int64(111+333), out.GetScannedRemoteBytes())
 	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
+}
+
+func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvancedKeepsZeroHitWorkerMetadata() {
+	ctx := context.Background()
+	metricType := metric.IP
+	nq := int64(1)
+	topK := int64(1)
+
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+	paramtable.Get().Save(key, "false")
+
+	hitData := &schemapb.SearchResultData{
+		NumQueries:     nq,
+		TopK:           topK,
+		Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:         []float32{0.9},
+		Topks:          []int64{1},
+		AllSearchCount: 10,
+	}
+	emptyData := &schemapb.SearchResultData{
+		NumQueries:     nq,
+		TopK:           topK,
+		Ids:            &schemapb.IDs{},
+		Scores:         []float32{},
+		Topks:          []int64{0},
+		AllSearchCount: 20,
+		FieldsData:     []*schemapb.FieldData{},
+	}
+
+	hitResult, err := EncodeSearchResultData(ctx, hitData, nq, topK, metricType)
+	suite.NoError(err)
+	hitResult.ScannedRemoteBytes = 111
+	hitResult.ScannedTotalBytes = 222
+	hitResult.CostAggregation = &internalpb.CostAggregation{
+		ResponseTime:         1,
+		ServiceTime:          11,
+		TotalRelatedDataSize: 13,
+	}
+	hitResult.ChannelsMvcc = map[string]uint64{"hit-channel": 100}
+
+	emptyResult, err := EncodeSearchResultData(ctx, emptyData, nq, topK, metricType)
+	suite.NoError(err)
+	suite.NotEmpty(emptyResult.GetSlicedBlob())
+	emptyResult.ScannedRemoteBytes = 333
+	emptyResult.ScannedTotalBytes = 444
+	emptyResult.CostAggregation = &internalpb.CostAggregation{
+		ResponseTime:         2,
+		ServiceTime:          22,
+		TotalRelatedDataSize: 17,
+	}
+	emptyResult.ChannelsMvcc = map[string]uint64{"empty-channel": 200}
+
+	out, err := ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{hitResult, emptyResult},
+		reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
+	suite.NoError(err)
+	suite.Equal(int64(111+333), out.GetScannedRemoteBytes())
+	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
+	suite.Equal(int64(13+17), out.GetCostAggregation().GetTotalRelatedDataSize())
+	suite.Equal(map[string]uint64{"hit-channel": 100, "empty-channel": 200}, out.GetChannelsMvcc())
+
+	var reduced schemapb.SearchResultData
+	suite.NoError(proto.Unmarshal(out.GetSlicedBlob(), &reduced))
+	suite.Equal(int64(30), reduced.GetAllSearchCount())
+	suite.Equal([]int64{1}, reduced.GetIds().GetIntId().GetData())
+	suite.Equal([]int64{1}, reduced.GetTopks())
+}
+
+func (suite *ResultSuite) TestReduceSearchOnQueryNode_ZeroCopyEmptyResultBeforeFieldsData() {
+	ctx := context.Background()
+	metricType := metric.IP
+	nq := int64(1)
+	topK := int64(1)
+
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+	paramtable.Get().Save(key, "true")
+
+	emptyData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{},
+		Scores:     []float32{},
+		Topks:      []int64{0},
+		FieldsData: []*schemapb.FieldData{},
+	}
+	hitData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "field1",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{10}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	emptyResult, err := EncodeSearchResultData(ctx, emptyData, nq, topK, metricType)
+	suite.NoError(err)
+	hitResult, err := EncodeSearchResultData(ctx, hitData, nq, topK, metricType)
+	suite.NoError(err)
+
+	var out *internalpb.SearchResults
+	suite.NotPanics(func() {
+		out, err = ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{emptyResult, hitResult},
+			reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
+	})
+	suite.NoError(err)
+	if suite.NotNil(out) {
+		reduced, err := DecodeSearchResults(ctx, []*internalpb.SearchResults{out})
+		suite.NoError(err)
+		if suite.Len(reduced, 1) {
+			suite.Equal([]int64{1}, reduced[0].GetIds().GetIntId().GetData())
+			suite.Len(reduced[0].GetFieldsData(), 1)
+		}
+	}
+}
+
+func (suite *ResultSuite) TestEncodeSearchResultData_ZeroCopySwitch() {
+	ctx := context.Background()
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+
+	srd := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	paramtable.Get().Save(key, "false")
+	encodedBlob, err := EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Nil(encodedBlob.GetResultData())
+	suite.NotNil(encodedBlob.GetSlicedBlob())
+
+	paramtable.Get().Save(key, "true")
+	encodedZeroCopy, err := EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Nil(encodedZeroCopy.GetSlicedBlob())
+	suite.Same(srd, encodedZeroCopy.GetResultData())
+}
+
+func (suite *ResultSuite) TestReduceSearchOnQueryNode_AdvancedPreservesResultData() {
+	nq := int64(1)
+	topK := int64(1)
+	resultData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	reducedRes, err := ReduceSearchOnQueryNode(context.Background(), []*internalpb.SearchResults{
+		{
+			MetricType:         metric.IP,
+			NumQueries:         nq,
+			TopK:               topK,
+			ResultData:         resultData,
+			ScannedRemoteBytes: 10,
+			ScannedTotalBytes:  20,
+		},
+	}, reduce.NewReduceSearchResultInfo(nq, topK).
+		WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64).WithAdvance(true))
+	suite.NoError(err)
+	suite.Len(reducedRes.GetSubResults(), 1)
+	suite.Same(resultData, reducedRes.GetSubResults()[0].GetResultData())
+	suite.Nil(reducedRes.GetSubResults()[0].GetSlicedBlob())
+}
+
+func (suite *ResultSuite) TestDecodeSearchResults_ResultDataAndBlob() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(1)
+
+	// ResultData path (pre-decoded, zero-copy)
+	resultData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	// SlicedBlob path (legacy marshaled)
+	blobData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{20}}}},
+		Scores:     []float32{0.8},
+		Topks:      []int64{1},
+	}
+	blob, err := proto.Marshal(blobData)
+	suite.NoError(err)
+
+	decoded, err := DecodeSearchResults(ctx, []*internalpb.SearchResults{
+		{ResultData: resultData}, // zero-copy path
+		{SlicedBlob: blob},       // legacy path
+		{},                       // empty — should be skipped
+		{SlicedBlob: nil},        // nil blob — should be skipped
+	})
+	suite.NoError(err)
+	suite.Len(decoded, 2)
+	suite.Same(resultData, decoded[0])            // zero-copy: same pointer
+	suite.True(proto.Equal(blobData, decoded[1])) // blob: equal content
+}
+
+func (suite *ResultSuite) TestReduceSearchResults_FilterIncludesResultData() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(1)
+
+	resultData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	// Single result with ResultData only (no SlicedBlob) — should pass filter and use shortcut return
+	out, err := ReduceSearchResults(ctx, []*internalpb.SearchResults{
+		{
+			MetricType: metric.IP,
+			NumQueries: nq,
+			TopK:       topK,
+			ResultData: resultData,
+		},
+		nil, // should be filtered out
+		{},  // no data — should be filtered out
+	}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64))
+	suite.NoError(err)
+	suite.Same(resultData, out.GetResultData())
+}
+
+func (suite *ResultSuite) TestEncodeSearchResultData_EmptyResult() {
+	ctx := context.Background()
+
+	// nil searchResultData — should produce neither SlicedBlob nor ResultData
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+
+	paramtable.Get().Save(key, "true")
+	encoded, err := EncodeSearchResultData(ctx, nil, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Nil(encoded.GetResultData())
+	suite.Nil(encoded.GetSlicedBlob())
+
+	// empty IDs still carry search metadata and should be encoded
+	srd := &schemapb.SearchResultData{
+		NumQueries:     1,
+		TopK:           1,
+		Ids:            &schemapb.IDs{},
+		Scores:         []float32{},
+		Topks:          []int64{0},
+		AllSearchCount: 123,
+		FieldsData:     []*schemapb.FieldData{},
+	}
+
+	paramtable.Get().Save(key, "false")
+	encoded, err = EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Nil(encoded.GetResultData())
+	suite.NotEmpty(encoded.GetSlicedBlob())
+
+	var decoded schemapb.SearchResultData
+	suite.NoError(proto.Unmarshal(encoded.GetSlicedBlob(), &decoded))
+	suite.True(proto.Equal(srd, &decoded))
+
+	paramtable.Get().Save(key, "true")
+	encoded, err = EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Same(srd, encoded.GetResultData())
+	suite.Nil(encoded.GetSlicedBlob())
 }
 
 func TestResult_MergeRequestCost(t *testing.T) {

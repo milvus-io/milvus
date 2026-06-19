@@ -1,0 +1,60 @@
+name: Python Lint (tests/)
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'tests/**/*.py'
+      - 'tests/ruff.toml'
+      - '.github/workflows/python-lint.yaml'
+  pull_request:
+    paths:
+      - 'tests/**/*.py'
+      - 'tests/ruff.toml'
+      - '.github/workflows/python-lint.yaml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ruff:
+    name: Ruff (changed files only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed Python files under tests/
+        id: changed
+        uses: tj-actions/changed-files@v46
+        with:
+          files: tests/**/*.py
+
+      - name: ruff check
+        if: steps.changed.outputs.any_changed == 'true'
+        uses: astral-sh/ruff-action@v4.0.0
+        with:
+          version: "0.15.11"
+          src: ${{ steps.changed.outputs.all_changed_files }}
+
+      - name: ruff format --check
+        if: steps.changed.outputs.any_changed == 'true'
+        uses: astral-sh/ruff-action@v4.0.0
+        with:
+          version: "0.15.11"
+          src: ${{ steps.changed.outputs.all_changed_files }}
+          args: "format --check --diff"
+
+      - name: Validate ruff configuration (smoke test)
+        # Always runs so config-only PRs still catch a broken ruff.toml.
+        # --exit-zero ignores existing baseline violations; only fails when
+        # ruff cannot load the config at all.
+        uses: astral-sh/ruff-action@v4.0.0
+        with:
+          version: "0.15.11"
+          src: "tests/scripts"
+          args: "check --exit-zero"

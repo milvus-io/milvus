@@ -1,21 +1,28 @@
---extra-index-url https://test.pypi.org/simple/
+--find-links https://test.pypi.org/simple/pymilvus/
 requests>=2.32.4
 urllib3>=2.5.0
-pytest==7.2.0
-pyyaml==6.0
-numpy==1.24.3
+pytest==8.3.4
+pytest_tagging==1.6.0
+PyYAML==6.0.2
+numpy==2.2.6
 allure-pytest>=2.8.18
 Faker==19.2.0
 pymilvus
 scikit-learn>=1.5.2
 pytest-xdist==2.5.0
 minio==7.2.0
-tenacity==8.1.0
+tenacity>=8.2.3
 # for bf16 datatype
-ml-dtypes==0.2.0
+ml-dtypes==0.5.1
 loguru==0.7.3
 bm25s==0.2.13
-jieba==0.42.1
+# rjieba 0.1.11 wraps jieba-rs 0.6.x, closest to Milvus' pinned jieba-rs 0.6.8.
+rjieba==0.1.11
 pyarrow==21.0.0
+# for external collection formats
+pylance==6.0.0
+vortex-data==0.56.0; python_version >= "3.11"
+substrait==0.26.0; python_version >= "3.11"
+pyiceberg[sql-sqlite]==0.8.1
 # for geometry data type
 shapely>=2.0.0

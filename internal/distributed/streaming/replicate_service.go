@@ -6,20 +6,35 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// buildSkipMessageTypes builds a set of message type names to skip during replication.
+func buildSkipMessageTypes(types []string) map[string]struct{} {
+	m := make(map[string]struct{}, len(types))
+	for _, t := range types {
+		if t != "" {
+			m[t] = struct{}{}
+		}
+	}
+	return m
+}
 
 var _ ReplicateService = replicateService{}
 
 type replicateService struct {
 	*walAccesserImpl
+	skipMessageTypes map[string]struct{}
 }
 
 // Append appends the message into current cluster.
@@ -38,16 +53,16 @@ func (s replicateService) Append(ctx context.Context, rmsg message.ReplicateMuta
 	if err != nil {
 		return nil, err
 	}
-	return s.appendToWAL(ctx, msg)
+	return s.appendReplicateMessageToWAL(ctx, msg)
 }
 
-func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
 	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return ErrWALAccesserClosed
 	}
 	defer s.lifetime.Done()
 
-	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, config)
+	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, req)
 }
 
 func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
@@ -56,7 +71,8 @@ func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*commo
 	}
 	defer s.lifetime.Done()
 
-	configHelper, err := s.streamingCoordClient.Assignment().GetReplicateConfiguration(ctx)
+	// Use WithFreshRead to ensure strong consistency after UpdateReplicateConfiguration.
+	configHelper, err := s.streamingCoordClient.Assignment().GetReplicateConfiguration(ctx, assignment.WithFreshRead())
 	if err != nil {
 		return nil, err
 	}
@@ -78,9 +94,28 @@ func (s replicateService) GetReplicateCheckpoint(ctx context.Context, channelNam
 	return checkpoint, nil
 }
 
+// shouldSkipReplicateMessageType checks if the given message type should be skipped during replication.
+func (s replicateService) shouldSkipReplicateMessageType(msgType message.MessageType) bool {
+	_, ok := s.skipMessageTypes[msgType.String()]
+	return ok
+}
+
+func (s replicateService) GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error) {
+	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
+	}
+	defer s.lifetime.Done()
+
+	return s.handlerClient.GetSalvageCheckpoint(ctx, channelName)
+}
+
 // overwriteReplicateMessage overwrites the replicate message.
 // because some message such as create collection message write vchannel in its body, so we need to overwrite the message.
 func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg message.ReplicateMutableMessage, rh *message.ReplicateHeader) (message.MutableMessage, error) {
+	if s.shouldSkipReplicateMessageType(msg.MessageType()) {
+		return nil, status.NewIgnoreOperation("message type %s is configured to be skipped during replication", msg.MessageType())
+	}
+
 	cfg, err := s.streamingCoordClient.Assignment().GetReplicateConfiguration(ctx)
 	if err != nil {
 		return nil, err
@@ -95,17 +130,36 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 	if sourceCluster == nil {
 		return nil, status.NewReplicateViolation("source cluster %s not found in replicate configuration", rh.ClusterID)
 	}
-	targetVChannel, err := s.getTargetVChannel(sourceCluster, msg.VChannel())
+
+	// For pchannel-increasing AlterReplicateConfig messages, use the NEW config from the
+	// message header to map ALL channels (including newly added ones).
+	// The current config only knows about old pchannels, so both the main vchannel and
+	// broadcast vchannels need the new config for mapping.
+	channelMappingSourceCluster := sourceCluster
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+		alterMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
+		if alterMsg.Header().GetIsPchannelIncreasing() {
+			newCfg, newCfgErr := replicateutil.NewConfigHelper(s.clusterID, alterMsg.Header().GetReplicateConfiguration())
+			if newCfgErr != nil {
+				return nil, status.NewReplicateViolation("failed to parse new replicate config from message header: %s", newCfgErr.Error())
+			}
+			channelMappingSourceCluster = newCfg.GetCluster(rh.ClusterID)
+			if channelMappingSourceCluster == nil {
+				return nil, status.NewReplicateViolation("source cluster %s not found in new replicate configuration", rh.ClusterID)
+			}
+		}
+	}
+
+	targetVChannel, err := s.getTargetVChannel(channelMappingSourceCluster, msg.VChannel())
 	if err != nil {
 		return nil, err
 	}
 
 	// Get target broadcast vchannels on current cluster that should be written to
 	if bh := msg.BroadcastHeader(); bh != nil {
-		// broadcast header have vchannels, so we need to overwrite it.
 		targetBroadcastVChannels := make([]string, 0, len(bh.VChannels))
 		for _, vchannel := range bh.VChannels {
-			targetBroadcastVChannel, err := s.getTargetVChannel(sourceCluster, vchannel)
+			targetBroadcastVChannel, err := s.getTargetVChannel(channelMappingSourceCluster, vchannel)
 			if err != nil {
 				return nil, status.NewReplicateViolation("failed to get target channel, %s", err.Error())
 			}
@@ -126,6 +180,8 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 		if err := s.overwriteAlterReplicateConfigMessage(cfg, msg); err != nil {
 			return nil, err
 		}
+	case message.MessageTypeAlterLoadConfig:
+		s.overwriteAlterLoadConfigMessage(msg)
 	}
 
 	if funcutil.IsControlChannel(msg.VChannel()) {
@@ -169,7 +225,15 @@ func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replic
 // overwriteAlterReplicateConfigMessage overwrites the alter replicate configuration message.
 func (s replicateService) overwriteAlterReplicateConfigMessage(currentReplicateConfig *replicateutil.ConfigHelper, msg message.ReplicateMutableMessage) error {
 	alterReplicateConfigMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
-	cfg := alterReplicateConfigMsg.Header().ReplicateConfiguration
+	header := alterReplicateConfigMsg.Header()
+
+	// Check ignore field - if true, skip processing
+	// This is used for incomplete switchover messages that should be ignored after force promote
+	if header.Ignore {
+		return nil
+	}
+
+	cfg := header.ReplicateConfiguration
 	_, err := replicateutil.NewConfigHelper(s.clusterID, cfg)
 	if err == nil {
 		return nil
@@ -188,4 +252,18 @@ func (s replicateService) overwriteAlterReplicateConfigMessage(currentReplicateC
 		},
 	})
 	return nil
+}
+
+// overwriteAlterLoadConfigMessage sets use_local_replica_config flag on replicated AlterLoadConfig messages
+// when streaming.replication.useLocalReplicaConfig is enabled.
+// This allows the secondary cluster to use its own cluster-level replica/resource-group config
+// instead of blindly applying the primary's config.
+func (s replicateService) overwriteAlterLoadConfigMessage(msg message.ReplicateMutableMessage) {
+	if !paramtable.Get().StreamingCfg.ReplicationUseLocalReplicaConfig.GetAsBool() {
+		return
+	}
+	alterLoadConfigMsg := message.MustAsMutableAlterLoadConfigMessageV2(msg)
+	header := alterLoadConfigMsg.Header()
+	header.UseLocalReplicaConfig = true
+	alterLoadConfigMsg.OverwriteHeader(header)
 }

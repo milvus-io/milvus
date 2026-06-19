@@ -20,9 +20,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // taskDispatcher is the utility to provide task dedup and dispatch feature
@@ -51,7 +51,7 @@ func newTaskDispatcher[K comparable](runner task[K]) *taskDispatcher[K] {
 }
 
 func (d *taskDispatcher[K]) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored and called in Stop()
 	d.cancel = cancel
 
 	d.wg.Add(1)

@@ -18,6 +18,7 @@
 
 #include "cachinglayer/Manager.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
 #include "glog/logging.h"
 #include "log/Log.h"
@@ -50,10 +51,38 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
 }
 
 extern "C" void
+SegcoreSetStorageV3Enabled(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_storage_v3_enabled(value);
+}
+
+extern "C" void
+SegcoreSetEnableGrowingSourceFlush(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_enable_growing_source_flush(value);
+}
+
+extern "C" void
 SegcoreSetEnableGeometryCache(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_enable_geometry_cache(value);
+}
+
+extern "C" void
+SegcoreSetVisibilityFilterEnabled(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_visibility_filter_enabled(value);
+}
+
+extern "C" void
+SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_prefer_field_data_when_index_has_raw_data(value);
 }
 
 extern "C" void
@@ -115,6 +144,13 @@ SegcoreSetInterimIndexMemExpansionRate(const float value) {
 }
 
 extern "C" void
+SegcoreSetMaxGroupByGroups(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_max_group_by_groups(value);
+}
+
+extern "C" void
 SegcoreSetSubDim(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
@@ -163,7 +199,7 @@ SegcoreSetSimdType(const char* value) {
     auto real_type = milvus::config::KnowhereSetSimdType(value);
     char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
     AssertInfo(ret != nullptr, "memmory allocation for ret failed!");
-    memcpy(ret, real_type.c_str(), real_type.length());
+    milvus::fastmem::FastMemcpy(ret, real_type.c_str(), real_type.length());
     ret[real_type.length()] = 0;
     return ret;
 }
@@ -227,7 +263,9 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const float loading_resource_factor,
                        const float max_disk_usage_percentage,
                        const char* disk_path,
-                       const int64_t loading_timeout_ms) {
+                       const int64_t loading_timeout_ms,
+                       const int64_t warmup_loading_timeout_ms,
+                       const uint32_t prefetch_pool_threads) {
     std::string disk_path_str(disk_path);
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
         {scalarFieldCacheWarmupPolicy,
@@ -248,9 +286,30 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
          cache_cell_unaccessed_survival_time,
          overloaded_memory_threshold_percentage,
          max_disk_usage_percentage,
-         disk_path_str,
+         std::move(disk_path_str),
          loading_resource_factor},
-        std::chrono::milliseconds(loading_timeout_ms));
+        std::chrono::milliseconds(loading_timeout_ms),
+        std::chrono::milliseconds(warmup_loading_timeout_ms),
+        prefetch_pool_threads);
+}
+
+extern "C" void
+UpdateTieredStorageConfig(
+    const int64_t loading_timeout_ms,
+    const int64_t warmup_loading_timeout_ms,
+    const bool storage_usage_tracking_enabled,
+    const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+    const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+    const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+    const CacheWarmupPolicy vectorIndexCacheWarmupPolicy) {
+    milvus::cachinglayer::Manager::UpdateConfig(
+        std::chrono::milliseconds(loading_timeout_ms),
+        std::chrono::milliseconds(warmup_loading_timeout_ms),
+        storage_usage_tracking_enabled,
+        {scalarFieldCacheWarmupPolicy,
+         vectorFieldCacheWarmupPolicy,
+         scalarIndexCacheWarmupPolicy,
+         vectorIndexCacheWarmupPolicy});
 }
 
 }  // namespace milvus::segcore

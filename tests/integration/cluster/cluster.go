@@ -21,16 +21,16 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration/cluster/process"
 )
 
@@ -234,7 +234,7 @@ func (c *MiniClusterV3) initInternalClient() {
 // ModifyMilvusConfig modifies the milvus config.
 // Meanwhile it will return a guard function to revert the config into default.
 // It doesn't promise that the configuration will be applied immediately,
-// milvus may not support the dynamic configuration change for some configurations or some configration may be applied slowly.
+// milvus may not support the dynamic configuration change for some configurations or some configuration may be applied slowly.
 // If you want to ensure the config is applied, you should restart the target component or wait it to be ready.
 func (c *MiniClusterV3) MustModifyMilvusConfig(kvs map[string]string) func() {
 	keys := make([]string, 0, len(kvs))

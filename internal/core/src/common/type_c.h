@@ -92,6 +92,8 @@ typedef struct CStorageConfig {
     const char* gcp_credential_json;
     bool use_custom_part_upload;
     uint32_t max_connections;
+    const char* tls_min_version;
+    bool use_crc32c_checksum;
 } CStorageConfig;
 
 typedef struct CDiskWriteRateLimiterConfig {
@@ -110,6 +112,11 @@ typedef struct CDiskWriteConfig {
     CDiskWriteRateLimiterConfig rate_limiter_config;
 } CDiskWriteConfig;
 
+typedef struct CArrowReaderConfig {
+    int64_t hole_size_limit_bytes;
+    int64_t range_size_limit_bytes;
+} CArrowReaderConfig;
+
 typedef struct CMmapConfig {
     const char* cache_read_ahead_policy;
     const char* mmap_path;
@@ -121,6 +128,8 @@ typedef struct CMmapConfig {
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
     bool mmap_populate;
+    bool json_stats_enable_mmap;
+    const char* json_stats_mmap_path;
 } CMmapConfig;
 
 typedef struct CTraceConfig {

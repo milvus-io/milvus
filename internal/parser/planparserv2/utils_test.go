@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 func Test_relationalCompatible(t *testing.T) {
@@ -1028,6 +1028,12 @@ func Test_checkValidPoint(t *testing.T) {
 		// POINT with extra spaces should pass
 		err := checkValidPoint("POINT( 1  2 )")
 		assert.NoError(t, err)
+	})
+
+	t.Run("valid non-point WKT", func(t *testing.T) {
+		err := checkValidPoint("POLYGON((0 0, 1 0, 1 1, 0 0))")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "only supports POINT geometry")
 	})
 }
 

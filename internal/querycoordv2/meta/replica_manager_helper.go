@@ -3,7 +3,7 @@ package meta
 import (
 	"sort"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // collectionAssignmentHelper is a helper to manage the replica assignment in same collection.
@@ -170,7 +170,7 @@ func newReplicaAssignmentInfo(replica *Replica, nodeInRG typeutil.UniqueSet) *re
 		return true
 	})
 	return &replicaAssignmentInfo{
-		replicaID:            replica.GetID(),
+		replica:              replica,
 		expectedNodeCount:    0,
 		rwNodes:              rwNodes,
 		newRONodes:           newRONodes,
@@ -204,7 +204,7 @@ func newReplicaSQNAssignmentInfo(replica *Replica, nodes typeutil.UniqueSet) *re
 		return true
 	})
 	return &replicaAssignmentInfo{
-		replicaID:            replica.GetID(),
+		replica:              replica,
 		expectedNodeCount:    0,
 		rwNodes:              rwNodes,
 		newRONodes:           newRONodes,
@@ -214,7 +214,7 @@ func newReplicaSQNAssignmentInfo(replica *Replica, nodes typeutil.UniqueSet) *re
 }
 
 type replicaAssignmentInfo struct {
-	replicaID            typeutil.UniqueID
+	replica              *Replica           // the replica snapshot this assignment was computed from
 	expectedNodeCount    int                // expected node count for each replica.
 	rwNodes              typeutil.UniqueSet // rw nodes is used by current replica. (rw -> rw)
 	newRONodes           typeutil.UniqueSet // new ro nodes for these replica. (rw -> ro)
@@ -222,9 +222,14 @@ type replicaAssignmentInfo struct {
 	unrecoverableRONodes typeutil.UniqueSet // unrecoverable ro nodes for these replica (ro node can't be put back to rw node if it's not in current resource group). (ro -> ro)
 }
 
+// GetReplica returns the replica snapshot this assignment was computed from.
+func (s *replicaAssignmentInfo) GetReplica() *Replica {
+	return s.replica
+}
+
 // GetReplicaID returns the replica id for these replica.
 func (s *replicaAssignmentInfo) GetReplicaID() typeutil.UniqueID {
-	return s.replicaID
+	return s.replica.GetID()
 }
 
 // GetNewRONodes returns the new ro nodes for these replica.
@@ -307,26 +312,27 @@ func (s replicaAssignmentInfoSortByAvailableAndRecoverable) Less(i, j int) bool 
 
 	// Reach stable sort result by replica id.
 	// Otherwise unstable assignment may cause unnecessary node transfer.
-	return left < right || (left == right && s.replicaAssignmentInfoSorter[i].replicaID < s.replicaAssignmentInfoSorter[j].replicaID)
+	return left < right || (left == right && s.replicaAssignmentInfoSorter[i].GetReplicaID() < s.replicaAssignmentInfoSorter[j].GetReplicaID())
 }
 
 // newReplicaSQNAssignmentHelper creates a new replicaSQNAssignmentHelper.
+// rgName can be empty for flat allocation mode across all resource groups.
 func newReplicaSQNAssignmentHelper(
+	rgName string,
 	replicas []*Replica,
 	nodes typeutil.UniqueSet,
 ) *replicasInSameRGAssignmentHelper {
-	// We use a fake resource group name to create a helper.
 	assignmentInfos := make([]*replicaAssignmentInfo, 0, len(replicas))
 	for _, replica := range replicas {
 		assignmentInfos = append(assignmentInfos, newReplicaSQNAssignmentInfo(replica, nodes))
 	}
 	h := &replicasInSameRGAssignmentHelper{
-		rgName:        "",
+		rgName:        rgName,
 		nodesInRG:     nodes,
 		incomingNodes: nodes.Clone(),
 		replicas:      assignmentInfos,
 	}
-	// generate incoming nodes for collection.
+	// generate incoming nodes for resource group.
 	h.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
 		assignment.RangeOverAllNodes(func(nodeID int64) {
 			if nodes.Contain(nodeID) {
@@ -335,6 +341,6 @@ func newReplicaSQNAssignmentHelper(
 		})
 	})
 	// update expected node count for all replicas in same resource group.
-	h.updateExpectedNodeCountForReplicas(len(nodes))
+	h.updateExpectedNodeCountForReplicas(nodes.Len())
 	return h
 }

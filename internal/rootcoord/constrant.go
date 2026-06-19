@@ -19,7 +19,7 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -28,6 +28,7 @@ const (
 	globalIDAllocatorSubPath  = "gid"
 	globalTSOAllocatorKey     = "timestamp"
 	globalTSOAllocatorSubPath = "tso"
+	defaultMaxArrayCapacity   = 4096
 )
 
 func checkGeneralCapacity(ctx context.Context, newColNum int,

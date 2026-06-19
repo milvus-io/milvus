@@ -93,8 +93,6 @@ struct ElementWiseBitsetPolicy {
 
         if (start_element == end_element) {
             // read from 1 element only
-            const data_type m1 = get_shift_mask_end(start_shift);
-            const data_type m2 = get_shift_mask_begin(end_shift + 1);
             const data_type mask = get_shift_mask_end(start_shift) &
                                    get_shift_mask_begin(end_shift + 1);
 
@@ -136,9 +134,6 @@ struct ElementWiseBitsetPolicy {
 
         if (start_element == end_element) {
             // write into a single element
-
-            const data_type m1 = get_shift_mask_end(start_shift);
-            const data_type m2 = get_shift_mask_begin(end_shift + 1);
             const data_type mask = get_shift_mask_end(start_shift) &
                                    get_shift_mask_begin(end_shift + 1);
 
@@ -358,8 +353,21 @@ struct ElementWiseBitsetPolicy {
             start_element += 1;
         }
 
-        // process the middle
-        for (size_t i = start_element; i < end_element; i++) {
+        // process the middle; a per-element early-exit loop cannot be
+        // auto-vectorized, so AND-reduce 64-byte blocks (the fixed-trip
+        // inner loop vectorizes) and branch once per block
+        constexpr size_t block_elements = 64 / sizeof(data_type);
+        size_t i = start_element;
+        for (; i + block_elements <= end_element; i += block_elements) {
+            data_type acc = data_type(-1);
+            for (size_t k = 0; k < block_elements; k++) {
+                acc &= data[i + k];
+            }
+            if (acc != data_type(-1)) {
+                return false;
+            }
+        }
+        for (; i < end_element; i++) {
             if (data[i] != data_type(-1)) {
                 return false;
             }
@@ -415,8 +423,21 @@ struct ElementWiseBitsetPolicy {
             start_element += 1;
         }
 
-        // process the middle
-        for (size_t i = start_element; i < end_element; i++) {
+        // process the middle; a per-element early-exit loop cannot be
+        // auto-vectorized, so OR-reduce 64-byte blocks (the fixed-trip
+        // inner loop vectorizes) and branch once per block
+        constexpr size_t block_elements = 64 / sizeof(data_type);
+        size_t i = start_element;
+        for (; i + block_elements <= end_element; i += block_elements) {
+            data_type acc = data_type(0);
+            for (size_t k = 0; k < block_elements; k++) {
+                acc |= data[i + k];
+            }
+            if (acc != data_type(0)) {
+                return false;
+            }
+        }
+        for (; i < end_element; i++) {
             if (data[i] != data_type(0)) {
                 return false;
             }

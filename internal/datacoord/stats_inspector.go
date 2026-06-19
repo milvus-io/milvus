@@ -28,14 +28,14 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type StatsInspector interface {
@@ -149,7 +149,7 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 		case <-ticker.C:
 			si.triggerTextStatsTask()
 			si.triggerBM25StatsTask()
-			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = si.triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
+			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = si.triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
 		}
 	}
 }
@@ -158,9 +158,11 @@ func (si *statsInspector) enableBM25() bool {
 	return false
 }
 
-func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
-		!segment.GetIsSorted() {
+func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
+	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
+		return false
+	}
+	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
 		return false
 	}
 
@@ -175,9 +177,9 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
-func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
+func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
-		!segment.GetIsSorted() {
+		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) {
 		return false
 	}
 
@@ -205,7 +207,7 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 func (si *statsInspector) triggerTextStatsTask() {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
-		if collection == nil || collection.IsExternal() {
+		if collection == nil {
 			continue
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -217,8 +219,9 @@ func (si *statsInspector) triggerTextStatsTask() {
 			}
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
+		allowUnsorted := collection.IsExternal()
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return seg.GetIsSorted() && needDoTextIndex(seg, needTriggerFieldIDs)
+			return needDoTextIndex(seg, needTriggerFieldIDs, allowUnsorted)
 		}))
 
 		resources := []*internalpb.FileResourceInfo{}
@@ -241,7 +244,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 	}
 }
 
-func (si *statsInspector) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
+func (si *statsInspector) triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
 		if collection == nil || collection.IsExternal() {
@@ -255,7 +258,7 @@ func (si *statsInspector) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger 
 			}
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoJsonKeyIndex(seg, needTriggerFieldIDs)
+			return needDoJSONKeyIndex(seg, needTriggerFieldIDs)
 		}))
 		if time.Now().Unix()-lastJSONStatsLastTrigger > int64(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute).Seconds()) {
 			lastJSONStatsLastTrigger = time.Now().Unix()
@@ -290,7 +293,7 @@ func (si *statsInspector) triggerBM25StatsTask() {
 			}
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return seg.GetIsSorted() && needDoBM25(seg, needTriggerFieldIDs)
+			return (seg.GetIsSorted() || seg.GetIsSortedByNamespace()) && needDoBM25(seg, needTriggerFieldIDs)
 		}))
 
 		for _, segment := range segments {
@@ -340,7 +343,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
 	}
-	if si.isExternalCollection(originSegment.GetCollectionID()) {
+	if si.isExternalCollection(originSegment.GetCollectionID()) && subJobType != indexpb.StatsSubJob_TextIndexJob {
 		log.Ctx(si.ctx).Info("skip submit stats task for external collection",
 			zap.Int64("collectionID", originSegment.GetCollectionID()),
 			zap.Int64("segmentID", originSegmentID),

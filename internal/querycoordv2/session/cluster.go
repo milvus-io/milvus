@@ -18,29 +18,22 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-var ErrNodeNotFound = errors.New("NodeNotFound")
-
-func WrapErrNodeNotFound(nodeID int64) error {
-	return fmt.Errorf("%w(%v)", ErrNodeNotFound, nodeID)
-}
 
 type Cluster interface {
 	WatchDmChannels(ctx context.Context, nodeID int64, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
@@ -57,6 +50,7 @@ type Cluster interface {
 	RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)
 	SyncFileResource(ctx context.Context, nodeID int64, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
+	ClearReadTaskQueue(ctx context.Context, nodeID int64, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)
 	Start()
 	Stop()
@@ -93,7 +87,7 @@ func (c *QueryCluster) Start() {
 
 func (c *QueryCluster) Stop() {
 	c.stopOnce.Do(func() {
-		c.clients.closeAll()
+		c.closeAll()
 		close(c.ch)
 		c.wg.Wait()
 	})
@@ -110,10 +104,10 @@ func (c *QueryCluster) updateLoop() {
 			log.Info("cluster closed")
 			return
 		case <-ticker.C:
-			nodes := c.clients.getAllNodeIDs()
+			nodes := c.getAllNodeIDs()
 			for _, id := range nodes {
 				if c.nodeManager.Get(id) == nil {
-					c.clients.close(id)
+					c.close(id)
 				}
 			}
 			// apply dynamic update only when changed
@@ -134,7 +128,7 @@ func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *quer
 	var status *commonpb.Status
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
-		req := proto.Clone(req).(*querypb.LoadSegmentsRequest)
+		req = proto.Clone(req).(*querypb.LoadSegmentsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.LoadSegments(ctx, req)
 	})
@@ -333,6 +327,22 @@ func (c *QueryCluster) SyncFileResource(ctx context.Context, nodeID int64, req *
 	return resp, err
 }
 
+func (c *QueryCluster) ClearReadTaskQueue(ctx context.Context, nodeID int64, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	var (
+		resp *internalpb.ClearReadTaskQueueResponse
+		err  error
+	)
+
+	req = proto.Clone(req).(*internalpb.ClearReadTaskQueueRequest)
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.ClearReadTaskQueue(ctx, req)
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return resp, err
+}
+
 func (c *QueryCluster) ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	var (
 		resp *querypb.ComputePhraseMatchSlopResponse
@@ -351,10 +361,10 @@ func (c *QueryCluster) ComputePhraseMatchSlop(ctx context.Context, nodeID int64,
 func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types.QueryNodeClient)) error {
 	node := c.nodeManager.Get(nodeID)
 	if node == nil {
-		return WrapErrNodeNotFound(nodeID)
+		return merr.WrapErrNodeNotFound(nodeID)
 	}
 
-	cli, err := c.clients.getOrCreate(ctx, node)
+	cli, err := c.getOrCreate(ctx, node)
 	if err != nil {
 		return err
 	}

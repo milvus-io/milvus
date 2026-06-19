@@ -6,8 +6,8 @@ package segcore
 #include "common/type_c.h"
 #include "futures/future_c.h"
 #include "segcore/collection_c.h"
+#include "segcore/segment_c.h"
 #include "segcore/plan_c.h"
-#include "segcore/reduce_c.h"
 */
 import "C"
 
@@ -15,18 +15,24 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 const (
@@ -79,7 +85,16 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
-	return &cSegmentImpl{id: req.SegmentID, ptr: ptr}, nil
+	seg := &cSegmentImpl{id: req.SegmentID, ptr: ptr}
+	if req.LoadInfo != nil {
+		if commitTs := req.LoadInfo.GetCommitTimestamp(); commitTs != 0 {
+			if err := seg.SetCommitTimestamp(commitTs); err != nil {
+				C.DeleteSegment(ptr)
+				return nil, merr.Wrap(err, "failed to set commit timestamp on segment")
+			}
+		}
+	}
+	return seg, nil
 }
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
@@ -123,10 +138,18 @@ func (s *cSegmentImpl) HasFieldData(fieldID int64) bool {
 }
 
 // Search requests a search on the segment.
+// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(searchReq)
+
+	// Use physical time for entity-level TTL (issue #47413)
+	physicalTimeUs := int64(searchReq.entityTTLPhysicalTime)
+	if physicalTimeUs == 0 {
+		physicalTimeMs, _ := tsoutil.ParseHybridTs(searchReq.mvccTimestamp)
+		physicalTimeUs = physicalTimeMs * 1000
+	}
 
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
@@ -138,11 +161,15 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.uint64_t(searchReq.mvccTimestamp),
 				C.int32_t(searchReq.consistencyLevel),
 				C.uint64_t(searchReq.collectionTTL),
+				C.uint64_t(physicalTimeUs),
+				C.bool(searchReq.filterOnly),
+				C.bool(searchReq.enableExprCache),
 			))
 		},
 		cgo.WithName("search"),
 	)
 	defer future.Release()
+
 	result, err := future.BlockAndLeakyGet()
 	if err != nil {
 		return nil, err
@@ -155,6 +182,14 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
+
+	// Use physical time for entity-level TTL (issue #47413)
+	physicalTimeUs := int64(plan.entityTTLPhysicalTime)
+	if physicalTimeUs == 0 {
+		physicalTimeMs, _ := tsoutil.ParseHybridTs(plan.Timestamp)
+		physicalTimeUs = physicalTimeMs * 1000
+	}
+
 	future := cgo.Async(
 		ctx,
 		func() cgo.CFuturePtr {
@@ -167,6 +202,7 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 				C.bool(plan.ignoreNonPk),
 				C.int32_t(plan.consistencyLevel),
 				C.uint64_t(plan.collectionTTL),
+				C.uint64_t(physicalTimeUs),
 			))
 		},
 		cgo.WithName("retrieve"),
@@ -220,7 +256,7 @@ func (s *cSegmentImpl) Insert(ctx context.Context, request *InsertRequest) (*Ins
 
 	insertRecordBlob, err := proto.Marshal(request.Record)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal insert record: %s", err)
+		return nil, merr.Wrap(err, "failed to marshal insert record")
 	}
 
 	numOfRow := len(request.RowIDs)
@@ -262,7 +298,7 @@ func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*Del
 
 	dataBlob, err := proto.Marshal(ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ids: %s", err)
+		return nil, merr.Wrap(err, "failed to marshal ids")
 	}
 	status := C.Delete(s.ptr,
 		cSize,
@@ -283,41 +319,40 @@ func (s *cSegmentImpl) LoadFieldData(ctx context.Context, request *LoadFieldData
 
 	status := C.LoadFieldData(s.ptr, creq.cLoadFieldDataInfo)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "failed to load field data")
+		return nil, merr.Wrap(err, "failed to load field data")
 	}
 	return &LoadFieldDataResult{}, nil
-}
-
-// AddFieldDataInfo adds field data info into the segment.
-func (s *cSegmentImpl) AddFieldDataInfo(ctx context.Context, request *AddFieldDataInfoRequest) (*AddFieldDataInfoResult, error) {
-	creq, err := request.getCLoadFieldDataRequest()
-	if err != nil {
-		return nil, err
-	}
-	defer creq.Release()
-
-	status := C.AddFieldDataInfoForSealed(s.ptr, creq.cLoadFieldDataInfo)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "failed to add field data info")
-	}
-	return &AddFieldDataInfoResult{}, nil
 }
 
 func (s *cSegmentImpl) Load(ctx context.Context) error {
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 
-	// Create cancellation guard for this load operation
-	guard := NewCancellationGuard(ctx)
-	defer guard.Close()
-
-	// Perform the load with cancellation support
-	status := C.SegmentLoad(traceCtx.ctx, s.ptr, (C.CLoadCancellationSource)(guard.Source()))
-
-	return ConsumeCStatusIntoError(&status)
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncSegmentLoad(
+				traceCtx.ctx,
+				s.ptr,
+			))
+		},
+		cgo.WithName("segment-load"),
+	)
+	defer future.Release()
+	_, err := future.BlockAndLeakyGet()
+	return err
 }
 
 func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
+	if req == nil {
+		return merr.WrapErrParameterInvalidMsg("reopen request is nil")
+	}
+	if req.LoadInfo == nil {
+		return merr.WrapErrParameterInvalidMsg("reopen load info is nil")
+	}
+	if req.Schema == nil {
+		return merr.WrapErrParameterInvalidMsg("reopen schema is nil")
+	}
+
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
@@ -327,15 +362,42 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if err != nil {
 		return err
 	}
+	if len(loadInfoBlob) == 0 {
+		return merr.WrapErrServiceInternalMsg("reopen load info blob is empty")
+	}
 
-	status := C.ReopenSegment(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
-	return ConsumeCStatusIntoError(&status)
+	schemaBlob, err := proto.Marshal(req.Schema)
+	if err != nil {
+		return err
+	}
+	if len(schemaBlob) == 0 {
+		return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
+	}
+	defer runtime.KeepAlive(schemaBlob)
+
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
+				traceCtx.ctx,
+				s.ptr,
+				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
+				C.int64_t(len(loadInfoBlob)),
+				unsafe.Pointer(&schemaBlob[0]),
+				C.int64_t(len(schemaBlob)),
+				C.uint64_t(req.SchemaVersion),
+			))
+		},
+		cgo.WithName("segment-reopen"),
+	)
+	defer future.Release()
+	_, err = future.BlockAndLeakyGet()
+	return err
 }
 
 func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
 	status := C.DropSealedSegmentIndex(s.ptr, C.int64_t(fieldID))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to drop index")
+		return merr.Wrap(err, "failed to drop index")
 	}
 	return nil
 }
@@ -343,7 +405,7 @@ func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
 func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error {
 	status := C.DropSealedSegmentJSONIndex(s.ptr, C.int64_t(fieldID), C.CString(nestedPath))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to drop json index")
+		return merr.Wrap(err, "failed to drop json index")
 	}
 	return nil
 }
@@ -351,6 +413,14 @@ func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedP
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)
+}
+
+// SetCommitTimestamp sets the commit timestamp for the segment.
+// Import segments use this to ensure rows with old historical timestamps are
+// not visible to queries dispatched before T_commit.
+func (s *cSegmentImpl) SetCommitTimestamp(ts uint64) error {
+	status := C.SegmentSetCommitTimestamp(s.ptr, C.uint64_t(ts))
+	return ConsumeCStatusIntoError(&status)
 }
 
 // ConvertToSegcoreSegmentLoadInfo converts querypb.SegmentLoadInfo to segcorepb.SegmentLoadInfo.
@@ -361,29 +431,82 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		return nil
 	}
 
+	// Resolve text/json stats with basePaths.
+	// V2: stats come from src proto fields, basePaths computed from metadata + rootPath.
+	// V3: stats resolved from manifest (src proto fields are empty), basePaths from manifest paths.
+	textStats, jsonStats, textBasePaths, jsonBasePaths := resolveStatsWithBasePaths(src)
+
 	return &segcorepb.SegmentLoadInfo{
-		SegmentID:        src.GetSegmentID(),
-		PartitionID:      src.GetPartitionID(),
-		CollectionID:     src.GetCollectionID(),
-		DbID:             src.GetDbID(),
-		FlushTime:        src.GetFlushTime(),
-		BinlogPaths:      convertFieldBinlogs(src.GetBinlogPaths()),
-		NumOfRows:        src.GetNumOfRows(),
-		Statslogs:        convertFieldBinlogs(src.GetStatslogs()),
-		Deltalogs:        convertFieldBinlogs(src.GetDeltalogs()),
-		CompactionFrom:   src.GetCompactionFrom(),
-		IndexInfos:       convertFieldIndexInfos(src.GetIndexInfos()),
-		SegmentSize:      src.GetSegmentSize(),
-		InsertChannel:    src.GetInsertChannel(),
-		ReadableVersion:  src.GetReadableVersion(),
-		StorageVersion:   src.GetStorageVersion(),
-		IsSorted:         src.GetIsSorted(),
-		TextStatsLogs:    convertTextIndexStats(src.GetTextStatsLogs()),
-		Bm25Logs:         convertFieldBinlogs(src.GetBm25Logs()),
-		JsonKeyStatsLogs: convertJSONKeyStats(src.GetJsonKeyStatsLogs()),
-		Priority:         src.GetPriority(),
-		ManifestPath:     src.GetManifestPath(),
+		SegmentID:            src.GetSegmentID(),
+		PartitionID:          src.GetPartitionID(),
+		CollectionID:         src.GetCollectionID(),
+		DbID:                 src.GetDbID(),
+		FlushTime:            src.GetFlushTime(),
+		BinlogPaths:          convertFieldBinlogs(src.GetBinlogPaths()),
+		NumOfRows:            src.GetNumOfRows(),
+		Statslogs:            convertFieldBinlogs(src.GetStatslogs()),
+		Deltalogs:            convertFieldBinlogs(src.GetDeltalogs()),
+		CompactionFrom:       src.GetCompactionFrom(),
+		IndexInfos:           convertFieldIndexInfos(src.GetIndexInfos()),
+		SegmentSize:          src.GetSegmentSize(),
+		InsertChannel:        src.GetInsertChannel(),
+		ReadableVersion:      src.GetReadableVersion(),
+		StorageVersion:       src.GetStorageVersion(),
+		IsSorted:             src.GetIsSorted(),
+		TextStatsLogs:        convertTextIndexStats(textStats, textBasePaths),
+		Bm25Logs:             convertFieldBinlogs(src.GetBm25Logs()),
+		JsonKeyStatsLogs:     convertJSONKeyStats(jsonStats, jsonBasePaths),
+		Priority:             src.GetPriority(),
+		ManifestPath:         src.GetManifestPath(),
+		UseTakeForOutput:     src.GetUseTakeForOutput(),
+		EstimatedBytesPerRow: src.GetEstimatedBytesPerRow(),
+		CommitTimestamp:      src.GetCommitTimestamp(),
 	}
+}
+
+// resolveStatsWithBasePaths resolves text/json stats and computes basePaths.
+// V2: stats from src proto fields, basePaths computed from rootPath + metadata.
+// V3: stats resolved from manifest via StatsResolver, basePaths extracted from manifest paths.
+func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
+	map[int64]*datapb.TextIndexStats,
+	map[int64]*datapb.JsonKeyStats,
+	map[int64]string, // textBasePaths
+	map[int64]string, // jsonBasePaths
+) {
+	textStats := src.GetTextStatsLogs()
+	jsonStats := src.GetJsonKeyStatsLogs()
+
+	// For V3 (manifest-based): resolve stats from manifest if proto fields are empty.
+	if src.GetStorageVersion() == storage.StorageV3 {
+		result := packed.NewStatsResolverFromLoadInfo(src).TextAndJSONIndexStatsWithBasePaths()
+		if result.Err() != nil {
+			log.Warn("failed to resolve stats from manifest for segcore load info",
+				zap.Int64("segmentID", src.GetSegmentID()),
+				zap.String("manifestPath", src.GetManifestPath()),
+				zap.Error(result.Err()))
+		} else {
+			return result.TextIndexStats, result.JSONKeyStats, result.TextBasePaths, result.JSONBasePaths
+		}
+	}
+
+	// V2: compute basePaths from rootPath + stats metadata.
+	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
+
+	textBasePaths := make(map[int64]string, len(textStats))
+	for fieldID, stats := range textStats {
+		textBasePaths[fieldID] = metautil.BuildTextIndexPrefix(rootPath,
+			stats.GetBuildID(), stats.GetVersion(),
+			src.GetCollectionID(), src.GetPartitionID(), src.GetSegmentID(), fieldID)
+	}
+
+	jsonBasePaths := make(map[int64]string, len(jsonStats))
+	for fieldID, stats := range jsonStats {
+		jsonBasePaths[fieldID] = metautil.BuildJSONKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
+			stats.GetBuildID(), stats.GetVersion(),
+			src.GetCollectionID(), src.GetPartitionID(), src.GetSegmentID(), fieldID)
+	}
+
+	return textStats, jsonStats, textBasePaths, jsonBasePaths
 }
 
 // convertFieldBinlogs converts datapb.FieldBinlog to segcorepb.FieldBinlog.
@@ -457,13 +580,14 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 			NumRows:                   fii.GetNumRows(),
 			CurrentIndexVersion:       fii.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: fii.GetCurrentScalarIndexVersion(),
+			IndexStorePathVersion:     fii.GetIndexStorePathVersion(),
 		})
 	}
 	return result
 }
 
 // convertTextIndexStats converts datapb.TextIndexStats to segcorepb.TextIndexStats.
-func convertTextIndexStats(src map[int64]*datapb.TextIndexStats) map[int64]*segcorepb.TextIndexStats {
+func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[int64]string) map[int64]*segcorepb.TextIndexStats {
 	if src == nil {
 		return nil
 	}
@@ -474,20 +598,45 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats) map[int64]*segc
 			continue
 		}
 
+		files := v.GetFiles()
+		basePath := basePaths[k]
+		// V2 legacy segments may carry full paths in Files (reconstructed by
+		// metautil.BuildTextLogPaths on etcd load). The C++ loader expects
+		// relative filenames and prepends BasePath itself, so strip any
+		// basePath prefix here to honor the contract.
+		if basePath != "" {
+			prefix := basePath + "/"
+			stripped := make([]string, len(files))
+			for i, f := range files {
+				stripped[i] = strings.TrimPrefix(f, prefix)
+			}
+			files = stripped
+		}
+		log.Info("convertTextIndexStats",
+			zap.Int64("fieldID", v.GetFieldID()),
+			zap.Int64("buildID", v.GetBuildID()),
+			zap.Int64("version", v.GetVersion()),
+			zap.String("basePath", basePath),
+			zap.Int("fileCount", len(files)),
+			zap.Strings("files", files),
+		)
+
 		result[k] = &segcorepb.TextIndexStats{
-			FieldID:    v.GetFieldID(),
-			Version:    v.GetVersion(),
-			Files:      v.GetFiles(),
-			LogSize:    v.GetLogSize(),
-			MemorySize: v.GetMemorySize(),
-			BuildID:    v.GetBuildID(),
+			FieldID:                   v.GetFieldID(),
+			Version:                   v.GetVersion(),
+			Files:                     files,
+			LogSize:                   v.GetLogSize(),
+			MemorySize:                v.GetMemorySize(),
+			BuildID:                   v.GetBuildID(),
+			CurrentScalarIndexVersion: v.GetCurrentScalarIndexVersion(),
+			BasePath:                  basePath,
 		}
 	}
 	return result
 }
 
 // convertJSONKeyStats converts datapb.JsonKeyStats to segcorepb.JsonKeyStats.
-func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats) map[int64]*segcorepb.JsonKeyStats {
+func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats, basePaths map[int64]string) map[int64]*segcorepb.JsonKeyStats {
 	if src == nil {
 		return nil
 	}
@@ -498,14 +647,37 @@ func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats) map[int64]*segcorep
 			continue
 		}
 
+		files := v.GetFiles()
+		basePath := basePaths[k]
+		// V2 legacy segments may carry full paths in Files; strip basePath
+		// prefix so the C++ loader (which prepends BasePath) sees relative
+		// filenames. See convertTextIndexStats for details.
+		if basePath != "" {
+			prefix := basePath + "/"
+			stripped := make([]string, len(files))
+			for i, f := range files {
+				stripped[i] = strings.TrimPrefix(f, prefix)
+			}
+			files = stripped
+		}
+		log.Info("convertJSONKeyStats",
+			zap.Int64("fieldID", v.GetFieldID()),
+			zap.Int64("buildID", v.GetBuildID()),
+			zap.Int64("version", v.GetVersion()),
+			zap.String("basePath", basePath),
+			zap.Int("fileCount", len(files)),
+			zap.Strings("files", files),
+		)
+
 		result[k] = &segcorepb.JsonKeyStats{
 			FieldID:                v.GetFieldID(),
 			Version:                v.GetVersion(),
-			Files:                  v.GetFiles(),
+			Files:                  files,
 			LogSize:                v.GetLogSize(),
 			MemorySize:             v.GetMemorySize(),
 			BuildID:                v.GetBuildID(),
 			JsonKeyStatsDataFormat: v.GetJsonKeyStatsDataFormat(),
+			BasePath:               basePath,
 		}
 	}
 	return result

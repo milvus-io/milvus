@@ -14,9 +14,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <string>
+#include <utility>
 
 #include "common/type_c.h"
 #include "milvus-storage/properties.h"
@@ -42,6 +45,7 @@ class LoonFFIPropertiesSingleton {
         if (properties_ == nullptr) {
             properties_ =
                 MakeInternalPropertiesFromStorageConfig(c_storage_config);
+            ApplyArrowReaderConfig(*properties_);
         }
     }
 
@@ -51,6 +55,21 @@ class LoonFFIPropertiesSingleton {
 
         if (properties_ == nullptr) {
             properties_ = MakeInternalLocalProperies(root_path);
+            ApplyArrowReaderConfig(*properties_);
+        }
+    }
+
+    void
+    SetArrowReaderConfig(int64_t hole_size_limit_bytes,
+                         int64_t range_size_limit_bytes) {
+        std::unique_lock lck(mutex_);
+        arrow_reader_hole_size_limit_bytes_ = hole_size_limit_bytes;
+        arrow_reader_range_size_limit_bytes_ = range_size_limit_bytes;
+        if (properties_ != nullptr) {
+            auto properties =
+                std::make_shared<milvus_storage::api::Properties>(*properties_);
+            ApplyArrowReaderConfig(*properties);
+            properties_ = std::move(properties);
         }
     }
 
@@ -61,8 +80,22 @@ class LoonFFIPropertiesSingleton {
     }
 
  private:
+    void
+    ApplyArrowReaderConfig(milvus_storage::api::Properties& properties) const {
+        milvus_storage::api::SetValue(
+            properties,
+            PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT,
+            std::to_string(arrow_reader_hole_size_limit_bytes_).c_str());
+        milvus_storage::api::SetValue(
+            properties,
+            PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT,
+            std::to_string(arrow_reader_range_size_limit_bytes_).c_str());
+    }
+
     mutable std::shared_mutex mutex_;
     std::shared_ptr<milvus_storage::api::Properties> properties_ = nullptr;
+    int64_t arrow_reader_hole_size_limit_bytes_ = 0;
+    int64_t arrow_reader_range_size_limit_bytes_ = 0;
 };
 
 }  // namespace milvus::storage

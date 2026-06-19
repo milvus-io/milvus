@@ -26,17 +26,17 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type CoordinatorBrokerRootCoordSuite struct {
@@ -491,6 +491,40 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetIndexInfo() {
 		s.NoError(err)
 		s.resetMock()
 	})
+}
+
+func (s *CoordinatorBrokerDataCoordSuite) TestGetIndexInfoPreservesIndexStorePathVersion() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	collectionID := int64(100)
+	segmentID := int64(200)
+
+	s.mixcoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).
+		Return(&indexpb.GetIndexInfoResponse{
+			Status: merr.Success(),
+			SegmentInfo: map[int64]*indexpb.SegmentInfo{
+				segmentID: {
+					SegmentID: segmentID,
+					IndexInfos: []*indexpb.IndexFilePathInfo{
+						{
+							FieldID:               101,
+							IndexID:               102,
+							BuildID:               103,
+							IndexVersion:          1,
+							IndexFilePaths:        []string{"index_v1/100/20/200/103/1/index_data"},
+							IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+						},
+					},
+				},
+			},
+		}, nil)
+
+	infos, err := s.broker.GetIndexInfo(ctx, collectionID, segmentID)
+	s.Require().NoError(err)
+	s.Require().Len(infos[segmentID], 1)
+	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, infos[segmentID][0].GetIndexStorePathVersion())
+	s.resetMock()
 }
 
 func (s *CoordinatorBrokerRootCoordSuite) TestDescribeDatabase() {

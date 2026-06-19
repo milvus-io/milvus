@@ -23,15 +23,14 @@ if [[ ${SKIP_3RDPARTY} -eq 1 ]]; then
 fi
 
 usage() {
-  echo "Usage: $0 [-o BUILD_OPENDAL] [-t BUILD_TYPE] [-h]"
-  echo "  -o BUILD_OPENDAL  Enable/disable OpenDAL build (ON/OFF, default: OFF)"
+  echo "Usage: $0 [-t BUILD_TYPE] [-h]"
   echo "  -t BUILD_TYPE     Set build type (Debug/Release/RelWithDebInfo/MinSizeRel, default: Release)"
   echo "  -h                Show this help message"
   echo ""
   echo "Examples:"
-  echo "  $0                          # Build with default settings (Release, OpenDAL OFF)"
+  echo "  $0                          # Build with default settings (Release)"
   echo "  $0 -t Debug                 # Build in Debug mode"
-  echo "  $0 -o ON -t RelWithDebInfo  # Build with OpenDAL enabled and RelWithDebInfo"
+  echo "  $0 -t RelWithDebInfo        # Build with RelWithDebInfo"
 }
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -41,13 +40,9 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 
-BUILD_OPENDAL="OFF"
 BUILD_TYPE="Release"
-while getopts "o:t:h" arg; do
+while getopts "t:h" arg; do
   case $arg in
-  o)
-    BUILD_OPENDAL=$OPTARG
-    ;;
   t)
     BUILD_TYPE=$OPTARG
     ;;
@@ -64,11 +59,11 @@ done
 
 # Validate build type
 case "${BUILD_TYPE}" in
-  Debug|Release)
+  Debug|Release|RelWithDebInfo|MinSizeRel)
     echo "Build type: ${BUILD_TYPE}"
     ;;
   *)
-    echo "Invalid build type: ${BUILD_TYPE}. Valid options are: Debug, Release"
+    echo "Invalid build type: ${BUILD_TYPE}. Valid options are: Debug, Release, RelWithDebInfo, MinSizeRel"
     exit 1
     ;;
 esac
@@ -82,18 +77,131 @@ if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
 fi
 
 source ${ROOT_DIR}/scripts/setenv.sh
+
+# Allow overriding the Conan binary via CONAN_CMD, e.g. for developers who
+# keep Conan 1.x as their default `conan` (for release-2.5/2.6) but need 2.x
+# here:
+#   CONAN_CMD=conan-2 make
+CONAN="${CONAN_CMD:-conan}"
+
+# Add conan to PATH if installed in user's local bin directory
+if [[ -f "$HOME/.local/bin/conan" ]]; then
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# Ensure conan version matches the required version (2.25.1)
+# CI Docker images may have an older version pre-installed
+REQUIRED_CONAN_VERSION="2.25.1"
+CURRENT_CONAN_VERSION=$("$CONAN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
+if [[ "${CURRENT_CONAN_VERSION}" != "${REQUIRED_CONAN_VERSION}" ]]; then
+    # When the user explicitly points at a Conan binary, don't silently
+    # pip-install over some unrelated interpreter -- fail loudly instead.
+    if [[ -n "${CONAN_CMD:-}" ]]; then
+        echo "ERROR: CONAN_CMD=${CONAN_CMD} reports version ${CURRENT_CONAN_VERSION}, but this branch needs ${REQUIRED_CONAN_VERSION}." >&2
+        echo "If your default 'conan' is already ${REQUIRED_CONAN_VERSION}, unset CONAN_CMD and retry." >&2
+        echo "Otherwise install a matching Conan, e.g.: pipx install conan==${REQUIRED_CONAN_VERSION}" >&2
+        exit 1
+    fi
+    echo "Conan version mismatch: ${CURRENT_CONAN_VERSION} != ${REQUIRED_CONAN_VERSION}, upgrading..."
+    pip3 install conan==${REQUIRED_CONAN_VERSION} 2>/dev/null || pip install conan==${REQUIRED_CONAN_VERSION}
+fi
+
+# Ensure a default profile exists (Conan 2.x requires it; CI images may not have one)
+if [[ ! -f "$("$CONAN" config home)/profiles/default" ]]; then
+    "$CONAN" profile detect
+fi
+
 pushd ${BUILD_OUTPUT_DIR}
 
-export CONAN_REVISIONS_ENABLED=1
+# Unset LD_PRELOAD and LD_LIBRARY_PATH to prevent jemalloc and other shared
+# libraries (set by setenv.sh) from being injected into conan's Python process.
+# - LD_PRELOAD with jemalloc causes immediate segfaults in Python.
+# - LD_LIBRARY_PATH with cmake_build/lib/ (populated by conan imports on
+#   previous runs) causes the Python ssl module to load a mismatched
+#   libssl.so during the conan update check, also triggering segfaults.
+# The pre_build hook (below) handles setting LD_LIBRARY_PATH per-build
+# for tools like grpc_cpp_plugin that need shared libs at build time.
+SAVED_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+SAVED_LD_PRELOAD="${LD_PRELOAD:-}"
+SAVED_DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}"
+SAVED_DYLD_INSERT_LIBRARIES="${DYLD_INSERT_LIBRARIES:-}"
+unset LD_PRELOAD
+unset LD_LIBRARY_PATH
+unset DYLD_LIBRARY_PATH
+unset DYLD_INSERT_LIBRARIES
+
+# Enable parallel downloads for faster dependency resolution
+export CONAN_CPU_COUNT=${CONAN_CPU_COUNT:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations -include cstdint"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
+# LLVM from Homebrew doesn't set TARGET_OS_OSX=1 (unlike Apple's clang), which causes
+# macOS SDK headers to exclude macOS-specific APIs (SecImportExport, SCPreferences, etc.).
+# This fixes aws-c-cal, c-ares, and other packages that depend on macOS Security/SystemConfig APIs.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    arm_crypto_flags=""
+    if [[ "$(uname -m)" == "arm64" ]]; then
+        # Homebrew LLVM needs ARM crypto enabled for libsodium armcrypto sources on macOS arm64.
+        arm_crypto_flags=" -march=armv8-a+crypto"
+    fi
+    export CFLAGS="${CFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
+    export CXXFLAGS="${CXXFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
+fi
+# Allow CMake 4.x to build packages with old cmake_minimum_required versions (< 3.5)
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 # Determine the Conan remote URL, using the environment variable if set, otherwise defaulting
-CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local}"
+# Always ensure the default-conan-local2 remote is the highest priority (index 0) to avoid conflicts with other remotes that may have the same packages
+CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local2}"
 
-if [[ ! `conan remote list` == *default-conan-local* ]]; then
-    conan remote add default-conan-local $CONAN_ARTIFACTORY_URL
+if "$CONAN" remote list | grep -q default-conan-local2; then
+    "$CONAN" remote remove default-conan-local2
 fi
+"$CONAN" remote add default-conan-local2 $CONAN_ARTIFACTORY_URL --index 0
+
+# Install a conan pre_build hook that sets LD_LIBRARY_PATH (Linux) or
+# DYLD_LIBRARY_PATH (macOS) before each package build. This ensures that
+# tools like grpc_cpp_plugin can find shared libraries (e.g. libprotoc.so)
+# when invoked during downstream package builds (opentelemetry-cpp, googleapis).
+# Use "conan config home" to get the correct conan home directory, as ~ may
+# differ from the conan home in CI containers.
+CONAN_HOME_DIR=$("$CONAN" config home 2>/dev/null || echo "${CONAN_HOME:-$HOME/.conan2}")
+mkdir -p "$CONAN_HOME_DIR/extensions/hooks"
+cat > "$CONAN_HOME_DIR/extensions/hooks/hook_fix_shared_lib_env.py" << 'HOOK_EOF'
+import os, platform
+
+_saved_env = {}
+
+def pre_build(conanfile, **kwargs):
+    """Set library path before build so tools like grpc_cpp_plugin can find
+    shared libs (e.g. libprotoc.so). Saved state is restored in post_build
+    to avoid polluting the conan process environment."""
+    dep_lib_dirs = []
+    try:
+        for dep in conanfile.dependencies.values():
+            if dep.package_folder:
+                lib_dir = os.path.join(dep.package_folder, "lib")
+                if os.path.isdir(lib_dir):
+                    dep_lib_dirs.append(lib_dir)
+    except Exception:
+        return
+    if not dep_lib_dirs:
+        return
+    env_var = "DYLD_LIBRARY_PATH" if platform.system() == "Darwin" else "LD_LIBRARY_PATH"
+    _saved_env[env_var] = os.environ.get(env_var)
+    existing = os.environ.get(env_var, "")
+    new_val = ":".join(dep_lib_dirs) + (":" + existing if existing else "")
+    os.environ[env_var] = new_val
+    conanfile.output.info("Set %s for %d dependency lib dirs" % (env_var, len(dep_lib_dirs)))
+
+def post_build(conanfile, **kwargs):
+    """Restore library path after build to prevent conan process corruption."""
+    for env_var, old_val in _saved_env.items():
+        if old_val is None:
+            os.environ.pop(env_var, None)
+        else:
+            os.environ[env_var] = old_val
+    _saved_env.clear()
+HOOK_EOF
 
 unameOut="$(uname -s)"
 case "${unameOut}" in
@@ -103,7 +211,59 @@ case "${unameOut}" in
     export CMAKE_CXX_COMPILER_LAUNCHER=ccache
     echo "Using CXX: $CXX"
     echo "Using CC: $CC"
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20 -u"
+
+    # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
+    # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include
+    # dependency lib dirs (e.g. abseil). This causes dyld failures when
+    # downstream packages (opentelemetry-cpp, googleapis) invoke them.
+    #
+    # Fix: install a Conan post_package hook that adds dependency rpaths to
+    # each package's binaries right after it is built (before the manifest is
+    # sealed), so every tool binary works the first time it is invoked.
+    mkdir -p "$CONAN_HOME_DIR/extensions/hooks"
+    cat > "$CONAN_HOME_DIR/extensions/hooks/hook_fix_macos_rpaths.py" << 'HOOK_EOF'
+import os, platform, subprocess, stat
+
+def post_package(conanfile, **kwargs):
+    if platform.system() != "Darwin":
+        return
+    pkg = conanfile.package_folder
+    if not pkg:
+        return
+    bin_dir = os.path.join(pkg, "bin")
+    if not os.path.isdir(bin_dir):
+        return
+    dep_lib_dirs = []
+    try:
+        for dep in conanfile.dependencies.values():
+            if dep.package_folder:
+                lib_dir = os.path.join(dep.package_folder, "lib")
+                if os.path.isdir(lib_dir):
+                    dep_lib_dirs.append(lib_dir)
+    except Exception:
+        return
+    if not dep_lib_dirs:
+        return
+    fixed = []
+    for name in os.listdir(bin_dir):
+        fp = os.path.join(bin_dir, name)
+        if not os.path.isfile(fp) or not (os.stat(fp).st_mode & stat.S_IXUSR):
+            continue
+        r = subprocess.run(["file", fp], capture_output=True, text=True)
+        if "Mach-O" not in r.stdout:
+            continue
+        for lib_path in dep_lib_dirs:
+            r = subprocess.run(["install_name_tool", "-add_rpath", lib_path, fp],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                conanfile.output.warning("install_name_tool failed for %s: %s" % (name, r.stderr.strip()))
+        fixed.append(name)
+    if fixed:
+        conanfile.output.info("Fixed macOS rpaths for: %s" % ", ".join(fixed))
+HOOK_EOF
+
+    "$CONAN" install ${CPP_SRC_DIR} ${CONAN_ARGS} || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     if [ -f /etc/os-release ]; then
@@ -115,15 +275,29 @@ case "${unameOut}" in
     export CPU_TARGET=avx
     GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 || { echo 'conan install failed'; exit 1; }
     else
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)
     echo "Cannot build on windows"
     ;;
 esac
+
+# Restore LD_LIBRARY_PATH/LD_PRELOAD/DYLD vars so downstream build steps can find shared libs
+if [[ -n "${SAVED_LD_LIBRARY_PATH}" ]]; then
+    export LD_LIBRARY_PATH="${SAVED_LD_LIBRARY_PATH}"
+fi
+if [[ -n "${SAVED_LD_PRELOAD}" ]]; then
+    export LD_PRELOAD="${SAVED_LD_PRELOAD}"
+fi
+if [[ -n "${SAVED_DYLD_LIBRARY_PATH}" ]]; then
+    export DYLD_LIBRARY_PATH="${SAVED_DYLD_LIBRARY_PATH}"
+fi
+if [[ -n "${SAVED_DYLD_INSERT_LIBRARIES}" ]]; then
+    export DYLD_INSERT_LIBRARIES="${SAVED_DYLD_INSERT_LIBRARIES}"
+fi
 
 popd
 
@@ -136,15 +310,15 @@ if command -v cargo >/dev/null 2>&1; then
     unameOut="$(uname -s)"
     case "${unameOut}" in
         Darwin*)
-          echo "running on mac os, reinstall rust 1.89"
+          echo "running on mac os, reinstall rust 1.92"
           # github will install rust 1.74 by default.
           # https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md
-          rustup install 1.89
-          rustup default 1.89;;
+          rustup install 1.92
+          rustup default 1.92;;
         *)
           echo "not running on mac os, no need to reinstall rust";;
     esac
 else
-    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.89 -y" || { echo 'rustup install failed'; exit 1;}
+    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.92 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi

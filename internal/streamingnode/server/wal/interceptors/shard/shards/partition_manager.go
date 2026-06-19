@@ -11,9 +11,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // newPartitionSegmentManager creates a new partition segment assign manager.
@@ -89,6 +89,7 @@ func (m *partitionManager) GetSegmentManager(segmentID int64) *segmentAllocManag
 }
 
 // AssignSegment assigns a segment for a assign segment request.
+// req.SchemaVersion must be set by the caller before invoking.
 func (m *partitionManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	// !!! We have promised that the fencedAssignTimeTick is always less than new incoming insert request by Barrier TimeTick of ManualFlush.
 	// So it's just a promise check here.
@@ -211,6 +212,6 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 
 	// There is no segment can be allocated for the insert request.
 	// Ask a new pending segment to insert.
-	m.asyncAllocSegment()
+	m.asyncAllocSegment(req.SchemaVersion, req.UseGrowingSourceFlush)
 	return nil, ErrWaitForNewSegment
 }

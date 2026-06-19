@@ -29,31 +29,47 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var errIndexOperationIgnored = errors.New("index operation ignored")
+
+func validateIndexStorePathVersionForFinish(buildID int64, requested, actual indexpb.IndexStorePathVersion) error {
+	if actual > requested {
+		return merr.WrapErrParameterInvalidMsg(
+			"index store path version returned by worker is newer than requested, buildID=%d, requested=%s, actual=%s",
+			buildID,
+			requested.String(),
+			actual.String(),
+		)
+	}
+	return nil
+}
 
 type indexMeta struct {
 	ctx     context.Context
@@ -97,17 +113,31 @@ type segmentBuildInfo struct {
 	taskStats *expirable.LRU[UniqueID, *metricsinfo.IndexTaskStats]
 }
 
+const taskStatsLRUCapacity = 1024
+
 func newSegmentIndexBuildInfo() *segmentBuildInfo {
 	return &segmentBuildInfo{
 		// build ID -> segment index
 		buildID2SegmentIndex: typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex](),
 		// build ID -> task stats
-		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](1024, nil, time.Minute*30),
+		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](taskStatsLRUCapacity, nil, time.Minute*30),
 	}
 }
 
 func (m *segmentBuildInfo) Add(segIdx *model.SegmentIndex) {
 	m.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
+	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
+}
+
+// AddForRecovery inserts segment index during recovery. It skips the LRU write
+// only when the LRU is already full and the index task is finished, since
+// finished tasks are unlikely to be queried and the LRU write is expensive
+// during bulk recovery.
+func (m *segmentBuildInfo) AddForRecovery(segIdx *model.SegmentIndex) {
+	m.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
+	if m.taskStats.Len() >= taskStatsLRUCapacity && segIdx.IndexState == commonpb.IndexState_Finished {
+		return
+	}
 	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
 }
 
@@ -129,7 +159,7 @@ func (m *segmentBuildInfo) GetTaskStats() []*metricsinfo.IndexTaskStats {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*indexMeta, error) {
+func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog, collectionIDs []int64) (*indexMeta, error) {
 	mt := &indexMeta{
 		ctx:              ctx,
 		catalog:          catalog,
@@ -138,7 +168,7 @@ func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*ind
 		segmentBuildInfo: newSegmentIndexBuildInfo(),
 		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
-	err := mt.reloadFromKV()
+	err := mt.reloadFromKV(collectionIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -146,31 +176,85 @@ func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*ind
 }
 
 // reloadFromKV loads meta from KV storage
-func (m *indexMeta) reloadFromKV() error {
+func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 	record := timerecord.NewTimeRecorder("indexMeta-reloadFromKV")
-	// load field indexes
-	fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
-	if err != nil {
-		log.Error("indexMeta reloadFromKV load field indexes fail", zap.Error(err))
-		return err
-	}
-	for _, fieldIndex := range fieldIndexes {
-		m.updateCollectionIndex(fieldIndex)
-	}
-	segmentIndexes, err := m.catalog.ListSegmentIndexes(m.ctx)
-	if err != nil {
-		log.Error("indexMeta reloadFromKV load segment indexes fail", zap.Error(err))
-		return err
-	}
-	for _, segIdx := range segmentIndexes {
-		if segIdx.IndexMemSize == 0 {
-			segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+
+	// Parallel load and process: ListIndexes and ListSegmentIndexes have no dependency,
+	// and they update completely separate data structures so memory updates can also run in parallel.
+	// collectionSegIdxes is hoisted to function scope so the gauge goroutine
+	// (launched after g.Wait) can access it when both indexes and segment indexes are loaded.
+	collectionSegIdxes := make([][]*model.SegmentIndex, len(collectionIDs))
+	g, _ := errgroup.WithContext(m.ctx)
+	g.Go(func() error {
+		fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
+		if err != nil {
+			log.Error("indexMeta reloadFromKV load field indexes fail", zap.Error(err))
+			return err
 		}
-		m.updateSegmentIndex(segIdx)
-		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
-		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-			fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
+		for _, fieldIndex := range fieldIndexes {
+			m.updateCollectionIndex(fieldIndex)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+		defer pool.Release()
+		futures := make([]*conc.Future[any], 0, len(collectionIDs))
+		for i, collID := range collectionIDs {
+			i, collID := i, collID
+			futures = append(futures, pool.Submit(func() (any, error) {
+				segIdxes, err := m.catalog.ListSegmentIndexes(m.ctx, collID)
+				if err != nil {
+					return nil, err
+				}
+				collectionSegIdxes[i] = segIdxes
+				return nil, nil
+			}))
+		}
+		if err := conc.AwaitAll(futures...); err != nil {
+			return err
+		}
+		for _, segIdxes := range collectionSegIdxes {
+			for _, segIdx := range segIdxes {
+				if segIdx.IndexMemSize == 0 {
+					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+				}
+				indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
+				if ok {
+					indexes.Insert(segIdx.IndexID, segIdx)
+				} else {
+					indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+					indexes.Insert(segIdx.IndexID, segIdx)
+					m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
+				}
+				m.segmentBuildInfo.AddForRecovery(segIdx)
+			}
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
 	}
+
+	// Update Prometheus metrics asynchronously. Launched after g.Wait() so that
+	// both m.indexes (from goroutine 1) and collectionSegIdxes (from goroutine 2)
+	// are fully populated. Only count active indexes (index definition alive).
+	go func() {
+		storedSizeByCollection := make(map[int64]float64)
+		for _, segIdxes := range collectionSegIdxes {
+			for _, segIdx := range segIdxes {
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
+				if m.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+					storedSizeByCollection[segIdx.CollectionID] += float64(segIdx.IndexSerializedSize)
+				}
+			}
+		}
+		for collID, size := range storedSizeByCollection {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+				fmt.Sprintf("%d", collID)).Add(size)
+		}
+	}()
+
 	log.Info("indexMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -186,7 +270,6 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
-		m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 	} else {
 		indexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		indexes.Insert(segIdx.IndexID, segIdx)
@@ -252,7 +335,7 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }
 
-func checkIdenticalJson(index *model.Index, req *indexpb.CreateIndexRequest) bool {
+func checkIdenticalJSON(index *model.Index, req *indexpb.CreateIndexRequest) bool {
 	// Skip error handling since json path existence is guaranteed in CreateIndex
 	jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
 	jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
@@ -266,8 +349,8 @@ func checkIdenticalJson(index *model.Index, req *indexpb.CreateIndexRequest) boo
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
-	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey})
-	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey})
+	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey, common.WarmupKey})
+	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey, common.WarmupKey})
 	if len(metaTypeParams) != len(reqTypeParams) {
 		return false
 	}
@@ -354,10 +437,10 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 }
 
 // CanCreateIndex currently is used in Unittest
-func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
+func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool) (UniqueID, error) {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
-	indexID, err := m.canCreateIndex(req, isJson)
+	indexID, err := m.canCreateIndex(req, isJSON)
 	if err != nil {
 		return 0, err
 	}
@@ -365,7 +448,7 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 	return indexID, nil
 }
 
-func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
+func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool) (UniqueID, error) {
 	indexes, ok := m.indexes[req.CollectionID]
 	if !ok {
 		return 0, nil
@@ -376,7 +459,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 		}
 		if req.IndexName == index.IndexName {
 			if req.FieldID == index.FieldID && checkParams(index, req) &&
-				/*only check json params when it is json index*/ (!isJson || checkIdenticalJson(index, req)) {
+				/*only check json params when it is json index*/ (!isJSON || checkIdenticalJSON(index, req)) {
 				return index.IndexID, errIndexOperationIgnored
 			}
 			errMsg := "at most one distinct index is allowed per field"
@@ -385,10 +468,10 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 					index.IndexName, index.FieldID, index.IndexParams, index.UserIndexParams, index.TypeParams)),
 				zap.String("current index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, user_params: %v, type_params: %v}",
 					req.GetIndexName(), req.GetFieldID(), req.GetIndexParams(), req.GetUserIndexParams(), req.GetTypeParams())))
-			return 0, fmt.Errorf("CreateIndex failed: %s", errMsg)
+			return 0, merr.WrapErrParameterInvalidMsg("%s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
-			if isJson {
+			if isJSON {
 				// Skip error handling since json path existence is guaranteed in CreateIndex
 				jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
 				jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
@@ -401,7 +484,11 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 			// creating multiple indexes on same field is not supported
 			errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
 			log.Warn(errMsg)
-			return 0, errors.New(errMsg)
+			// Client-caused conflict, same family as the "one distinct index per
+			// field" case above: return an input-class error rather than
+			// ServiceInternal (code 5, "never return out of Milvus") so the
+			// caller is not blamed with a system error / counted as fail_system.
+			return 0, merr.WrapErrParameterInvalidMsg("%s", errMsg)
 		}
 	}
 	return 0, nil
@@ -467,6 +554,17 @@ func (m *indexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) err
 	return nil
 }
 
+// Precondition: caller holds fieldIndexLock — serializes the indexes map read with MarkIndexAsDeleted.
+func (m *indexMeta) addStoredIndexSizeMetric(collID, indexID UniqueID, delta float64) {
+	if delta == 0 {
+		return
+	}
+	if idx, ok := m.indexes[collID][indexID]; ok && !idx.IsDeleted {
+		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+			fmt.Sprintf("%d", collID)).Add(delta)
+	}
+}
+
 // AddSegmentIndex adds the index meta corresponding the indexBuildID to meta table.
 func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.SegmentIndex) error {
 	buildID := segIndex.BuildID
@@ -478,14 +576,29 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID), zap.String("indexType", segIndex.IndexType))
 
-	segIndex.IndexState = commonpb.IndexState_Unissued
+	// Only override to Unissued if the caller hasn't set a specific state.
+	// Copy segment sets Finished because index files are already copied.
+	if segIndex.IndexState == commonpb.IndexState_IndexStateNone {
+		segIndex.IndexState = commonpb.IndexState_Unissued
+	}
 	if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
 		log.Ctx(ctx).Warn("meta update: adding segment index failed",
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 			zap.Int64("buildID", segIndex.BuildID), zap.String("indexType", segIndex.IndexType), zap.Error(err))
 		return err
 	}
+
+	// Insert + gauge Add must be serialized vs MarkIndexAsDeleted.
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+
 	m.updateSegmentIndex(segIndex)
+
+	if segIndex.IndexState == commonpb.IndexState_Finished {
+		m.addStoredIndexSizeMetric(segIndex.CollectionID, segIndex.IndexID,
+			float64(segIndex.IndexSerializedSize))
+	}
+
 	log.Ctx(ctx).Info("meta update: adding segment index success", zap.Int64("collectionID", segIndex.CollectionID),
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID), zap.String("indexType", segIndex.IndexType))
@@ -572,7 +685,7 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	matchedFields := typeutil.NewUniqueSet()
 
 	targetIndices := lo.Filter(lo.Values(fieldIndexes), func(index *model.Index, _ int) bool {
-		return fieldIDSet.Contain(index.FieldID)
+		return fieldIDSet.Contain(index.FieldID) && !index.IsDeleted
 	})
 	for _, index := range targetIndices {
 		matchedFields.Insert(index.FieldID)
@@ -586,10 +699,6 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	checkSegmentState := func(indexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
 		indexedFields := 0
 		for _, index := range targetIndices {
-			if !fieldIDSet.Contain(index.FieldID) || index.IsDeleted {
-				continue
-			}
-
 			if segIdx, ok := indexes.Get(index.IndexID); ok && segIdx.IndexState == commonpb.IndexState_Finished {
 				indexedFields += 1
 			}
@@ -643,7 +752,9 @@ func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) 
 	return indexInfos
 }
 
-// MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
+// MarkIndexAsDeleted marks indexes as deleted. File cleanup is split by path layout:
+// recycleUnusedIndexFilesV0 handles legacy v0 index_files objects, and
+// recycleUnusedIndexFilesV1 handles v1 index_v1 objects.
 func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, indexIDs []UniqueID) error {
 	log.Ctx(ctx).Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
 		zap.Int64s("indexIDs", indexIDs))
@@ -684,8 +795,27 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		log.Ctx(ctx).Error("failed to alter index meta in meta store", zap.Int("indexes num", len(indexes)), zap.Error(err))
 		return err
 	}
+
+	deletedSet := make(map[UniqueID]struct{}, len(indexes))
 	for _, index := range indexes {
 		m.indexes[index.CollectionID][index.IndexID] = index
+		deletedSet[index.IndexID] = struct{}{}
+	}
+
+	// Subtract immediately — gauge tracks alive indexes only; deferred GC (RemoveSegmentIndex)
+	// must not re-subtract. fieldIndexLock.Lock serializes with concurrent RLock gauge adders.
+	var totalSize float64
+	m.segmentIndexes.Range(func(_ UniqueID, idxMap *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
+		for indexID := range deletedSet {
+			if segIdx, ok := idxMap.Get(indexID); ok && segIdx.CollectionID == collID {
+				totalSize += float64(segIdx.IndexSerializedSize)
+			}
+		}
+		return true
+	})
+	if totalSize > 0 {
+		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+			fmt.Sprintf("%d", collID)).Sub(totalSize)
 	}
 
 	log.Ctx(ctx).Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collectionID", collID), zap.Int64s("indexIDs", indexIDs))
@@ -738,6 +868,33 @@ func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
 	return m.getSegmentIndexes(collectionID, segID)
+}
+
+// GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
+// for segID, including ones whose parent field index has been marked
+// IsDeleted — that is the case dropped-segment GC needs to clean up.
+//
+// Intentionally does NOT acquire fieldIndexLock: this method only reads
+// m.segmentIndexes (a ConcurrentMap, self-synchronized) and never touches
+// m.indexes (which fieldIndexLock protects). Do not add an IsDeleted
+// filter here without first taking fieldIndexLock — that change would
+// silently start requiring the lock, unlike GetSegmentIndexes above which
+// already holds it.
+func (m *indexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
+	if m.segmentIndexes == nil {
+		return nil
+	}
+	segIndexInfos, ok := m.segmentIndexes.Get(segID)
+	if !ok || segIndexInfos.Len() == 0 {
+		return nil
+	}
+
+	segIndexes := segIndexInfos.Values()
+	ret := make([]*model.SegmentIndex, 0, len(segIndexes))
+	for _, segIdx := range segIndexes {
+		ret = append(ret, model.CloneSegmentIndex(segIdx))
+	}
+	return ret
 }
 
 // Note: thread-unsafe, don't call it outside indexMeta
@@ -859,7 +1016,7 @@ func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 	log.Ctx(m.ctx).Info("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
-		return fmt.Errorf("there is no index with buildID: %d", buildID)
+		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
@@ -878,7 +1035,7 @@ func (m *indexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		log.Ctx(m.ctx).Warn("there is no index with buildID", zap.Int64("buildID", buildID))
-		return fmt.Errorf("there is no index with buildID: %d", buildID)
+		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
@@ -906,6 +1063,25 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		log.Ctx(m.ctx).Warn("there is no index with buildID", zap.Int64("buildID", taskInfo.GetBuildID()))
 		return nil
 	}
+
+	actualPathVersion := taskInfo.GetIndexStorePathVersion()
+	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
+		log.Ctx(m.ctx).Warn("invalid index store path version returned by worker",
+			zap.Int64("buildID", taskInfo.GetBuildID()),
+			zap.String("requested", segIdx.IndexStorePathVersion.String()),
+			zap.String("actual", actualPathVersion.String()),
+			zap.Error(err))
+		return err
+	}
+	if actualPathVersion < segIdx.IndexStorePathVersion {
+		log.Ctx(m.ctx).Info("worker downgraded index store path version",
+			zap.Int64("buildID", taskInfo.GetBuildID()),
+			zap.String("requested", segIdx.IndexStorePathVersion.String()),
+			zap.String("actual", actualPathVersion.String()))
+	}
+
+	oldSize := segIdx.IndexSerializedSize
+
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IndexState = taskInfo.GetState()
 		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
@@ -915,6 +1091,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
 		segIdx.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
+		segIdx.IndexStorePathVersion = actualPathVersion
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
@@ -927,8 +1104,12 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		zap.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
 	)
 
-	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-		fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
+	// gauge Add must be serialized vs MarkIndexAsDeleted.
+	newSize := taskInfo.GetSerializedSize()
+	m.fieldIndexLock.RLock()
+	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
+		float64(newSize)-float64(oldSize))
+	m.fieldIndexLock.RUnlock()
 
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 	return nil
@@ -964,7 +1145,7 @@ func (m *indexMeta) BuildIndex(buildID UniqueID) error {
 
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
-		return fmt.Errorf("there is no index with buildID: %d", buildID)
+		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
@@ -1008,6 +1189,13 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 		return err
 	}
 
+	// Reclaim size only when the index is still alive (segment-drop case);
+	// MarkIndexAsDeleted already subtracted otherwise.
+	m.fieldIndexLock.RLock()
+	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
+		-float64(segIdx.IndexSerializedSize))
+	m.fieldIndexLock.RUnlock()
+
 	segIndexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		segIndexes.Remove(segIdx.IndexID)
@@ -1019,9 +1207,6 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 	}
 
 	m.segmentBuildInfo.Remove(buildID)
-
-	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-		fmt.Sprintf("%d", segIdx.CollectionID)).Sub(float64(segIdx.IndexSerializedSize))
 
 	return nil
 }
@@ -1074,6 +1259,25 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 	return true, nil
 }
 
+// GetDeletedIndexesWithV1Path returns deleted SegmentIndex entries stored under
+// the v1 index_v1 layout. v0 cleanup still walks the buildID-rooted
+// index_files prefix and does not use this metadata-driven query.
+func (m *indexMeta) GetDeletedIndexesWithV1Path() []*model.SegmentIndex {
+	if m.segmentBuildInfo == nil {
+		return nil
+	}
+	var result []*model.SegmentIndex
+	for _, segIdx := range m.segmentBuildInfo.List() {
+		if !segIdx.IsDeleted {
+			continue
+		}
+		if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
+			result = append(result, model.CloneSegmentIndex(segIdx))
+		}
+	}
+	return result
+}
+
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
 	ret := make(map[int64]map[int64]*indexpb.SegmentIndexState, 0)
 	m.fieldIndexLock.RLock()
@@ -1098,7 +1302,7 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 		for _, segIdx := range segIndexInfos.Values() {
 			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
 				indexVersion := segIdx.CurrentIndexVersion
-				if indexparamcheck.IsScalarIndexType(indexparamcheck.IndexType(segIdx.IndexType)) {
+				if indexparamcheck.IsScalarIndexType(segIdx.IndexType) {
 					indexVersion = segIdx.CurrentScalarIndexVersion
 				}
 				ret[segID][segIdx.IndexID] = &indexpb.SegmentIndexState{

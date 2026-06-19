@@ -3,7 +3,7 @@
 package replicatemanager
 
 import (
-	typeutil "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	typeutil "github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	mock "github.com/stretchr/testify/mock"
 )
 

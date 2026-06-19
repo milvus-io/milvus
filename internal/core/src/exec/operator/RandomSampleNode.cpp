@@ -73,7 +73,7 @@ PhyRandomSampleNode::HashsetSample(const uint32_t N,
                                    std::mt19937& gen) {
     std::uniform_int_distribution<> dis(0, N - 1);
     std::unordered_set<uint32_t> sampled;
-    sampled.reserve(N);
+    sampled.reserve(M);
     while (sampled.size() < M) {
         sampled.insert(dis(gen));
     }
@@ -162,7 +162,8 @@ PhyRandomSampleNode::GetOutput() {
             }
         }
 
-        result = std::make_shared<RowVector>(std::vector<VectorPtr>{input_col});
+        result = std::make_shared<RowVector>(
+            std::vector<VectorPtr>{std::move(input_col)});
     } else {
         auto sample_output = std::make_shared<ColumnVector>(
             TargetBitmap(active_count_), TargetBitmap(active_count_));
@@ -187,8 +188,8 @@ PhyRandomSampleNode::GetOutput() {
             data.flip();
         }
 
-        result =
-            std::make_shared<RowVector>(std::vector<VectorPtr>{sample_output});
+        result = std::make_shared<RowVector>(
+            std::vector<VectorPtr>{std::move(sample_output)});
     }
 
     std::chrono::high_resolution_clock::time_point end =

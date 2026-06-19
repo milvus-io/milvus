@@ -65,6 +65,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -81,7 +82,8 @@ struct ChunkManagerWrapper {
             cm_->Remove(file);
         }
 
-        boost::filesystem::remove_all(cm_->GetRootPath());
+        boost::system::error_code ec;
+        boost::filesystem::remove_all(cm_->GetRootPath(), ec);
     }
 
     void
@@ -110,7 +112,7 @@ class JsonFlatIndexTest : public ::testing::Test {
         index_meta_ =
             gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
-        std::string root_path = "/tmp/test-json-flat-index/";
+        std::string root_path = TestLocalPath;
         auto storage_config = gen_local_storage_config(root_path);
         cm_ = storage::CreateChunkManager(storage_config);
         fs_ = storage::InitArrowFileSystem(storage_config);
@@ -138,7 +140,8 @@ class JsonFlatIndexTest : public ::testing::Test {
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
         auto get_binlog_path = [=](int64_t log_id) {
-            return fmt::format("{}/{}/{}/{}/{}",
+            return fmt::format("{}{}/{}/{}/{}/{}",
+                               TestLocalPath,
                                collection_id,
                                partition_id,
                                segment_id,
@@ -163,7 +166,7 @@ class JsonFlatIndexTest : public ::testing::Test {
             auto index = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
             index->Build(config);
 
-            auto create_index_result = index->Upload();
+            auto create_index_result = index->UploadUnified({});
             auto memSize = create_index_result->GetMemSize();
             auto serializedSize = create_index_result->GetSerializedSize();
             ASSERT_GT(memSize, 0);
@@ -183,7 +186,7 @@ class JsonFlatIndexTest : public ::testing::Test {
 
         ctx_->set_for_loading_index(true);
         json_index_ = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
-        json_index_->Load(milvus::tracer::TraceContext{}, load_config);
+        json_index_->LoadUnified(load_config);
 
         auto cnt = json_index_->Count();
         ASSERT_EQ(cnt, json_data_.size());
@@ -192,7 +195,7 @@ class JsonFlatIndexTest : public ::testing::Test {
     void
     TearDown() override {
         cm_w_.reset();
-        boost::filesystem::remove_all("/tmp/test-json-flat-index/");
+        // Cleanup handled by random test path in init_gtest.cpp
     }
 
     storage::FieldDataMeta field_meta_;
@@ -292,25 +295,25 @@ TEST_F(JsonFlatIndexTest, TestPrefixMatchQuery) {
     ASSERT_FALSE(result[2]);  // Charlie doesn't start with A
 }
 
-TEST_F(JsonFlatIndexTest, TestRegexQuery) {
+TEST_F(JsonFlatIndexTest, TestLikePatternMatch) {
     auto json_flat_index =
         dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
     ASSERT_NE(json_flat_index, nullptr);
 
     std::string json_path = "/profile/name/first";
     auto executor = json_flat_index->create_executor<std::string>(json_path);
-    auto result = executor->RegexQuery("[AB].*ice");
+    auto result = executor->PatternMatch("A%ice", proto::plan::Match);
     ASSERT_EQ(result.size(), json_data_.size());
-    ASSERT_TRUE(result[0]);   // Alice matches [AB].*ice
-    ASSERT_FALSE(result[1]);  // Bob doesn't match [AB].*ice
-    ASSERT_FALSE(result[2]);  // Charlie doesn't match [AB].*ice
+    ASSERT_TRUE(result[0]);   // Alice matches A%ice
+    ASSERT_FALSE(result[1]);  // Bob doesn't match A%ice
+    ASSERT_FALSE(result[2]);  // Charlie doesn't match A%ice
 
-    // Test another regex pattern
-    auto result2 = executor->RegexQuery("B.b");
+    // Test another LIKE pattern
+    auto result2 = executor->PatternMatch("B_b", proto::plan::Match);
     ASSERT_EQ(result2.size(), json_data_.size());
-    ASSERT_FALSE(result2[0]);  // Alice doesn't match B.b
-    ASSERT_TRUE(result2[1]);   // Bob matches B.b
-    ASSERT_FALSE(result2[2]);  // Charlie doesn't match B.b
+    ASSERT_FALSE(result2[0]);  // Alice doesn't match B_b
+    ASSERT_TRUE(result2[1]);   // Bob matches B_b
+    ASSERT_FALSE(result2[2]);  // Charlie doesn't match B_b
 }
 
 TEST_F(JsonFlatIndexTest, TestPatternMatchQuery) {
@@ -569,7 +572,7 @@ class JsonFlatIndexExprTest : public ::testing::Test {
         auto json_index_path = "";
 
         auto schema = std::make_shared<Schema>();
-        auto vec_fid = schema->AddDebugField(
+        schema->AddDebugField(
             "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
         auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
         json_fid_ = schema->AddDebugField("json", DataType::JSON, true);
@@ -585,13 +588,12 @@ class JsonFlatIndexExprTest : public ::testing::Test {
             json_fid_.get());
         file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
         file_manager_ctx.fieldDataMeta.field_id = json_fid_.get();
+        index::CreateIndexInfo json_index_info;
+        json_index_info.index_type = index::INVERTED_INDEX_TYPE;
+        json_index_info.json_cast_type = JsonCastType::FromString("JSON");
+        json_index_info.json_path = json_index_path;
         auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
-            index::CreateIndexInfo{
-                .index_type = index::INVERTED_INDEX_TYPE,
-                .json_cast_type = JsonCastType::FromString("JSON"),
-                .json_path = json_index_path,
-            },
-            file_manager_ctx);
+            json_index_info, file_manager_ctx);
 
         json_index_ = std::unique_ptr<index::JsonFlatIndex>(
             static_cast<index::JsonFlatIndex*>(index.release()));

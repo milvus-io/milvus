@@ -2,26 +2,28 @@ package rewriter
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func columnKey(c *planpb.ColumnInfo) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%d|%d|%d|%t|%t|%t|",
+	fmt.Fprintf(&b, "%d|%d|%d|%t|%t|%t|%t|%t|",
 		c.GetFieldId(),
 		int32(c.GetDataType()),
 		int32(c.GetElementType()),
 		c.GetIsPrimaryKey(),
 		c.GetIsAutoID(),
 		c.GetIsPartitionKey(),
-	))
+		c.GetNullable(),
+		c.GetIsElementLevel())
 	for _, p := range c.GetNestedPath() {
 		b.WriteString(p)
 		b.WriteByte('|')
@@ -92,15 +94,6 @@ func isNumericType(dt schemapb.DataType) bool {
 	return typeutil.IsArithmetic(dt)
 }
 
-const defaultConvertOrToInNumericLimit = 150
-
-func shouldMergeToIn(dt schemapb.DataType, count int) bool {
-	if isNumericType(dt) {
-		return count > defaultConvertOrToInNumericLimit
-	}
-	return count > 1
-}
-
 func sortTermValues(term *planpb.TermExpr) {
 	if term == nil || len(term.GetValues()) <= 1 {
 		return
@@ -136,7 +129,15 @@ func sortGenericValues(values []*planpb.GenericValue) []*planpb.GenericValue {
 		values = lo.UniqBy(values, func(v *planpb.GenericValue) int64 { return v.GetInt64Val() })
 	case "float":
 		sort.Slice(values, func(i, j int) bool {
-			return values[i].GetFloatVal() < values[j].GetFloatVal()
+			a, b := values[i].GetFloatVal(), values[j].GetFloatVal()
+			// NaN sorts last to maintain strict weak ordering required by sort.Slice
+			if math.IsNaN(a) {
+				return false
+			}
+			if math.IsNaN(b) {
+				return true
+			}
+			return a < b
 		})
 		values = lo.UniqBy(values, func(v *planpb.GenericValue) float64 { return v.GetFloatVal() })
 	case "string":
@@ -185,12 +186,57 @@ func newBoolConstExpr(v bool) *planpb.Expr {
 	}
 }
 
+func newNullExpr(col *planpb.ColumnInfo, op planpb.NullExpr_NullOp) *planpb.Expr {
+	return &planpb.Expr{
+		Expr: &planpb.Expr_NullExpr{
+			NullExpr: &planpb.NullExpr{
+				ColumnInfo: col,
+				Op:         op,
+			},
+		},
+	}
+}
+
 func newAlwaysTrueExpr() *planpb.Expr {
 	return &planpb.Expr{
 		Expr: &planpb.Expr_AlwaysTrueExpr{
 			AlwaysTrueExpr: &planpb.AlwaysTrueExpr{},
 		},
 	}
+}
+
+func hasNullableFieldSemantics(col *planpb.ColumnInfo) bool {
+	return col != nil && col.GetNullable()
+}
+
+func hasMissingPathSemantics(col *planpb.ColumnInfo) bool {
+	return col != nil && len(col.GetNestedPath()) > 0
+}
+
+func canFoldBoolDomainToConstant(col *planpb.ColumnInfo) bool {
+	return !hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
+}
+
+func canFoldInNotEqualTautologyToTrue(col *planpb.ColumnInfo) bool {
+	return !hasNullableFieldSemantics(col) && !hasMissingPathSemantics(col)
+}
+
+func hasMissingPathNotEqualSemantics(col *planpb.ColumnInfo, values ...*planpb.GenericValue) bool {
+	if !hasMissingPathSemantics(col) {
+		return false
+	}
+	if col.GetDataType() != schemapb.DataType_JSON {
+		return true
+	}
+	for _, value := range values {
+		if value == nil || value.GetVal() == nil {
+			continue
+		}
+		if _, ok := value.GetVal().(*planpb.GenericValue_ArrayVal); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func newAlwaysFalseExpr() *planpb.Expr {

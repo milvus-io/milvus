@@ -19,7 +19,7 @@ package milvusclient
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 )
@@ -53,6 +53,9 @@ func (opt *searchIteratorOption) Limit() int64 {
 func (opt *searchIteratorOption) ValidateParams() error {
 	if opt.batchSize <= 0 {
 		return fmt.Errorf("batch size must be greater than 0")
+	}
+	if opt.searchAggregation != nil {
+		return fmt.Errorf("search_aggregation is not supported with search iterator")
 	}
 	return nil
 }

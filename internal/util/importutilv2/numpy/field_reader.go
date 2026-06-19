@@ -23,18 +23,17 @@ import (
 	"io"
 	"unicode/utf8"
 
-	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type FieldReader struct {
@@ -109,7 +108,12 @@ func (c *FieldReader) getCount(count int64) int64 {
 	case schemapb.DataType_FloatVector:
 		count *= c.dim
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		count *= c.dim * 2
+		elementType, err := convertNumpyType(c.npyReader.Header.Descr.Type)
+		if err == nil && (elementType == schemapb.DataType_Float || elementType == schemapb.DataType_Double) {
+			count *= c.dim
+		} else {
+			count *= c.dim * 2
+		}
 	case schemapb.DataType_Int8Vector:
 		count *= c.dim
 	}
@@ -117,6 +121,25 @@ func (c *FieldReader) getCount(count int64) int64 {
 		return int64(total - c.readPosition)
 	}
 	return count
+}
+
+func (c *FieldReader) logicalRowCount(readCount int64) int64 {
+	switch c.field.GetDataType() {
+	case schemapb.DataType_BinaryVector:
+		return readCount / (c.dim / 8)
+	case schemapb.DataType_FloatVector:
+		return readCount / c.dim
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		elementType, err := convertNumpyType(c.npyReader.Header.Descr.Type)
+		if err == nil && (elementType == schemapb.DataType_Float || elementType == schemapb.DataType_Double) {
+			return readCount / c.dim
+		}
+		return readCount / (c.dim * 2)
+	case schemapb.DataType_Int8Vector:
+		return readCount / c.dim
+	default:
+		return readCount
+	}
 }
 
 func (c *FieldReader) Next(count int64) (any, any, error) {
@@ -134,8 +157,9 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 	// construct a bool array with all-true if the field is nullable
 
 	if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
-		validData = make([]bool, 0, readCount)
-		for i := int64(0); i < readCount; i++ {
+		validRows := c.logicalRowCount(readCount)
+		validData = make([]bool, 0, validRows)
+		for i := int64(0); i < validRows; i++ {
 			validData = append(validData, true)
 		}
 	}
@@ -249,8 +273,14 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data = byteArr
 		c.readPosition += int(readCount)
-	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+	case schemapb.DataType_BinaryVector:
 		data, err = ReadN[uint8](c.reader, c.order, readCount)
+		if err != nil {
+			return nil, nil, err
+		}
+		c.readPosition += int(readCount)
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		data, err = c.readFP16BF16Vector(readCount)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -287,15 +317,49 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			data = lo.Map(data64, func(f float64, _ int) float32 {
-				return float32(f)
-			})
+			data32 := make([]float32, len(data64))
+			for i, f := range data64 {
+				data32[i] = float32(f)
+			}
+			data = data32
 		}
 		c.readPosition += int(readCount)
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", dt.String()))
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported data type: %s", dt.String())
 	}
 	return data, validData, nil
+}
+
+func (c *FieldReader) readFP16BF16Vector(readCount int64) ([]byte, error) {
+	elementType, err := convertNumpyType(c.npyReader.Header.Descr.Type)
+	if err != nil {
+		return nil, err
+	}
+	switch elementType {
+	case schemapb.DataType_BinaryVector:
+		return ReadN[uint8](c.reader, c.order, readCount)
+	case schemapb.DataType_Float:
+		floatData, err := ReadN[float32](c.reader, c.order, readCount)
+		if err != nil {
+			return nil, err
+		}
+		return typeutil.ConvertFloat32ToFP16BF16Bytes(floatData, c.field.GetDataType())
+	case schemapb.DataType_Double:
+		data64, err := ReadN[float64](c.reader, c.order, readCount)
+		if err != nil {
+			return nil, err
+		}
+		if err := typeutil.VerifyFloats64(data64); err != nil {
+			return nil, err
+		}
+		floatData := make([]float32, len(data64))
+		for i, f := range data64 {
+			floatData[i] = float32(f)
+		}
+		return typeutil.ConvertFloat32ToFP16BF16Bytes(floatData, c.field.GetDataType())
+	default:
+		return nil, merr.WrapErrImportFailedMsg("unsupported numpy element type %s for field '%s'", elementType.String(), c.field.GetName())
+	}
 }
 
 // setByteOrder sets BigEndian/LittleEndian, the logic of this method is copied from npyio lib
@@ -343,7 +407,7 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			// for non-ascii characters, the unicode could be 1 ~ 4 bytes, each character occupies 4 bytes, too
 			raw, err := io.ReadAll(io.LimitReader(c.reader, utf8.UTFMax*int64(maxLen)))
 			if err != nil {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read utf32 bytes from numpy file, error: %v", err))
+				return nil, merr.WrapErrImportFailedMsg("failed to read utf32 bytes from numpy file, error: %v", err)
 			}
 			str, err := decodeUtf32(raw, c.order)
 			if c.field.DataType == schemapb.DataType_VarChar {
@@ -352,7 +416,7 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 				}
 			}
 			if err != nil {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to decode utf32 bytes, error: %v", err))
+				return nil, merr.WrapErrImportFailedMsg("failed to decode utf32 bytes, error: %v", err)
 			}
 			data = append(data, str)
 		} else {
@@ -360,7 +424,7 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			// bytes.Index(buf, []byte{0}) tell us which position is the end of the string
 			buf, err := io.ReadAll(io.LimitReader(c.reader, int64(maxLen)))
 			if err != nil {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read ascii bytes from numpy file, error: %v", err))
+				return nil, merr.WrapErrImportFailedMsg("failed to read ascii bytes from numpy file, error: %v", err)
 			}
 			n := bytes.Index(buf, []byte{0})
 			if n > 0 {

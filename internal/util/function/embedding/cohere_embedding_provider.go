@@ -20,14 +20,14 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CohereEmbeddingProvider struct {
@@ -41,9 +41,9 @@ type CohereEmbeddingProvider struct {
 	embdType      models.EmbeddingType
 	outputType    string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*CohereEmbeddingProvider, error) {
@@ -69,7 +69,7 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 			}
 		case models.TruncateParamKey:
 			if param.Value != "NONE" && param.Value != "START" && param.Value != "END" {
-				return nil, fmt.Errorf("Illegal parameters, %s only supports [NONE, START, END]", models.TruncateParamKey)
+				return nil, merr.WrapErrParameterInvalidMsg("illegal parameters, %s only supports [NONE, START, END]", models.TruncateParamKey)
 			}
 			truncate = param.Value
 		default:
@@ -87,7 +87,7 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 
 	embdType := models.GetEmbdType(fieldSchema.DataType)
 	if embdType == models.UnsupportEmbd {
-		return nil, fmt.Errorf("Unsupport output type: %s", fieldSchema.DataType)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupport output type: %s", fieldSchema.DataType)
 	}
 
 	outputType := func() string {
@@ -96,6 +96,8 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		}
 		return "int8"
 	}()
+
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
 
 	provider := CohereEmbeddingProvider{
 		client:        c,
@@ -107,7 +109,7 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		embdType:      embdType,
 		outputType:    outputType,
 		maxBatch:      96,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -143,28 +145,28 @@ func (provider *CohereEmbeddingProvider) CallEmbedding(ctx context.Context, text
 			end = numRows
 		}
 
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, int(provider.embedDimParam), provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, int(provider.embedDimParam), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if provider.embdType == models.Float32Embd {
 			if end-i != len(resp.Embeddings.Float) {
-				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Float))
+				return nil, merr.WrapErrFunctionFailedMsg("get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Float))
 			}
 			for _, item := range resp.Embeddings.Float {
 				if len(item) != int(provider.fieldDim) {
-					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+					return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 						provider.fieldDim, len(item))
 				}
 			}
 			embRet.Append(resp.Embeddings.Float)
 		} else {
 			if end-i != len(resp.Embeddings.Int8) {
-				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Int8))
+				return nil, merr.WrapErrFunctionFailedMsg("get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Int8))
 			}
 			for _, item := range resp.Embeddings.Int8 {
 				if len(item) != int(provider.fieldDim) {
-					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+					return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 						provider.fieldDim, len(item))
 				}
 			}

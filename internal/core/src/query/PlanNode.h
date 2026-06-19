@@ -13,9 +13,13 @@
 
 #include <stdint.h>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
+#include "common/FieldMeta.h"
 #include "common/QueryInfo.h"
+#include "common/Types.h"
 
 namespace milvus::plan {
 class PlanNode;
@@ -58,6 +62,14 @@ struct RetrievePlanNode : PlanNode {
     std::shared_ptr<milvus::plan::PlanNode> plannodes_;
 
     int64_t limit_;
+    bool has_order_by_ = false;
+    // Non-sort output fields deferred for late materialization (two-project mode).
+    // Empty means single-project mode (all columns materialized in the first project).
+    std::vector<FieldId> deferred_field_ids_;
+    // Field IDs for pipeline columns in the same order as the ProjectNode output.
+    // Used by FillOrderByResult to set field_id on DataArrays produced by the pipeline.
+    std::vector<FieldId> pipeline_field_ids_;
+    std::optional<QueryIteratorCursor> query_iterator_cursor_;
 };
 
 }  // namespace milvus::query

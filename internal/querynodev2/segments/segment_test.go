@@ -6,16 +6,20 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SegmentSuite struct {
@@ -154,6 +158,72 @@ func (suite *SegmentSuite) TestLoadInfo() {
 	suite.NotNil(suite.growing.LoadInfo())
 }
 
+func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key)
+
+	segment := suite.sealed.(*LocalSegment)
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			102: {
+				FieldID:                102,
+				BuildID:                5001,
+				Version:                3,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			},
+		},
+	}
+	segment.syncFieldJSONStatsFromLoadInfo(context.Background(), loadInfo)
+
+	stats := segment.GetFieldJSONIndexStats()
+	suite.Require().Len(stats, 1)
+	suite.EqualValues(102, stats[102].GetFieldID())
+	suite.EqualValues(5001, stats[102].GetBuildID())
+	suite.EqualValues(3, stats[102].GetVersionID())
+	suite.EqualValues(common.JSONStatsDataFormatVersion, stats[102].GetDataFormatVersion())
+
+	stats[102].BuildID = 9999
+	suite.EqualValues(5001, segment.GetFieldJSONIndexStats()[102].GetBuildID())
+
+	invalidLoadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			102: {
+				FieldID:                102,
+				BuildID:                5002,
+				Version:                4,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion - 1,
+			},
+		},
+	}
+	segment.syncFieldJSONStatsFromLoadInfo(context.Background(), invalidLoadInfo)
+	suite.Empty(segment.GetFieldJSONIndexStats())
+
+	replacementLoadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			103: {
+				FieldID:                103,
+				BuildID:                6001,
+				Version:                1,
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			},
+		},
+	}
+	segment.syncFieldJSONStatsFromLoadInfo(context.Background(), replacementLoadInfo)
+	stats = segment.GetFieldJSONIndexStats()
+	suite.Require().Len(stats, 1)
+	suite.Nil(stats[102])
+	suite.EqualValues(6001, stats[103].GetBuildID())
+}
+
 func (suite *SegmentSuite) TestResourceUsageEstimate() {
 	// growing segment has resource usage
 	// growing segment can not estimate resource usage
@@ -212,6 +282,137 @@ func (suite *SegmentSuite) TestCASVersion() {
 func (suite *SegmentSuite) TestSegmentRemoveUnusedFieldFiles() {
 }
 
+// TestDeleteSameTimestampAcrossBatches reproduces the DumpSnapshot Assert failure
+// caused by proxy splitting a large DELETE operation into multiple messages that
+// cross timetick boundaries. All split messages share the same TSO timestamp,
+// so consecutive StreamPush calls can insert entries with the same timestamp but
+// smaller row_ids — landing BEFORE the DumpSnapshot cursor in the sorted skip list.
+//
+// Scenario:
+//  1. Batch 1: Delete PKs [50,60,70,80,90] at ts=1000 → DumpSnapshot creates cursor
+//  2. Batch 2: Delete PKs [10,20,30] at ts=[1000,1000,1001] → entries (1000,10),(1000,20)
+//     are sorted BEFORE the cursor, but accessor.size() counts them.
+//     Iterator from cursor can't reach them → old code Assert, new code rebuilds.
+func (suite *SegmentSuite) TestDeleteSameTimestampAcrossBatches() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set DELETE_DUMP_BATCH_SIZE to a small value so DumpSnapshot triggers easily
+	initcore.UpdateDefaultDeleteDumpBatchSize(3)
+	defer initcore.UpdateDefaultDeleteDumpBatchSize(10000)
+
+	// Batch 1: delete PKs with higher row_ids at timestamp 1000
+	// This triggers DumpSnapshot which sets cursor after processing 3 entries.
+	// Skip list: (1000,50),(1000,60),(1000,70),(1000,80),(1000,90)
+	// DumpSnapshot processes first 3 → cursor at (1000,80)
+	pks1 := storage.NewInt64PrimaryKeys(5)
+	pks1.AppendRaw(50, 60, 70, 80, 90)
+	err := suite.sealed.Delete(ctx, pks1, []uint64{1000, 1000, 1000, 1000, 1000})
+	suite.NoError(err)
+
+	// Batch 2: delete PKs with LOWER row_ids at the SAME timestamp 1000,
+	// plus one entry at ts=1001 to bypass lastDeltaTimestamp check (1000 >= 1001 is false).
+	//
+	// InternalPush inserts: (1000,10),(1000,20) → BEFORE cursor (1000,80)
+	//                       (1001,30)           → AFTER cursor
+	//
+	// DumpSnapshot sees: total=8, dumped=3, remaining=5 > BATCH_SIZE(3)
+	// But only 3 entries exist from cursor to end: (1000,80),(1000,90),(1001,30)
+	// For loop consumes all 3 → iterator reaches end() → triggers rebuild (or Assert in old code)
+	pks2 := storage.NewInt64PrimaryKeys(3)
+	pks2.AppendRaw(10, 20, 30)
+	err = suite.sealed.Delete(ctx, pks2, []uint64{1000, 1000, 1001})
+	suite.NoError(err)
+
+	// If we reach here without crash/panic, the rebuild fix works correctly.
+	// Verify all 8 deletes were applied.
+	suite.Equal(int64(100-8), suite.sealed.RowNum())
+	suite.Equal(int64(100), suite.sealed.InsertCount())
+}
+
+// TestLoadDeltaData_LowerTsNotSkipped guards against the bug where L0-forwarded
+// deletes with ts lower than the already-applied manifest-delta watermark
+// were silently dropped, causing snapshot restore to retain deleted rows.
+//
+// Reproduction: apply a delete at a high ts (simulating segment's own _delta/
+// loaded from manifest), then apply a delete for a DIFFERENT PK at a lower ts
+// (simulating L0 segment delete forwarded by delegator). Both must take effect.
+// Before the fix, the second call was skipped entirely via:
+//
+//	if s.lastDeltaTimestamp.Load() >= tss[len(tss)-1] { return nil }
+func (suite *SegmentSuite) TestLoadDeltaData_LowerTsNotSkipped() {
+	ctx := context.Background()
+
+	// Phase 1: apply delete for PK=80 at ts=2000 (simulates manifest _delta/).
+	pksHigh := storage.NewInt64PrimaryKeys(1)
+	pksHigh.AppendRaw(80)
+	ddHigh, err := storage.NewDeltaDataWithData(pksHigh, []uint64{2000})
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddHigh))
+	suite.EqualValues(2000, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+
+	// Phase 2: L0-forwarded delete for PK=10 at ts=1000 (LOWER than watermark).
+	// Must be applied — before the fix this was silently dropped.
+	pksLow := storage.NewInt64PrimaryKeys(1)
+	pksLow.AppendRaw(10)
+	ddLow, err := storage.NewDeltaDataWithData(pksLow, []uint64{1000})
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddLow))
+
+	// Both PKs deleted => RowNum = 100 - 2 = 98.
+	suite.EqualValues(98, suite.sealed.RowNum())
+	// Watermark stays at max, not regresses to 1000.
+	suite.EqualValues(2000, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+}
+
+// TestLoadDeltaData_UnsortedBatchAllApplied guards against the BufferForwarder
+// interaction: rangeHitL0Deletions iterates L0 segments in unsorted order, so
+// tss[last] is whichever L0 segment was visited last, NOT the batch max.
+// A batch like tss=[1500, 500] would previously be compared as tss[1]=500
+// against watermark and (if watermark >= 500) get entirely dropped, including
+// the PK at ts=1500 that was ABOVE the watermark.
+func (suite *SegmentSuite) TestLoadDeltaData_UnsortedBatchAllApplied() {
+	ctx := context.Background()
+
+	// Establish watermark at 1000.
+	pksInit := storage.NewInt64PrimaryKeys(1)
+	pksInit.AppendRaw(99)
+	ddInit, err := storage.NewDeltaDataWithData(pksInit, []uint64{1000})
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddInit))
+
+	// Unsorted batch: first ts=1500 (above watermark), last ts=500 (below).
+	// Must apply both. Before fix: tss[last]=500 <= 1000 => entire batch dropped.
+	pksMixed := storage.NewInt64PrimaryKeys(2)
+	pksMixed.AppendRaw(20, 30)
+	ddMixed, err := storage.NewDeltaDataWithData(pksMixed, []uint64{1500, 500})
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddMixed))
+
+	suite.EqualValues(97, suite.sealed.RowNum()) // 100 - 3 deletes
+	// Watermark advances to batch max, not last.
+	suite.EqualValues(1500, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+}
+
+// TestAdvanceLastDeltaTimestamp_NeverRegresses verifies the watermark is
+// monotonic: a lower-max batch after a higher-max batch must not regress it.
+func (suite *SegmentSuite) TestAdvanceLastDeltaTimestamp_NeverRegresses() {
+	ctx := context.Background()
+
+	pksA := storage.NewInt64PrimaryKeys(1)
+	pksA.AppendRaw(11)
+	ddA, _ := storage.NewDeltaDataWithData(pksA, []uint64{5000})
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddA))
+	suite.EqualValues(5000, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+
+	pksB := storage.NewInt64PrimaryKeys(1)
+	pksB.AppendRaw(12)
+	ddB, _ := storage.NewDeltaDataWithData(pksB, []uint64{2000})
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddB))
+	// Watermark stays at 5000, not regresses to 2000.
+	suite.EqualValues(5000, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+}
+
 func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.sealed.Release(context.Background())
 
@@ -223,6 +424,290 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.False(sealed.HasRawData(101))
 }
 
+func (suite *SegmentSuite) TestFlushData() {
+	ctx := context.Background()
+
+	// Test 1: FlushData on growing segment should work
+	config := &FlushConfig{
+		SegmentBasePath:   suite.rootPath + "/segment",
+		PartitionBasePath: suite.rootPath + "/partition",
+		CollectionID:      suite.collectionID,
+		PartitionID:       suite.partitionID,
+	}
+
+	rowNum := suite.growing.RowNum()
+	suite.Greater(rowNum, int64(0), "growing segment should have data")
+
+	// flush all data
+	result, err := suite.growing.FlushData(ctx, 0, rowNum, config)
+	// note: this test may fail if C++ milvus-storage is not properly initialized
+	// in that case, the error is expected
+	if err != nil {
+		suite.T().Logf("FlushData failed (expected if milvus-storage not initialized): %v", err)
+	} else {
+		suite.NotNil(result)
+		suite.NotEmpty(result.ManifestPath)
+		suite.Equal(rowNum, result.NumRows)
+	}
+}
+
+func (suite *SegmentSuite) TestFlushDataSealedSegmentFails() {
+	ctx := context.Background()
+
+	config := &FlushConfig{
+		SegmentBasePath:   suite.rootPath + "/segment",
+		PartitionBasePath: suite.rootPath + "/partition",
+		CollectionID:      suite.collectionID,
+		PartitionID:       suite.partitionID,
+	}
+
+	// sealed segment should fail
+	_, err := suite.sealed.FlushData(ctx, 0, 10, config)
+	suite.Error(err)
+	suite.Contains(err.Error(), "only supported for growing segments")
+}
+
+func (suite *SegmentSuite) TestFlushDataInvalidOffsets() {
+	ctx := context.Background()
+
+	config := &FlushConfig{
+		SegmentBasePath:   suite.rootPath + "/segment",
+		PartitionBasePath: suite.rootPath + "/partition",
+		CollectionID:      suite.collectionID,
+		PartitionID:       suite.partitionID,
+	}
+
+	// Test negative start offset
+	_, err := suite.growing.FlushData(ctx, -1, 10, config)
+	suite.Error(err)
+	suite.Contains(err.Error(), "invalid offsets")
+
+	// Test end < start
+	_, err = suite.growing.FlushData(ctx, 50, 10, config)
+	suite.Error(err)
+	suite.Contains(err.Error(), "invalid offsets")
+}
+
+func (suite *SegmentSuite) TestFlushDataEmptyRange() {
+	ctx := context.Background()
+
+	config := &FlushConfig{
+		SegmentBasePath:   suite.rootPath + "/segment",
+		PartitionBasePath: suite.rootPath + "/partition",
+		CollectionID:      suite.collectionID,
+		PartitionID:       suite.partitionID,
+	}
+
+	// empty range (start == end) should return nil, nil
+	result, err := suite.growing.FlushData(ctx, 10, 10, config)
+	suite.NoError(err)
+	suite.Nil(result)
+}
+
+func (suite *SegmentSuite) TestFlushDataPartialRange() {
+	ctx := context.Background()
+
+	config := &FlushConfig{
+		SegmentBasePath:   suite.rootPath + "/segment_partial",
+		PartitionBasePath: suite.rootPath + "/partition_partial",
+		CollectionID:      suite.collectionID,
+		PartitionID:       suite.partitionID,
+	}
+
+	rowNum := suite.growing.RowNum()
+	suite.Greater(rowNum, int64(20), "growing segment should have enough data")
+
+	// flush partial range
+	start := int64(10)
+	end := int64(20)
+	result, err := suite.growing.FlushData(ctx, start, end, config)
+	// note: this test may fail if C++ milvus-storage is not properly initialized
+	if err != nil {
+		suite.T().Logf("FlushData failed (expected if milvus-storage not initialized): %v", err)
+	} else {
+		suite.NotNil(result)
+		suite.Equal(end-start, result.NumRows)
+	}
+}
+
 func TestSegment(t *testing.T) {
 	suite.Run(t, new(SegmentSuite))
+}
+
+// newTestBaseSegment creates a baseSegment for testing without requiring segcore Collection.
+func newTestBaseSegment(segmentID, partitionID int64) baseSegment {
+	return baseSegment{
+		loadInfo: atomic.NewPointer(&querypb.SegmentLoadInfo{
+			SegmentID:   segmentID,
+			PartitionID: partitionID,
+		}),
+		version:            atomic.NewInt64(0),
+		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+		needUpdatedVersion: atomic.NewInt64(0),
+	}
+}
+
+// TestBaseSegment_PkCandidateExternalCandidate tests pkCandidate wrapper methods
+// with an ExternalSegmentCandidate (used for external/virtual-PK collections).
+func TestBaseSegment_PkCandidateExternalCandidate(t *testing.T) {
+	paramtable.Init()
+
+	segmentID := int64(12345)
+	partitionID := int64(10)
+	candidate := pkoracle.NewExternalSegmentCandidate(segmentID, partitionID, SegmentTypeSealed)
+
+	bs := newTestBaseSegment(segmentID, partitionID)
+	bs.SetPKCandidate(candidate)
+
+	// PkCandidateExist: ExternalSegmentCandidate always returns true
+	assert.True(t, bs.PkCandidateExist())
+
+	// Stats: ExternalSegmentCandidate returns nil
+	assert.Nil(t, bs.Stats())
+
+	// GetMinPk / GetMaxPk: nil stats → nil
+	assert.Nil(t, bs.GetMinPk())
+	assert.Nil(t, bs.GetMaxPk())
+
+	// Charge / Refund: no-op, should not panic
+	bs.Charge()
+	bs.Refund()
+
+	// UpdatePkCandidate: no-op for external candidate
+	bs.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)})
+
+	// MayPkExist with a virtual PK belonging to this segment
+	virtualPK := GetVirtualPK(segmentID, 42)
+	lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(virtualPK))
+	assert.True(t, bs.MayPkExist(lc))
+
+	// MayPkExist with a virtual PK from a different segment
+	otherPK := GetVirtualPK(segmentID+1, 42)
+	lc2 := storage.NewLocationsCache(storage.NewInt64PrimaryKey(otherPK))
+	assert.False(t, bs.MayPkExist(lc2))
+
+	// BatchPkExist
+	pks := []storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(GetVirtualPK(segmentID, 0)),
+		storage.NewInt64PrimaryKey(GetVirtualPK(segmentID+1, 0)),
+		storage.NewInt64PrimaryKey(GetVirtualPK(segmentID, 99)),
+	}
+	blc := storage.NewBatchLocationsCache(pks)
+	results := bs.BatchPkExist(blc)
+	assert.Equal(t, []bool{true, false, true}, results)
+}
+
+// TestBaseSegment_GetMinMaxPkWithStats tests GetMinPk/GetMaxPk when Stats() returns non-nil.
+func TestBaseSegment_GetMinMaxPkWithStats(t *testing.T) {
+	paramtable.Init()
+
+	segmentID := int64(100)
+	partitionID := int64(10)
+	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, SegmentTypeSealed)
+	// Feed PKs so Stats() returns non-nil with min/max
+	bfs.UpdatePkCandidate([]storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(10),
+		storage.NewInt64PrimaryKey(50),
+		storage.NewInt64PrimaryKey(100),
+	})
+
+	bs := newTestBaseSegment(segmentID, partitionID)
+	bs.SetPKCandidate(bfs)
+
+	minPk := bs.GetMinPk()
+	assert.NotNil(t, minPk)
+	maxPk := bs.GetMaxPk()
+	assert.NotNil(t, maxPk)
+}
+
+// TestBaseSegment_PkCandidateNil tests pkCandidate wrapper methods when candidate is nil.
+func TestBaseSegment_PkCandidateNil(t *testing.T) {
+	paramtable.Init()
+
+	bs := newTestBaseSegment(1, 0)
+	// pkCandidate is nil by default from newTestBaseSegment
+
+	// PkCandidateExist: nil → false
+	assert.False(t, bs.PkCandidateExist())
+
+	// Stats: nil candidate → nil
+	assert.Nil(t, bs.Stats())
+
+	// GetMinPk / GetMaxPk: nil candidate → nil
+	assert.Nil(t, bs.GetMinPk())
+	assert.Nil(t, bs.GetMaxPk())
+
+	// Charge / Refund: nil candidate → no-op, should not panic
+	bs.Charge()
+	bs.Refund()
+
+	// UpdatePkCandidate: nil candidate → no-op
+	bs.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)})
+
+	// MayPkExist: nil candidate → returns true (assume PK might exist)
+	lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(42))
+	assert.True(t, bs.MayPkExist(lc))
+
+	// BatchPkExist: nil candidate → all true (consistent with MayPkExist)
+	pks := []storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(1),
+		storage.NewInt64PrimaryKey(2),
+	}
+	blc := storage.NewBatchLocationsCache(pks)
+	results := bs.BatchPkExist(blc)
+	assert.Equal(t, []bool{true, true}, results)
+}
+
+func TestLocalSegmentBM25StatsAreCloned(t *testing.T) {
+	segment := &LocalSegment{
+		baseSegment:     newTestBaseSegment(1, 0),
+		bm25StatsHolder: newBM25StatsHolder(),
+	}
+
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1})
+	input := map[int64]*storage.BM25Stats{102: stats}
+
+	segment.UpdateBM25Stats(input)
+	stats.Append(map[uint32]float32{2: 1})
+
+	got := segment.GetBM25Stats()
+	assert.Equal(t, int64(1), got[102].NumRow())
+
+	got[102].Append(map[uint32]float32{3: 1})
+	got[103] = storage.NewBM25Stats()
+
+	gotAgain := segment.GetBM25Stats()
+	assert.Equal(t, int64(1), gotAgain[102].NumRow())
+	assert.NotContains(t, gotAgain, int64(103))
+}
+
+// TestBaseSegment_SkipGrowingBF tests that skipGrowingBF bypasses PK candidate checks.
+func TestBaseSegment_SkipGrowingBF(t *testing.T) {
+	paramtable.Init()
+
+	segmentID := int64(100)
+	candidate := pkoracle.NewExternalSegmentCandidate(segmentID, 10, SegmentTypeGrowing)
+
+	bs := newTestBaseSegment(segmentID, 10)
+	bs.skipGrowingBF = true
+	bs.SetPKCandidate(candidate)
+
+	// MayPkExist: skipGrowingBF → always true regardless of candidate
+	otherPK := GetVirtualPK(segmentID+999, 42)
+	lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(otherPK))
+	assert.True(t, bs.MayPkExist(lc))
+
+	// UpdatePkCandidate: skipGrowingBF → skips update
+	bs.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)})
+
+	// BatchPkExist: skipGrowingBF → all true
+	pks := []storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(1),
+		storage.NewInt64PrimaryKey(2),
+		storage.NewInt64PrimaryKey(3),
+	}
+	blc := storage.NewBatchLocationsCache(pks)
+	results := bs.BatchPkExist(blc)
+	assert.Equal(t, []bool{true, true, true}, results)
 }

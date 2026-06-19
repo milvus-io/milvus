@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 )
 
@@ -67,6 +67,17 @@ type AssignPolicy interface {
 	// AssignChannel assigns channels to nodes based on the policy
 	// Returns a list of channel assignment plans
 	AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan
+}
+
+// ScoreAwareAssignPolicy extends AssignPolicy with score-based node conversion
+// and score calculation methods. This interface eliminates the need for type
+// assertions when accessing score-specific functionality.
+type ScoreAwareAssignPolicy interface {
+	AssignPolicy
+	ConvertToNodeItemsBySegment(collectionID int64, nodes []int64) map[int64]*NodeItem
+	ConvertToNodeItemsByChannel(collectionID int64, nodes []int64) map[int64]*NodeItem
+	CalculateSegmentScore(s *meta.Segment) float64
+	CalculateChannelScore(ch *meta.DmChannel, currentCollection int64) float64
 }
 
 // AssignPolicyConfig contains common configuration for assignment policies

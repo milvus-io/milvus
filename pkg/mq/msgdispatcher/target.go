@@ -17,15 +17,15 @@
 package msgdispatcher
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type target struct {
@@ -112,7 +112,7 @@ func (t *target) send(pack *MsgPack) error {
 		return nil
 	case <-t.timer.C:
 		t.isLagged = true
-		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s, beginTs=%d, endTs=%d, latestTimeTick=%d", t.vchannel, t.maxLag, pack.BeginTs, pack.EndTs, t.latestTimeTick)
+		return merr.WrapErrMqInternalMsg("send target timeout, vchannel=%s, timeout=%s, beginTs=%d, endTs=%d, latestTimeTick=%d", t.vchannel, t.maxLag, pack.BeginTs, pack.EndTs, t.latestTimeTick)
 	case t.ch <- pack:
 		if len(pack.EndPositions) > 0 {
 			t.latestTimeTick = pack.EndPositions[0].GetTimestamp()

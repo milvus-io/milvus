@@ -15,12 +15,16 @@
 // limitations under the License.
 #pragma once
 
-#include "common/Utils.h"
+#include <algorithm>
+#include <type_traits>
+
+#include "common/FastMem.h"
 #include "common/Span.h"
-#include "mmap/ChunkData.h"
-#include "storage/MmapManager.h"
-#include "segcore/SegcoreConfig.h"
 #include "common/TypeTraits.h"
+#include "common/Utils.h"
+#include "mmap/ChunkData.h"
+#include "segcore/SegcoreConfig.h"
+#include "storage/MmapManager.h"
 
 namespace milvus {
 template <typename Type>
@@ -97,10 +101,11 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         int64_t length,
         const std::optional<CheckDataValid>& check_data_valid) override {
         std::unique_lock<std::shared_mutex> lck(mutex_);
-        AssertInfo(chunk_id < this->counter_,
+        const auto counter = this->counter_.load();
+        AssertInfo(chunk_id < counter,
                    fmt::format("index out of range, index={}, counter_={}",
                                chunk_id,
-                               this->counter_));
+                               counter));
         if constexpr (!IsMmap || !IsVariableType<Type>) {
             auto ptr = (Type*)vec_[chunk_id].data();
             AssertInfo(
@@ -110,7 +115,12 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                     offset,
                     length,
                     vec_[chunk_id].size()));
-            std::copy_n(data, length, ptr + offset);
+            if constexpr (std::is_trivially_copyable_v<Type>) {
+                milvus::fastmem::FastMemcpy(
+                    ptr + offset, data, length * sizeof(Type));
+            } else {
+                std::copy_n(data, length, ptr + offset);
+            }
         } else {
             vec_[chunk_id].set(data, offset, length, check_data_valid);
         }
@@ -150,20 +160,22 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     void*
     get_chunk_data(int64_t index) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        AssertInfo(index < this->counter_,
-                   fmt::format("index out of range, index={}, counter_={}",
-                               index,
-                               this->counter_));
+        const auto counter = this->counter_.load();
+        AssertInfo(
+            index < counter,
+            fmt::format(
+                "index out of range, index={}, counter_={}", index, counter));
         return vec_[index].data();
     }
 
     int64_t
     get_chunk_size(int64_t index) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        AssertInfo(index < this->counter_,
-                   fmt::format("index out of range, index={}, counter_={}",
-                               index,
-                               this->counter_));
+        const auto counter = this->counter_.load();
+        AssertInfo(
+            index < counter,
+            fmt::format(
+                "index out of range, index={}, counter_={}", index, counter));
         return vec_[index].size();
     }
 

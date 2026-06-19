@@ -31,6 +31,8 @@
 #include "segcore/SegmentInterface.h"
 #include "query/Utils.h"
 #include "common/RegexQuery.h"
+#include "common/Volnitsky.h"
+#include "index/NgramInvertedIndex.h"
 #include "exec/expression/Utils.h"
 #include "common/bson_view.h"
 #include "index/json_stats/bson_inverted.h"
@@ -40,9 +42,20 @@
 namespace milvus {
 namespace exec {
 
+// Optional context for UnaryCompare to hold pre-built objects that are
+// expensive to construct per-row (e.g. LikePatternMatcher for Match ops).
+// Callers on hot paths should pre-construct and reuse across rows.
+struct UnaryCompareContext {
+    const LikePatternMatcher* like_matcher = nullptr;
+    const PartialRegexMatcher* regex_matcher = nullptr;
+};
+
 template <typename T, typename U>
 bool
-UnaryCompare(const T& get_value, const U& val, proto::plan::OpType op_type) {
+UnaryCompare(const T& get_value,
+             const U& val,
+             proto::plan::OpType op_type,
+             const UnaryCompareContext* context = nullptr) {
     switch (op_type) {
         case proto::plan::GreaterThan:
             return get_value > val;
@@ -63,20 +76,38 @@ UnaryCompare(const T& get_value, const U& val, proto::plan::OpType op_type) {
                           std::is_same_v<U, std::string_view>) {
                 return milvus::query::Match(get_value, val, op_type);
             } else {
-                return false;
+                ThrowInfo(OpTypeInvalid,
+                          "PrefixMatch/PostfixMatch/InnerMatch only supports "
+                          "string type");
             }
         case proto::plan::Match:
             if constexpr (std::is_same_v<U, std::string> ||
                           std::is_same_v<U, std::string_view>) {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
-                return matcher(get_value);
+                if (context && context->like_matcher) {
+                    return (*context->like_matcher)(get_value);
+                }
+                LikePatternMatcher fallback(val);
+                return fallback(get_value);
             } else {
-                return false;
+                ThrowInfo(OpTypeInvalid,
+                          "Match operation only supports string type");
+            }
+        case proto::plan::RegexMatch:
+            if constexpr (std::is_same_v<U, std::string> ||
+                          std::is_same_v<U, std::string_view>) {
+                if (context && context->regex_matcher) {
+                    return (*context->regex_matcher)(get_value);
+                }
+                PartialRegexMatcher fallback(val);
+                return fallback(get_value);
+            } else {
+                ThrowInfo(OpTypeInvalid,
+                          "RegexMatch operation only supports string type");
             }
         default:
-            return false;
+            ThrowInfo(OpTypeInvalid,
+                      fmt::format("unsupported op_type:{} for UnaryCompare",
+                                  op_type));
     }
 }
 
@@ -85,46 +116,159 @@ struct UnaryElementFuncForMatch {
     using IndexInnerType =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
+    // Pre-built matcher — owned by PhyUnaryRangeFilterExpr and reused
+    // across batches; nullptr means build a local one (mirrors
+    // UnaryElementFuncForRegexMatch).
+    const LikePatternMatcher* matcher = nullptr;
+
     void
     operator()(const T* src,
                size_t size,
-               IndexInnerType val,
+               const IndexInnerType& val,
                TargetBitmapView res) {
         static_assert(
             filter_type == FilterType::sequential,
             "this override operator() of UnaryElementFuncForMatch does "
             "not support FilterType::random");
 
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(val);
-        RegexMatcher matcher(regex_pattern);
-
-        for (int i = 0; i < size; ++i) {
-            res[i] = matcher(src[i]);
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            std::unique_ptr<LikePatternMatcher> local_matcher;
+            const LikePatternMatcher* m = matcher;
+            if (m == nullptr) {
+                local_matcher = std::make_unique<LikePatternMatcher>(val);
+                m = local_matcher.get();
+            }
+            for (int i = 0; i < size; ++i) {
+                res[i] = (*m)(src[i]);
+            }
+        } else {
+            ThrowInfo(OpTypeInvalid,
+                      "Match operation only supports string type");
         }
     }
 
     void
     operator()(const T* src,
                size_t size,
-               IndexInnerType val,
+               const IndexInnerType& val,
                TargetBitmapView res,
                const TargetBitmap& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(val);
-        RegexMatcher matcher(regex_pattern);
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
-                continue;
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            std::unique_ptr<LikePatternMatcher> local_matcher;
+            const LikePatternMatcher* m = matcher;
+            if (m == nullptr) {
+                local_matcher = std::make_unique<LikePatternMatcher>(val);
+                m = local_matcher.get();
             }
-            if constexpr (filter_type == FilterType::random) {
-                res[i] = matcher(src[offsets ? offsets[i] : i]);
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
+                    continue;
+                }
+                if constexpr (filter_type == FilterType::random) {
+                    res[i] = (*m)(src[offsets ? offsets[i] : i]);
+                } else {
+                    res[i] = (*m)(src[i]);
+                }
+            }
+        } else {
+            ThrowInfo(OpTypeInvalid,
+                      "Match operation only supports string type");
+        }
+    }
+};
+
+template <typename T, FilterType filter_type = FilterType::sequential>
+struct UnaryElementFuncForRegexMatch {
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+
+    // Pre-built matcher and searcher — owned by PhyUnaryRangeFilterExpr,
+    // constructed once per segment, passed by pointer to avoid per-batch
+    // reconstruction.
+    const PartialRegexMatcher* matcher = nullptr;
+    const VolnitskySearcher* searcher = nullptr;  // null if no literal
+
+    void
+    operator()(const T* src,
+               size_t size,
+               const IndexInnerType& val,
+               TargetBitmapView res) {
+        static_assert(
+            filter_type == FilterType::sequential,
+            "this override operator() of UnaryElementFuncForRegexMatch does "
+            "not support FilterType::random");
+
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            // Fallback: construct locally if no pre-built objects
+            std::unique_ptr<PartialRegexMatcher> local_matcher;
+            const PartialRegexMatcher* m = matcher;
+            if (!m) {
+                local_matcher = std::make_unique<PartialRegexMatcher>(val);
+                m = local_matcher.get();
+            }
+
+            if (searcher) {
+                for (int i = 0; i < size; ++i) {
+                    res[i] = searcher->contains(src[i]) && (*m)(src[i]);
+                }
             } else {
-                res[i] = matcher(src[i]);
+                for (int i = 0; i < size; ++i) {
+                    res[i] = (*m)(src[i]);
+                }
             }
+        } else {
+            ThrowInfo(OpTypeInvalid,
+                      "RegexMatch operation only supports string type");
+        }
+    }
+
+    void
+    operator()(const T* src,
+               size_t size,
+               const IndexInnerType& val,
+               TargetBitmapView res,
+               const TargetBitmap& bitmap_input,
+               int start_cursor,
+               const int32_t* offsets = nullptr) {
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            std::unique_ptr<PartialRegexMatcher> local_matcher;
+            const PartialRegexMatcher* m = matcher;
+            if (!m) {
+                local_matcher = std::make_unique<PartialRegexMatcher>(val);
+                m = local_matcher.get();
+            }
+
+            bool has_bitmap_input = !bitmap_input.empty();
+            if (searcher) {
+                for (int i = 0; i < size; ++i) {
+                    if (has_bitmap_input && !bitmap_input[i + start_cursor])
+                        continue;
+                    auto idx = (filter_type == FilterType::random && offsets)
+                                   ? offsets[i]
+                                   : i;
+                    res[i] = searcher->contains(src[idx]) && (*m)(src[idx]);
+                }
+            } else {
+                for (int i = 0; i < size; ++i) {
+                    if (has_bitmap_input && !bitmap_input[i + start_cursor])
+                        continue;
+                    if constexpr (filter_type == FilterType::random) {
+                        res[i] = (*m)(src[offsets ? offsets[i] : i]);
+                    } else {
+                        res[i] = (*m)(src[i]);
+                    }
+                }
+            }
+        } else {
+            ThrowInfo(OpTypeInvalid,
+                      "RegexMatch operation only supports string type");
         }
     }
 };
@@ -140,12 +284,17 @@ struct UnaryElementFunc {
     operator()(const T* src,
                size_t size,
                TargetBitmapView res,
-               IndexInnerType val) {
+               const IndexInnerType& val) {
         static_assert(filter_type == FilterType::sequential,
                       "this override operator() of UnaryElementFunc does not "
                       "support FilterType::random");
         if constexpr (op == proto::plan::OpType::Match) {
             UnaryElementFuncForMatch<T> func;
+            func(src, size, val, res);
+            return;
+        }
+        if constexpr (op == proto::plan::OpType::RegexMatch) {
+            UnaryElementFuncForRegexMatch<T> func;
             func(src, size, val, res);
             return;
         }
@@ -207,7 +356,7 @@ struct UnaryElementFunc {
     void
     operator()(const T* src,
                size_t size,
-               IndexInnerType val,
+               const IndexInnerType& val,
                TargetBitmapView res,
                const TargetBitmap& bitmap_input,
                size_t start_cursor,
@@ -215,6 +364,11 @@ struct UnaryElementFunc {
         bool has_bitmap_input = !bitmap_input.empty();
         if constexpr (op == proto::plan::OpType::Match) {
             UnaryElementFuncForMatch<T, filter_type> func;
+            func(src, size, val, res, bitmap_input, start_cursor, offsets);
+            return;
+        }
+        if constexpr (op == proto::plan::OpType::RegexMatch) {
+            UnaryElementFuncForRegexMatch<T, filter_type> func;
             func(src, size, val, res, bitmap_input, start_cursor, offsets);
             return;
         }
@@ -345,7 +499,7 @@ struct UnaryElementFuncForArray {
     operator()(const ArrayView* src,
                const bool* valid_data,
                size_t size,
-               ValueType val,
+               const ValueType& val,
                int index,
                TargetBitmapView res,
                TargetBitmapView valid_res,
@@ -353,6 +507,20 @@ struct UnaryElementFuncForArray {
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
+        // Pre-construct LikePatternMatcher/PartialRegexMatcher before the loop
+        // to avoid re-parsing the pattern on every row.
+        [[maybe_unused]] std::optional<LikePatternMatcher> matcher;
+        if constexpr (op == proto::plan::OpType::Match) {
+            if constexpr (std::is_same_v<ValueType, std::string>) {
+                matcher.emplace(val);
+            }
+        }
+        [[maybe_unused]] std::optional<PartialRegexMatcher> regex_matcher;
+        if constexpr (op == proto::plan::OpType::RegexMatch) {
+            if constexpr (std::is_same_v<ValueType, std::string>) {
+                regex_matcher.emplace(val);
+            }
+        }
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -403,18 +571,41 @@ struct UnaryElementFuncForArray {
                 UnaryArrayCompare(milvus::query::Match(array_data, val, op));
             } else if constexpr (op == proto::plan::OpType::Match) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = false;
-                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation is not supported for nested "
+                              "Array type");
+                } else if constexpr (std::is_same_v<GetType,
+                                                    std::string_view> ||
+                                     std::is_same_v<GetType, std::string>) {
                     if (index >= src[offset].length()) {
                         res[i] = false;
                         continue;
                     }
-                    PatternMatchTranslator translator;
-                    auto regex_pattern = translator(val);
-                    RegexMatcher matcher(regex_pattern);
                     auto array_data =
                         src[offset].template get_data<GetType>(index);
-                    res[i] = matcher(array_data);
+                    res[i] = (*matcher)(array_data);
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation only supports string type");
+                }
+            } else if constexpr (op == proto::plan::OpType::RegexMatch) {
+                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    ThrowInfo(OpTypeInvalid,
+                              "RegexMatch operation is not supported for "
+                              "nested Array type");
+                } else if constexpr (std::is_same_v<GetType,
+                                                    std::string_view> ||
+                                     std::is_same_v<GetType, std::string>) {
+                    if (index >= src[offset].length()) {
+                        res[i] = false;
+                        continue;
+                    }
+                    auto array_data =
+                        src[offset].template get_data<GetType>(index);
+                    res[i] = (*regex_matcher)(array_data);
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "RegexMatch operation only supports string type");
                 }
             } else {
                 ThrowInfo(OpTypeInvalid,
@@ -448,7 +639,7 @@ struct UnaryIndexFuncForMatch {
 
             if (!index->HasRawData()) {
                 ThrowInfo(Unsupported,
-                          "index don't support regex query and don't have "
+                          "index don't support pattern match and don't have "
                           "raw data");
             }
             // retrieve raw data to do brute force query, may be very slow.
@@ -467,9 +658,7 @@ struct UnaryIndexFuncForMatch {
                 }
                 return res;
             } else {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                LikePatternMatcher matcher(val);
                 for (int64_t i = 0; i < cnt; i++) {
                     auto raw = index->Reverse_Lookup(i);
                     if (!raw.has_value()) {
@@ -511,6 +700,35 @@ struct UnaryIndexFunc {
                              op == proto::plan::OpType::InnerMatch) {
             UnaryIndexFuncForMatch<T> func;
             return func(index, val, op);
+        } else if constexpr (op == proto::plan::OpType::RegexMatch) {
+            if constexpr (std::is_same_v<T, std::string> ||
+                          std::is_same_v<T, std::string_view>) {
+                // Prefer PatternMatch which iterates unique values
+                // (O(unique) vs O(total_rows) for Reverse_Lookup)
+                if (index->SupportPatternMatch()) {
+                    return index->PatternMatch(val, op);
+                }
+                // Fallback to Reverse_Lookup for indexes without
+                // PatternMatch support
+                if (!index->HasRawData()) {
+                    ThrowInfo(Unsupported,
+                              "index doesn't have raw data for RegexMatch");
+                }
+                auto cnt = index->Count();
+                TargetBitmap res(cnt);
+                PartialRegexMatcher matcher(val);
+                for (int64_t i = 0; i < cnt; i++) {
+                    auto raw = index->Reverse_Lookup(i);
+                    if (!raw.has_value()) {
+                        res[i] = false;
+                        continue;
+                    }
+                    res[i] = matcher(raw.value());
+                }
+                return res;
+            }
+            ThrowInfo(ErrorCode::Unsupported,
+                      "RegexMatch is only supported on string types");
         } else {
             ThrowInfo(
                 OpTypeInvalid,
@@ -611,9 +829,17 @@ BatchUnaryCompare(const T* src,
         case proto::plan::Match: {
             if constexpr (std::is_same_v<U, std::string> ||
                           std::is_same_v<U, std::string_view>) {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                LikePatternMatcher matcher(val);
+                for (int i = 0; i < size; ++i) {
+                    res[i] = matcher(src[i]);
+                }
+                break;
+            }
+        }
+        case proto::plan::RegexMatch: {
+            if constexpr (std::is_same_v<U, std::string> ||
+                          std::is_same_v<U, std::string_view>) {
+                PartialRegexMatcher matcher(val);
                 for (int i = 0; i < size; ++i) {
                     res[i] = matcher(src[i]);
                 }
@@ -745,7 +971,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
-        int32_t consistency_level)
+        int32_t consistency_level,
+        const query::PlanOptions& plan_options = {},
+        bool enable_sub_expr_cache_write = true)
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -755,14 +983,19 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       FromValCase(expr->val_.val_case()),
                       active_count,
                       batch_size,
-                      consistency_level),
-          expr_(expr) {
+                      consistency_level,
+                      false,
+                      false,
+                      plan_options),
+          expr_(expr),
+          enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
         auto val_type = FromValCase(expr_->val_.val_case());
         if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
             (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
              expr_->op_type_ == proto::plan::OpType::Match ||
              expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
-             expr_->op_type_ == proto::plan::OpType::PostfixMatch)) {
+             expr_->op_type_ == proto::plan::OpType::PostfixMatch ||
+             expr_->op_type_ == proto::plan::OpType::RegexMatch)) {
             // try to pin ngram index for json
             auto field_id = expr_->column_.field_id_;
             auto schema = segment->get_schema();
@@ -777,10 +1010,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                 pinned_ngram_index_ = segment->GetNgramIndex(op_ctx_, field_id);
             }
         }
+        DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineExecPath() override;
 
     bool
     SupportOffsetInput() override {
@@ -792,7 +1029,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -896,14 +1133,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     bool
-    CanUseIndex();
-
-    template <typename T>
-    bool
     CanUseIndexForArray();
-
-    bool
-    CanUseIndexForJson(DataType val_type);
 
     VectorPtr
     ExecTextMatch();
@@ -917,7 +1147,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
 
-    std::pair<std::string, std::string>
+    static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
 
  private:
@@ -927,6 +1157,49 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
+    bool enable_sub_expr_cache_write_{true};
+
+    // Cached regex objects — constructed once per segment, reused across batches.
+    bool regex_cache_inited_{false};
+    std::unique_ptr<PartialRegexMatcher> cached_regex_matcher_;
+    std::string cached_volnitsky_literal_;
+    std::unique_ptr<VolnitskySearcher> cached_volnitsky_searcher_;
+
+    void
+    EnsureRegexCache() {
+        if (regex_cache_inited_)
+            return;
+        regex_cache_inited_ = true;
+        if (expr_->op_type_ != proto::plan::OpType::RegexMatch)
+            return;
+        auto pattern = GetValueFromProto<std::string>(expr_->val_);
+        cached_regex_matcher_ = std::make_unique<PartialRegexMatcher>(pattern);
+        auto lits = index::extract_literals_from_regex(pattern);
+        for (const auto& l : lits) {
+            if (l.size() > cached_volnitsky_literal_.size())
+                cached_volnitsky_literal_ = l;
+        }
+        if (!cached_volnitsky_literal_.empty()) {
+            cached_volnitsky_searcher_ =
+                std::make_unique<VolnitskySearcher>(cached_volnitsky_literal_);
+        }
+    }
+
+    // Cached LIKE pattern matcher — constructed once per segment, reused
+    // across batches (the pattern is an expression constant).
+    bool like_cache_inited_{false};
+    std::unique_ptr<LikePatternMatcher> cached_like_matcher_;
+
+    void
+    EnsureLikeMatcherCache() {
+        if (like_cache_inited_)
+            return;
+        like_cache_inited_ = true;
+        if (expr_->op_type_ != proto::plan::OpType::Match)
+            return;
+        auto pattern = GetValueFromProto<std::string>(expr_->val_);
+        cached_like_matcher_ = std::make_unique<LikePatternMatcher>(pattern);
+    }
 };
 }  // namespace exec
 }  // namespace milvus

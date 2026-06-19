@@ -21,12 +21,12 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 type qnServerWrapper struct {
@@ -168,12 +168,20 @@ func (qn *qnServerWrapper) DropIndex(ctx context.Context, in *querypb.DropIndexR
 	return qn.QueryNode.DropIndex(ctx, in)
 }
 
+func (qn *qnServerWrapper) UpdateIndex(ctx context.Context, in *querypb.UpdateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return qn.QueryNode.UpdateIndex(ctx, in)
+}
+
 func (qn *qnServerWrapper) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, _ ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	return qn.QueryNode.ValidateAnalyzer(ctx, in)
 }
 
 func (qn *qnServerWrapper) SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return qn.QueryNode.SyncFileResource(ctx, in)
+}
+
+func (qn *qnServerWrapper) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return qn.QueryNode.ClearReadTaskQueue(ctx, in)
 }
 
 func (qn *qnServerWrapper) ComputePhraseMatchSlop(ctx context.Context, in *querypb.ComputePhraseMatchSlopRequest, _ ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {

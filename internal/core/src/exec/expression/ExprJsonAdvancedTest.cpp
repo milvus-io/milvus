@@ -115,7 +115,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSON) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
@@ -301,7 +301,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSONNullable) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
     schema->set_primary_field_id(i64_fid);
@@ -415,7 +415,7 @@ TEST_P(ExprTest, TestNullExprWithJSON) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
@@ -534,7 +534,7 @@ TEST_P(ExprTest, TestTermWithJSON) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
@@ -712,7 +712,7 @@ TEST_P(ExprTest, TestTermWithJSONNullable) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
     schema->set_primary_field_id(i64_fid);
@@ -833,7 +833,7 @@ TEST_P(ExprTest, TestExistsWithJSON) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
@@ -953,7 +953,7 @@ TEST_P(ExprTest, TestExistsWithJSONNullable) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
     schema->set_primary_field_id(i64_fid);

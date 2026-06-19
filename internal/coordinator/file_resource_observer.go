@@ -28,12 +28,12 @@ import (
 	qcsession "github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type NodeType int
@@ -165,7 +165,7 @@ func (m *FileResourceObserver) CheckNodeSynced(nodeID int64) bool {
 func (m *FileResourceObserver) CheckAllQnReady() error {
 	// return error if meta is not ready
 	if m.meta == nil {
-		return merr.WrapErrParameterInvalidMsg("rootcoord meta is not ready")
+		return merr.WrapErrServiceUnavailable("rootcoord meta is not ready")
 	}
 
 	resources, version := m.meta.ListFileResource(m.ctx)
@@ -177,7 +177,7 @@ func (m *FileResourceObserver) CheckAllQnReady() error {
 	var err error
 	m.distribution.Range(func(nodeID int64, node *NodeInfo) bool {
 		if node.NodeType == QueryNode && node.Version < version {
-			err = merr.WrapErrParameterInvalidMsg("node %d file resource not synced", nodeID)
+			err = merr.WrapErrServiceUnavailableMsg("file resource not synced, node-%d", nodeID)
 			return false
 		}
 		return true

@@ -22,9 +22,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestInt64Pk(t *testing.T) {
@@ -38,7 +38,7 @@ func TestInt64Pk(t *testing.T) {
 	}
 
 	bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-	bfs.UpdateBloomFilter(pks)
+	bfs.UpdatePkCandidate(pks)
 
 	for i := 0; i < batchSize; i++ {
 		lc := storage.NewLocationsCache(pks[i])
@@ -62,7 +62,7 @@ func TestVarCharPk(t *testing.T) {
 	}
 
 	bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-	bfs.UpdateBloomFilter(pks)
+	bfs.UpdatePkCandidate(pks)
 
 	for i := 0; i < batchSize; i++ {
 		lc := storage.NewLocationsCache(pks[i])
@@ -81,7 +81,7 @@ func TestHistoricalStat(t *testing.T) {
 	}
 
 	bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-	bfs.UpdateBloomFilter(pks)
+	bfs.UpdatePkCandidate(pks)
 
 	// mock historical bf
 	bfs.AddHistoricalStats(bfs.currentStat)
@@ -119,7 +119,7 @@ func TestMemSize(t *testing.T) {
 		}
 
 		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs.UpdateBloomFilter(pks)
+		bfs.UpdatePkCandidate(pks)
 
 		size := bfs.MemSize()
 		assert.Greater(t, size, int64(0))
@@ -138,7 +138,7 @@ func TestMemSize(t *testing.T) {
 		}
 
 		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs.UpdateBloomFilter(pks)
+		bfs.UpdatePkCandidate(pks)
 
 		currentSize := bfs.MemSize()
 
@@ -161,7 +161,7 @@ func TestMemSize(t *testing.T) {
 		}
 
 		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs.UpdateBloomFilter(pks)
+		bfs.UpdatePkCandidate(pks)
 
 		singleSize := bfs.MemSize()
 
@@ -182,7 +182,7 @@ func TestMemSize(t *testing.T) {
 		}
 
 		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs.UpdateBloomFilter(pks)
+		bfs.UpdatePkCandidate(pks)
 
 		size := bfs.MemSize()
 		assert.Greater(t, size, int64(0))

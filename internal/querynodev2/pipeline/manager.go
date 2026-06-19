@@ -23,15 +23,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Manager manage pipeline in querynode
@@ -91,9 +91,9 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 	}
 
 	m.channel2Pipeline[channel] = newPipeLine
-	metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-	metrics.QueryNodeWatchDmlChannelLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Inc()
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(paramtable.GetStringNodeID()).Inc()
+	metrics.QueryNodeWatchDmlChannelLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return newPipeLine, nil
 }
 
@@ -125,8 +125,8 @@ func (m *manager) Remove(channels ...string) {
 			log.Warn("pipeline to be removed doesn't existed", zap.String("channel", channel))
 		}
 	}
-	metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+	metrics.QueryNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Dec()
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(paramtable.GetStringNodeID()).Dec()
 }
 
 // Start pipeline by channel

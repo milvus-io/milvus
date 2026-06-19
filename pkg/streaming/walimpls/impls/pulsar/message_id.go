@@ -7,8 +7,8 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 var _ message.MessageID = pulsarID{}

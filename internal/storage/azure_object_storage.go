@@ -27,8 +27,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type AzureObjectStorage struct {
@@ -138,13 +138,13 @@ func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, buc
 
 func (AzureObjectStorage *AzureObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).UploadStream(ctx, reader, &azblob.UploadStreamOptions{})
-	return checkObjectStorageError(objectName, err)
+	return mapObjectStorageError(objectName, err)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).GetProperties(ctx, &blob.GetPropertiesOptions{})
 	if err != nil {
-		return 0, checkObjectStorageError(objectName, err)
+		return 0, mapObjectStorageError(objectName, err)
 	}
 	return *info.ContentLength, nil
 }
@@ -192,11 +192,11 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 
 func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).Delete(ctx, &blob.DeleteOptions{})
-	return checkObjectStorageError(objectName, err)
+	return mapObjectStorageError(objectName, err)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
-	containerClient := AzureObjectStorage.Client.NewContainerClient(bucketName)
+	containerClient := AzureObjectStorage.NewContainerClient(bucketName)
 	srcBlobClient := containerClient.NewBlockBlobClient(srcObjectName)
 	dstBlobClient := containerClient.NewBlockBlobClient(dstObjectName)
 
@@ -205,5 +205,5 @@ func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bu
 
 	// Start copy operation
 	_, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
-	return checkObjectStorageError(dstObjectName, err)
+	return mapObjectStorageError(dstObjectName, err)
 }

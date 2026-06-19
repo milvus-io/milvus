@@ -26,8 +26,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
@@ -37,19 +37,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // importStateV2ToCopySegmentTaskState converts ImportTaskStateV2 to CopySegmentTaskState
@@ -194,11 +194,11 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	}
 
 	if req.GetBeginLogID() == 0 {
-		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid beginLogID")), nil
+		return merr.Status(merr.WrapErrServiceInternalMsg("invalid beginLogID")), nil
 	}
 
 	if req.GetPreAllocatedLogIDs().GetBegin() == 0 || req.GetPreAllocatedLogIDs().GetEnd() == 0 {
-		return merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid beginID %d or invalid endID %d", req.GetPreAllocatedLogIDs().GetBegin(), req.GetPreAllocatedLogIDs().GetEnd()))), nil
+		return merr.Status(merr.WrapErrServiceInternalMsg(fmt.Sprintf("invalid beginID %d or invalid endID %d", req.GetPreAllocatedLogIDs().GetBegin(), req.GetPreAllocatedLogIDs().GetEnd()))), nil
 	}
 
 	/*
@@ -220,6 +220,8 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(err), err
 	}
 	var task compactor.Compactor
+	binlogIO := io.NewBinlogIO(cm)
+	namespaceEnabled := req.GetSchema().GetEnableNamespace()
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compactor.NewLevelZeroCompactionTask(
@@ -231,65 +233,80 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		)
 	case datapb.CompactionType_MixCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil
 		}
 		pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
 		if err != nil {
 			return merr.Status(err), err
+		}
+		sortFields := []int64{pk.GetFieldID()}
+		if namespaceEnabled {
+			partitionKey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
+			if err != nil {
+				return merr.Status(err), err
+			}
+			sortFields = append([]int64{partitionKey.GetFieldID()}, sortFields...)
 		}
 		task = compactor.NewMixCompactionTask(
 			taskCtx,
 			io.NewBinlogIO(cm),
 			req,
 			compactionParams,
-			[]int64{pk.GetFieldID()},
+			sortFields,
 		)
 	case datapb.CompactionType_ClusteringCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil
 		}
-		task = compactor.NewClusteringCompactionTask(
-			taskCtx,
-			io.NewBinlogIO(cm),
-			req,
-			compactionParams,
-		)
+		if namespaceEnabled {
+			var sortFields []int64
+			partitionKey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
+			if err != nil {
+				return merr.Status(err), err
+			}
+			sortFields = append(sortFields, partitionKey.GetFieldID())
+			pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
+			if err != nil {
+				return merr.Status(err), err
+			}
+			sortFields = append(sortFields, pk.GetFieldID())
+			task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, compactionParams, sortFields)
+		} else {
+			task = compactor.NewClusteringCompactionTask(
+				taskCtx,
+				binlogIO,
+				req,
+				compactionParams,
+			)
+		}
 	case datapb.CompactionType_SortCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil
 		}
 		pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
 		if err != nil {
 			return merr.Status(err), err
 		}
-		task = compactor.NewSortCompactionTask(
-			taskCtx,
-			cm,
-			req,
-			compactionParams,
-			[]int64{pk.GetFieldID()},
-		)
-	case datapb.CompactionType_PartitionKeySortCompaction:
-		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
-		}
-		pk, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
-		partitionkey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
-		if err != nil {
-			return merr.Status(err), err
+		sortFields := []int64{pk.GetFieldID()}
+		if namespaceEnabled {
+			partitionKey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
+			if err != nil {
+				return merr.Status(err), err
+			}
+			sortFields = append([]int64{partitionKey.GetFieldID()}, sortFields...)
 		}
 		task = compactor.NewSortCompactionTask(
 			taskCtx,
 			cm,
 			req,
 			compactionParams,
-			[]int64{partitionkey.GetFieldID(), pk.GetFieldID()},
+			sortFields,
 		)
-	case datapb.CompactionType_ClusteringPartitionKeySortCompaction:
-		// TODO
+	case datapb.CompactionType_BumpSchemaVersionCompaction:
+		task = compactor.NewBumpSchemaVersionCompactionTask(taskCtx, cm, req, compactionParams)
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))
-		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
+		return merr.Status(merr.WrapErrServiceInternalMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
 	succeed, err := node.compactionExecutor.Enqueue(task)
@@ -756,12 +773,16 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)
-	case taskcommon.ExternalCollection:
-		req := &datapb.UpdateExternalCollectionRequest{}
+	case taskcommon.RefreshExternalCollection:
+		req := &datapb.RefreshExternalCollectionTaskRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createExternalCollectionTask(ctx, req)
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		return node.createRefreshExternalCollectionTask(ctx, clusterID, req)
 	case taskcommon.CopySegment:
 		req := &datapb.CopySegmentRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -769,7 +790,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		}
 		return node.CopySegment(ctx, req)
 	default:
-		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("CreateTask failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -786,7 +807,7 @@ func wrapQueryTaskResult[Resp proto.Message](resp Resp, properties taskcommon.Pr
 	}
 	statusResp, ok := any(resp).(ResponseWithStatus)
 	if !ok {
-		return &workerpb.QueryTaskResponse{Status: merr.Status(fmt.Errorf("response does not implement GetStatus"))}, nil
+		return &workerpb.QueryTaskResponse{Status: merr.Status(merr.WrapErrServiceInternalMsg("response does not implement GetStatus"))}, nil
 	}
 	return &workerpb.QueryTaskResponse{
 		Status:     statusResp.GetStatus(),
@@ -878,11 +899,11 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
 		return wrapQueryTaskResult(resp, resProperties)
-	case taskcommon.ExternalCollection:
+	case taskcommon.RefreshExternalCollection:
 		// Query task state from external collection manager
 		info := node.externalCollectionManager.Get(clusterID, taskID)
 		if info == nil {
-			resp := &datapb.UpdateExternalCollectionResponse{
+			resp := &datapb.RefreshExternalCollectionTaskResponse{
 				Status:     merr.Success(),
 				State:      indexpb.JobState_JobStateFailed,
 				FailReason: "task result not found",
@@ -892,7 +913,7 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendReason("task result not found")
 			return wrapQueryTaskResult(resp, resProperties)
 		}
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			Status:          merr.Success(),
 			State:           info.State,
 			FailReason:      info.FailReason,
@@ -916,7 +937,7 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
 	default:
-		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("QueryTask failed", zap.Error(err))
 		return &workerpb.QueryTaskResponse{
 			Status: merr.Status(err),
@@ -960,15 +981,15 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			TaskIDs:   []int64{taskID},
 			JobType:   jobType,
 		})
-	case taskcommon.ExternalCollection:
+	case taskcommon.RefreshExternalCollection:
 		// Drop external collection task from external collection manager
 		clusterID, err := properties.GetClusterID()
 		if err != nil {
 			return merr.Status(err), nil
 		}
-		cancelled := node.externalCollectionManager.CancelTask(clusterID, taskID)
+		canceled := node.externalCollectionManager.CancelTask(clusterID, taskID)
 		info := node.externalCollectionManager.Delete(clusterID, taskID)
-		if !cancelled && info != nil && info.Cancel != nil {
+		if !canceled && info != nil && info.Cancel != nil {
 			info.Cancel()
 		}
 		log.Ctx(ctx).Info("DropTask for external collection completed",
@@ -976,7 +997,7 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			zap.String("clusterID", clusterID))
 		return merr.Success(), nil
 	default:
-		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("DropTask failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -998,15 +1019,18 @@ func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.Sync
 	return merr.Success(), nil
 }
 
-// createExternalCollectionTask handles updating external collection segments
-// This submits the task to the external collection manager for async execution
-func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *datapb.UpdateExternalCollectionRequest) (*commonpb.Status, error) {
+// createRefreshExternalCollectionTask handles a refresh-external-collection task dispatched from DataCoord.
+// This submits the task to the external collection manager for async execution.
+// clusterID is the caller's cluster identifier (from CreateTask properties),
+// used as the task key so that QueryTask from the same caller can locate the result.
+func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, clusterID string, req *datapb.RefreshExternalCollectionTaskRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("clusterID", clusterID),
 	)
 
-	log.Info("createExternalCollectionTask received",
+	log.Info("createRefreshExternalCollectionTask received",
 		zap.Int("currentSegments", len(req.GetCurrentSegments())),
 		zap.String("externalSource", req.GetExternalSource()))
 
@@ -1014,13 +1038,10 @@ func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *dat
 		return merr.Status(err), nil
 	}
 
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-
 	// Submit task to external collection manager
 	// The task will execute asynchronously in the manager's goroutine pool
-	err := node.externalCollectionManager.SubmitTask(clusterID, req, func(taskCtx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
-		// Execute the task
-		task := external.NewUpdateExternalTask(taskCtx, func() {}, req)
+	err := node.externalCollectionManager.SubmitTask(clusterID, req, func(taskCtx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+		task := external.NewRefreshExternalCollectionTask(taskCtx, req)
 
 		if err := task.PreExecute(taskCtx); err != nil {
 			log.Warn("external collection task PreExecute failed", zap.Error(err))
@@ -1040,10 +1061,10 @@ func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *dat
 		log.Info("external collection task completed successfully",
 			zap.Int("updatedSegments", len(task.GetUpdatedSegments())))
 
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			Status:          merr.Success(),
 			State:           indexpb.JobState_JobStateFinished,
-			KeptSegments:    extractSegmentIDs(req.GetCurrentSegments()),
+			KeptSegments:    task.GetKeptSegmentIDs(),
 			UpdatedSegments: task.GetUpdatedSegments(),
 		}
 
@@ -1056,18 +1077,4 @@ func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *dat
 
 	log.Info("external collection task submitted to manager")
 	return merr.Success(), nil
-}
-
-func extractSegmentIDs(segments []*datapb.SegmentInfo) []int64 {
-	if len(segments) == 0 {
-		return nil
-	}
-	result := make([]int64, 0, len(segments))
-	for _, seg := range segments {
-		if seg == nil {
-			continue
-		}
-		result = append(result, seg.GetID())
-	}
-	return result
 }

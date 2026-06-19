@@ -23,21 +23,22 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func init() {
@@ -246,6 +247,7 @@ func (suite *ReaderSuite) TestError() {
 				return r, nil
 			}
 		})
+		cm.EXPECT().Size(mock.Anything, "dummy path").Return(int64(len(content)), nil).Maybe()
 
 		reader, err := NewReader(context.Background(), cm, schema, "dummy path", bufferSize, ',', "")
 		suite.Error(err)
@@ -346,6 +348,51 @@ func (suite *ReaderSuite) TestReadLoop() {
 	suite.Nil(data)
 }
 
+func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "int32",
+				DataType: schemapb.DataType_Int32,
+			},
+		},
+	}
+	var contentBuilder strings.Builder
+	contentBuilder.WriteString("pk,int32\n")
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&contentBuilder, "%d,%d\n", i, i*10)
+	}
+	content := contentBuilder.String()
+	openCount := 0
+
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, "dummy path").RunAndReturn(func(ctx context.Context, path string) (storage.FileReader, error) {
+		openCount++
+		if openCount == 1 {
+			return importcommon.NewPrematureEOFReader(content, 18), nil
+		}
+		return importcommon.NewMockReader(content), nil
+	})
+
+	reader, err := NewReader(context.Background(), cm, schema, "dummy path", 1024, ',', "")
+	suite.NoError(err)
+	defer reader.Close()
+
+	data, err := reader.Read()
+	suite.NoError(err)
+	suite.Equal(100, data.GetRowNum())
+	suite.Equal(int64(1), data.Data[100].GetRow(0))
+	suite.Equal(int32(1000), data.Data[101].GetRow(99))
+	suite.GreaterOrEqual(openCount, 2)
+}
+
 func TestCsvReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
@@ -399,5 +446,90 @@ func (suite *ReaderSuite) TestAllowInsertAutoID_KeepUserPK() {
 		// call Read once to ensure parsing proceeds
 		_, err = reader.Read()
 		suite.NoError(err)
+	}
+}
+
+func (suite *ReaderSuite) TestFunctionOutputField() {
+	// Test 1: BM25 function output NOT in CSV should be excluded from result,
+	// but nullable non-function-output field not in CSV should be retained (filled with nil).
+	{
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+				},
+				{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+				{FieldID: 103, Name: "score", DataType: schemapb.DataType_Float, Nullable: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Id: 1000, Name: "bm25", Type: schemapb.FunctionType_BM25,
+					InputFieldIds: []int64{101}, InputFieldNames: []string{"text"},
+					OutputFieldIds: []int64{102}, OutputFieldNames: []string{"sparse"},
+				},
+			},
+		}
+		// CSV does NOT provide "sparse" (function output) or "score" (nullable)
+		content := "pk,text\n1,hello\n2,world"
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+			return importcommon.NewMockReader(content), nil
+		})
+
+		reader, err := NewReader(context.Background(), cm, schema, "dummy path", 1024, ',', "")
+		suite.NoError(err)
+		res, err := reader.Read()
+		suite.NoError(err)
+		suite.Equal(2, res.GetRowNum())
+		// BM25 function output field should be removed (not populated from CSV)
+		_, hasSparse := res.Data[102]
+		suite.False(hasSparse)
+		// Nullable non-function-output field should be retained (filled with nil, not removed)
+		scoreData, hasScore := res.Data[103]
+		suite.True(hasScore)
+		suite.Equal(2, scoreData.RowNum())
+	}
+
+	// Test 2: Non-BM25 function output in CSV with property enabled should be included
+	{
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+				},
+				{
+					FieldID: 102, Name: "embedding", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Id: 1000, Name: "text_embedding", Type: schemapb.FunctionType_TextEmbedding,
+					InputFieldIds: []int64{101}, InputFieldNames: []string{"text"},
+					OutputFieldIds: []int64{102}, OutputFieldNames: []string{"embedding"},
+				},
+			},
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAllowInsertNonBM25FunctionOutputs, Value: "true"},
+			},
+		}
+		content := "pk,text,embedding\n1,hello,\"[0.1, 0.2]\"\n2,world,\"[0.3, 0.4]\""
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+			return importcommon.NewMockReader(content), nil
+		})
+
+		reader, err := NewReader(context.Background(), cm, schema, "dummy path", 1024, ',', "")
+		suite.NoError(err)
+		res, err := reader.Read()
+		suite.NoError(err)
+		suite.Equal(2, res.GetRowNum())
+		// embedding field should be present with correct data
+		suite.NotNil(res.Data[102])
+		suite.Equal(2, res.Data[102].RowNum())
 	}
 }

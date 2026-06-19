@@ -434,6 +434,59 @@ TEST_F(MatchExprTest, MatchExactZero) {
         });
 }
 
+TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
+    struct BatchSizeGuard {
+        int64_t saved;
+        ~BatchSizeGuard() {
+            EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
+        }
+    } guard{EXEC_EVAL_EXPR_BATCH_SIZE.load()};
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, false);
+
+    constexpr int64_t N = 3;
+    auto insert_data = std::make_unique<InsertRecordProto>();
+
+    std::vector<int64_t> ids = {0, 1, 2};
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, N, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+    std::vector<milvus::proto::schema::ScalarField> sub_int_data(N);
+    sub_int_data[2].mutable_int_data()->add_data(9001);
+    auto sub_int_array = CreateDataArrayFrom(
+        sub_int_data.data(), nullptr, N, schema->operator[](sub_int_fid));
+    insert_data->mutable_fields_data()->AddAllocated(sub_int_array.release());
+    insert_data->set_num_rows(N);
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema;
+    generated_data.raw_ = insert_data.release();
+    for (int64_t i = 0; i < N; ++i) {
+        generated_data.row_ids_.push_back(i);
+        generated_data.timestamps_.push_back(i);
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, generated_data);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.Parse("match_any(struct_array, $[sub_int] >= 9000)");
+    auto plan =
+        CreateRetrievePlanByExpr(schema, plan_str.data(), plan_str.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto result = segment->Retrieve(
+        nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->offset_size(), 1);
+    EXPECT_EQ(result->offset(0), 2);
+}
+
 class SealedMatchExprTest : public ::testing::Test {
  protected:
     void
@@ -1571,6 +1624,34 @@ TEST_F(SealedMatchExprTestNoIndex, MatchWithOtherExpr) {
     EXPECT_GT(result->offset_size(), 0)
         << "Should have at least some matching rows";
     std::cout << "==============================" << std::endl;
+}
+
+TEST_F(SealedMatchExprTestNoIndex, ConjunctSkipMovesMatchChildCursor) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    // Batch size is 100 in this fixture. The id predicate rejects the first two
+    // batches completely, so ConjunctExpr short-circuits and skips MatchExpr.
+    std::string predicate = "$[sub_str] == \"" + target_str +
+                            "\" && $[sub_int] > " + std::to_string(target_int);
+    std::string filter_expr =
+        "id > 199 && match_any(struct_array, " + predicate + ")";
+
+    auto result = ExecuteRetrieve(filter_expr);
+
+    std::set<int64_t> expected_rows;
+    for (size_t i = 0; i < N_; ++i) {
+        if (i > 199 && CountMatchingElements(i, target_str, target_int) > 0) {
+            expected_rows.insert(static_cast<int64_t>(i));
+        }
+    }
+
+    std::set<int64_t> actual_rows;
+    for (const auto offset : result->offset()) {
+        actual_rows.insert(offset);
+    }
+
+    EXPECT_EQ(expected_rows, actual_rows);
 }
 
 // ==================== Parameterized Test for Different Int Types ====================

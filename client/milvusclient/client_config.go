@@ -2,6 +2,7 @@ package milvusclient
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"math"
 	"net/url"
@@ -55,6 +56,8 @@ type ClientConfig struct {
 
 	EnableTLSAuth bool   // Enable TLS Auth for transport security.
 	APIKey        string // API key
+
+	tlsConfig *tls.Config // Custom TLS config, set via WithTLSConfig method.
 
 	DialOptions []grpc.DialOption // Dial options for GRPC.
 
@@ -148,4 +151,19 @@ func (c *ClientConfig) hasFlags(flags uint64) bool {
 
 func (c *ClientConfig) resetFlags(flags uint64) {
 	c.flags &= ^flags
+}
+
+// WithTLSConfig sets the custom TLS configuration and enables TLS auth.
+// This method should be used to configure custom TLS settings (e.g., mTLS, custom CA).
+func (c *ClientConfig) WithTLSConfig(tlsConfig *tls.Config) *ClientConfig {
+	c.tlsConfig = tlsConfig
+	c.EnableTLSAuth = true
+	return c
+}
+
+// WithGrpcAuthority sets the gRPC :authority header, used for proxy-based routing.
+// DefaultGrpcOpts are always applied by dialOptions(), so only the authority option is needed here.
+func (c *ClientConfig) WithGrpcAuthority(authority string) *ClientConfig {
+	c.DialOptions = []grpc.DialOption{grpc.WithAuthority(authority)}
+	return c
 }

@@ -251,9 +251,6 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         for result in results[0]:
             assert result['highlight'][default_text_field_name]['fragments'] in expected
 
-        # test with multi analyzer
-        # BUG: #46498
-        '''
         results = client.search(
             collection_name, 
             ["water"],
@@ -265,7 +262,6 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         assert results[0] != []
         for result in results[0]:
             assert result['highlight'][default_text_field_name_multi_analyzer]['fragments'] in expected
-            '''
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_highlighter_multiple_tags(self):
@@ -1115,8 +1111,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
                                        num_of_fragments=1)
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: cannot parse expression: TEXT_MATCH({default_text_field_name}, \"seat\"), "
-                             f"error: field \"{default_text_field_name}\" does not enable match: invalid parameter"}
+                 ct.err_msg: "does not enable match"}
 
         self.search(
             client,

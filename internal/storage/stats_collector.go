@@ -20,15 +20,15 @@ import (
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // StatsCollector collects statistics from records
@@ -70,9 +70,7 @@ func (c *PkStatsCollector) Collect(r Record) error {
 			c.pkstats.Update(pk)
 		case schemapb.DataType_VarChar:
 			pkArray := r.Column(c.pkstats.FieldID).(*array.String)
-			pk := &VarCharPrimaryKey{
-				Value: pkArray.Value(i),
-			}
+			pk := NewVarCharPrimaryKey(pkArray.Value(i))
 			c.pkstats.Update(pk)
 		default:
 			panic("invalid data type")
@@ -142,6 +140,31 @@ func (c *PkStatsCollector) Digest(
 	}, nil
 }
 
+// SerializeBlob serializes the collected PK statistics into a Blob without
+// writing to storage. Returns nil if no stats were collected.
+// Also returns the PK field ID for use in path construction.
+func (c *PkStatsCollector) SerializeBlob(rowNum int64) (*Blob, int64, error) {
+	if c.pkstats == nil {
+		return nil, 0, nil
+	}
+
+	codec := NewInsertCodecWithSchema(&etcdpb.CollectionMeta{
+		ID:     c.collectionID,
+		Schema: c.schema,
+	})
+	blob, err := codec.SerializePkStats(c.pkstats, rowNum)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	pkField, err := typeutil.GetPrimaryFieldSchema(c.schema)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return blob, pkField.GetFieldID(), nil
+}
+
 // NewPkStatsCollector creates a new primary key stats collector
 func NewPkStatsCollector(
 	collectionID UniqueID,
@@ -179,7 +202,7 @@ func (c *Bm25StatsCollector) Collect(r Record) error {
 	for fieldID, stats := range c.bm25Stats {
 		field, ok := r.Column(fieldID).(*array.Binary)
 		if !ok {
-			return errors.New("bm25 field value not found")
+			return merr.WrapErrServiceInternalMsg("bm25 field value not found")
 		}
 		for i := 0; i < rows; i++ {
 			stats.AppendBytes(field.Value(i))
@@ -256,6 +279,28 @@ func (c *Bm25StatsCollector) Digest(
 		return nil, err
 	}
 
+	return result, nil
+}
+
+// SerializeBlobs serializes the collected BM25 statistics into Blobs without
+// writing to storage. Returns nil if no BM25 stats were collected.
+// The map key is the field ID.
+func (c *Bm25StatsCollector) SerializeBlobs() (map[int64]*Blob, error) {
+	if len(c.bm25Stats) == 0 {
+		return nil, nil
+	}
+
+	result := make(map[int64]*Blob, len(c.bm25Stats))
+	for fieldID, stats := range c.bm25Stats {
+		data, err := stats.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		result[fieldID] = &Blob{
+			Value:      data,
+			MemorySize: int64(len(data)),
+		}
+	}
 	return result, nil
 }
 

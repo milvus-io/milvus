@@ -18,26 +18,24 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
@@ -80,6 +78,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		preserveFieldID: preserveFieldID == "true",
 	}
 	if err := createCollectionTask.Prepare(ctx); err != nil {
+		createCollectionTask.releaseFileResources()
 		return err
 	}
 
@@ -95,6 +94,9 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		WithBroadcast(broadcastChannel).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		// Do NOT release file resources here: the broadcast task is already in the
+		// scheduler and will retry until success. refCnt will be decremented when
+		// the collection is eventually dropped.
 		return err
 	}
 	return nil
@@ -108,13 +110,13 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 		if !funcutil.IsControlChannel(vchannel) {
 			// create shard info when virtual channel is created.
 			if err := c.createCollectionShard(ctx, header, body, vchannel, result); err != nil {
-				return errors.Wrap(err, "failed to create collection shard")
+				return merr.Wrap(err, "failed to create collection shard")
 			}
 		}
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
-		return errors.Wrap(err, "failed to add collection to meta table")
+		return merr.Wrap(err, "failed to add collection to meta table")
 	}
 
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
@@ -209,6 +211,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		Partitions:           partitions,
 		Properties:           properties,
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
+		EnableNamespace:      body.CollectionSchema.EnableNamespace,
 		UpdateTimestamp:      ts,
 		SchemaVersion:        0,
 		ShardInfos:           shardInfos,
@@ -223,7 +226,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 func mustConsumeConsistencyLevel(properties []*commonpb.KeyValuePair) (commonpb.ConsistencyLevel, []*commonpb.KeyValuePair) {
 	ok, consistencyLevel := getConsistencyLevel(properties...)
 	if !ok {
-		panic(fmt.Errorf("consistency level not found in properties"))
+		panic(merr.WrapErrServiceInternalMsg("consistency level not found in properties"))
 	}
 	newProperties := make([]*commonpb.KeyValuePair, 0, len(properties)-1)
 	for _, property := range properties {

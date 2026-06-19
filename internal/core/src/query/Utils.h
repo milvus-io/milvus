@@ -14,34 +14,81 @@
 #include <limits>
 #include <string>
 
+#include <utility>
+#include <vector>
+
+#include "common/ArrayOffsets.h"
 #include "common/BitsetView.h"
+#include "common/Consts.h"
 #include "common/OffsetMapping.h"
+#include "common/QueryResult.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 
 namespace milvus::query {
-inline TargetBitmap
-TransformBitset(const BitsetView& bitset,
-                const milvus::OffsetMapping& mapping) {
-    TargetBitmap result;
-    auto count = mapping.GetValidCount();
-    result.resize(count);
-    for (int64_t physical_idx = 0; physical_idx < count; physical_idx++) {
-        auto logical_idx = mapping.GetLogicalOffset(physical_idx);
-        if (logical_idx >= 0 &&
-            logical_idx < static_cast<int64_t>(bitset.size())) {
-            result[physical_idx] = bitset.test(logical_idx);
-        }
-    }
-    return result;
+inline void
+FillEmptySearchResult(SearchResult& result, int64_t num_queries, int64_t topk) {
+    auto total_num = num_queries * topk;
+    result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
+    result.distances_.resize(total_num, 0.0f);
+    result.total_nq_ = num_queries;
+    result.unity_topK_ = topk;
 }
 
+// Map logical element IDs returned by knowhere to (doc_id, elem_idx) pairs
+// via ArrayOffsets. Caller must ensure the input `element_ids` are already
+// in logical space (i.e. apply OffsetMapping::TransformOffsets first when
+// offset_mapping is enabled), since ArrayOffsets::ElementIDToRowID is keyed
+// on logical element IDs.
+inline std::pair<std::vector<int64_t>, std::vector<int32_t>>
+ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
+                      const milvus::IArrayOffsets& array_offsets) {
+    std::vector<int64_t> doc_offsets;
+    std::vector<int32_t> element_indices;
+    doc_offsets.reserve(element_ids.size());
+    element_indices.reserve(element_ids.size());
+    for (size_t i = 0; i < element_ids.size(); i++) {
+        if (element_ids[i] == INVALID_SEG_OFFSET) {
+            doc_offsets.push_back(INVALID_SEG_OFFSET);
+            element_indices.push_back(-1);
+        } else {
+            auto [doc_id, elem_index] =
+                array_offsets.ElementIDToRowID(element_ids[i]);
+            doc_offsets.push_back(doc_id);
+            element_indices.push_back(elem_index);
+        }
+    }
+    return std::make_pair(std::move(doc_offsets), std::move(element_indices));
+}
+
+// Map knowhere's raw offsets back to logical space. The two inputs are
+// mutually exclusive:
+//
+// - array_offsets != nullptr (VECTOR_ARRAY element-level search):
+//   knowhere returns physical element IDs. ArrayOffsets is built by
+//   walking every row in the segment and advancing the row counter on
+//   every row (including empty/null rows, which occupy a zero-length
+//   element range), so ElementIDToRowID produces (logical_row_id,
+//   elem_idx) directly. No OffsetMapping pass is needed.
+//
+// - array_offsets == nullptr (plain vector field): when OffsetMapping is
+//   enabled, the index/chunk was built over valid rows only, so
+//   knowhere's physical row IDs must be remapped to logical via
+//   OffsetMapping. When OffsetMapping is disabled, TransformOffsets is a
+//   no-op.
 inline void
-TransformOffset(std::vector<int64_t>& seg_offsets,
-                const milvus::OffsetMapping& mapping) {
-    for (auto& seg_offset : seg_offsets) {
-        if (seg_offset >= 0) {
-            seg_offset = mapping.GetLogicalOffset(seg_offset);
+FinalizeVectorSearchOffsets(SearchResult& result,
+                            const milvus::OffsetMapping& offset_mapping,
+                            const milvus::IArrayOffsets* array_offsets) {
+    if (array_offsets != nullptr) {
+        auto [doc_offsets, elem_indices] =
+            ApplyElementIDMapping(result.seg_offsets_, *array_offsets);
+        result.seg_offsets_ = std::move(doc_offsets);
+        result.element_indices_ = std::move(elem_indices);
+        result.element_level_ = true;
+    } else {
+        if (offset_mapping.IsEnabled()) {
+            offset_mapping.TransformOffsets(result.seg_offsets_);
         }
     }
 }
@@ -72,6 +119,37 @@ inline bool
 Match<std::string_view>(const std::string_view& str,
                         const std::string& val,
                         OpType op) {
+    switch (op) {
+        case OpType::PrefixMatch:
+            return PrefixMatch(str, val);
+        case OpType::PostfixMatch:
+            return PostfixMatch(str, val);
+        case OpType::InnerMatch:
+            return InnerMatch(str, val);
+        default:
+            ThrowInfo(OpTypeInvalid, "not supported");
+    }
+}
+
+// Overloads for string_view combinations used when CompareExpr operands
+// hold string_view in the data_access_type variant (chunk access), or a
+// mix of string (index access) and string_view (chunk access).
+inline bool
+Match(const std::string_view& str, const std::string_view& val, OpType op) {
+    switch (op) {
+        case OpType::PrefixMatch:
+            return PrefixMatch(str, val);
+        case OpType::PostfixMatch:
+            return PostfixMatch(str, val);
+        case OpType::InnerMatch:
+            return InnerMatch(str, val);
+        default:
+            ThrowInfo(OpTypeInvalid, "not supported");
+    }
+}
+
+inline bool
+Match(const std::string& str, const std::string_view& val, OpType op) {
     switch (op) {
         case OpType::PrefixMatch:
             return PrefixMatch(str, val);

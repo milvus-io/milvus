@@ -23,22 +23,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/slices"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -291,7 +293,7 @@ func (suite *ReaderSuite) createMockChunk(schema *schemapb.CollectionSchema, ins
 		if len(suite.deletePKs) != 0 {
 			for _, path := range deltaLogs {
 				buf := createDeltaBuf(suite.T(), suite.deletePKs, suite.deleteTss)
-				cm.EXPECT().Read(mock.Anything, path).Return(buf, nil)
+				cm.EXPECT().MultiRead(mock.Anything, []string{path}).Return([][]byte{buf}, nil)
 			}
 		}
 	}
@@ -429,15 +431,16 @@ OUTER:
 		for i := 0; i < expectRowCount; i++ {
 			expect := fieldData.GetRow(i)
 			actual := data.GetRow(i)
-			if fieldDataType == schemapb.DataType_Array {
+			switch fieldDataType {
+			case schemapb.DataType_Array:
 				if expect == nil {
 					suite.Nil(expect)
 				} else {
 					suite.True(slices.Equal(expect.(*schemapb.ScalarField).GetIntData().GetData(), actual.(*schemapb.ScalarField).GetIntData().GetData()))
 				}
-			} else if fieldDataType == schemapb.DataType_ArrayOfVector {
+			case schemapb.DataType_ArrayOfVector:
 				suite.True(slices.Equal(expect.(*schemapb.VectorField).GetFloatVector().GetData(), actual.(*schemapb.VectorField).GetFloatVector().GetData()))
-			} else {
+			default:
 				suite.Equal(expect, actual)
 			}
 		}
@@ -518,6 +521,18 @@ func (suite *ReaderSuite) TestStringPK() {
 }
 
 func (suite *ReaderSuite) TestVector() {
+	suite.pkDataType = schemapb.DataType_Int64
+	suite.tsStart = 2
+	suite.tsEnd = 8
+	suite.deletePKs = []storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(1),
+		storage.NewInt64PrimaryKey(4),
+		storage.NewInt64PrimaryKey(6),
+		storage.NewInt64PrimaryKey(8),
+	}
+	suite.deleteTss = []int64{
+		8, 8, 1, 8,
+	}
 	suite.vecDataType = schemapb.DataType_BinaryVector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 	suite.vecDataType = schemapb.DataType_FloatVector
@@ -818,4 +833,126 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 func TestBinlogReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
+}
+
+func TestDeltaLogListing_RetryOnTransientError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+
+	insertPrefix := "backup/insert_log/seg/"
+	deltaPrefix := "backup/delta_log/seg/"
+
+	// Insert walk succeeds immediately with one field
+	cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, true, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+			walkFunc(&storage.ChunkObjectInfo{FilePath: insertPrefix + "0/file1"})
+			walkFunc(&storage.ChunkObjectInfo{FilePath: insertPrefix + "1/file1"})
+			return nil
+		}).Once()
+
+	// Delta walk: first call returns partial results + transient error, second call succeeds with empty result
+	// Empty result triggers early return (len(deltaLogs) == 0) so readDelete is never called.
+	deltaCallCount := 0
+	cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, true, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+			deltaCallCount++
+			if deltaCallCount == 1 {
+				walkFunc(&storage.ChunkObjectInfo{FilePath: deltaPrefix + "partial"})
+				return errors.New("net/http: timeout awaiting response headers")
+			}
+			// Second attempt: empty walk (no delta logs) — triggers early nil return
+			return nil
+		}).Times(2)
+
+	r := &reader{
+		ctx:            ctx,
+		cm:             cm,
+		schema:         &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 0}, {FieldID: 1}}},
+		storageVersion: storage.StorageV1,
+		retryAttempts:  5,
+	}
+
+	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, deltaCallCount, "delta log WalkWithPrefix should have retried on transient error")
+}
+
+func TestDeltaLogListing_NonRetryableErrorFailsFast(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+
+	insertPrefix := "backup/insert_log/seg/"
+	deltaPrefix := "backup/delta_log/seg/"
+
+	// Insert walk succeeds
+	cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, true, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+			walkFunc(&storage.ChunkObjectInfo{FilePath: insertPrefix + "0/file1"})
+			walkFunc(&storage.ChunkObjectInfo{FilePath: insertPrefix + "1/file1"})
+			return nil
+		}).Once()
+
+	// Delta walk: return non-retryable error
+	deltaCallCount := 0
+	cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, true, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+			deltaCallCount++
+			return merr.WrapErrIoPermissionDenied(deltaPrefix, errors.New("access denied"))
+		}).Once()
+
+	r := &reader{
+		ctx:            ctx,
+		cm:             cm,
+		schema:         &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 0}, {FieldID: 1}}},
+		storageVersion: storage.StorageV1,
+		retryAttempts:  5,
+	}
+
+	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrIoPermissionDenied))
+	assert.Equal(t, 1, deltaCallCount, "non-retryable error should not retry")
+}
+
+func TestMultiReadWithRetry_NonRetryableError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	cm := mocks.NewChunkManager(t)
+	callCount := 0
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
+			callCount++
+			return nil, merr.WrapErrIoPermissionDenied("test/path", fmt.Errorf("access denied"))
+		})
+
+	r := &reader{ctx: ctx, cm: cm, retryAttempts: 3}
+	_, err := r.multiReadWithRetry(ctx, []string{"test/path"})
+	assert.Error(t, err)
+	assert.True(t, merr.IsNonRetryableErr(err))
+	assert.Equal(t, 1, callCount, "non-retryable error should not be retried")
+}
+
+func TestMultiReadWithRetry_RetryableError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	cm := mocks.NewChunkManager(t)
+	callCount := 0
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
+			callCount++
+			if callCount < 3 {
+				return nil, merr.WrapErrIoFailed("test/path", fmt.Errorf("transient error"))
+			}
+			return [][]byte{[]byte("data")}, nil
+		})
+
+	r := &reader{ctx: ctx, cm: cm, retryAttempts: 3}
+	result, err := r.multiReadWithRetry(ctx, []string{"test/path"})
+	assert.NoError(t, err)
+	assert.Equal(t, [][]byte{[]byte("data")}, result)
+	assert.Equal(t, 3, callCount, "retryable error should be retried until success")
 }

@@ -1,10 +1,10 @@
-import re
-import jieba
-from faker import Faker
-from tantivy import SchemaBuilder, Document, Index, Query
-from typing import List, Dict
-import numpy as np
 import random
+import re
+
+import numpy as np
+import rjieba
+from faker import Faker
+from tantivy import Document, Index, Query, SchemaBuilder
 
 
 class PhraseMatchTestGenerator:
@@ -163,18 +163,18 @@ class PhraseMatchTestGenerator:
         self.connectors = self.zh_connectors if language == "zh" else self.en_connectors
         self.modifiers = self.zh_modifiers if language == "zh" else self.en_modifiers
 
-    def tokenize_text(self, text: str) -> List[str]:
+    def tokenize_text(self, text: str) -> list[str]:
         """Tokenize text using jieba tokenizer"""
         text = text.strip()
         text = re.sub(r"[^\w\s]", " ", text)
         text = text.replace("\n", " ")
         if self.language == "zh":
             text = text.replace(" ", "")
-            return list(jieba.cut_for_search(text))
+            return list(rjieba.cut_for_search(text))
         else:
             return list(text.split())
 
-    def generate_embedding(self, dim: int) -> List[float]:
+    def generate_embedding(self, dim: int) -> list[float]:
         """Generate random embedding vector"""
         return list(np.random.random(dim))
 
@@ -184,17 +184,23 @@ class PhraseMatchTestGenerator:
             # Simple pattern with two activities
             lambda: f"{random.choice(self.activities)} {random.choice(self.activities)}",
             # Pattern with connector between activities
-            lambda: f"{random.choice(self.activities)} {random.choice(self.connectors)} {random.choice(self.activities)}",
+            lambda: (
+                f"{random.choice(self.activities)} {random.choice(self.connectors)} {random.choice(self.activities)}"
+            ),
             # Pattern with modifier between activities
-            lambda: f"{random.choice(self.activities)} {random.choice(self.modifiers)} {random.choice(self.activities)}",
+            lambda: (
+                f"{random.choice(self.activities)} {random.choice(self.modifiers)} {random.choice(self.activities)}"
+            ),
             # Complex pattern with verb and activities
             lambda: f"{random.choice(self.verbs)} {random.choice(self.activities)} {random.choice(self.activities)}",
             # Pattern with multiple gaps
-            lambda: f"{random.choice(self.activities)} {random.choice(self.modifiers)} {random.choice(self.connectors)} {random.choice(self.activities)}",
+            lambda: (
+                f"{random.choice(self.activities)} {random.choice(self.modifiers)} {random.choice(self.connectors)} {random.choice(self.activities)}"
+            ),
         ]
         return random.choice(patterns)()
 
-    def generate_test_data(self, num_documents: int, dim: int) -> List[Dict]:
+    def generate_test_data(self, num_documents: int, dim: int) -> list[dict]:
         """
         Generate test documents with text and embeddings
 
@@ -242,7 +248,7 @@ class PhraseMatchTestGenerator:
 
         return self.documents
 
-    def _generate_random_word(self, exclude_words: List[str]) -> str:
+    def _generate_random_word(self, exclude_words: list[str]) -> str:
         """
         Generate a random word that is not in the exclude_words list using Faker
         """
@@ -252,7 +258,7 @@ class PhraseMatchTestGenerator:
             if word not in exclude_words:
                 return word
 
-    def generate_pattern_documents(self, patterns: List[tuple], dim: int, num_docs_per_pattern: int = 1) -> List[Dict]:
+    def generate_pattern_documents(self, patterns: list[tuple], dim: int, num_docs_per_pattern: int = 1) -> list[dict]:
         """
         Generate documents that match specific test patterns with their corresponding slop values
 
@@ -272,8 +278,9 @@ class PhraseMatchTestGenerator:
             # Generate multiple documents for each pattern
             if slop == 0:  # Exact phrase
                 text = " ".join(pattern_words)
-                pattern_documents.append({
-                    "id": random.randint(0, 1000000), "text": text, "emb": self.generate_embedding(dim)})
+                pattern_documents.append(
+                    {"id": random.randint(0, 1000000), "text": text, "emb": self.generate_embedding(dim)}
+                )
 
             else:  # Pattern with gaps
                 # Generate slop number of unique words
@@ -290,10 +297,9 @@ class PhraseMatchTestGenerator:
                     all_words.insert(pos, word)
 
                 text = " ".join(all_words)
-                pattern_documents.append({
-                    "id": random.randint(0, 1000000),
-                    "text": text,
-                    "emb": self.generate_embedding(dim)})
+                pattern_documents.append(
+                    {"id": random.randint(0, 1000000), "text": text, "emb": self.generate_embedding(dim)}
+                )
 
         new_pattern_documents = []
         start = 1000000
@@ -305,7 +311,7 @@ class PhraseMatchTestGenerator:
 
         return new_pattern_documents
 
-    def generate_test_queries(self, num_queries: int) -> List[Dict]:
+    def generate_test_queries(self, num_queries: int) -> list[dict]:
         """
         Generate test queries with varying slop values
 
@@ -326,9 +332,7 @@ class PhraseMatchTestGenerator:
             queries.append(
                 {
                     "id": i,
-                    "query": " ".join(words)
-                    if self.language == "en"
-                    else "".join(words),
+                    "query": " ".join(words) if self.language == "en" else "".join(words),
                     "slop": random.choice(slop_values),
                     "type": f"{num_words}_words",
                 }
@@ -336,7 +340,7 @@ class PhraseMatchTestGenerator:
 
         return queries
 
-    def get_query_results(self, query: str, slop: int) -> List[Dict]:
+    def get_query_results(self, query: str, slop: int) -> list[dict]:
         """
         Get all documents that match the phrase query
 
@@ -368,4 +372,3 @@ class PhraseMatchTestGenerator:
             matched_docs.extend(doc_id)
 
         return matched_docs
-

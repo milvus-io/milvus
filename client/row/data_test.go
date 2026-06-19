@@ -245,6 +245,161 @@ func (s *RowsSuite) TestReflectValueCandi() {
 	}
 }
 
+func (s *RowsSuite) TestNullablePointerColumns() {
+	s.Run("nil_pointer_appends_null", func() {
+		type NullableRow struct {
+			ID     int64   `milvus:"primary_key"`
+			Name   *string `milvus:"max_length:256"`
+			Age    *int32
+			Vector []float32 `milvus:"dim:16"`
+		}
+
+		columns, err := AnyToColumns([]any{&NullableRow{
+			ID:     1,
+			Name:   nil,
+			Age:    nil,
+			Vector: make([]float32, 16),
+		}}, false)
+		s.NoError(err)
+
+		for _, col := range columns {
+			if col.Name() == "Name" || col.Name() == "Age" {
+				s.True(col.Nullable(), "column %s should be nullable", col.Name())
+				isNull, err := col.IsNull(0)
+				s.NoError(err)
+				s.True(isNull, "column %s should have null at index 0", col.Name())
+			}
+		}
+	})
+
+	s.Run("non_nil_pointer_appends_value", func() {
+		type NullableRow struct {
+			ID     int64   `milvus:"primary_key"`
+			Name   *string `milvus:"max_length:256"`
+			Age    *int32
+			Vector []float32 `milvus:"dim:16"`
+		}
+
+		name := "test"
+		age := int32(25)
+		columns, err := AnyToColumns([]any{&NullableRow{
+			ID:     1,
+			Name:   &name,
+			Age:    &age,
+			Vector: make([]float32, 16),
+		}}, false)
+		s.NoError(err)
+
+		for _, col := range columns {
+			switch col.Name() {
+			case "Name":
+				s.True(col.Nullable())
+				isNull, err := col.IsNull(0)
+				s.NoError(err)
+				s.False(isNull)
+				val, err := col.Get(0)
+				s.NoError(err)
+				s.Equal("test", val)
+			case "Age":
+				s.True(col.Nullable())
+				isNull, err := col.IsNull(0)
+				s.NoError(err)
+				s.False(isNull)
+				val, err := col.Get(0)
+				s.NoError(err)
+				s.Equal(int32(25), val)
+			}
+		}
+	})
+
+	s.Run("mixed_nil_and_values", func() {
+		type NullableRow struct {
+			ID     int64     `milvus:"primary_key"`
+			Name   *string   `milvus:"max_length:256"`
+			Vector []float32 `milvus:"dim:16"`
+		}
+
+		name := "hello"
+		columns, err := AnyToColumns([]any{
+			&NullableRow{ID: 1, Name: &name, Vector: make([]float32, 16)},
+			&NullableRow{ID: 2, Name: nil, Vector: make([]float32, 16)},
+		}, false)
+		s.NoError(err)
+
+		for _, col := range columns {
+			if col.Name() == "Name" {
+				s.True(col.Nullable())
+
+				isNull0, err := col.IsNull(0)
+				s.NoError(err)
+				s.False(isNull0)
+				val, err := col.Get(0)
+				s.NoError(err)
+				s.Equal("hello", val)
+
+				isNull1, err := col.IsNull(1)
+				s.NoError(err)
+				s.True(isNull1)
+			}
+		}
+	})
+}
+
+func (s *RowsSuite) TestSetFieldPointer() {
+	s.Run("set_pointer_field_with_value", func() {
+		type PtrStruct struct {
+			Name *string
+		}
+		row := &PtrStruct{}
+		err := SetField(row, "Name", "hello")
+		s.NoError(err)
+		s.Require().NotNil(row.Name)
+		s.Equal("hello", *row.Name)
+	})
+
+	s.Run("set_pointer_field_with_nil", func() {
+		type PtrStruct struct {
+			Name *string
+		}
+		name := "old"
+		row := &PtrStruct{Name: &name}
+		err := SetField(row, "Name", nil)
+		s.NoError(err)
+		s.Nil(row.Name)
+	})
+
+	s.Run("set_non_pointer_field", func() {
+		type RegularStruct struct {
+			Name string
+		}
+		row := &RegularStruct{}
+		err := SetField(row, "Name", "hello")
+		s.NoError(err)
+		s.Equal("hello", row.Name)
+	})
+}
+
+func (s *RowsSuite) TestReflectValueCandiPointer() {
+	s.Run("pointer_field_isPtr", func() {
+		type PtrStruct struct {
+			Name  *string
+			Value int64
+		}
+		name := "test"
+		v := reflect.ValueOf(PtrStruct{Name: &name, Value: 42})
+		result, err := reflectValueCandi(v)
+		s.NoError(err)
+
+		nameCandi, ok := result["Name"]
+		s.True(ok)
+		s.True(nameCandi.isPtr)
+
+		valueCandi, ok := result["Value"]
+		s.True(ok)
+		s.False(valueCandi.isPtr)
+	})
+}
+
 func TestRows(t *testing.T) {
 	suite.Run(t, new(RowsSuite))
 }

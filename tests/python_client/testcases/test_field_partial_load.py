@@ -23,7 +23,7 @@ class TestFieldPartialLoad(TestcaseBase):
         self._connect()
         name = cf.gen_unique_str()
         dim = 128
-        nb = 2000
+        nb = ct.default_nb
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         load_int64_field = cf.gen_int64_field(name="int64_load")
         not_load_int64_field = cf.gen_int64_field(name="int64_not_load")
@@ -85,7 +85,7 @@ class TestFieldPartialLoad(TestcaseBase):
         self._connect()
         name = cf.gen_unique_str()
         dim = 128
-        nb = 2000
+        nb = ct.default_nb
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         load_int64_field = cf.gen_int64_field(name="int64_load")
         load_string_field = cf.gen_string_field(name="string_load")
@@ -143,7 +143,7 @@ class TestFieldPartialLoad(TestcaseBase):
         self._connect()
         name = cf.gen_unique_str()
         dim = 128
-        nb = 2000
+        nb = ct.default_nb
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         load_string_field = cf.gen_string_field(name="string_load")
         vector_field = cf.gen_float_vec_field(name="vec_float32", dim=dim)
@@ -189,7 +189,7 @@ class TestFieldPartialLoad(TestcaseBase):
         self._connect()
         name = cf.gen_unique_str()
         dim = 128
-        nb = 2000
+        nb = ct.default_nb
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         load_int64_field = cf.gen_int64_field(name="int64_load")
         not_load_int64_field = cf.gen_int64_field(name="int64_not_load")
@@ -349,7 +349,7 @@ class TestFieldPartialLoadInvalid(TestcaseBase):
         self._connect()
         name = cf.gen_unique_str()
         dim = 32
-        nb = 2000
+        nb = ct.default_nb
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         not_load_int64_field = cf.gen_int64_field(name="not_int64_load")
         load_string_field = cf.gen_string_field(name="string_load")
@@ -395,7 +395,7 @@ class TestFieldPartialLoadInvalid(TestcaseBase):
         self._connect()
         name = cf.gen_unique_str()
         dim = 32
-        nb = 2000
+        nb = ct.default_nb
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         load_int64_field = cf.gen_int64_field(name="int64_load")
         load_string_field = cf.gen_string_field(name="string_load")
@@ -440,7 +440,7 @@ class TestFieldPartialLoadInvalid(TestcaseBase):
         self._connect()
         name = cf.gen_unique_str()
         dim = 32
-        nb = 2000
+        nb = ct.default_nb
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         not_load_int64_field = cf.gen_int64_field(name="not_int64_load")
         load_string_field = cf.gen_string_field(name="string_load")

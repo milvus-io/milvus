@@ -30,9 +30,10 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestSchema(t *testing.T) {
@@ -301,6 +302,60 @@ func TestSchema(t *testing.T) {
 
 		assert.True(t, IsVectorArrayType(schemapb.DataType_ArrayOfVector))
 	})
+}
+
+func TestHasTextField(t *testing.T) {
+	assert.False(t, HasTextField(nil))
+	assert.False(t, HasTextField(&schemapb.CollectionSchema{}))
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+	assert.True(t, HasTextField(schema))
+}
+
+func TestValidateTextRequiresStorageV3(t *testing.T) {
+	textSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+	ordinarySchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	assert.NoError(t, ValidateTextRequiresStorageV3(nil, false))
+	assert.NoError(t, ValidateTextRequiresStorageV3(ordinarySchema, false))
+	assert.Error(t, ValidateTextRequiresStorageV3(textSchema, false))
+	assert.NoError(t, ValidateTextRequiresStorageV3(textSchema, true))
+}
+
+func TestUseGrowingSourceFlush(t *testing.T) {
+	ordinarySchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		},
+	}
+	textSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+
+	assert.False(t, UseGrowingSourceFlush(ordinarySchema, false, true))
+	assert.False(t, UseGrowingSourceFlush(textSchema, false, true))
+	assert.False(t, UseGrowingSourceFlush(ordinarySchema, true, false))
+	assert.True(t, UseGrowingSourceFlush(ordinarySchema, true, true))
+	assert.True(t, UseGrowingSourceFlush(textSchema, true, false))
+	assert.False(t, UseGrowingSourceFlush(nil, true, false))
+	assert.True(t, UseGrowingSourceFlush(nil, true, true))
 }
 
 func TestSchema_GetVectorFieldSchemas(t *testing.T) {
@@ -649,7 +704,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "duplicated fieldName: field_int8")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "duplicated fieldName: field_int8")
 	})
 	t.Run("Duplicate field id", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -675,7 +731,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "duplicated fieldID: 100")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "duplicated fieldID: 100")
 	})
 	t.Run("Duplicated primary key", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -701,7 +758,8 @@ func TestSchema_invalid(t *testing.T) {
 		}
 		_, err := CreateSchemaHelper(schema)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "primary key is not unique")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "primary key is not unique")
 	})
 	t.Run("field not exist", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -723,15 +781,18 @@ func TestSchema_invalid(t *testing.T) {
 
 		_, err = helper.GetPrimaryKeyField()
 		assert.Error(t, err)
-		assert.EqualError(t, err, "failed to get primary key field: no primary in schema")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "failed to get primary key field: no primary in schema")
 
 		_, err = helper.GetFieldFromName("none")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "failed to get field schema by name: fieldName(none) not found")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "failed to get field schema by name: fieldName(none) not found")
 
 		_, err = helper.GetFieldFromID(101)
 		assert.Error(t, err)
-		assert.EqualError(t, err, "fieldID(101) not found")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "fieldID(101) not found")
 	})
 	t.Run("vector dim not exist", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
@@ -2124,6 +2185,46 @@ func TestMergeFieldData(t *testing.T) {
 		err := MergeFieldData([]*schemapb.FieldData{emptyField}, []*schemapb.FieldData{emptyField})
 		assert.Error(t, err)
 	})
+
+	t.Run("nullable float vector - all null src", func(t *testing.T) {
+		dim := int64(4)
+		dstFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vec",
+				FieldId:   200,
+				ValidData: []bool{true},
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: dim,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+			},
+		}
+		// src: all rows are null -> VectorField.Data = nil
+		srcFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vec",
+				FieldId:   200,
+				ValidData: []bool{false},
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim:  dim,
+						Data: nil, // all null -> no FloatVector oneof set
+					},
+				},
+			},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err, "MergeFieldData should handle nullable FloatVector with nil VectorField.Data")
+	})
 }
 
 type FieldDataSuite struct {
@@ -3038,6 +3139,44 @@ func TestGetDataIterator(t *testing.T) {
 				ValidData: []bool{true, false, true, true},
 			},
 			want: []any{int64(1), nil, int64(2), int64(3)},
+		},
+		{
+			name: "compact nullable float vector",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 2,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1, 2, 5, 6},
+							},
+						},
+					},
+				},
+				ValidData: []bool{true, false, true},
+			},
+			want: []any{[]float32{1, 2}, nil, []float32{5, 6}},
+		},
+		{
+			name: "compact nullable sparse vector",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_SparseFloatVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_SparseFloatVector{
+							SparseFloatVector: &schemapb.SparseFloatArray{
+								Contents: [][]byte{
+									CreateSparseFloatRow([]uint32{1}, []float32{1}),
+									CreateSparseFloatRow([]uint32{3}, []float32{3}),
+								},
+							},
+						},
+					},
+				},
+				ValidData: []bool{false, true, false, true},
+			},
+			want: []any{nil, CreateSparseFloatRow([]uint32{1}, []float32{1}), nil, CreateSparseFloatRow([]uint32{3}, []float32{3})},
 		},
 	}
 	for _, tt := range tests {
@@ -4572,7 +4711,7 @@ func TestGetNeedProcessFunctions(t *testing.T) {
 	{
 		fs := []*schemapb.FunctionSchema{{Name: "test_func", Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{1}}}
 		_, err := GetNeedProcessFunctions([]int64{1}, fs, true, false)
-		assert.ErrorContains(t, err, "Attempt to insert bm25 function output field")
+		assert.ErrorContains(t, err, "attempt to insert bm25 function output field")
 	}
 	{
 		fs := []*schemapb.FunctionSchema{
@@ -5092,11 +5231,12 @@ func TestIsExternalCollection(t *testing.T) {
 	assert.True(t, IsExternalCollection(schema))
 }
 
-func TestValidateExternalCollectionSchema(t *testing.T) {
+func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 	buildSchema := func() *schemapb.CollectionSchema {
 		return &schemapb.CollectionSchema{
 			Name:           "external",
 			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text",
@@ -5132,21 +5272,90 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 				},
 			},
 		}
-		assert.NoError(t, ValidateExternalCollectionSchema(schema))
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+		assert.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
 	})
 
-	t.Run("functions disabled", func(t *testing.T) {
+	t.Run("resolved schema skips system and unmapped fields", func(t *testing.T) {
 		schema := buildSchema()
-		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
-		err := ValidateExternalCollectionSchema(schema)
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{
+				Name:     common.RowIDFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+			&schemapb.FieldSchema{
+				Name:     "late_field",
+				DataType: schemapb.DataType_Int64,
+			},
+		)
+		assert.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
+	})
+
+	t.Run("resolved schema skips generated output fields", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			FieldID:          102,
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		assert.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
+	})
+
+	t.Run("resolved schema rejects generated output external mapping", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			FieldID:          102,
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+			ExternalField:    "sparse_col",
+		})
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "must not have external_field mapping")
+		}
+	})
+
+	t.Run("functions allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+		}}
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("function output external_field rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			ExternalField:    "sparse_col",
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+		}}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support functions")
+		assert.Contains(t, err.Error(), "must not have external_field mapping")
 	})
 
 	t.Run("dynamic field disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.EnableDynamicField = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("struct fields disabled", func(t *testing.T) {
@@ -5154,52 +5363,1127 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
 			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array}}},
 		}
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("primary key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsPrimaryKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("partition key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsPartitionKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("clustering key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsClusteringKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("auto id disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].AutoID = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
-	t.Run("text match disabled", func(t *testing.T) {
+	t.Run("text match allowed", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams, &commonpb.KeyValuePair{
 			Key:   "enable_match",
 			Value: "true",
+		}, &commonpb.KeyValuePair{
+			Key:   "enable_analyzer",
+			Value: "true",
 		})
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("external_field mapping required", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].ExternalField = ""
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must have external_field mapping")
 	})
 
 	t.Run("valid schema passes", func(t *testing.T) {
-		err := ValidateExternalCollectionSchema(buildSchema())
+		err := NormalizeAndValidateExternalCollectionSchema(buildSchema())
 		assert.NoError(t, err)
 	})
+
+	t.Run("source set without spec rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = "s3://bucket/path"
+		schema.ExternalSpec = ""
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "both set or both empty")
+	})
+
+	t.Run("spec set without source rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = ""
+		schema.ExternalSpec = `{"format":"parquet"}`
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "both set or both empty")
+	})
+
+	t.Run("both empty allowed deferred refresh", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = ""
+		schema.ExternalSpec = ""
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("both set allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = "s3://bucket/path"
+		schema.ExternalSpec = `{"format":"parquet"}`
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("duplicate external_field rejected different types", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "dup_int",
+			DataType:      schemapb.DataType_Int64,
+			ExternalField: "text_col",
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "text_col")
+		assert.Contains(t, err.Error(), "mapped by multiple fields")
+	})
+
+	t.Run("duplicate external_field rejected same type", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "text_alias",
+			DataType:      schemapb.DataType_VarChar,
+			ExternalField: "text_col",
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "32"},
+			},
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mapped by multiple fields")
+	})
+
+	t.Run("external_field matching function output name allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[1].ExternalField = "sparse"
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+		}}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("external_field matching function output field id rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].FieldID = 100
+		schema.Fields[1].FieldID = 101
+		schema.Fields[1].ExternalField = "102"
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			FieldID:          102,
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			InputFieldIds:    []int64{100},
+			OutputFieldNames: []string{"sparse"},
+			OutputFieldIds:   []int64{102},
+		}}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicts with generated function output field")
+	})
+
+	t.Run("function output ids define generated columns after rootcoord assigns ids", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].FieldID = 100
+		schema.Fields[1].FieldID = 101
+		schema.Fields[1].ExternalField = "102"
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:     "sparse",
+			FieldID:  102,
+			DataType: schemapb.DataType_SparseFloatVector,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			InputFieldIds:    []int64{100},
+			OutputFieldNames: []string{"sparse"},
+			OutputFieldIds:   []int64{102},
+		}}
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicts with generated function output field")
+	})
+
+	t.Run("duplicate external field mapping rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "score",
+			DataType:      schemapb.DataType_Double,
+			ExternalField: "text_col",
+		})
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "external_field \"text_col\" is mapped by multiple fields")
+		}
+	})
+
+	t.Run("resolved schema validation rejects unsupported user field type", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "bad_field",
+			DataType:      schemapb.DataType_SparseFloatVector,
+			ExternalField: "bad_col",
+		})
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "does not support field type")
+		}
+	})
+
+	t.Run("unsupported field types rejected", func(t *testing.T) {
+		unsupportedTypes := []schemapb.DataType{
+			schemapb.DataType_SparseFloatVector,
+		}
+		for _, dt := range unsupportedTypes {
+			schema := buildSchema()
+			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+				Name:          "bad_field",
+				DataType:      dt,
+				ExternalField: "bad_col",
+			})
+			err := NormalizeAndValidateExternalCollectionSchema(schema)
+			assert.Error(t, err, "expected error for type %s", dt.String())
+			assert.Contains(t, err.Error(), "does not support field type")
+		}
+	})
+
+	t.Run("supported field types accepted", func(t *testing.T) {
+		supportedTypes := []struct {
+			dt     schemapb.DataType
+			params []*commonpb.KeyValuePair
+		}{
+			{schemapb.DataType_Bool, nil},
+			{schemapb.DataType_Int8, nil},
+			{schemapb.DataType_Int16, nil},
+			{schemapb.DataType_Int32, nil},
+			{schemapb.DataType_Int64, nil},
+			{schemapb.DataType_Float, nil},
+			{schemapb.DataType_Double, nil},
+			{schemapb.DataType_VarChar, []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}},
+			{schemapb.DataType_Text, []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}},
+			{schemapb.DataType_JSON, nil},
+			{schemapb.DataType_Array, nil},
+			{schemapb.DataType_Timestamptz, nil},
+			{schemapb.DataType_Geometry, nil},
+			{schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_Float16Vector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_BFloat16Vector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_BinaryVector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_Int8Vector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_ArrayOfVector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		}
+		for _, tc := range supportedTypes {
+			schema := &schemapb.CollectionSchema{
+				Name:           "external",
+				ExternalSource: "s3://bucket/path",
+				ExternalSpec:   `{"format":"parquet"}`,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:          "vec",
+						DataType:      schemapb.DataType_FloatVector,
+						ExternalField: "vec_col",
+						TypeParams:    []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "16"}},
+					},
+					{
+						Name:          "test_field",
+						DataType:      tc.dt,
+						ExternalField: "test_col",
+						TypeParams:    tc.params,
+					},
+				},
+			}
+			err := NormalizeAndValidateExternalCollectionSchema(schema)
+			assert.NoError(t, err, "expected no error for type %s", tc.dt.String())
+			assert.True(t, schema.GetFields()[0].GetNullable(), "base vector field should be nullable")
+			assert.True(t, schema.GetFields()[1].GetNullable(), "field type %s should be nullable", tc.dt.String())
+		}
+	})
+
+	t.Run("user fields forced nullable", func(t *testing.T) {
+		schema := buildSchema()
+		for _, f := range schema.GetFields() {
+			assert.False(t, f.GetNullable())
+		}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+		assert.True(t, schema.GetFields()[0].GetNullable(), "scalar field should be nullable")
+		assert.True(t, schema.GetFields()[1].GetNullable(), "vector field should be nullable")
+	})
+
+	t.Run("virtual pk stays non-nullable", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:         common.VirtualPKFieldName,
+			DataType:     schemapb.DataType_Int64,
+			IsPrimaryKey: true,
+			AutoID:       true,
+			Nullable:     false,
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+		for _, f := range schema.GetFields() {
+			switch f.GetName() {
+			case common.VirtualPKFieldName:
+				assert.False(t, f.GetNullable(), "virtual PK should remain non-nullable")
+			case "vec":
+				assert.True(t, f.GetNullable(), "vector field should be nullable")
+			default:
+				assert.True(t, f.GetNullable())
+			}
+		}
+	})
+
+	t.Run("already nullable fields unchanged", func(t *testing.T) {
+		schema := buildSchema()
+		for _, f := range schema.GetFields() {
+			f.Nullable = true
+		}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+		for _, f := range schema.GetFields() {
+			assert.True(t, f.GetNullable())
+		}
+	})
+
+	t.Run("validation failure leaves schema unmutated", func(t *testing.T) {
+		// First field is valid, second field has an unsupported type.
+		// Without the two-pass split, the first field would already have
+		// Nullable=true by the time the second field's check fails — the
+		// caller would receive an error but the schema would be partially
+		// normalized, breaking the "atomic" invariant.
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "bad_field",
+			DataType:      schemapb.DataType_SparseFloatVector,
+			ExternalField: "bad_col",
+		})
+		for _, f := range schema.GetFields() {
+			f.Nullable = false
+		}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		for _, f := range schema.GetFields() {
+			assert.False(t, f.GetNullable(),
+				"field %s nullable was flipped despite validation failure", f.GetName())
+		}
+	})
+}
+
+func TestAppendFieldDataByColumn(t *testing.T) {
+	t.Run("nil dst or src", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		// nil dst
+		AppendFieldDataByColumn(nil, src, []int64{0, 1})
+		// nil src
+		AppendFieldDataByColumn(dst, nil, []int64{0, 1})
+		// empty dataIndices
+		AppendFieldDataByColumn(dst, src, []int64{})
+		assert.Nil(t, dst.GetScalars())
+	})
+
+	t.Run("scalar int32", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{10, 20, 30, 40, 50}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{1, 3})
+		assert.Equal(t, []int32{20, 40}, dst.GetScalars().GetIntData().Data)
+	})
+
+	t.Run("scalar with ValidData", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			ValidData: []bool{true, false, true, false, true},
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{100, 200, 300, 400, 500}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{0, 2, 4})
+		assert.Equal(t, []int64{100, 300, 500}, dst.GetScalars().GetLongData().Data)
+		assert.Equal(t, []bool{true, true, true}, dst.ValidData)
+	})
+
+	t.Run("string data", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"a", "b", "c", "d"}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{1, 2})
+		assert.Equal(t, []string{"b", "c"}, dst.GetScalars().GetStringData().Data)
+	})
+
+	t.Run("json data", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{"a":1}`), []byte(`{"b":2}`)}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{0})
+		assert.Equal(t, [][]byte{[]byte(`{"a":1}`)}, dst.GetScalars().GetJsonData().Data)
+	})
+
+	t.Run("float vector", func(t *testing.T) {
+		dim := int64(4)
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{
+							1, 2, 3, 4,
+							5, 6, 7, 8,
+							9, 10, 11, 12,
+						}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{0, 2})
+		assert.Equal(t, []float32{1, 2, 3, 4, 9, 10, 11, 12}, dst.GetVectors().GetFloatVector().Data)
+		assert.Equal(t, dim, dst.GetVectors().GetDim())
+	})
+
+	t.Run("float vector with ValidData - all null case", func(t *testing.T) {
+		dim := int64(4)
+		src := &schemapb.FieldData{
+			ValidData: []bool{false, false, false}, // all null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{}}, // COMPRESSED: no data
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		// dataIndices is empty (no non-null data), but rowIndices has all rows
+		dataIndices := []int64{}
+		rowIndices := []int64{0, 1, 2}
+		AppendFieldDataByColumn(dst, src, dataIndices, rowIndices)
+		// ValidData should be copied even though data is empty
+		assert.Equal(t, []bool{false, false, false}, dst.ValidData)
+		// No vector data copied
+		assert.Nil(t, dst.GetVectors())
+	})
+
+	t.Run("sparse float vector", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 100,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{{1, 2}, {3, 4}, {5, 6}},
+						},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{0, 2})
+		assert.Equal(t, [][]byte{{1, 2}, {5, 6}}, dst.GetVectors().GetSparseFloatVector().Contents)
+	})
+
+	t.Run("nullable array of vector copies dense row data", func(t *testing.T) {
+		validData := []bool{true, false, true, false}
+		src := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, validData)
+		dst := &schemapb.FieldData{Type: schemapb.DataType_ArrayOfVector}
+
+		AppendFieldDataByColumn(dst, src, []int64{0, 1, 2, 3}, []int64{0, 1, 2, 3})
+
+		got := dst.GetVectors().GetVectorArray()
+		require.NotNil(t, got)
+		require.Len(t, got.GetData(), 4)
+		assert.Equal(t, validData, dst.GetValidData())
+		assert.Equal(t, []float32{1}, got.GetData()[0].GetFloatVector().GetData())
+		assert.Empty(t, got.GetData()[1].GetFloatVector().GetData())
+		assert.Equal(t, []float32{3}, got.GetData()[2].GetFloatVector().GetData())
+		assert.Empty(t, got.GetData()[3].GetFloatVector().GetData())
+		assert.EqualValues(t, 1, got.GetDim())
+		assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
+	})
+}
+
+func TestUpdateFieldDataByColumn(t *testing.T) {
+	t.Run("nil base or update", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{10, 20}},
+					},
+				},
+			},
+		}
+		// nil base
+		err := UpdateFieldDataByColumn(nil, update, []int64{0}, []int64{0})
+		assert.NoError(t, err)
+		// nil update
+		err = UpdateFieldDataByColumn(base, nil, []int64{0}, []int64{0})
+		assert.NoError(t, err)
+		// empty indices
+		err = UpdateFieldDataByColumn(base, update, []int64{}, []int64{})
+		assert.NoError(t, err)
+		assert.Equal(t, []int32{1, 2, 3}, base.GetScalars().GetIntData().Data)
+	})
+
+	t.Run("indices length mismatch", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{10, 20}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 1}, []int64{0})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "length mismatch")
+	})
+
+	t.Run("scalar int32", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{1, 2, 3, 4, 5}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{1, 3}, []int64{0, 2})
+		assert.NoError(t, err)
+		assert.Equal(t, []int32{1, 100, 3, 300, 5}, base.GetScalars().GetIntData().Data)
+	})
+
+	t.Run("scalar with ValidData", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			ValidData: []bool{true, true, true, true},
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{10, 20, 30, 40}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			ValidData: []bool{false, true},
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{100, 200}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{1, 2}, []int64{0, 1})
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{10, 100, 200, 40}, base.GetScalars().GetLongData().Data)
+		assert.Equal(t, []bool{true, false, true, true}, base.ValidData)
+	})
+
+	t.Run("string data", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"X", "Y"}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"X", "b", "Y"}, base.GetScalars().GetStringData().Data)
+	})
+
+	t.Run("float vector", func(t *testing.T) {
+		dim := int64(4)
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{
+							1, 2, 3, 4,
+							5, 6, 7, 8,
+							9, 10, 11, 12,
+						}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{
+							100, 200, 300, 400,
+							500, 600, 700, 800,
+						}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
+		assert.NoError(t, err)
+		expected := []float32{100, 200, 300, 400, 5, 6, 7, 8, 500, 600, 700, 800}
+		assert.Equal(t, expected, base.GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("sparse float vector", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{{1}, {2}, {3}},
+						},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{{10}, {20}},
+						},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
+		assert.NoError(t, err)
+		assert.Equal(t, [][]byte{{10}, {2}, {20}}, base.GetVectors().GetSparseFloatVector().Contents)
+	})
+
+	t.Run("nullable array of vector stays row-dense", func(t *testing.T) {
+		base := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, []bool{true, true, true})
+		update := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, []bool{false, true})
+
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
+
+		require.NoError(t, err)
+		assert.Equal(t, []bool{false, true, true}, base.GetValidData())
+
+		got := base.GetVectors().GetVectorArray()
+		require.NotNil(t, got)
+		require.Len(t, got.GetData(), 3)
+		assert.Empty(t, got.GetData()[0].GetFloatVector().GetData())
+		assert.Equal(t, []float32{2}, got.GetData()[2].GetFloatVector().GetData())
+		assert.EqualValues(t, 1, got.GetDim())
+		assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
+	})
+
+	t.Run("nullable compact float vector changes validity", func(t *testing.T) {
+		dim := int64(2)
+		base := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{
+							1, 1,
+							3, 3,
+						}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			ValidData: []bool{false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{20, 20}},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 1}, []int64{0, 1})
+
+		require.NoError(t, err)
+		assert.Equal(t, []bool{false, true, true}, base.GetValidData())
+		assert.Equal(t, []float32{20, 20, 3, 3}, base.GetVectors().GetFloatVector().GetData())
+	})
+
+	t.Run("nullable compact sparse vector changes validity", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{CreateSparseFloatRow([]uint32{1}, []float32{1}), CreateSparseFloatRow([]uint32{3}, []float32{3})},
+						},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{CreateSparseFloatRow([]uint32{20}, []float32{20})},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 1}, []int64{0, 1})
+
+		require.NoError(t, err)
+		assert.Equal(t, []bool{false, true, true}, base.GetValidData())
+		assert.Equal(t, [][]byte{
+			CreateSparseFloatRow([]uint32{20}, []float32{20}),
+			CreateSparseFloatRow([]uint32{3}, []float32{3}),
+		}, base.GetVectors().GetSparseFloatVector().GetContents())
+	})
+
+	t.Run("nullable compact sparse vector all null base accepts valid update", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{false, false},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{},
+			},
+		}
+		updateRow := CreateSparseFloatRow([]uint32{20}, []float32{20})
+		update := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			ValidData: []bool{true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{updateRow},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldDataByColumn(base, update, []int64{1}, []int64{0})
+
+		require.NoError(t, err)
+		assert.Equal(t, []bool{false, true}, base.GetValidData())
+		assert.Equal(t, [][]byte{updateRow}, base.GetVectors().GetSparseFloatVector().GetContents())
+	})
+}
+
+func TestIsClusteringKeyType(t *testing.T) {
+	// Supported scalar types
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_Int8))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_Int16))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_Int32))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_Int64))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_Float))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_Double))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_VarChar))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_String))
+
+	// Supported vector types
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_FloatVector))
+
+	// Unsupported types
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_JSON))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Bool))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Array))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Geometry))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Text))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Timestamptz))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_BinaryVector))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_Float16Vector))
+	assert.False(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))
+}
+
+func TestAppendFieldDataNullableVectorWithSchemaWithoutValidData(t *testing.T) {
+	const fieldID = int64(101)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  fieldID,
+				Name:     "nullable_sparse",
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: true,
+			},
+		},
+	}
+	src := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "nullable_sparse",
+			FieldId:   fieldID,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{},
+				},
+			}},
+		},
+	}
+	dst := PrepareResultFieldData(src, 1)
+	idxComputer := NewFieldDataIdxComputerWithSchema(src, schema)
+	fieldIdxs := idxComputer.Compute(0)
+
+	require.NotPanics(t, func() {
+		AppendFieldData(dst, src, 0, fieldIdxs...)
+	})
+	require.Len(t, dst, 1)
+	assert.Equal(t, []bool{false}, dst[0].GetValidData())
+	assert.Empty(t, dst[0].GetVectors().GetSparseFloatVector().GetContents())
+}
+
+func TestAppendFieldDataNullableVectorWithSchemaAndValidData(t *testing.T) {
+	const (
+		fieldID = int64(101)
+		dim     = int64(2)
+	)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  fieldID,
+				Name:     "nullable_float",
+				DataType: schemapb.DataType_FloatVector,
+				Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "2"},
+				},
+			},
+		},
+	}
+	src := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: "nullable_float",
+			FieldId:   fieldID,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+				},
+			}},
+		},
+	}
+	dst := PrepareResultFieldData(src, 3)
+	idxComputer := NewFieldDataIdxComputerWithSchema(src, schema)
+	for _, rowIdx := range []int64{0, 1, 2} {
+		fieldIdxs := idxComputer.Compute(rowIdx)
+		AppendFieldData(dst, src, rowIdx, fieldIdxs...)
+	}
+
+	assert.Equal(t, []bool{true, false, true}, dst[0].GetValidData())
+	assert.Equal(t, []float32{1, 2, 3, 4}, dst[0].GetVectors().GetFloatVector().GetData())
+}
+
+func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, elementType schemapb.DataType, rows any) *schemapb.FieldData {
+	var rowCount int
+	var validData []bool
+	switch v := rows.(type) {
+	case int:
+		rowCount = v
+	case []bool:
+		validData = v
+		rowCount = len(v)
+	default:
+		panic("unexpected ArrayOfVector row spec")
+	}
+
+	data := make([]*schemapb.VectorField, rowCount)
+	for i := 0; i < rowCount; i++ {
+		if len(validData) > 0 && !validData[i] {
+			data[i] = &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{},
+				},
+			}
+			continue
+		}
+		data[i] = &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{float32(i + 1)}},
+			},
+		}
+	}
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: fieldName,
+		FieldId:   fieldID,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        data,
+						Dim:         dim,
+						ElementType: elementType,
+					},
+				},
+			},
+		},
+	}
+	if len(validData) > 0 {
+		fd.ValidData = validData
+	}
+	return fd
+}
+
+func TestFieldDataIdxComputer_ArrayOfVectorIsNonVector(t *testing.T) {
+	scalar := &schemapb.FieldData{
+		Type:    schemapb.DataType_Int64,
+		FieldId: 100,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{10, 20, 30, 40}},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true, false},
+	}
+
+	// Compact vector: 2 valid rows out of 4; Data len==2.
+	vec := &schemapb.FieldData{
+		Type:    schemapb.DataType_FloatVector,
+		FieldId: 101,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: 1,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true, false},
+	}
+
+	arrVec := newArrayOfVectorFieldData(102, "arrvec", 1, schemapb.DataType_FloatVector, []bool{true, false, true, false})
+
+	c := NewFieldDataIdxComputer([]*schemapb.FieldData{scalar, vec, arrVec})
+
+	// The key invariant: for every row, ArrayOfVector's index must equal rowIdx
+	// (dense/scalar semantics), never the compact index like a regular vector.
+	// Regular vector uses compact indexing, which diverges from rowIdx at row 2:
+	// rowIdx=2 but there's only one valid row before it, so compact index == 1.
+	for rowIdx := int64(0); rowIdx < 4; rowIdx++ {
+		got := c.Compute(rowIdx)
+		assert.Equal(t, rowIdx, got[0], "scalar row %d", rowIdx)
+		assert.Equal(t, rowIdx, got[2], "ArrayOfVector row %d must follow rowIdx", rowIdx)
+	}
+
+	// Reset by calling Compute on a smaller rowIdx.
+	c.Compute(0)
+	// At row 2 (the second valid row), compact vector index is 1, which differs
+	// from rowIdx=2. This confirms ArrayOfVector is NOT using the compact path.
+	got := c.Compute(2)
+	assert.Equal(t, int64(1), got[1], "compact vector at row 2 -> compact index 1")
+	assert.Equal(t, int64(2), got[2], "ArrayOfVector at row 2 -> rowIdx 2")
+}
+
+func TestNewEmptyArrayOfVectorRow(t *testing.T) {
+	cases := []struct {
+		name string
+		elem schemapb.DataType
+		data any
+	}{
+		{name: "FloatVector", elem: schemapb.DataType_FloatVector, data: &schemapb.VectorField_FloatVector{}},
+		{name: "BinaryVector", elem: schemapb.DataType_BinaryVector, data: &schemapb.VectorField_BinaryVector{}},
+		{name: "Float16Vector", elem: schemapb.DataType_Float16Vector, data: &schemapb.VectorField_Float16Vector{}},
+		{name: "BFloat16Vector", elem: schemapb.DataType_BFloat16Vector, data: &schemapb.VectorField_Bfloat16Vector{}},
+		{name: "Int8Vector", elem: schemapb.DataType_Int8Vector, data: &schemapb.VectorField_Int8Vector{}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			vf, err := NewEmptyArrayOfVectorRow(8, c.elem)
+			require.NoError(t, err)
+			require.NotNil(t, vf)
+			assert.EqualValues(t, 8, vf.GetDim())
+			assert.IsType(t, c.data, vf.GetData())
+		})
+	}
+
+	t.Run("unsupported element type returns error", func(t *testing.T) {
+		vf, err := NewEmptyArrayOfVectorRow(8, schemapb.DataType_None)
+		require.Error(t, err)
+		assert.Nil(t, vf)
+		assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
+	})
+}
+
+func TestAppendFieldData_ArrayOfVectorNullRowAppendsPlaceholder(t *testing.T) {
+	validData := []bool{true, false, true, false}
+	src := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, validData)
+
+	// dst is a slice of same length as src, elements will be filled on first append.
+	dst := make([]*schemapb.FieldData, 1)
+
+	// Walk rows 0..3, fieldIdx == rowIdx because IdxComputer treats ArrayOfVector
+	// as non-vector.
+	for i := int64(0); i < 4; i++ {
+		AppendFieldData(dst, []*schemapb.FieldData{src}, i, i)
+	}
+
+	require.NotNil(t, dst[0])
+	got := dst[0].GetVectors().GetVectorArray()
+	require.NotNil(t, got)
+	// All 4 rows must be present — null rows are placeholders, not skipped.
+	require.Len(t, got.GetData(), 4)
+	assert.Equal(t, []float32{1}, got.GetData()[0].GetFloatVector().GetData())
+	assert.Equal(t, []float32{3}, got.GetData()[2].GetFloatVector().GetData())
+	assert.Empty(t, got.GetData()[1].GetFloatVector().GetData())
+	assert.Empty(t, got.GetData()[3].GetFloatVector().GetData())
+	assert.Equal(t, validData, dst[0].GetValidData())
+	assert.EqualValues(t, 1, got.GetDim())
+	assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
+}
+
+func TestGetTotalFieldsNumIncludesStructParent(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64},
+			{Name: "scalar", DataType: schemapb.DataType_Bool},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "profile",
+				Fields: []*schemapb.FieldSchema{
+					{Name: "profile[ints]", DataType: schemapb.DataType_Array},
+					{Name: "profile[vectors]", DataType: schemapb.DataType_ArrayOfVector},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, 5, GetTotalFieldsNum(schema))
+	assert.Len(t, GetAllFieldSchemas(schema), 4)
 }

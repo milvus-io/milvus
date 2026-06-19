@@ -22,7 +22,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/zilliz"
 )
@@ -33,7 +33,7 @@ type zillzProvider struct {
 	params map[string]string
 }
 
-func newZillizProvider(params []*commonpb.KeyValuePair, conf map[string]string, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
+func newZillizProvider(params []*commonpb.KeyValuePair, conf map[string]string, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
 	var modelDeploymentID string
 	var err error
 	maxBatch := 64
@@ -46,12 +46,16 @@ func newZillizProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 			if maxBatch, err = parseMaxBatch(param.Value); err != nil {
 				return nil, err
 			}
+		case models.TimeoutMsParamKey:
+			// consumed by ResolveTimeoutMs; not a model-service param
 		default:
 			modelParams[param.Key] = param.Value
 		}
 	}
 
-	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, conf)
+	timeoutMs := models.ResolveTimeoutMs(params)
+
+	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, conf, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +68,6 @@ func newZillizProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 	return &provider, nil
 }
 
-func (provider *zillzProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+func (provider *zillzProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
 	return provider.client.Rerank(ctx, query, docs, provider.params)
 }

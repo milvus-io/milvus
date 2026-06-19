@@ -1,6 +1,6 @@
 package metacache
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+import "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 
 // SchemaManager is a manager for collection schema.
 type SchemaManager interface {

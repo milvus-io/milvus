@@ -20,23 +20,24 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type teiProvider struct {
 	baseProvider
-	client *tei.TEIClient
-	params map[string]any
+	client    *tei.TEIClient
+	params    map[string]any
+	timeoutMs int64
 }
 
-func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
+func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (ModelProvider, error) {
 	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
 	if err != nil {
 		return nil, err
@@ -57,13 +58,13 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 			}
 		case models.TruncateParamKey:
 			if teiTrun, err := strconv.ParseBool(param.Value); err != nil {
-				return nil, fmt.Errorf("Rerank params error, %s: %s is not bool type", models.TruncateParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("Rerank params error, %s: %s is not bool type", models.TruncateParamKey, param.Value)
 			} else {
 				truncateParams[models.TruncateParamKey] = teiTrun
 			}
 		case models.TruncationDirectionParamKey:
 			if truncationDirection := param.Value; truncationDirection != "Left" && truncationDirection != "Right" {
-				return nil, fmt.Errorf("[%s param's value: %s] is not invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
 			} else {
 				truncateParams[models.TruncationDirectionParamKey] = truncationDirection
 			}
@@ -76,16 +77,19 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 		return nil, err
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := teiProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
 		client:       client,
 		params:       truncateParams,
+		timeoutMs:    timeoutMs,
 	}
 	return &provider, nil
 }
 
-func (provider *teiProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(query, docs, provider.params, 30)
+func (provider *teiProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+	rerankResp, err := provider.client.Rerank(query, docs, provider.params, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

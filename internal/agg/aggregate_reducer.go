@@ -2,14 +2,15 @@ package agg
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type GroupAggReducer struct {
@@ -86,15 +87,15 @@ func (reducer *GroupAggReducer) EmptyAggResult() (*AggregationResult, error) {
 		} else {
 			field, err := helper.GetFieldFromID(agg.GetFieldId())
 			if err != nil {
-				return nil, fmt.Errorf("failed to get field schema for aggregate fieldID %d: %w", agg.GetFieldId(), err)
+				return nil, merr.Wrapf(err, "failed to get field schema for aggregate fieldID %d", agg.GetFieldId())
 			}
 			resultType, err := getAggregateResultType(agg.GetOp(), field.GetDataType())
 			if err != nil {
-				return nil, fmt.Errorf("failed to get result type for aggregate fieldID %d: %w", agg.GetFieldId(), err)
+				return nil, merr.Wrapf(err, "failed to get result type for aggregate fieldID %d", agg.GetFieldId())
 			}
 			emptyFieldData, err := genEmptyFieldDataByType(resultType)
 			if err != nil {
-				return nil, fmt.Errorf("failed to generate empty field data for result type %s: %w", resultType.String(), err)
+				return nil, merr.Wrapf(err, "failed to generate empty field data for result type %s", resultType.String())
 			}
 			ret.fieldDatas = append(ret.fieldDatas, emptyFieldData)
 		}
@@ -158,7 +159,7 @@ func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, e
 		return genEmptyLongFieldData(dataType, []int64{0}), nil
 	default:
 		// For other types, try to use the original field's GenEmptyFieldData
-		return nil, fmt.Errorf("unsupported data type for aggregate result: %s", dataType.String())
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type for aggregate result: %s", dataType.String())
 	}
 }
 
@@ -185,10 +186,10 @@ func getAggregateResultType(op planpb.AggregateOp, inputType schemapb.DataType) 
 		case schemapb.DataType_Float, schemapb.DataType_Double:
 			return schemapb.DataType_Double, nil
 		default:
-			return schemapb.DataType_None, fmt.Errorf("unsupported input type %s for sum aggregation", inputType.String())
+			return schemapb.DataType_None, merr.WrapErrParameterInvalidMsg("unsupported input type %s for sum aggregation", inputType.String())
 		}
 	default:
-		return schemapb.DataType_None, fmt.Errorf("unknown aggregate operator: %d", op)
+		return schemapb.DataType_None, merr.WrapErrParameterInvalidMsg("unknown aggregate operator: %d", op)
 	}
 }
 
@@ -199,12 +200,12 @@ func getAggregateResultType(op planpb.AggregateOp, inputType schemapb.DataType) 
 // 3. Each fieldData's Type matches the expected type from schema
 func (reducer *GroupAggReducer) validateAggregationResults(results []*AggregationResult) error {
 	if reducer.schema == nil {
-		return fmt.Errorf("schema is nil, cannot validate field types")
+		return merr.WrapErrParameterInvalidMsg("schema is nil, cannot validate field types")
 	}
 
 	helper, err := typeutil.CreateSchemaHelper(reducer.schema)
 	if err != nil {
-		return fmt.Errorf("failed to create schema helper: %w", err)
+		return merr.Wrap(err, "failed to create schema helper")
 	}
 
 	numGroupingKeys := len(reducer.groupByFieldIds)
@@ -218,7 +219,7 @@ func (reducer *GroupAggReducer) validateAggregationResults(results []*Aggregatio
 	for _, fieldID := range reducer.groupByFieldIds {
 		field, err := helper.GetFieldFromID(fieldID)
 		if err != nil {
-			return fmt.Errorf("failed to get field schema for groupBy fieldID %d: %w", fieldID, err)
+			return merr.Wrapf(err, "failed to get field schema for groupBy fieldID %d", fieldID)
 		}
 		expectedTypes = append(expectedTypes, field.GetDataType())
 	}
@@ -232,11 +233,11 @@ func (reducer *GroupAggReducer) validateAggregationResults(results []*Aggregatio
 		} else {
 			field, err := helper.GetFieldFromID(agg.GetFieldId())
 			if err != nil {
-				return fmt.Errorf("failed to get field schema for aggregate fieldID %d: %w", agg.GetFieldId(), err)
+				return merr.Wrapf(err, "failed to get field schema for aggregate fieldID %d", agg.GetFieldId())
 			}
 			expectedType, err = getAggregateResultType(agg.GetOp(), field.GetDataType())
 			if err != nil {
-				return fmt.Errorf("failed to get aggregate result type for aggregate fieldID %d: %w", agg.GetFieldId(), err)
+				return merr.Wrapf(err, "failed to get aggregate result type for aggregate fieldID %d", agg.GetFieldId())
 			}
 		}
 		expectedTypes = append(expectedTypes, expectedType)
@@ -245,27 +246,27 @@ func (reducer *GroupAggReducer) validateAggregationResults(results []*Aggregatio
 	// Validate each result
 	for resultIdx, result := range results {
 		if result == nil {
-			return fmt.Errorf("result at index %d is nil", resultIdx)
+			return merr.WrapErrServiceInternalMsg("result at index %d is nil", resultIdx)
 		}
 
 		fieldDatas := result.GetFieldDatas()
 
 		// Check 1: fieldDatas length
 		if len(fieldDatas) != expectedColumnCount {
-			return fmt.Errorf("result at index %d has fieldDatas length %d, expected %d (numGroupingKeys=%d, numAggs=%d)",
+			return merr.WrapErrServiceInternalMsg("result at index %d has fieldDatas length %d, expected %d (numGroupingKeys=%d, numAggs=%d)",
 				resultIdx, len(fieldDatas), expectedColumnCount, numGroupingKeys, numAggs)
 		}
 
 		// Check 2: no nil fieldData and Check 3: type matching
 		for colIdx, fieldData := range fieldDatas {
 			if fieldData == nil {
-				return fmt.Errorf("result at index %d has nil fieldData at column %d", resultIdx, colIdx)
+				return merr.WrapErrServiceInternalMsg("result at index %d has nil fieldData at column %d", resultIdx, colIdx)
 			}
 
 			expectedType := expectedTypes[colIdx]
 			actualType := fieldData.GetType()
 			if actualType != expectedType {
-				return fmt.Errorf("result at index %d, column %d has type %s, expected %s",
+				return merr.WrapErrServiceInternalMsg("result at index %d, column %d has type %s, expected %s",
 					resultIdx, colIdx, schemapb.DataType_name[int32(actualType)], schemapb.DataType_name[int32(expectedType)])
 			}
 		}
@@ -303,7 +304,7 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	numAggs := len(reducer.aggregates)
 	hashers := make([]FieldAccessor, numGroupingKeys)
 	accumulators := make([]FieldAccessor, numAggs)
-	firstFieldData := results[0].GetFieldDatas()
+	firstFieldData := results[0].GetFieldDatas() //nolint:gosec // results[0] is safe: empty/single-result cases already returned above
 	outputColumnCount := len(firstFieldData)
 	for idx, fieldData := range firstFieldData {
 		accessor, err := NewFieldAccessor(fieldData.GetType())
@@ -327,7 +328,11 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 			for col := 0; col < outputColumnCount; col++ {
 				fieldData := result.GetFieldDatas()[col]
 				accumulators[col].SetVals(fieldData)
-				fieldValues[col] = NewFieldValue(accumulators[col].ValAt(0))
+				if accumulators[col].IsNullAt(0) {
+					fieldValues[col] = NewNullFieldValue()
+				} else {
+					fieldValues[col] = NewFieldValue(accumulators[col].ValAt(0))
+				}
 			}
 			rows[idx] = NewRow(fieldValues)
 		}
@@ -341,24 +346,20 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	}
 
 	// 2. compute hash values for all rows in the result retrieved
-	var totalRowCount int64 = 0
-processResults:
+	var totalGroupCount int64 = 0
+	maxGroupByGroups := paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64()
+	limitReached := false
 	for _, result := range results {
-		// Check limit before processing each shard to avoid unnecessary work
-		if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
-			break processResults
-		}
-
-		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
 		if result == nil {
-			return nil, fmt.Errorf("input result from any sources cannot be nil")
+			return nil, merr.WrapErrServiceInternalMsg("input result from any sources cannot be nil")
 		}
+		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
 		fieldDatas := result.GetFieldDatas()
 		if outputColumnCount != len(fieldDatas) {
-			return nil, fmt.Errorf("retrieved results from different segments have different size of columns")
+			return nil, merr.WrapErrServiceInternalMsg("retrieved results from different segments have different size of columns")
 		}
 		if outputColumnCount == 0 {
-			return nil, fmt.Errorf("retrieved results have no column data")
+			return nil, merr.WrapErrServiceInternalMsg("retrieved results have no column data")
 		}
 		rowCount := -1
 		for i := 0; i < outputColumnCount; i++ {
@@ -372,20 +373,16 @@ processResults:
 				rowCount = hashers[i].RowCount()
 			} else if i < numGroupingKeys {
 				if rowCount != hashers[i].RowCount() {
-					return nil, fmt.Errorf("field data:%d for different columns have different row count, %d vs %d, wrong state",
+					return nil, merr.WrapErrServiceInternalMsg("field data:%d for different columns have different row count, %d vs %d, wrong state",
 						i, rowCount, hashers[i].RowCount())
 				}
 			} else if rowCount != accumulators[i-numGroupingKeys].RowCount() {
-				return nil, fmt.Errorf("field data:%d for different columns have different row count, %d vs %d, wrong state",
+				return nil, merr.WrapErrServiceInternalMsg("field data:%d for different columns have different row count, %d vs %d, wrong state",
 					i, rowCount, accumulators[i-numGroupingKeys].RowCount())
 			}
 		}
 
 		for row := 0; row < rowCount; row++ {
-			// Check limit before processing each row to avoid unnecessary hashing and copying
-			if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
-				break processResults
-			}
 			rowFieldValues := make([]*FieldValue, outputColumnCount)
 			var hashVal uint64
 			for col := 0; col < outputColumnCount; col++ {
@@ -395,31 +392,66 @@ processResults:
 					} else {
 						hashVal = hashers[col].Hash(row)
 					}
-					rowFieldValues[col] = NewFieldValue(hashers[col].ValAt(row))
+					if hashers[col].IsNullAt(row) {
+						rowFieldValues[col] = NewNullFieldValue()
+					} else {
+						rowFieldValues[col] = NewFieldValue(hashers[col].ValAt(row))
+					}
 				} else {
-					rowFieldValues[col] = NewFieldValue(accumulators[col-numGroupingKeys].ValAt(row))
+					if accumulators[col-numGroupingKeys].IsNullAt(row) {
+						rowFieldValues[col] = NewNullFieldValue()
+					} else {
+						rowFieldValues[col] = NewFieldValue(accumulators[col-numGroupingKeys].ValAt(row))
+					}
 				}
 			}
 			newRow := NewRow(rowFieldValues)
 			if bucket := reducer.hashValsMap[hashVal]; bucket == nil {
+				// New group: check groupLimit before adding.
+				// When limitReached, new groups/sub-groups are skipped, but
+				// accumulation into existing groups continues (line 434).
+				// This is intentional: groupLimit controls the number of output
+				// groups, not the amount of input data processed. Existing groups
+				// should accumulate all matching rows for correct aggregation
+				// (e.g., count/sum must reflect all data, not just early rows).
+				if limitReached {
+					continue
+				}
 				newBucket := NewBucket()
 				newBucket.AddRow(newRow)
-				totalRowCount++
+				totalGroupCount++
 				reducer.hashValsMap[hashVal] = newBucket
+				if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
+					limitReached = true
+				}
 			} else {
 				if rowIdx := bucket.Find(newRow, numGroupingKeys); rowIdx == NONE {
+					// New sub-group in existing bucket: check groupLimit
+					if limitReached {
+						continue
+					}
 					bucket.AddRow(newRow)
-					totalRowCount++
+					totalGroupCount++
+					if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
+						limitReached = true
+					}
 				} else {
-					bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs)
+					if err := bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs); err != nil {
+						return nil, err
+					}
 				}
+			}
+			if totalGroupCount > maxGroupByGroups {
+				return nil, merr.WrapErrParameterInvalidMsg("GROUP BY produced too many groups (%d). "+
+					"Add filters or increase common.groupBy.maxGroups (current: %d)",
+					totalGroupCount, maxGroupByGroups)
 			}
 			// Don't guarantee specific groups to be returned before milvus support order by
 		}
 	}
 
 	// 3. assemble reduced buckets into retrievedResult
-	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, totalRowCount)
+	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, totalGroupCount)
 	for _, bucket := range reducer.hashValsMap {
 		err := AssembleBucket(bucket, reducedResult.GetFieldDatas())
 		if err != nil {
@@ -445,7 +477,7 @@ func SegcoreResults2AggResult(results []*segcorepb.RetrieveResults) ([]*Aggregat
 	aggResults := make([]*AggregationResult, len(results))
 	for i := 0; i < len(results); i++ {
 		if results[i] == nil {
-			return nil, fmt.Errorf("input segcore query results from any sources cannot be nil")
+			return nil, merr.WrapErrServiceInternalMsg("input segcore query results from any sources cannot be nil")
 		}
 		fieldsData := results[i].GetFieldsData()
 		allRetrieveCount := results[i].GetAllRetrieveCount()

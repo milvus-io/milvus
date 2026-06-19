@@ -21,13 +21,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type UtilsSuite struct {
@@ -537,6 +539,259 @@ func (s *UtilsSuite) TestFieldMmapPriorityOverCollection() {
 			s.Equalf(expectedValues.expectedMmap, actualMmap,
 				"%s for field %s", expectedValues.description, field.GetName())
 		}
+	})
+}
+
+func (s *UtilsSuite) TestPackLoadSegmentRequestLoadScope() {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+		},
+	}
+
+	testCases := []struct {
+		name      string
+		action    ActionType
+		wantScope querypb.LoadScope
+	}{
+		{
+			name:      "index update",
+			action:    ActionTypeUpdate,
+			wantScope: querypb.LoadScope_Index,
+		},
+		{
+			name:      "legacy stats update",
+			action:    ActionTypeStatsUpdate,
+			wantScope: querypb.LoadScope_Stats,
+		},
+		{
+			name:      "reopen update",
+			action:    ActionTypeReopen,
+			wantScope: querypb.LoadScope_Reopen,
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			action := NewSegmentAction(1, tc.action, "test-ch", 100)
+			task, err := NewSegmentTask(
+				ctx,
+				time.Second,
+				nil,
+				1,
+				newReplicaDefaultRG(10),
+				commonpb.LoadPriority_LOW,
+				action,
+			)
+			s.NoError(err)
+
+			req := packLoadSegmentRequest(
+				task,
+				action,
+				schema,
+				nil,
+				&querypb.LoadMetaInfo{LoadType: querypb.LoadType_LoadCollection},
+				&querypb.SegmentLoadInfo{},
+				nil,
+			)
+
+			s.Equal(tc.wantScope, req.GetLoadScope())
+		})
+	}
+}
+
+func TestAutoWarmupForNonPKIsolationCollection(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("config disabled", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+		result := autoWarmupForNonPKIsolationCollection(nil)
+		assert.False(t, result)
+	})
+
+	t.Run("config enabled, no PKI", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+		result := autoWarmupForNonPKIsolationCollection(nil)
+		assert.True(t, result)
+	})
+
+	t.Run("config enabled, with PKI", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+		result := autoWarmupForNonPKIsolationCollection([]*commonpb.KeyValuePair{
+			{Key: common.PartitionKeyIsolationKey, Value: "true"},
+		})
+		assert.False(t, result)
+	})
+
+	t.Run("config enabled, PKI explicitly false", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+		result := autoWarmupForNonPKIsolationCollection([]*commonpb.KeyValuePair{
+			{Key: common.PartitionKeyIsolationKey, Value: "false"},
+		})
+		assert.True(t, result)
+	})
+}
+
+func TestApplyCollectionWarmupSettingAutoWarmup(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("autoWarmupForNonPKIsolationCollection sets sync for scalar fields, skips vector fields", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_Int64},
+				{FieldID: 2, DataType: schemapb.DataType_VarChar},
+				{FieldID: 3, DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		collectionProps := []*commonpb.KeyValuePair{}
+
+		result := applyCollectionWarmupSetting(schema, collectionProps)
+
+		// Scalar fields should get sync warmup
+		for _, field := range result.GetFields() {
+			warmup, exist := common.GetWarmupPolicy(field.GetTypeParams()...)
+			if field.GetDataType() == schemapb.DataType_FloatVector {
+				assert.False(t, exist, "vector field should NOT have warmup set by autoWarmupForNonPKIsolationCollection")
+			} else {
+				assert.True(t, exist, "scalar field should have warmup set by autoWarmupForNonPKIsolationCollection")
+				assert.Equal(t, common.WarmupSync, warmup)
+			}
+		}
+	})
+
+	t.Run("autoWarmupForNonPKIsolationCollection disabled for PKI collection", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_Int64},
+			},
+		}
+		collectionProps := []*commonpb.KeyValuePair{
+			{Key: common.PartitionKeyIsolationKey, Value: "true"},
+		}
+
+		result := applyCollectionWarmupSetting(schema, collectionProps)
+
+		field := result.GetFields()[0]
+		_, exist := common.GetWarmupPolicy(field.GetTypeParams()...)
+		assert.False(t, exist, "PKI collection should not have autoWarmupForNonPKIsolationCollection")
+	})
+
+	t.Run("collection-level warmup takes priority over autoWarmupForNonPKIsolationCollection", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_Int64},
+			},
+		}
+		collectionProps := []*commonpb.KeyValuePair{
+			{Key: common.WarmupScalarFieldKey, Value: common.WarmupDisable},
+		}
+
+		result := applyCollectionWarmupSetting(schema, collectionProps)
+
+		field := result.GetFields()[0]
+		warmup, exist := common.GetWarmupPolicy(field.GetTypeParams()...)
+		assert.True(t, exist)
+		assert.Equal(t, common.WarmupDisable, warmup, "collection-level setting should override autoWarmupForNonPKIsolationCollection")
+	})
+}
+
+func TestApplyIndexWarmupSettingAutoWarmup(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("autoWarmupForNonPKIsolationCollection sets sync for all indexes", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_Int64},
+				{FieldID: 2, DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		loadInfo := &querypb.SegmentLoadInfo{
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{FieldID: 1, IndexParams: []*commonpb.KeyValuePair{}},
+				{FieldID: 2, IndexParams: []*commonpb.KeyValuePair{}},
+			},
+		}
+		collectionProps := []*commonpb.KeyValuePair{}
+
+		applyIndexWarmupSetting(loadInfo, schema, collectionProps)
+
+		for _, indexInfo := range loadInfo.GetIndexInfos() {
+			warmup, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
+			assert.True(t, exist, "all indexes should have warmup set by autoWarmupForNonPKIsolationCollection")
+			assert.Equal(t, common.WarmupSync, warmup)
+		}
+	})
+
+	t.Run("autoWarmupForNonPKIsolationCollection disabled for PKI collection indexes", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_Int64},
+			},
+		}
+		loadInfo := &querypb.SegmentLoadInfo{
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{FieldID: 1, IndexParams: []*commonpb.KeyValuePair{}},
+			},
+		}
+		collectionProps := []*commonpb.KeyValuePair{
+			{Key: common.PartitionKeyIsolationKey, Value: "true"},
+		}
+
+		applyIndexWarmupSetting(loadInfo, schema, collectionProps)
+
+		indexInfo := loadInfo.GetIndexInfos()[0]
+		_, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
+		assert.False(t, exist, "PKI collection index should not have autoWarmupForNonPKIsolationCollection")
+	})
+
+	t.Run("collection-level index warmup takes priority over autoWarmupForNonPKIsolationCollection", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, DataType: schemapb.DataType_Int64},
+			},
+		}
+		loadInfo := &querypb.SegmentLoadInfo{
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{FieldID: 1, IndexParams: []*commonpb.KeyValuePair{}},
+			},
+		}
+		collectionProps := []*commonpb.KeyValuePair{
+			{Key: common.WarmupScalarIndexKey, Value: common.WarmupDisable},
+		}
+
+		applyIndexWarmupSetting(loadInfo, schema, collectionProps)
+
+		indexInfo := loadInfo.GetIndexInfos()[0]
+		warmup, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
+		assert.True(t, exist)
+		assert.Equal(t, common.WarmupDisable, warmup, "collection-level setting should override autoWarmupForNonPKIsolationCollection")
 	})
 }
 

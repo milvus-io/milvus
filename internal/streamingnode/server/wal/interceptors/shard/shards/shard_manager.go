@@ -14,21 +14,26 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
-	ErrCollectionExists   = errors.New("collection exists")
-	ErrCollectionNotFound = errors.New("collection not found")
-	ErrPartitionExists    = errors.New("partition exists")
-	ErrPartitionNotFound  = errors.New("partition not found")
-	ErrSegmentExists      = errors.New("segment exists")
-	ErrSegmentNotFound    = errors.New("segment not found")
-	ErrSegmentOnGrowing   = errors.New("segment on growing")
-	ErrFencedAssign       = errors.New("fenced assign")
+	ErrCollectionExists                = errors.New("collection exists")
+	ErrCollectionNotFound              = errors.New("collection not found")
+	ErrCollectionSchemaNotFound        = errors.New("collection schema not found")
+	ErrCollectionSchemaVersionNotMatch = errors.New("collection schema version not match")
+	ErrPartitionExists                 = errors.New("partition exists")
+	ErrPartitionNotFound               = errors.New("partition not found")
+	ErrSegmentExists                   = errors.New("segment exists")
+	ErrSegmentNotFound                 = errors.New("segment not found")
+	ErrSegmentOnGrowing                = errors.New("segment on growing")
+	ErrFencedAssign                    = errors.New("fenced assign")
 
 	ErrTimeTickTooOld    = errors.New("time tick is too old")
 	ErrWaitForNewSegment = errors.New("wait for new segment")
@@ -117,8 +122,8 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	// recover the segment infos from the streaming node segment assignment meta storage
 	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
 	growingBelongs := make(map[int64]stats.SegmentBelongs)
+	seenSegments := make(map[int64]struct{}, len(recoverInfos.SegmentAssignments))
 	for _, rawMeta := range recoverInfos.SegmentAssignments {
-		m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
 		coll, ok := collections[rawMeta.GetCollectionId()]
 		if !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, collection not found, %d", rawMeta.GetCollectionId()))
@@ -126,24 +131,33 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 		if _, ok := coll.PartitionIDs[rawMeta.GetPartitionId()]; !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, partition not found, partition not found, %d", rawMeta.GetPartitionId()))
 		}
-		if _, ok := growingBelongs[rawMeta.GetSegmentId()]; ok {
+		if _, ok := seenSegments[rawMeta.GetSegmentId()]; ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, segment repeated, %d", rawMeta.GetSegmentId()))
 		}
-		growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
-			PChannel:     pchannel.Name,
-			VChannel:     m.GetVChannel(),
-			CollectionID: rawMeta.GetCollectionId(),
-			PartitionID:  rawMeta.GetPartitionId(),
-			SegmentID:    m.GetSegmentID(),
-		}
+		seenSegments[rawMeta.GetSegmentId()] = struct{}{}
 		uniqueKey := PartitionUniqueKey{
 			CollectionID: rawMeta.GetCollectionId(),
 			PartitionID:  rawMeta.GetPartitionId(),
 		}
-		if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
-			partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+		switch rawMeta.GetState() {
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
+			m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
+			growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
+				PChannel:     pchannel.Name,
+				VChannel:     m.GetVChannel(),
+				CollectionID: rawMeta.GetCollectionId(),
+				PartitionID:  rawMeta.GetPartitionId(),
+				SegmentID:    m.GetSegmentID(),
+			}
+			if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
+				partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+			}
+			partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
+			continue
+		default:
+			panic(fmt.Sprintf("segment assignment meta has unknown state, segment %d state %s", rawMeta.GetSegmentId(), rawMeta.GetState()))
 		}
-		partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
 	}
 	return partitionToSegmentManagers, growingBelongs
 }
@@ -159,9 +173,15 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 		}
 		// add all partitions id into the collection info.
 		currentPartition[common.AllPartitionsID] = struct{}{}
+		// Only keep the latest schema, as shard_interceptor only needs the current write view
+		var latestSchema *streamingpb.CollectionSchemaOfVChannel
+		if len(vchannelInfo.CollectionInfo.Schemas) > 0 {
+			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
+		}
 		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = &CollectionInfo{
 			VChannel:     vchannelInfo.Vchannel,
 			PartitionIDs: currentPartition,
+			Schema:       latestSchema,
 		}
 	}
 	return collectionInfoMap
@@ -187,6 +207,36 @@ type shardManagerImpl struct {
 type CollectionInfo struct {
 	VChannel     string
 	PartitionIDs map[int64]struct{}
+	Schema       *streamingpb.CollectionSchemaOfVChannel
+}
+
+// SchemaVersion returns the current collection schema version for the write path.
+// It returns 0 if schema is not set (nil receiver, nil Schema, or nil inner CollectionSchema).
+func (c *CollectionInfo) SchemaVersion() int32 {
+	if c == nil || c.Schema == nil {
+		return 0
+	}
+	s := c.Schema.GetSchema()
+	if s == nil {
+		return 0
+	}
+	return s.GetVersion()
+}
+
+func (c *CollectionInfo) UseGrowingSourceFlush() bool {
+	if c == nil || c.Schema == nil {
+		return false
+	}
+	return typeutil.UseGrowingSourceFlush(c.Schema.GetSchema(),
+		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
+}
+
+func (c *CollectionInfo) HasTextField() bool {
+	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil {
+		return false
+	}
+	return typeutil.HasTextField(c.Schema.GetSchema())
 }
 
 func (m *shardManagerImpl) Channel() types.PChannelInfo {
@@ -215,6 +265,7 @@ func newCollectionInfo(vchannel string, partitionIDs []int64) *CollectionInfo {
 	info := &CollectionInfo{
 		VChannel:     vchannel,
 		PartitionIDs: make(map[int64]struct{}, len(partitionIDs)),
+		Schema:       nil, // Schema will be set when collection is created or altered
 	}
 	for _, partitionID := range partitionIDs {
 		info.PartitionIDs[partitionID] = struct{}{}

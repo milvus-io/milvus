@@ -32,6 +32,7 @@
 #include "common/protobuf_utils.h"
 #include "milvus-storage/column_groups.h"
 #include "pb/common.pb.h"
+#include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Types.h"
 
@@ -47,21 +48,36 @@ namespace milvus::segcore {
  * Cross-category changes (binlog <-> manifest) are not supported.
  */
 struct LoadDiff {
-    // Indexes that need to be loaded (field_id -> list of LoadIndexInfo)
+    // Indexes that need to be loaded for fields without existing index
     std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes_to_load;
 
-    // Field binlog paths that need to be loaded [field_ids,FieldBinlog]
+    // Indexes that need to replace existing indexes (field already has an index)
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes_to_replace;
+
+    // Field binlog paths that need to be loaded (new fields)
     // Only populated when both current and new use binlog mode
     std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
         binlogs_to_load;
 
-    // list of column group indices and related field ids to load
+    // Field binlog paths that need to replace existing field data
+    std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
+        binlogs_to_replace;
+
+    // list of column group indices and related field ids to load (new fields)
     // same index could appear multiple times if same group using different setups
     std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_load;
 
-    // list of column group indices and related field ids to lazy load
+    // list of column group indices and related field ids to replace
+    // (field moved between column groups or column group data changed)
+    std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_replace;
+
+    // list of column group indices and related field ids to lazy load (new fields)
     // used for lazy load fields or fields with index has raw data
     std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_lazyload;
+
+    // list of column group indices and related field ids to lazy replace
+    std::vector<std::pair<int, std::vector<FieldId>>>
+        column_groups_to_lazyreplace;
 
     std::vector<FieldId> fields_to_reload;
 
@@ -76,6 +92,33 @@ struct LoadDiff {
     // These fields exist in schema but have no data source (binlog/index/column_group)
     std::vector<FieldId> fields_to_fill_default;
 
+    // Text indexes that need to be loaded from pre-built files
+    // (field_id -> converted LoadTextIndexInfo)
+    std::unordered_map<FieldId,
+                       std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>
+        text_indexes_to_load;
+
+    // JSON stats that need to be loaded from pre-built files
+    std::unordered_map<FieldId,
+                       std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>>
+        json_stats_to_load;
+
+    // JSON stats that need to replace existing stats
+    std::unordered_map<FieldId,
+                       std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>>
+        json_stats_to_replace;
+
+    // JSON stats that need to be dropped
+    std::unordered_set<FieldId> json_stats_to_drop;
+
+    // Text fields that need text indexes created from raw data
+    std::unordered_set<FieldId> text_indexes_to_create;
+
+    // External collections with manifest should bypass ComputeDiffColumnGroups
+    // (their column names are parquet field names, not numeric field IDs)
+    // and use LoadColumnGroups(manifest_path) directly in ApplyLoadDiff
+    bool load_external_manifest = false;
+
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;
 
@@ -84,10 +127,18 @@ struct LoadDiff {
 
     [[nodiscard]] bool
     HasChanges() const {
-        return !indexes_to_load.empty() || !binlogs_to_load.empty() ||
-               !column_groups_to_load.empty() || !fields_to_reload.empty() ||
-               !indexes_to_drop.empty() || !field_data_to_drop.empty() ||
-               !fields_to_fill_default.empty() || manifest_updated;
+        return !indexes_to_load.empty() || !indexes_to_replace.empty() ||
+               !binlogs_to_load.empty() || !binlogs_to_replace.empty() ||
+               !column_groups_to_load.empty() ||
+               !column_groups_to_replace.empty() ||
+               !column_groups_to_lazyload.empty() ||
+               !column_groups_to_lazyreplace.empty() ||
+               !fields_to_reload.empty() || !indexes_to_drop.empty() ||
+               !field_data_to_drop.empty() || !fields_to_fill_default.empty() ||
+               !text_indexes_to_load.empty() || !json_stats_to_load.empty() ||
+               !json_stats_to_replace.empty() || !json_stats_to_drop.empty() ||
+               !text_indexes_to_create.empty() || manifest_updated ||
+               load_external_manifest;
     }
 
     [[nodiscard]] bool
@@ -104,6 +155,17 @@ struct LoadDiff {
         oss << "indexes_to_load=[";
         bool first = true;
         for (const auto& [field_id, infos] : indexes_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get() << ":" << infos.size() << " indexes";
+        }
+        oss << "], ";
+
+        // indexes_to_replace
+        oss << "indexes_to_replace=[";
+        first = true;
+        for (const auto& [field_id, infos] : indexes_to_replace) {
             if (!first)
                 oss << ", ";
             first = false;
@@ -128,10 +190,79 @@ struct LoadDiff {
         }
         oss << "], ";
 
+        // binlogs_to_replace
+        oss << "binlogs_to_replace=[";
+        first = true;
+        for (const auto& [field_ids, binlog] : binlogs_to_replace) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
         // column_groups_to_load
         oss << "column_groups_to_load=[";
         first = true;
         for (const auto& [group_idx, field_ids] : column_groups_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // column_groups_to_replace
+        oss << "column_groups_to_replace=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] : column_groups_to_replace) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // column_groups_to_lazyload
+        oss << "column_groups_to_lazyload=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] : column_groups_to_lazyload) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // column_groups_to_lazyreplace
+        oss << "column_groups_to_lazyreplace=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] :
+             column_groups_to_lazyreplace) {
             if (!first)
                 oss << ", ";
             first = false;
@@ -178,10 +309,70 @@ struct LoadDiff {
         }
         oss << "], ";
 
+        // text_indexes_to_load
+        oss << "text_indexes_to_load=[";
+        first = true;
+        for (const auto& [field_id, stats] : text_indexes_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // json_stats_to_load
+        oss << "json_stats_to_load=[";
+        first = true;
+        for (const auto& [field_id, stats] : json_stats_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // json_stats_to_replace
+        oss << "json_stats_to_replace=[";
+        first = true;
+        for (const auto& [field_id, stats] : json_stats_to_replace) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // json_stats_to_drop
+        oss << "json_stats_to_drop=[";
+        first = true;
+        for (const auto& field_id : json_stats_to_drop) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // text_indexes_to_create
+        oss << "text_indexes_to_create=[";
+        first = true;
+        for (const auto& field_id : text_indexes_to_create) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
         // manifest_updated and new_manifest_path
         oss << "manifest_updated=" << (manifest_updated ? "true" : "false");
         if (manifest_updated) {
             oss << ", new_manifest_path=" << new_manifest_path;
+        }
+
+        // load_external_manifest
+        if (load_external_manifest) {
+            oss << ", load_external_manifest=true";
         }
 
         oss << "}";
@@ -228,7 +419,9 @@ class SegmentLoadInfo {
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
           schema_(other.schema_),
-          column_groups_(other.column_groups_) {
+          column_groups_(other.column_groups_),
+          fields_filled_with_default_(other.fields_filled_with_default_),
+          created_text_indexes_(other.created_text_indexes_) {
         BuildCache();
     }
 
@@ -241,8 +434,12 @@ class SegmentLoadInfo {
           converted_index_infos_(std::move(other.converted_index_infos_)),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
+          field_index_has_raw_data_(std::move(other.field_index_has_raw_data_)),
+          fields_filled_with_default_(
+              std::move(other.fields_filled_with_default_)),
           field_binlog_cache_(std::move(other.field_binlog_cache_)),
-          column_groups_(std::move(other.column_groups_)) {
+          column_groups_(std::move(other.column_groups_)),
+          created_text_indexes_(std::move(other.created_text_indexes_)) {
     }
 
     /**
@@ -255,6 +452,8 @@ class SegmentLoadInfo {
             info_ = other.info_;
             schema_ = other.schema_;
             column_groups_ = other.column_groups_;
+            fields_filled_with_default_ = other.fields_filled_with_default_;
+            created_text_indexes_ = other.created_text_indexes_;
             BuildCache();
         }
         return *this;
@@ -271,8 +470,13 @@ class SegmentLoadInfo {
             converted_index_infos_ = std::move(other.converted_index_infos_);
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
+            field_index_has_raw_data_ =
+                std::move(other.field_index_has_raw_data_);
+            fields_filled_with_default_ =
+                std::move(other.fields_filled_with_default_);
             field_binlog_cache_ = std::move(other.field_binlog_cache_);
             column_groups_ = std::move(other.column_groups_);
+            created_text_indexes_ = std::move(other.created_text_indexes_);
         }
         return *this;
     }
@@ -362,6 +566,23 @@ class SegmentLoadInfo {
     [[nodiscard]] proto::common::LoadPriority
     GetPriority() const {
         return info_.priority();
+    }
+
+    [[nodiscard]] bool
+    GetUseTakeForOutput() const {
+        return info_.use_take_for_output();
+    }
+
+    [[nodiscard]] bool
+    HasFieldInSchema(FieldId field_id) const {
+        return field_id.get() < START_USER_FIELDID ||
+               schema_->get_fields().find(field_id) !=
+                   schema_->get_fields().end();
+    }
+
+    [[nodiscard]] int64_t
+    GetEstimatedBytesPerRow() const {
+        return info_.estimated_bytes_per_row();
     }
 
     // ==================== Compaction Info ====================
@@ -549,11 +770,27 @@ class SegmentLoadInfo {
     // ==================== Column Groups Cache ====================
 
     /**
-     * @brief Get column groups from manifest
+     * @brief Get column groups from manifest (lazy-cached, thread-compatible)
      * @return Shared pointer to ColumnGroups, nullptr if manifest is empty
+     *
+     * The cache is populated on first access. Callers are responsible for
+     * serializing concurrent first-time calls on the same instance; in
+     * ChunkedSegmentSealedImpl this is guaranteed by `reopen_mutex_` since
+     * GetColumnGroups is only invoked from Load/Reopen/SetLoadInfo chains.
      */
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
-    GetColumnGroups();
+    GetColumnGroups() const;
+
+    /**
+     * @brief Pre-populate the column group cache without parsing a manifest
+     * @note Test-only hook: lets unit tests exercise diff logic that depends
+     *       on ColumnGroup contents without constructing real manifest files.
+     */
+    void
+    SetColumnGroupsForTesting(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> cg) {
+        column_groups_ = std::move(cg);
+    }
 
     // ==================== Stats & Delta Logs ====================
 
@@ -651,6 +888,55 @@ class SegmentLoadInfo {
                                               proto::segcore::JsonKeyStats>&
     GetJsonKeyStatsLogs() const {
         return info_.jsonkeystatslogs();
+    }
+
+    // ==================== Default-Filled Fields Tracking ====================
+
+    void
+    SetFieldFilledWithDefault(FieldId field_id) {
+        fields_filled_with_default_.insert(field_id);
+    }
+
+    void
+    ClearFieldFilledWithDefault(FieldId field_id) {
+        fields_filled_with_default_.erase(field_id);
+    }
+
+    [[nodiscard]] bool
+    IsFieldFilledWithDefault(FieldId field_id) const {
+        return fields_filled_with_default_.find(field_id) !=
+               fields_filled_with_default_.end();
+    }
+
+    [[nodiscard]] const std::set<FieldId>&
+    GetFieldsFilledWithDefault() const {
+        return fields_filled_with_default_;
+    }
+
+    void
+    SetFieldsFilledWithDefault(const std::set<FieldId>& field_ids) {
+        fields_filled_with_default_ = field_ids;
+    }
+
+    [[nodiscard]] std::set<FieldId>
+    GetDefaultFilledFieldsForNewInfo(const SegmentLoadInfo& new_info) const;
+
+    // ==================== Created Text Indexes Tracking ====================
+
+    void
+    SetTextIndexCreated(FieldId field_id) {
+        created_text_indexes_.insert(field_id);
+    }
+
+    [[nodiscard]] bool
+    HasTextIndexCreated(FieldId field_id) const {
+        return created_text_indexes_.find(field_id) !=
+               created_text_indexes_.end();
+    }
+
+    [[nodiscard]] const std::unordered_set<FieldId>&
+    GetCreatedTextIndexes() const {
+        return created_text_indexes_;
     }
 
     // ==================== Diff Computation ====================
@@ -764,6 +1050,26 @@ class SegmentLoadInfo {
     [[nodiscard]] static bool
     CheckIndexHasRawData(const LoadIndexInfo& load_index_info);
 
+    /**
+     * @brief Convert a TextIndexStats to LoadTextIndexInfo
+     *
+     * This method converts the protobuf TextIndexStats to the
+     * LoadTextIndexInfo structure used for loading pre-built text indexes.
+     *
+     * @param text_index_stats The TextIndexStats to convert
+     * @param field_id The field ID for the text index
+     * @return shared_ptr to LoadTextIndexInfo populated with the converted data
+     */
+    [[nodiscard]] std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
+    ConvertTextIndexStatsToLoadTextIndexInfo(
+        const proto::segcore::TextIndexStats& text_index_stats,
+        FieldId field_id) const;
+
+    [[nodiscard]] std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>
+    ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
+        const proto::segcore::JsonKeyStats& json_key_stats,
+        FieldId field_id) const;
+
  private:
     void
     BuildCache() {
@@ -784,10 +1090,13 @@ class SegmentLoadInfo {
             if (index_info.index_file_paths_size() == 0) {
                 continue;
             }
+            auto field_id = FieldId(index_info.fieldid());
+            if (!HasFieldInSchema(field_id)) {
+                continue;
+            }
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
             converted_index_infos_.push_back(load_index_info);
-            auto field_id = FieldId(index_info.fieldid());
             // Check if index has raw data before moving
             if (CheckIndexHasRawData(load_index_info)) {
                 field_index_has_raw_data_.insert(field_id);
@@ -812,6 +1121,15 @@ class SegmentLoadInfo {
     void
     ComputeDiffDefaultFields(LoadDiff& diff, SegmentLoadInfo& new_info);
 
+    void
+    ComputeDiffTextIndexes(LoadDiff& diff, SegmentLoadInfo& new_info);
+
+    void
+    ComputeDiffJsonKeyStats(LoadDiff& diff, SegmentLoadInfo& new_info);
+
+    [[nodiscard]] std::set<FieldId>
+    CollectDataFields() const;
+
     ProtoType info_;
 
     SchemaPtr schema_;
@@ -831,8 +1149,14 @@ class SegmentLoadInfo {
     // Cache for quick field -> binlog lookup
     std::map<FieldId, const proto::segcore::FieldBinlog*> field_binlog_cache_;
 
-    // Cache for column groups metadata (used with manifest mode)
-    std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+    // Cache for column groups metadata (used with manifest mode). Mutable so
+    // GetColumnGroups() can be const — the cache is a memoization of an
+    // immutable manifest path.
+    mutable std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+
+    // Field IDs where text indexes were created from raw data (not loaded from files)
+    // These should NOT be re-loaded in diff computation
+    std::unordered_set<FieldId> created_text_indexes_;
 };
 
 }  // namespace milvus::segcore

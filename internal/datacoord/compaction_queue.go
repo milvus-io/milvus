@@ -22,8 +22,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
 type Item[T any] struct {
@@ -74,9 +74,12 @@ func (pq *PriorityQueue[T]) Update(item *Item[T], value T, priority int) {
 	heap.Fix(pq, item.index)
 }
 
+// errFull / errNoSuchElement are INTERNAL sentinels: caught by errors.Is
+// inside the compaction inspector / scheduler loop and never serialized
+// across any gRPC boundary. See docs/dev/error_sentinel_convention.md.
 var (
-	ErrFull          = errors.New("compaction queue is full")
-	ErrNoSuchElement = errors.New("compaction queue has no element")
+	errFull          = errors.New("compaction queue is full")
+	errNoSuchElement = errors.New("compaction queue has no element")
 )
 
 type Prioritizer func(t CompactionTask) int
@@ -101,7 +104,7 @@ func (q *CompactionQueue) Enqueue(t CompactionTask) error {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 	if q.capacity > 0 && len(q.pq) >= q.capacity {
-		return ErrFull
+		return errFull
 	}
 
 	heap.Push(&q.pq, &Item[CompactionTask]{value: t, priority: q.prioritizer(t)})
@@ -113,7 +116,7 @@ func (q *CompactionQueue) Dequeue() (CompactionTask, error) {
 	defer q.lock.Unlock()
 
 	if len(q.pq) == 0 {
-		return nil, ErrNoSuchElement
+		return nil, errNoSuchElement
 	}
 
 	item := heap.Pop(&q.pq).(*Item[CompactionTask])
@@ -166,6 +169,8 @@ var (
 			return 1
 		case datapb.CompactionType_MixCompaction:
 			return 10
+		case datapb.CompactionType_BumpSchemaVersionCompaction:
+			return 10
 		case datapb.CompactionType_ClusteringCompaction:
 			return 100
 		default:
@@ -178,6 +183,8 @@ var (
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 10
 		case datapb.CompactionType_MixCompaction:
+			return 1
+		case datapb.CompactionType_BumpSchemaVersionCompaction:
 			return 1
 		case datapb.CompactionType_ClusteringCompaction:
 			return 100

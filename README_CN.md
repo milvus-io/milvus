@@ -72,7 +72,7 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 ```
 go: 1.21
 cmake: >=3.18
-gcc: 7.5
+gcc: >= 11
 protobuf: >=3.7
 ```
 

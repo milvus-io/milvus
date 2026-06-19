@@ -22,8 +22,8 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type FileType int
@@ -105,5 +105,5 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 		}
 		return CSV, nil
 	}
-	return Invalid, merr.WrapErrImportFailed(fmt.Sprintf("unexpected file type, files=%v", file.GetPaths()))
+	return Invalid, merr.WrapErrImportFailedMsg("unexpected file type, files=%v", file.GetPaths())
 }

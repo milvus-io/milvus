@@ -5,13 +5,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func fieldDataEmpty(data *schemapb.FieldData) bool {
@@ -280,6 +280,79 @@ func TestFillIfEmpty(t *testing.T) {
 		assert.Equal(t, 2, len(result.GetFieldsData()))
 		for _, fieldData := range result.GetFieldsData() {
 			assert.True(t, fieldDataEmpty(fieldData))
+		}
+	})
+
+	// System fields (RowID=0, Timestamp=1) are never part of the user/collection
+	// schema, but the proxy appends common.TimeStampField to OutputFieldsId for
+	// MVCC dedup. For external collections the segcore synthesizes these as Int64
+	// columns, so the empty-fill path must emit them as empty Int64 columns too,
+	// instead of failing the schema lookup with "fieldID(1) not found".
+	// See https://github.com/milvus-io/milvus/issues/50188.
+	t.Run("system field with external collection schema", func(t *testing.T) {
+		result := &segcorepb.RetrieveResults{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: nil,
+					},
+				},
+			},
+		}
+		// External collection schema: virtual PK + user fields, no system fields.
+		schema := &schemapb.CollectionSchema{
+			Name: "external_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         common.VirtualPKFieldName,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vc_tag",
+					DataType: schemapb.DataType_VarChar,
+				},
+			},
+		}
+		// OutputFieldsId carries the system timestamp field appended by the proxy.
+		err := FillRetrieveResultIfEmpty(NewSegcoreResults(result),
+			[]int64{101, common.TimeStampField}, schema)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(result.GetFieldsData()))
+
+		var tsFieldData *schemapb.FieldData
+		for _, fieldData := range result.GetFieldsData() {
+			assert.True(t, fieldDataEmpty(fieldData))
+			if fieldData.GetFieldId() == common.TimeStampField {
+				tsFieldData = fieldData
+			}
+		}
+		assert.NotNil(t, tsFieldData)
+		assert.Equal(t, schemapb.DataType_Int64, tsFieldData.GetType())
+	})
+
+	t.Run("row id system field", func(t *testing.T) {
+		result := &segcorepb.RetrieveResults{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: nil}},
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: "external_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			},
+		}
+		err := FillRetrieveResultIfEmpty(NewSegcoreResults(result),
+			[]int64{common.RowIDField, common.TimeStampField}, schema)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(result.GetFieldsData()))
+		for _, fieldData := range result.GetFieldsData() {
+			assert.True(t, fieldDataEmpty(fieldData))
+			assert.Equal(t, schemapb.DataType_Int64, fieldData.GetType())
 		}
 	})
 }

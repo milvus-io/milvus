@@ -10,12 +10,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -23,6 +23,13 @@ var (
 	fenced                             = typeutil.NewConcurrentSet[string]()
 	enableFenceError                   = atomic.NewBool(true)
 )
+
+// Reset clears global state of the in-memory WAL test implementation.
+func Reset() {
+	logs = typeutil.NewConcurrentMap[string, *messageLog]()
+	fenced = typeutil.NewConcurrentSet[string]()
+	enableFenceError.Store(true)
+}
 
 // EnableFenced enables fenced mode for the given channel.
 func EnableFenced(channel string) {
@@ -50,7 +57,7 @@ func (w *walImpls) Append(ctx context.Context, msg message.MutableMessage) (mess
 	if fenced.Contain(w.Channel().Name) {
 		return nil, errors.Mark(errors.New("err"), walimpls.ErrFenced)
 	}
-	if enableFenceError.Load() && rand.Int31n(30) == 0 {
+	if enableFenceError.Load() && msg.MessageType() != message.MessageTypeTimeTick && rand.Int31n(30) == 0 {
 		return nil, errors.New("random error")
 	}
 	return w.datas.Append(ctx, msg)

@@ -34,8 +34,8 @@ Collection::Collection(const std::string_view schema_proto) {
     if (!suc) {
         LOG_WARN("unmarshal schema string failed");
     }
-    collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
+    collection_name_ = std::move(*collection_schema.mutable_name());
 }
 
 Collection::Collection(const void* schema_proto, const int64_t length) {
@@ -46,8 +46,8 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
         LOG_WARN("unmarshal schema string failed");
     }
 
-    collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
+    collection_name_ = std::move(*collection_schema.mutable_name());
 }
 
 void
@@ -62,8 +62,9 @@ Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
         return;
     }
 
-    index_meta_ = std::make_shared<CollectionIndexMeta>(indexMeta);
-    LOG_INFO("index meta info: {}", index_meta_->ToString());
+    auto new_index_meta = std::make_shared<CollectionIndexMeta>(indexMeta);
+    LOG_INFO("index meta info: {}", new_index_meta->ToString());
+    set_index_meta(new_index_meta);
 }
 
 void

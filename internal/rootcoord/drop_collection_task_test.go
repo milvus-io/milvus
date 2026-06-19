@@ -23,13 +23,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func Test_dropCollectionTask_Prepare(t *testing.T) {
@@ -59,7 +59,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IsAlias(mock.Anything, mock.Anything, mock.Anything).Return(false)
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound)
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
 			Core: core,
@@ -75,7 +75,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IsAlias(mock.Anything, mock.Anything, mock.Anything).Return(false)
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID:        1,
 			DBID:                1,
 			State:               pb.CollectionState_CollectionCreated,
@@ -102,7 +102,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(false)
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID:        1,
 			DBName:              "db1",
 			DBID:                1,
@@ -111,7 +111,8 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		}, nil)
 		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).Return([]string{})
 
-		core := newTestCore(withMeta(meta))
+		broker := &mockBroker{}
+		core := newTestCore(withMeta(meta), withBroker(broker))
 		task := &dropCollectionTask{
 			Core: core,
 			Req: &milvuspb.DropCollectionRequest{

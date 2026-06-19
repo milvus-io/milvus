@@ -25,8 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // BalancerFactory is responsible for creating and caching balancer instances.
@@ -41,7 +41,6 @@ type BalancerFactory struct {
 	scheduler   task.Scheduler
 	nodeManager *session.NodeManager
 	dist        *meta.DistributionManager
-	meta        *meta.Meta
 	targetMgr   meta.TargetManagerInterface
 }
 
@@ -57,11 +56,10 @@ func InitGlobalBalancerFactory(
 	scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
-	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 ) {
 	factoryOnce.Do(func() {
-		globalFactory = NewBalancerFactory(scheduler, nodeManager, dist, meta, targetMgr)
+		globalFactory = NewBalancerFactory(scheduler, nodeManager, dist, targetMgr)
 		log.Info("Global balancer factory initialized")
 	})
 }
@@ -84,7 +82,6 @@ func NewBalancerFactory(
 	scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
-	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 ) *BalancerFactory {
 	return &BalancerFactory{
@@ -93,7 +90,6 @@ func NewBalancerFactory(
 		scheduler:           scheduler,
 		nodeManager:         nodeManager,
 		dist:                dist,
-		meta:                meta,
 		targetMgr:           targetMgr,
 	}
 }
@@ -115,20 +111,20 @@ func (f *BalancerFactory) GetBalancer() Balance {
 
 	switch balanceKey {
 	case meta.RoundRobinBalancerName:
-		balancer = NewRoundRobinBalancer(f.scheduler, f.nodeManager, f.dist, f.meta, f.targetMgr)
+		balancer = NewRoundRobinBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	case meta.RowCountBasedBalancerName:
-		balancer = NewRowCountBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.meta, f.targetMgr)
+		balancer = NewRowCountBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	case meta.ScoreBasedBalancerName:
-		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.meta, f.targetMgr)
+		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	case meta.MultiTargetBalancerName:
-		balancer = NewMultiTargetBalancer(f.scheduler, f.nodeManager, f.dist, f.meta, f.targetMgr)
+		balancer = NewMultiTargetBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	case meta.ChannelLevelScoreBalancerName:
-		balancer = NewChannelLevelScoreBalancer(f.scheduler, f.nodeManager, f.dist, f.meta, f.targetMgr)
+		balancer = NewChannelLevelScoreBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	default:
 		log.Info("Unknown balancer type, using default",
 			zap.String("requested", balanceKey),
 			zap.String("default", meta.ScoreBasedBalancerName))
-		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.meta, f.targetMgr)
+		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	}
 
 	f.balancerMap[balanceKey] = balancer

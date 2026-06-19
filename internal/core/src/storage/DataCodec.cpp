@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/DataCodec.h"
+#include "common/FastMem.h"
 
 #include <string.h>
 #include <any>
@@ -98,7 +99,8 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
         auto decrypted_ptr =
             std::shared_ptr<uint8_t[]>(new uint8_t[decrypted_str.size()],
                                        [](uint8_t* ptr) { delete[] ptr; });
-        memcpy(decrypted_ptr.get(), decrypted_str.data(), decrypted_str.size());
+        milvus::fastmem::FastMemcpy(
+            decrypted_ptr.get(), decrypted_str.data(), decrypted_str.size());
         buff_to_keep = decrypted_ptr;
 
         reader =

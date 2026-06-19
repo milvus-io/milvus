@@ -103,12 +103,10 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<int64_t>(input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<double>(input);
                     break;
                 }
@@ -171,57 +169,54 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             "division or modulus by zero in JSON field arithmetic expression");
     }
 
-#define BinaryArithRangeJSONCompare(cmp)                                \
-    do {                                                                \
-        for (size_t i = 0; i < size; ++i) {                             \
-            auto offset = i;                                            \
-            if constexpr (filter_type == FilterType::random) {          \
-                offset = (offsets) ? offsets[i] : i;                    \
-            }                                                           \
-            if (valid_data != nullptr && !valid_data[offset]) {         \
-                res[i] = false;                                         \
-                valid_res[i] = false;                                   \
-                continue;                                               \
-            }                                                           \
-            auto x = data[offset].template at<GetType>(pointer);        \
-            if (x.error()) {                                            \
-                if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                    auto x = data[offset].template at<double>(pointer); \
-                    res[i] = !x.error() && (cmp);                       \
-                    continue;                                           \
-                }                                                       \
-                res[i] = false;                                         \
-                continue;                                               \
-            }                                                           \
-            res[i] = (cmp);                                             \
-        }                                                               \
+// For int64_t GetType, uses at_numeric() to extract any JSON number in one
+// parse.  int64 values preserve precision; uint64/double fall back to double.
+// 'cmp' must reference 'json_v' (auto-typed as int64_t or double).
+#define BinaryArithRangeJSONCompareCore(cmp, error_result)                  \
+    do {                                                                    \
+        for (size_t i = 0; i < size; ++i) {                                 \
+            auto offset = i;                                                \
+            if constexpr (filter_type == FilterType::random) {              \
+                offset = (offsets) ? offsets[i] : i;                        \
+            }                                                               \
+            if (valid_data != nullptr && !valid_data[offset]) {             \
+                res[i] = false;                                             \
+                valid_res[i] = false;                                       \
+                continue;                                                   \
+            }                                                               \
+            if constexpr (std::is_same_v<GetType, int64_t>) {               \
+                auto x_num = data[offset].at_numeric(pointer);              \
+                if (x_num.error()) {                                        \
+                    res[i] = (error_result);                                \
+                    continue;                                               \
+                }                                                           \
+                auto n = x_num.value();                                     \
+                if (n.is_int64()) {                                         \
+                    auto json_v = n.get_int64();                            \
+                    res[i] = (cmp);                                         \
+                } else {                                                    \
+                    auto json_v = n.is_uint64()                             \
+                                      ? static_cast<double>(n.get_uint64()) \
+                                      : n.get_double();                     \
+                    res[i] = (cmp);                                         \
+                }                                                           \
+            } else {                                                        \
+                auto x = data[offset].template at<GetType>(pointer);        \
+                if (x.error()) {                                            \
+                    res[i] = (error_result);                                \
+                    continue;                                               \
+                }                                                           \
+                auto json_v = x.value();                                    \
+                res[i] = (cmp);                                             \
+            }                                                               \
+        }                                                                   \
     } while (false)
 
-#define BinaryArithRangeJSONCompareNotEqual(cmp)                        \
-    do {                                                                \
-        for (size_t i = 0; i < size; ++i) {                             \
-            auto offset = i;                                            \
-            if constexpr (filter_type == FilterType::random) {          \
-                offset = (offsets) ? offsets[i] : i;                    \
-            }                                                           \
-            if (valid_data != nullptr && !valid_data[offset]) {         \
-                res[i] = false;                                         \
-                valid_res[i] = false;                                   \
-                continue;                                               \
-            }                                                           \
-            auto x = data[offset].template at<GetType>(pointer);        \
-            if (x.error()) {                                            \
-                if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                    auto x = data[offset].template at<double>(pointer); \
-                    res[i] = x.error() || (cmp);                        \
-                    continue;                                           \
-                }                                                       \
-                res[i] = true;                                          \
-                continue;                                               \
-            }                                                           \
-            res[i] = (cmp);                                             \
-        }                                                               \
-    } while (false)
+#define BinaryArithRangeJSONCompare(cmp) \
+    BinaryArithRangeJSONCompareCore(cmp, false)
+
+#define BinaryArithRangeJSONCompareNotEqual(cmp) \
+    BinaryArithRangeJSONCompareCore(cmp, true)
 
 #define BinaryArithRangeJONCompareArrayLength(cmp)              \
     do {                                                        \
@@ -266,28 +261,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand ==
+                        BinaryArithRangeJSONCompare(json_v + right_operand ==
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand ==
+                        BinaryArithRangeJSONCompare(json_v - right_operand ==
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand ==
+                        BinaryArithRangeJSONCompare(json_v * right_operand ==
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand ==
+                        BinaryArithRangeJSONCompare(json_v / right_operand ==
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) == val);
+                            safe_mod(json_v, right_operand) == val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -308,27 +303,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
                         BinaryArithRangeJSONCompareNotEqual(
-                            x.value() + right_operand != val);
+                            json_v + right_operand != val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
                         BinaryArithRangeJSONCompareNotEqual(
-                            x.value() - right_operand != val);
+                            json_v - right_operand != val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
                         BinaryArithRangeJSONCompareNotEqual(
-                            x.value() * right_operand != val);
+                            json_v * right_operand != val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
                         BinaryArithRangeJSONCompareNotEqual(
-                            x.value() / right_operand != val);
+                            json_v / right_operand != val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompareNotEqual(
-                            safe_mod(x.value(), right_operand) != val);
+                            safe_mod(json_v, right_operand) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -348,28 +343,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::GreaterThan: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand >
+                        BinaryArithRangeJSONCompare(json_v + right_operand >
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand >
+                        BinaryArithRangeJSONCompare(json_v - right_operand >
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand >
+                        BinaryArithRangeJSONCompare(json_v * right_operand >
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand >
+                        BinaryArithRangeJSONCompare(json_v / right_operand >
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) > val);
+                            safe_mod(json_v, right_operand) > val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -389,28 +384,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::GreaterEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand >=
+                        BinaryArithRangeJSONCompare(json_v + right_operand >=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand >=
+                        BinaryArithRangeJSONCompare(json_v - right_operand >=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand >=
+                        BinaryArithRangeJSONCompare(json_v * right_operand >=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand >=
+                        BinaryArithRangeJSONCompare(json_v / right_operand >=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) >= val);
+                            safe_mod(json_v, right_operand) >= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -430,28 +425,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::LessThan: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand <
+                        BinaryArithRangeJSONCompare(json_v + right_operand <
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand <
+                        BinaryArithRangeJSONCompare(json_v - right_operand <
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand <
+                        BinaryArithRangeJSONCompare(json_v * right_operand <
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand <
+                        BinaryArithRangeJSONCompare(json_v / right_operand <
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) < val);
+                            safe_mod(json_v, right_operand) < val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -471,28 +466,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::LessEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(x.value() + right_operand <=
+                        BinaryArithRangeJSONCompare(json_v + right_operand <=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(x.value() - right_operand <=
+                        BinaryArithRangeJSONCompare(json_v - right_operand <=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(x.value() * right_operand <=
+                        BinaryArithRangeJSONCompare(json_v * right_operand <=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(x.value() / right_operand <=
+                        BinaryArithRangeJSONCompare(json_v / right_operand <=
                                                     val);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(x.value(), right_operand) <= val);
+                            safe_mod(json_v, right_operand) <= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -930,7 +925,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
 template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl(OffsetVector* input) {
-    if (CanUseIndex<T>()) {
+    if (exec_path_ == ExprExecPath::ScalarIndex) {
         return ExecRangeVisitorImplForIndex<T>(input);
     } else {
         return ExecRangeVisitorImplForData<T>(input);
@@ -1854,12 +1849,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         // there is a batch operation in ArithOpElementFunc,
         // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
         // but to mask res with valid_data after the batch operation.
-        if (valid_data != nullptr) {
+        if constexpr (filter_type == FilterType::sequential) {
+            // contiguous rows: reuse the vectorized shared helper
+            ApplyValidMask(valid_data, res, valid_res, size);
+        } else if (valid_data != nullptr) {
+            // scattered by offsets: gather, keep the per-row loop
             for (int i = 0; i < size; i++) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
+                auto offset = (offsets) ? offsets[i] : i;
                 if (!valid_data[offset]) {
                     res[i] = valid_res[i] = false;
                 }
@@ -1868,10 +1864,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     };
 
     auto skip_index_func =
-        [op_type, arith_type, value, right_operand](
+        [op_ctx = op_ctx_, op_type, arith_type, value, right_operand](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            return skip_index.CanSkipBinaryArithRange<T>(
-                field_id, chunk_id, op_type, arith_type, value, right_operand);
+            return skip_index.CanSkipBinaryArithRange<T>(op_ctx,
+                                                         field_id,
+                                                         chunk_id,
+                                                         op_type,
+                                                         arith_type,
+                                                         value,
+                                                         right_operand);
         };
 
     int64_t processed_size;

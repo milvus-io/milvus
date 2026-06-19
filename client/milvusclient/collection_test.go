@@ -27,12 +27,12 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type CollectionSuite struct {
@@ -261,6 +261,26 @@ func (s *CollectionSuite) TestDropCollection() {
 	})
 }
 
+func (s *CollectionSuite) TestTruncateCollection() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		s.mock.EXPECT().TruncateCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.TruncateCollectionResponse{Status: merr.Success()}, nil).Once()
+
+		err := s.client.TruncateCollection(ctx, NewTruncateCollectionOption("test_collection"))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().TruncateCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.TruncateCollection(ctx, NewTruncateCollectionOption("test_collection"))
+		s.Error(err)
+	})
+}
+
 func (s *CollectionSuite) TestRenameCollection() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -471,6 +491,120 @@ func (s *CollectionSuite) TestAddCollectionField() {
 
 		err := s.client.AddCollectionField(ctx, NewAddCollectionFieldOption(collName, field))
 		s.NoError(err)
+	})
+}
+
+func (s *CollectionSuite) TestAddCollectionStructField() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		fieldName := fmt.Sprintf("field_%s", s.randString(6))
+		s.mock.EXPECT().AddCollectionStructField(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, acsfr *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+			s.Equal(collName, acsfr.GetCollectionName())
+			structProto := acsfr.GetStructArrayFieldSchema()
+			s.Require().NotNil(structProto)
+			s.Equal(fieldName, structProto.GetName())
+			s.True(structProto.GetNullable())
+			s.Equal("16", entity.KvPairsMap(structProto.GetTypeParams())[common.MaxCapacityKey])
+			s.Require().Len(structProto.GetFields(), 2)
+
+			tagField := structProto.GetFields()[0]
+			s.Equal("tag", tagField.GetName())
+			s.Equal(schemapb.DataType_Array, tagField.GetDataType())
+			s.Equal(schemapb.DataType_VarChar, tagField.GetElementType())
+			tagParams := entity.KvPairsMap(tagField.GetTypeParams())
+			s.Equal("64", tagParams[common.MaxLengthKey])
+			s.Equal("16", tagParams[common.MaxCapacityKey])
+
+			embField := structProto.GetFields()[1]
+			s.Equal("emb", embField.GetName())
+			s.Equal(schemapb.DataType_ArrayOfVector, embField.GetDataType())
+			s.Equal(schemapb.DataType_FloatVector, embField.GetElementType())
+			embParams := entity.KvPairsMap(embField.GetTypeParams())
+			s.Equal("8", embParams[common.DimKey])
+			s.Equal("16", embParams[common.MaxCapacityKey])
+			return merr.Success(), nil
+		}).Once()
+
+		structSchema := entity.NewStructSchema().
+			WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)).
+			WithField(entity.NewField().WithName("emb").WithDataType(entity.FieldTypeFloatVector).WithDim(8))
+		field := entity.NewField().
+			WithName(fieldName).
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(16).
+			WithNullable(true).
+			WithStructSchema(structSchema)
+
+		err := s.client.AddCollectionStructField(ctx, NewAddCollectionStructFieldOption(collName, field))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		fieldName := fmt.Sprintf("field_%s", s.randString(6))
+		s.mock.EXPECT().AddCollectionStructField(mock.Anything, mock.Anything).Return(merr.Status(errors.New("mocked")), nil).Once()
+
+		field := entity.NewField().
+			WithName(fieldName).
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(16).
+			WithStructSchema(entity.NewStructSchema().WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)))
+
+		err := s.client.AddCollectionStructField(ctx, NewAddCollectionStructFieldOption(collName, field))
+		s.Error(err)
+	})
+
+	s.Run("non_struct_array_field", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		field := entity.NewField().WithName("field").WithDataType(entity.FieldTypeInt64).WithNullable(true)
+
+		err := s.client.AddCollectionStructField(ctx, NewAddCollectionStructFieldOption(collName, field))
+		s.Error(err)
+		s.Contains(err.Error(), "requires data type Array and element type Struct")
+	})
+
+	s.Run("nil_option", func() {
+		var opt *addCollectionStructFieldOption
+		err := opt.Validate()
+		s.Error(err)
+		s.Contains(err.Error(), "option is nil")
+	})
+
+	s.Run("nil_field_schema", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		err := NewAddCollectionStructFieldOption(collName, nil).Validate()
+		s.Error(err)
+		s.Contains(err.Error(), "struct array field schema is required")
+	})
+
+	s.Run("nil_struct_schema", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		field := entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct)
+
+		err := s.client.AddCollectionStructField(ctx, NewAddCollectionStructFieldOption(collName, field))
+		s.Error(err)
+		s.Contains(err.Error(), "struct schema is required")
+	})
+
+	s.Run("invalid_sub_field", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		field := entity.NewField().
+			WithName("clips").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithStructSchema(entity.NewStructSchema().WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithNullable(true)))
+
+		err := s.client.AddCollectionStructField(ctx, NewAddCollectionStructFieldOption(collName, field))
+		s.Error(err)
+		s.Contains(err.Error(), "must not be nullable")
 	})
 }
 

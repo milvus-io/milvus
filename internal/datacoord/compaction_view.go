@@ -18,13 +18,14 @@ package datacoord
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 type CompactionView interface {
@@ -36,6 +37,12 @@ type CompactionView interface {
 	ForceTrigger() (CompactionView, string)
 	ForceTriggerAll() ([]CompactionView, string)
 	GetTriggerID() int64
+	GetTotalSize() float64
+	GetCollectionTTL() time.Duration
+}
+
+func sumSegmentSize(views []*SegmentView) float64 {
+	return lo.SumBy(views, func(v *SegmentView) float64 { return v.Size })
 }
 
 type FullViews struct {

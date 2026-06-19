@@ -5,8 +5,9 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type FillExpressionValueSuite struct {
@@ -182,6 +183,112 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 		for _, c := range testcases {
 			s.assertInvalidExpr(schemaH, c.expr, c.values)
 		}
+	})
+}
+
+func (s *FillExpressionValueSuite) TestSpecialStringTemplate() {
+	schema := newTestSchema(true)
+	enableMatch(schema)
+	schemaH, err := typeutil.CreateSchemaHelper(schema)
+	s.NoError(err)
+
+	s.Run("like pattern", func() {
+		expr, err := ParseExpr(schemaH, `VarCharField like {pattern}`, map[string]*schemapb.TemplateValue{
+			"pattern": generateTemplateValue(schemapb.DataType_VarChar, "prefix%"),
+		})
+		s.NoError(err)
+		rangeExpr := expr.GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_PrefixMatch, rangeExpr.GetOp())
+		s.Equal("prefix", rangeExpr.GetValue().GetStringVal())
+	})
+
+	s.Run("regex pattern", func() {
+		expr, err := ParseExpr(schemaH, `VarCharField =~ {pattern}`, map[string]*schemapb.TemplateValue{
+			"pattern": generateTemplateValue(schemapb.DataType_VarChar, `prefix\d+`),
+		})
+		s.NoError(err)
+		rangeExpr := expr.GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_RegexMatch, rangeExpr.GetOp())
+		s.Equal(`prefix\d+`, rangeExpr.GetValue().GetStringVal())
+	})
+
+	s.Run("regex not match pattern", func() {
+		expr, err := ParseExpr(schemaH, `VarCharField !~ {pattern}`, map[string]*schemapb.TemplateValue{
+			"pattern": generateTemplateValue(schemapb.DataType_VarChar, `^prefix`),
+		})
+		s.NoError(err)
+		notExpr := expr.GetUnaryExpr()
+		s.NotNil(notExpr)
+		rangeExpr := notExpr.GetChild().GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_PrefixMatch, rangeExpr.GetOp())
+		s.Equal("prefix", rangeExpr.GetValue().GetStringVal())
+	})
+
+	s.Run("text match query", func() {
+		expr, err := ParseExpr(schemaH, `text_match(VarCharField, {query})`, map[string]*schemapb.TemplateValue{
+			"query": generateTemplateValue(schemapb.DataType_VarChar, "vector database"),
+		})
+		s.NoError(err)
+		rangeExpr := expr.GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_TextMatch, rangeExpr.GetOp())
+		s.Equal("vector database", rangeExpr.GetValue().GetStringVal())
+	})
+
+	s.Run("phrase match query", func() {
+		expr, err := ParseExpr(schemaH, `phrase_match(VarCharField, {query}, 1)`, map[string]*schemapb.TemplateValue{
+			"query": generateTemplateValue(schemapb.DataType_VarChar, "vector database"),
+		})
+		s.NoError(err)
+		rangeExpr := expr.GetUnaryRangeExpr()
+		s.NotNil(rangeExpr)
+		s.Equal(planpb.OpType_PhraseMatch, rangeExpr.GetOp())
+		s.Equal("vector database", rangeExpr.GetValue().GetStringVal())
+		s.Equal(int64(1), rangeExpr.GetExtraValues()[0].GetInt64Val())
+	})
+
+	s.Run("GIS WKT", func() {
+		expr, err := ParseExpr(schemaH, `st_contains(GeometryField, {wkt})`, map[string]*schemapb.TemplateValue{
+			"wkt": generateTemplateValue(schemapb.DataType_VarChar, "POINT(0 0)"),
+		})
+		s.NoError(err)
+		gisExpr := expr.GetGisfunctionFilterExpr()
+		s.NotNil(gisExpr)
+		s.Equal(planpb.GISFunctionFilterExpr_Contains, gisExpr.GetOp())
+		s.Equal("POINT(0 0)", gisExpr.GetWktString())
+	})
+
+	s.Run("ST_DWithin WKT", func() {
+		expr, err := ParseExpr(schemaH, `st_dwithin(GeometryField, {wkt}, 1.5)`, map[string]*schemapb.TemplateValue{
+			"wkt": generateTemplateValue(schemapb.DataType_VarChar, "POINT(0 0)"),
+		})
+		s.NoError(err)
+		gisExpr := expr.GetGisfunctionFilterExpr()
+		s.NotNil(gisExpr)
+		s.Equal(planpb.GISFunctionFilterExpr_DWithin, gisExpr.GetOp())
+		s.Equal("POINT(0 0)", gisExpr.GetWktString())
+		s.Equal(float64(1.5), gisExpr.GetDistance())
+	})
+
+	s.Run("extra parameters are still constants", func() {
+		s.assertInvalidExpr(schemaH, `VarCharField =~ {pattern}`, map[string]*schemapb.TemplateValue{
+			"pattern": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		})
+		s.assertInvalidExpr(schemaH, `text_match(VarCharField, "vector database", minimum_should_match={n})`, map[string]*schemapb.TemplateValue{
+			"n": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		})
+		s.assertInvalidExpr(schemaH, `phrase_match(VarCharField, "vector database", {slop})`, map[string]*schemapb.TemplateValue{
+			"slop": generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		})
+		s.assertInvalidExpr(schemaH, `st_dwithin(GeometryField, "POINT(0 0)", {distance})`, map[string]*schemapb.TemplateValue{
+			"distance": generateTemplateValue(schemapb.DataType_Double, float64(1.5)),
+		})
+		s.assertInvalidExpr(schemaH, `random_sample({ratio})`, map[string]*schemapb.TemplateValue{
+			"ratio": generateTemplateValue(schemapb.DataType_Double, float64(0.1)),
+		})
 	})
 }
 
@@ -724,7 +831,8 @@ func (s *FillExpressionValueSuite) TestTermExprWithMixedNumericTypesForJSON() {
 
 	s.Run("non-JSON field should not be affected by mixed type normalization", func() {
 		// Int64Field is not a JSON field, so mixed types would be an error or handled differently
-		exprStr := `Int64Field in [1, 2, 3]`
+		// Use >= 10 values to stay above the integer IN threshold and keep TermExpr form
+		exprStr := `Int64Field in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`
 
 		expr, err := ParseExpr(schemaH, exprStr, nil)
 		s.NoError(err)
@@ -733,10 +841,10 @@ func (s *FillExpressionValueSuite) TestTermExprWithMixedNumericTypesForJSON() {
 		// Verify values remain as integers for non-JSON field
 		te := expr.GetTermExpr()
 		s.NotNil(te, "expected TermExpr")
-		s.Len(te.GetValues(), 3)
-		s.Equal(int64(1), te.GetValues()[0].GetInt64Val())
-		s.Equal(int64(2), te.GetValues()[1].GetInt64Val())
-		s.Equal(int64(3), te.GetValues()[2].GetInt64Val())
+		s.Len(te.GetValues(), 10)
+		for i := 0; i < 10; i++ {
+			s.Equal(int64(i+1), te.GetValues()[i].GetInt64Val())
+		}
 	})
 
 	s.Run("not in with mixed int and float should normalize all to float", func() {
@@ -756,4 +864,104 @@ func (s *FillExpressionValueSuite) TestTermExprWithMixedNumericTypesForJSON() {
 		s.Equal(float64(2.5), te.GetValues()[1].GetFloatVal())
 		s.Equal(float64(3), te.GetValues()[2].GetFloatVal())
 	})
+}
+
+// assertNoUnfilledPlaceholder walks the expression tree and asserts that
+// every scalar predicate has its GenericValue populated. This is precisely
+// the invariant violated by issue #49141: under unary NOT, template
+// placeholders were left unset (val_case == VAL_NOT_SET), leading to
+// QueryNode assertion failures or empty-Values terms that flip the
+// semantics of the surrounding NOT.
+func (s *FillExpressionValueSuite) assertNoUnfilledPlaceholder(e *planpb.Expr) {
+	if e == nil {
+		return
+	}
+	switch x := e.GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		te := x.TermExpr
+		s.NotEmpty(te.GetValues(), "TermExpr values should be filled (template=%q)", te.GetTemplateVariableName())
+		for _, v := range te.GetValues() {
+			s.NotNil(v.GetVal(), "TermExpr element GenericValue must have val set")
+		}
+	case *planpb.Expr_UnaryRangeExpr:
+		ure := x.UnaryRangeExpr
+		s.NotNil(ure.GetValue(), "UnaryRangeExpr value should be filled (template=%q)", ure.GetTemplateVariableName())
+		s.NotNil(ure.GetValue().GetVal(), "UnaryRangeExpr GenericValue must have val set")
+	case *planpb.Expr_BinaryRangeExpr:
+		bre := x.BinaryRangeExpr
+		s.NotNil(bre.GetLowerValue().GetVal(), "BinaryRangeExpr lower value must be filled")
+		s.NotNil(bre.GetUpperValue().GetVal(), "BinaryRangeExpr upper value must be filled")
+	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
+		bao := x.BinaryArithOpEvalRangeExpr
+		s.NotNil(bao.GetValue().GetVal(), "BinaryArithOpEvalRangeExpr value must be filled")
+		s.NotNil(bao.GetRightOperand().GetVal(), "BinaryArithOpEvalRangeExpr right operand must be filled")
+	case *planpb.Expr_JsonContainsExpr:
+		jc := x.JsonContainsExpr
+		s.NotEmpty(jc.GetElements(), "JSONContainsExpr elements should be filled (template=%q)", jc.GetTemplateVariableName())
+		for _, v := range jc.GetElements() {
+			s.NotNil(v.GetVal(), "JSONContainsExpr element GenericValue must have val set")
+		}
+	case *planpb.Expr_BinaryExpr:
+		s.assertNoUnfilledPlaceholder(x.BinaryExpr.GetLeft())
+		s.assertNoUnfilledPlaceholder(x.BinaryExpr.GetRight())
+	case *planpb.Expr_UnaryExpr:
+		s.assertNoUnfilledPlaceholder(x.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryArithExpr:
+		s.assertNoUnfilledPlaceholder(x.BinaryArithExpr.GetLeft())
+		s.assertNoUnfilledPlaceholder(x.BinaryArithExpr.GetRight())
+	}
+}
+
+// TestUnaryNotWithTemplate regression-tests issue #49141: templated
+// expressions wrapped by unary NOT were not propagating IsTemplate to
+// the outer Expr, so FillExpressionValue short-circuited and left
+// placeholders unfilled (causing VAL_NOT_SET errors or silent wrong results).
+func (s *FillExpressionValueSuite) TestUnaryNotWithTemplate() {
+	schemaH := newTestSchemaHelper(s.T())
+
+	cases := []struct {
+		name      string
+		templExpr string
+		values    map[string]*schemapb.TemplateValue
+	}{
+		{
+			"not wrapping templated term expr",
+			`not (Int64Field in {vals})`,
+			map[string]*schemapb.TemplateValue{
+				"vals": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{10, 20, 99})),
+			},
+		},
+		{
+			"not wrapping templated unary range expr",
+			`not (Int64Field > {x})`,
+			map[string]*schemapb.TemplateValue{
+				"x": generateTemplateValue(schemapb.DataType_Int64, int64(15)),
+			},
+		},
+		{
+			"not wrapping compound expr with template",
+			`not ((Int64Field > {x}) and (StringField == "user"))`,
+			map[string]*schemapb.TemplateValue{
+				"x": generateTemplateValue(schemapb.DataType_Int64, int64(15)),
+			},
+		},
+		{
+			"not wrapping templated json contains",
+			`not (json_contains_any(JSONField["nums"], {vals}))`,
+			map[string]*schemapb.TemplateValue{
+				"vals": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{2, 9})),
+			},
+		},
+	}
+
+	for _, c := range cases {
+		s.Run(c.name, func() {
+			expr, err := ParseExpr(schemaH, c.templExpr, c.values)
+			s.NoError(err, c.templExpr)
+			s.NotNil(expr)
+			s.assertNoUnfilledPlaceholder(expr)
+		})
+	}
 }

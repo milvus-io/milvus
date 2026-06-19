@@ -17,7 +17,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,7 +26,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v2"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 type FileSource struct {
@@ -100,8 +99,8 @@ func (fs *FileSource) SetManager(m ConfigManager) {
 }
 
 func (fs *FileSource) SetEventHandler(eh EventHandler) {
-	fs.RWMutex.Lock()
-	defer fs.RWMutex.Unlock()
+	fs.Lock()
+	defer fs.Unlock()
 	fs.configRefresher.SetEventHandler(eh)
 }
 
@@ -135,7 +134,7 @@ func (fs *FileSource) loadFromFile() error {
 
 		ext := filepath.Ext(configFile)
 		if len(ext) == 0 || (ext[1:] != "yaml" && ext[1:] != "yml") {
-			return fmt.Errorf("Unsupported Config Type: %s", ext)
+			return errors.Wrapf(ErrUnsupportedConfigType, "%s", ext)
 		}
 
 		data, err := os.ReadFile(configFile)
@@ -153,7 +152,7 @@ func (fs *FileSource) loadFromFile() error {
 	}
 	// not allow all config files missing, return error for this case
 	if notExistsNum == len(configFiles) {
-		return errors.Newf("all config files not exists, files: %v", configFiles)
+		return errors.Wrapf(ErrAllConfigFilesNotExist, "files: %v", configFiles)
 	}
 
 	return fs.update(newConfig)

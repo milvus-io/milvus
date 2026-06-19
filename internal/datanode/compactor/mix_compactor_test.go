@@ -30,25 +30,141 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMixCompactionTaskSuite(t *testing.T) {
 	t.Skip("v1 format shall not be written anymore")
 	suite.Run(t, new(MixCompactionTaskStorageV1Suite))
+}
+
+func newMixCompactionStorageV1SuiteForDirectTest(t *testing.T) *MixCompactionTaskStorageV1Suite {
+	s := &MixCompactionTaskStorageV1Suite{}
+	s.SetT(t)
+	s.SetupSuite()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		s.TearDownTest()
+	})
+	s.SetupTest()
+	return s
+}
+
+func (s *MixCompactionTaskStorageV1Suite) prepareMissingBM25OutputSegments(isSorted bool) {
+	s.SetupBM25()
+	segments := []int64{5, 6, 7}
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0, len(segments))
+	for _, segID := range segments {
+		s.initSegBufferWithBM25(segID)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+			return downloadValuesForPathsForTest(kvs, keys)
+		}).Once()
+
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID: 1,
+			SegmentID:    segID,
+			FieldBinlogs: lo.Values(fBinlogs),
+			IsSorted:     isSorted,
+		})
+	}
+}
+
+func TestMixCompactionMaterializesMissingBM25OutputNoDelete(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	s.prepareMissingBM25OutputSegments(false)
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
+func TestMixCompactionMaterializesMissingFieldWithDeleteFilter(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+
+	segmentID := int64(4)
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
+	s.initMultiRowsSegBuffer(segmentID, 2, 1)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	s.Require().NoError(err)
+	removeFieldBinlogForTest(kvs, fBinlogs, StringField)
+
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	blob, err := getInt64DeltaBlobs(segmentID, []int64{segmentID}, []uint64{deleteTs})
+	s.Require().NoError(err)
+	deltaPath := "deltalog/missing-field-delete"
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltaPath}).
+		Return([][]byte{blob.GetValue()}, nil).Once()
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+		left, right := lo.Difference(keys, lo.Keys(kvs))
+		return len(left) == 0 && len(right) == 0
+	})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+		return downloadValuesForPathsForTest(kvs, keys)
+	}).Once()
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{{
+		CollectionID: 1,
+		SegmentID:    segmentID,
+		FieldBinlogs: lo.Values(fBinlogs),
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{LogPath: deltaPath}},
+		}},
+	}}
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+	s.Require().Len(result.GetSegments(), 1)
+	segment := result.GetSegments()[0]
+	s.EqualValues(1, segment.GetNumOfRows())
+	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetInsertLogs(), StringField))
+}
+
+func TestMixCompactionMergeSortMaterializesMissingBM25Output(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	mergeSortKey := paramtable.Get().DataNodeCfg.UseMergeSort.Key
+	paramtable.Get().Save(mergeSortKey, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(mergeSortKey) })
+	s.prepareMissingBM25OutputSegments(true)
+	s.task.compactionParams = compaction.GenParams()
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+	s.True(segment.GetIsSorted())
+	s.EqualValues(3, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
 }
 
 type MixCompactionTaskStorageV1Suite struct {
@@ -71,7 +187,7 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 
 	s.meta = genTestCollectionMeta()
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	if err != nil {
 		panic(err)
 	}
@@ -100,13 +216,12 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 
 func (s *MixCompactionTaskStorageV1Suite) SetupTest() {
 	s.setupTest()
-	paramtable.Get().Save("common.storage.enablev2", "false")
 }
 
 func (s *MixCompactionTaskStorageV1Suite) SetupBM25() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	if err != nil {
 		panic(err)
 	}
@@ -419,7 +534,6 @@ func (s *MixCompactionTaskStorageV1Suite) prepareCompactSortedSegmentLackBinlog(
 				{Binlogs: []*datapb.Binlog{{LogPath: deltaPath}}},
 			},
 		})
-
 	}
 }
 
@@ -452,12 +566,18 @@ func (s *MixCompactionTaskStorageV1Suite) prepareSplitMergeEntityExpired() {
 	s.task.plan.CollectionTtl = int64(collTTL)
 	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 
-	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(paths []string) bool {
+		left, right := lo.Difference(paths, lo.Keys(kvs))
+		return len(left) == 0 && len(right) == 0
+	})).RunAndReturn(
 		func(ctx context.Context, paths []string) ([][]byte, error) {
-			s.Require().Equal(len(paths), len(kvs))
-			return lo.Values(kvs), nil
+			res := make([][]byte, 0, len(paths))
+			for _, path := range paths {
+				res = append(res, kvs[path])
+			}
+			return res, nil
 		})
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -465,17 +585,7 @@ func (s *MixCompactionTaskStorageV1Suite) prepareSplitMergeEntityExpired() {
 	s.task.partitionID = PartitionID
 	s.task.maxRows = 1000
 
-	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(kvs))
-	for k := range kvs {
-		fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
-			Binlogs: []*datapb.Binlog{
-				{
-					LogPath: k,
-				},
-			},
-		})
-	}
-	s.task.plan.SegmentBinlogs[0].FieldBinlogs = fieldBinlogs
+	s.task.plan.SegmentBinlogs[0].FieldBinlogs = lo.Values(fBinlogs)
 }
 
 func (s *MixCompactionTaskStorageV1Suite) TestSplitMergeEntityExpired() {
@@ -551,30 +661,18 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpirationLackBinlog() {
 				}
 			}
 
-			insertPaths := lo.Keys(kvs)
-			insertBytes := func() [][]byte {
-				res := make([][]byte, 0, len(insertPaths))
-				for _, path := range insertPaths {
-					res = append(res, kvs[path])
-				}
-				return res
-			}()
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, insertPaths).RunAndReturn(
+			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(paths []string) bool {
+				left, right := lo.Difference(paths, lo.Keys(kvs))
+				return len(left) == 0 && len(right) == 0
+			})).RunAndReturn(
 				func(ctx context.Context, paths []string) ([][]byte, error) {
-					s.Require().Equal(len(paths), len(kvs))
-					return insertBytes, nil
+					res := make([][]byte, 0, len(paths))
+					for _, path := range paths {
+						res = append(res, kvs[path])
+					}
+					return res, nil
 				})
-			fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(insertPaths))
-			for _, k := range insertPaths {
-				fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
-					Binlogs: []*datapb.Binlog{
-						{
-							LogPath: k,
-						},
-					},
-				})
-			}
-			s.task.plan.SegmentBinlogs[0].FieldBinlogs = fieldBinlogs
+			s.task.plan.SegmentBinlogs[0].FieldBinlogs = lo.Values(fBinlogs)
 
 			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -608,7 +706,7 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpiration() {
 	}
 
 	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
-	kvs, _, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
 
 	for _, test := range tests {
@@ -633,30 +731,18 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpiration() {
 				}
 			}
 
-			insertPaths := lo.Keys(kvs)
-			insertBytes := func() [][]byte {
-				res := make([][]byte, 0, len(insertPaths))
-				for _, path := range insertPaths {
-					res = append(res, kvs[path])
-				}
-				return res
-			}()
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, insertPaths).RunAndReturn(
+			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(paths []string) bool {
+				left, right := lo.Difference(paths, lo.Keys(kvs))
+				return len(left) == 0 && len(right) == 0
+			})).RunAndReturn(
 				func(ctx context.Context, paths []string) ([][]byte, error) {
-					s.Require().Equal(len(paths), len(kvs))
-					return insertBytes, nil
+					res := make([][]byte, 0, len(paths))
+					for _, path := range paths {
+						res = append(res, kvs[path])
+					}
+					return res, nil
 				})
-			fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(insertPaths))
-			for _, k := range insertPaths {
-				fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
-					Binlogs: []*datapb.Binlog{
-						{
-							LogPath: k,
-						},
-					},
-				})
-			}
-			s.task.plan.SegmentBinlogs[0].FieldBinlogs = fieldBinlogs
+			s.task.plan.SegmentBinlogs[0].FieldBinlogs = lo.Values(fBinlogs)
 
 			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -673,6 +759,13 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpiration() {
 			s.EqualValues(test.leftNumRows, res[0].GetNumOfRows())
 		})
 	}
+}
+
+func (s *MixCompactionTaskStorageV1Suite) TestGetStorageConfig() {
+	// Verify GetStorageConfig returns the storage config from compaction params
+	storageConfig := s.task.GetStorageConfig()
+	s.NotNil(storageConfig)
+	s.Equal(s.task.compactionParams.StorageConfig, storageConfig)
 }
 
 func (s *MixCompactionTaskStorageV1Suite) TestGetBM25FieldIDs() {
@@ -703,14 +796,10 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsMultiSegment() {
 		description   string
 	}{
 		{
-			0, nil, nil,
-			100,
-			[]int64{1, 2, 3},
-			[]uint64{20000, 30000, 20005},
-			200,
-			[]int64{4, 5, 6},
-			[]uint64{50000, 50001, 50002},
-			map[int64]uint64{
+			segIDA: 0, dataApk: nil, dataAts: nil,
+			segIDB: 100, dataBpk: []int64{1, 2, 3}, dataBts: []uint64{20000, 30000, 20005},
+			segIDC: 200, dataCpk: []int64{4, 5, 6}, dataCts: []uint64{50000, 50001, 50002},
+			expectedpk2ts: map[int64]uint64{
 				1: 20000,
 				2: 30000,
 				3: 20005,
@@ -718,19 +807,13 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsMultiSegment() {
 				5: 50001,
 				6: 50002,
 			},
-			"2 segments",
+			description: "2 segments",
 		},
 		{
-			300,
-			[]int64{10, 20},
-			[]uint64{20001, 40001},
-			100,
-			[]int64{1, 2, 3},
-			[]uint64{20000, 30000, 20005},
-			200,
-			[]int64{4, 5, 6},
-			[]uint64{50000, 50001, 50002},
-			map[int64]uint64{
+			segIDA: 300, dataApk: []int64{10, 20}, dataAts: []uint64{20001, 40001},
+			segIDB: 100, dataBpk: []int64{1, 2, 3}, dataBts: []uint64{20000, 30000, 20005},
+			segIDC: 200, dataCpk: []int64{4, 5, 6}, dataCts: []uint64{50000, 50001, 50002},
+			expectedpk2ts: map[int64]uint64{
 				10: 20001,
 				20: 40001,
 				1:  20000,
@@ -740,33 +823,45 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsMultiSegment() {
 				5:  50001,
 				6:  50002,
 			},
-			"3 segments",
+			description: "3 segments",
 		},
 	}
 
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			dValues := make([][]byte, 0)
+			pks := make([]int64, 0)
+			tss := make([]uint64, 0)
 			if test.dataApk != nil {
-				d, err := getInt64DeltaBlobs(test.segIDA, test.dataApk, test.dataAts)
-				s.Require().NoError(err)
-				dValues = append(dValues, d.GetValue())
+				pks = append(pks, test.dataApk...)
+				tss = append(tss, test.dataAts...)
 			}
 			if test.dataBpk != nil {
-				d, err := getInt64DeltaBlobs(test.segIDB, test.dataBpk, test.dataBts)
-				s.Require().NoError(err)
-				dValues = append(dValues, d.GetValue())
+				pks = append(pks, test.dataBpk...)
+				tss = append(tss, test.dataBts...)
 			}
 			if test.dataCpk != nil {
-				d, err := getInt64DeltaBlobs(test.segIDC, test.dataCpk, test.dataCts)
-				s.Require().NoError(err)
-				dValues = append(dValues, d.GetValue())
+				pks = append(pks, test.dataCpk...)
+				tss = append(tss, test.dataCts...)
 			}
+			blob, err := getInt64DeltaBlobs(test.segIDA, pks, tss)
+			s.Require().NoError(err)
 
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).
-				Return(dValues, nil)
+			mockBinlogIO := mock_util.NewMockBinlogIO(s.T())
+			mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).
+				Return([][]byte{blob.GetValue()}, nil)
 
-			got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, []string{"random"})
+			pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
+			s.Require().NoError(err)
+			got, err := compaction.ComposeDeleteFromDeltalogsV1(s.task.ctx, pkField.DataType,
+				[]*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogPath: "random"},
+						},
+					},
+				},
+				storage.WithDownloader(mockBinlogIO.Download),
+				storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 			s.NoError(err)
 			s.Equal(len(got), len(test.expectedpk2ts))
 
@@ -795,13 +890,31 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsOneSegment() {
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"mock_error"}).
 		Return(nil, errors.New("mock_error")).Once()
 
-	invalidPaths := []string{"mock_error"}
-	got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, invalidPaths)
+	pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	got, err := compaction.ComposeDeleteFromDeltalogsV1(s.task.ctx, pkField.DataType,
+		[]*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "mock_error"},
+				},
+			},
+		},
+		storage.WithDownloader(s.mockBinlogIO.Download),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.Error(err)
 	s.Nil(got)
 
-	dpaths := []string{"a"}
-	got, err = compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, dpaths)
+	got, err = compaction.ComposeDeleteFromDeltalogsV1(s.task.ctx, pkField.DataType,
+		[]*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "a"},
+				},
+			},
+		},
+		storage.WithDownloader(s.mockBinlogIO.Download),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.NoError(err)
 	s.NotNil(got)
 	s.Equal(len(expectedMap), len(got))
@@ -1270,7 +1383,6 @@ func BenchmarkMixCompactor(b *testing.B) {
 		s.NotEmpty(segment.InsertLogs)
 		s.NotEmpty(segment.Field2StatslogPaths)
 		s.Empty(segment.Deltalogs)
-
 	}
 
 	s.TearDownTest()

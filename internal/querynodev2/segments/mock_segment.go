@@ -5,23 +5,23 @@ package segments
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
-	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 
-	metautil "github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	metautil "github.com/milvus-io/milvus/pkg/v3/util/metautil"
 
 	mock "github.com/stretchr/testify/mock"
 
-	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 
-	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 
 	segcore "github.com/milvus-io/milvus/internal/util/segcore"
 
-	segcorepb "github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	segcorepb "github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 )
@@ -87,51 +87,6 @@ func (_c *MockSegment_BatchPkExist_Call) RunAndReturn(run func(*storage.BatchLoc
 	return _c
 }
 
-// BloomFilterExist provides a mock function with no fields
-func (_m *MockSegment) BloomFilterExist() bool {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for BloomFilterExist")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockSegment_BloomFilterExist_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BloomFilterExist'
-type MockSegment_BloomFilterExist_Call struct {
-	*mock.Call
-}
-
-// BloomFilterExist is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) BloomFilterExist() *MockSegment_BloomFilterExist_Call {
-	return &MockSegment_BloomFilterExist_Call{Call: _e.mock.On("BloomFilterExist")}
-}
-
-func (_c *MockSegment_BloomFilterExist_Call) Run(run func()) *MockSegment_BloomFilterExist_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockSegment_BloomFilterExist_Call) Return(_a0 bool) *MockSegment_BloomFilterExist_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_BloomFilterExist_Call) RunAndReturn(run func() bool) *MockSegment_BloomFilterExist_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CASVersion provides a mock function with given fields: _a0, _a1
 func (_m *MockSegment) CASVersion(_a0 int64, _a1 int64) bool {
 	ret := _m.Called(_a0, _a1)
@@ -176,6 +131,38 @@ func (_c *MockSegment_CASVersion_Call) Return(_a0 bool) *MockSegment_CASVersion_
 
 func (_c *MockSegment_CASVersion_Call) RunAndReturn(run func(int64, int64) bool) *MockSegment_CASVersion_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// Charge provides a mock function with no fields
+func (_m *MockSegment) Charge() {
+	_m.Called()
+}
+
+// MockSegment_Charge_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Charge'
+type MockSegment_Charge_Call struct {
+	*mock.Call
+}
+
+// Charge is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) Charge() *MockSegment_Charge_Call {
+	return &MockSegment_Charge_Call{Call: _e.mock.On("Charge")}
+}
+
+func (_c *MockSegment_Charge_Call) Run(run func()) *MockSegment_Charge_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_Charge_Call) Return() *MockSegment_Charge_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_Charge_Call) RunAndReturn(run func()) *MockSegment_Charge_Call {
+	_c.Run(run)
 	return _c
 }
 
@@ -406,6 +393,67 @@ func (_c *MockSegment_ExistIndex_Call) Return(_a0 bool) *MockSegment_ExistIndex_
 }
 
 func (_c *MockSegment_ExistIndex_Call) RunAndReturn(run func(int64) bool) *MockSegment_ExistIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FlushData provides a mock function with given fields: ctx, startOffset, endOffset, config
+func (_m *MockSegment) FlushData(ctx context.Context, startOffset int64, endOffset int64, config *FlushConfig) (*FlushResult, error) {
+	ret := _m.Called(ctx, startOffset, endOffset, config)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FlushData")
+	}
+
+	var r0 *FlushResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, *FlushConfig) (*FlushResult, error)); ok {
+		return rf(ctx, startOffset, endOffset, config)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, *FlushConfig) *FlushResult); ok {
+		r0 = rf(ctx, startOffset, endOffset, config)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*FlushResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, *FlushConfig) error); ok {
+		r1 = rf(ctx, startOffset, endOffset, config)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSegment_FlushData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushData'
+type MockSegment_FlushData_Call struct {
+	*mock.Call
+}
+
+// FlushData is a helper method to define mock.On call
+//   - ctx context.Context
+//   - startOffset int64
+//   - endOffset int64
+//   - config *FlushConfig
+func (_e *MockSegment_Expecter) FlushData(ctx interface{}, startOffset interface{}, endOffset interface{}, config interface{}) *MockSegment_FlushData_Call {
+	return &MockSegment_FlushData_Call{Call: _e.mock.On("FlushData", ctx, startOffset, endOffset, config)}
+}
+
+func (_c *MockSegment_FlushData_Call) Run(run func(ctx context.Context, startOffset int64, endOffset int64, config *FlushConfig)) *MockSegment_FlushData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(*FlushConfig))
+	})
+	return _c
+}
+
+func (_c *MockSegment_FlushData_Call) Return(_a0 *FlushResult, _a1 error) *MockSegment_FlushData_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSegment_FlushData_Call) RunAndReturn(run func(context.Context, int64, int64, *FlushConfig) (*FlushResult, error)) *MockSegment_FlushData_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1472,6 +1520,83 @@ func (_c *MockSegment_PinIfNotReleased_Call) RunAndReturn(run func() error) *Moc
 	return _c
 }
 
+// PkCandidateExist provides a mock function with no fields
+func (_m *MockSegment) PkCandidateExist() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PkCandidateExist")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_PkCandidateExist_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PkCandidateExist'
+type MockSegment_PkCandidateExist_Call struct {
+	*mock.Call
+}
+
+// PkCandidateExist is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) PkCandidateExist() *MockSegment_PkCandidateExist_Call {
+	return &MockSegment_PkCandidateExist_Call{Call: _e.mock.On("PkCandidateExist")}
+}
+
+func (_c *MockSegment_PkCandidateExist_Call) Run(run func()) *MockSegment_PkCandidateExist_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_PkCandidateExist_Call) Return(_a0 bool) *MockSegment_PkCandidateExist_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_PkCandidateExist_Call) RunAndReturn(run func() bool) *MockSegment_PkCandidateExist_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Refund provides a mock function with no fields
+func (_m *MockSegment) Refund() {
+	_m.Called()
+}
+
+// MockSegment_Refund_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Refund'
+type MockSegment_Refund_Call struct {
+	*mock.Call
+}
+
+// Refund is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) Refund() *MockSegment_Refund_Call {
+	return &MockSegment_Refund_Call{Call: _e.mock.On("Refund")}
+}
+
+func (_c *MockSegment_Refund_Call) Run(run func()) *MockSegment_Refund_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_Refund_Call) Return() *MockSegment_Refund_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_Refund_Call) RunAndReturn(run func()) *MockSegment_Refund_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Release provides a mock function with given fields: ctx, opts
 func (_m *MockSegment) Release(ctx context.Context, opts ...releaseOption) {
 	_va := make([]interface{}, len(opts))
@@ -1957,35 +2082,35 @@ func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *segco
 	return _c
 }
 
-// SetBloomFilter provides a mock function with given fields: bf
-func (_m *MockSegment) SetBloomFilter(bf *pkoracle.BloomFilterSet) {
-	_m.Called(bf)
+// SetPKCandidate provides a mock function with given fields: candidate
+func (_m *MockSegment) SetPKCandidate(candidate pkoracle.Candidate) {
+	_m.Called(candidate)
 }
 
-// MockSegment_SetBloomFilter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetBloomFilter'
-type MockSegment_SetBloomFilter_Call struct {
+// MockSegment_SetPKCandidate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetPKCandidate'
+type MockSegment_SetPKCandidate_Call struct {
 	*mock.Call
 }
 
-// SetBloomFilter is a helper method to define mock.On call
-//   - bf *pkoracle.BloomFilterSet
-func (_e *MockSegment_Expecter) SetBloomFilter(bf interface{}) *MockSegment_SetBloomFilter_Call {
-	return &MockSegment_SetBloomFilter_Call{Call: _e.mock.On("SetBloomFilter", bf)}
+// SetPKCandidate is a helper method to define mock.On call
+//   - candidate pkoracle.Candidate
+func (_e *MockSegment_Expecter) SetPKCandidate(candidate interface{}) *MockSegment_SetPKCandidate_Call {
+	return &MockSegment_SetPKCandidate_Call{Call: _e.mock.On("SetPKCandidate", candidate)}
 }
 
-func (_c *MockSegment_SetBloomFilter_Call) Run(run func(bf *pkoracle.BloomFilterSet)) *MockSegment_SetBloomFilter_Call {
+func (_c *MockSegment_SetPKCandidate_Call) Run(run func(candidate pkoracle.Candidate)) *MockSegment_SetPKCandidate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*pkoracle.BloomFilterSet))
+		run(args[0].(pkoracle.Candidate))
 	})
 	return _c
 }
 
-func (_c *MockSegment_SetBloomFilter_Call) Return() *MockSegment_SetBloomFilter_Call {
+func (_c *MockSegment_SetPKCandidate_Call) Return() *MockSegment_SetPKCandidate_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockSegment_SetBloomFilter_Call) RunAndReturn(run func(*pkoracle.BloomFilterSet)) *MockSegment_SetBloomFilter_Call {
+func (_c *MockSegment_SetPKCandidate_Call) RunAndReturn(run func(pkoracle.Candidate)) *MockSegment_SetPKCandidate_Call {
 	_c.Run(run)
 	return _c
 }
@@ -2078,6 +2203,53 @@ func (_c *MockSegment_StartPosition_Call) Return(_a0 *msgpb.MsgPosition) *MockSe
 }
 
 func (_c *MockSegment_StartPosition_Call) RunAndReturn(run func() *msgpb.MsgPosition) *MockSegment_StartPosition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Stats provides a mock function with no fields
+func (_m *MockSegment) Stats() *storage.PkStatistics {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stats")
+	}
+
+	var r0 *storage.PkStatistics
+	if rf, ok := ret.Get(0).(func() *storage.PkStatistics); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*storage.PkStatistics)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_Stats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stats'
+type MockSegment_Stats_Call struct {
+	*mock.Call
+}
+
+// Stats is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) Stats() *MockSegment_Stats_Call {
+	return &MockSegment_Stats_Call{Call: _e.mock.On("Stats")}
+}
+
+func (_c *MockSegment_Stats_Call) Run(run func()) *MockSegment_Stats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_Stats_Call) Return(_a0 *storage.PkStatistics) *MockSegment_Stats_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_Stats_Call) RunAndReturn(run func() *storage.PkStatistics) *MockSegment_Stats_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2192,35 +2364,35 @@ func (_c *MockSegment_UpdateBM25Stats_Call) RunAndReturn(run func(map[int64]*sto
 	return _c
 }
 
-// UpdateBloomFilter provides a mock function with given fields: pks
-func (_m *MockSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
+// UpdatePkCandidate provides a mock function with given fields: pks
+func (_m *MockSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
 	_m.Called(pks)
 }
 
-// MockSegment_UpdateBloomFilter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateBloomFilter'
-type MockSegment_UpdateBloomFilter_Call struct {
+// MockSegment_UpdatePkCandidate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdatePkCandidate'
+type MockSegment_UpdatePkCandidate_Call struct {
 	*mock.Call
 }
 
-// UpdateBloomFilter is a helper method to define mock.On call
+// UpdatePkCandidate is a helper method to define mock.On call
 //   - pks []storage.PrimaryKey
-func (_e *MockSegment_Expecter) UpdateBloomFilter(pks interface{}) *MockSegment_UpdateBloomFilter_Call {
-	return &MockSegment_UpdateBloomFilter_Call{Call: _e.mock.On("UpdateBloomFilter", pks)}
+func (_e *MockSegment_Expecter) UpdatePkCandidate(pks interface{}) *MockSegment_UpdatePkCandidate_Call {
+	return &MockSegment_UpdatePkCandidate_Call{Call: _e.mock.On("UpdatePkCandidate", pks)}
 }
 
-func (_c *MockSegment_UpdateBloomFilter_Call) Run(run func(pks []storage.PrimaryKey)) *MockSegment_UpdateBloomFilter_Call {
+func (_c *MockSegment_UpdatePkCandidate_Call) Run(run func(pks []storage.PrimaryKey)) *MockSegment_UpdatePkCandidate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].([]storage.PrimaryKey))
 	})
 	return _c
 }
 
-func (_c *MockSegment_UpdateBloomFilter_Call) Return() *MockSegment_UpdateBloomFilter_Call {
+func (_c *MockSegment_UpdatePkCandidate_Call) Return() *MockSegment_UpdatePkCandidate_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockSegment_UpdateBloomFilter_Call) RunAndReturn(run func([]storage.PrimaryKey)) *MockSegment_UpdateBloomFilter_Call {
+func (_c *MockSegment_UpdatePkCandidate_Call) RunAndReturn(run func([]storage.PrimaryKey)) *MockSegment_UpdatePkCandidate_Call {
 	_c.Run(run)
 	return _c
 }
@@ -2275,8 +2447,7 @@ func (_c *MockSegment_Version_Call) RunAndReturn(run func() int64) *MockSegment_
 func NewMockSegment(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockSegment {
+}) *MockSegment {
 	mock := &MockSegment{}
 	mock.Mock.Test(t)
 

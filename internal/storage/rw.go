@@ -19,23 +19,22 @@ package storage
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
-	sio "io"
+	"io"
 	"sort"
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -73,18 +72,16 @@ type rwOptions struct {
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
+	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	externalReader      packed.ExternalReaderContext
 }
 
 func (o *rwOptions) validate() error {
-	if o.collectionID == 0 {
-		log.Warn("storage config collection id is empty when init BinlogReader")
-		// return merr.WrapErrServiceInternal("storage config collection id is empty")
-	}
-	if o.op == OpWrite && o.uploader == nil {
-		return merr.WrapErrServiceInternal("uploader is nil for writer")
-	}
 	switch o.version {
 	case StorageV1:
+		if o.op == OpWrite && o.uploader == nil {
+			return merr.WrapErrServiceInternal("uploader is nil for writer")
+		}
 		if o.op == OpRead && o.downloader == nil {
 			return merr.WrapErrServiceInternal("downloader is nil for v1 reader")
 		}
@@ -93,7 +90,7 @@ func (o *rwOptions) validate() error {
 			return merr.WrapErrServiceInternal("storage config is nil")
 		}
 	default:
-		return merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", o.version))
+		return merr.WrapErrServiceInternalMsg("unsupported storage version %d", o.version)
 	}
 	return nil
 }
@@ -102,6 +99,7 @@ type RwOption func(*rwOptions)
 
 func DefaultWriterOptions() *rwOptions {
 	return &rwOptions{
+		version:             StorageV1,
 		bufferSize:          packed.DefaultWriteBufferSize,
 		multiPartUploadSize: packed.DefaultMultiPartUploadSize,
 		op:                  OpWrite,
@@ -163,9 +161,24 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 	}
 }
 
+// GetStorageConfig extracts the storage config from the given options.
+func GetStorageConfig(option ...RwOption) *indexpb.StorageConfig {
+	opts := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(opts)
+	}
+	return opts.storageConfig
+}
+
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
+	}
+}
+
+func WithExternalReaderContext(externalReader packed.ExternalReaderContext) RwOption {
+	return func(options *rwOptions) {
+		options.externalReader = externalReader
 	}
 }
 
@@ -181,10 +194,19 @@ func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption 
 	}
 }
 
+// WithTextColumnConfigs sets TEXT column configurations for REWRITE_ALL mode during compaction.
+// when TEXT columns need to be rewritten (hole ratio >= threshold), this option enables
+// the writer to expand TEXT LOB references and write to new LOB files.
+func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
+	return func(options *rwOptions) {
+		options.textColumnConfigs = configs
+	}
+}
+
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}, nil
 	}
 	sort.Slice(binlogs, func(i, j int) bool {
@@ -233,7 +255,7 @@ func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloa
 	chunkPos := 0
 	return func() ([]*Blob, error) {
 		if chunkPos >= nChunks {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}
 
 		vals, err := downloader(ctx, chunks[chunkPos])
@@ -293,7 +315,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
 	case StorageV2, StorageV3:
 		if len(binlogs) <= 0 {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}
 		sort.Slice(binlogs, func(i, j int) bool {
 			return binlogs[i].GetFieldID() < binlogs[j].GetFieldID()
@@ -312,7 +334,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		// FIXME: add needed fields support
 		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
 	if err != nil {
 		return nil, err
@@ -348,7 +370,8 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 			}
 		}
 	}
-	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize,
+		rwOptions.storageConfig, pluginContext, option...)
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,
@@ -363,6 +386,11 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
+	}
+	if rwOptions.version == StorageV1 {
+		if err := ValidateStorageV1InsertWritableSchema(schema); err != nil {
+			return nil, err
+		}
 	}
 
 	blobsWriter := func(blobs []*Blob) error {
@@ -399,8 +427,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
-		)
+			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...)
 	case StorageV2:
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, maxRowNum,
@@ -409,6 +436,15 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 		)
 	case StorageV3:
+		// if TEXT column configs are provided, use the text writer with TEXT column support
+		if len(rwOptions.textColumnConfigs) > 0 {
+			return NewPackedTextManifestRecordWriter(collectionID, partitionID, segmentID, schema,
+				blobsWriter, allocator, maxRowNum,
+				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+				rwOptions.storageConfig,
+				rwOptions.textColumnConfigs,
+			)
+		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
@@ -416,7 +452,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 		)
 	}
-	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 }
 
 func NewDeltalogWriter(
@@ -433,11 +469,35 @@ func NewDeltalogWriter(
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
-	return NewLegacyDeltalogWriter(collectionID, partitionID, segmentID, logID, pkType, rwOptions.uploader, path)
+	switch rwOptions.version {
+	case StorageV1:
+		return NewLegacyDeltalogWriter(collectionID, partitionID, segmentID, logID, pkType, rwOptions.uploader, path)
+	case StorageV2:
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      0,
+					DataType:     pkType,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		bucketName := rwOptions.storageConfig.BucketName
+		return NewPackedRecordWriter(bucketName, []string{path}, schema,
+			rwOptions.bufferSize, rwOptions.multiPartUploadSize,
+			[]storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{0, common.TimeStampField}}},
+			rwOptions.storageConfig, nil)
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
+	}
 }
 
 func NewDeltalogReader(
-	pkField *schemapb.FieldSchema,
+	pkType schemapb.DataType,
 	paths []string,
 	option ...RwOption,
 ) (RecordReader, error) {
@@ -449,5 +509,38 @@ func NewDeltalogReader(
 		return nil, err
 	}
 
-	return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+	pkField := &schemapb.FieldSchema{
+		FieldID:      0,
+		DataType:     pkType,
+		IsPrimaryKey: true,
+	}
+
+	switch rwOptions.version {
+	case StorageV1:
+		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+	case StorageV2, StorageV3:
+		pathPos := 0
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				pkField,
+				{
+					FieldID:  common.TimeStampField,
+					Name:     "ts",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		return &IterativeRecordReader{
+			iterate: func() (RecordReader, error) {
+				if pathPos >= len(paths) {
+					return nil, io.EOF
+				}
+				path := paths[pathPos]
+				pathPos++
+				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil)
+			},
+		}, nil
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
+	}
 }

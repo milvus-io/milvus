@@ -20,14 +20,14 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type voyageaiProvider struct {
@@ -36,9 +36,10 @@ type voyageaiProvider struct {
 	url            string
 	modelName      string
 	params         map[string]any
+	timeoutMs      int64
 }
 
-func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
+func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
 	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.VoyageAIAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
@@ -63,7 +64,7 @@ func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string
 			}
 		case models.TruncationParamKey:
 			if truncate, err := strconv.ParseBool(param.Value); err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is invalid, only supports: [true/false]", models.TruncationParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is invalid, only supports: [true/false]", models.TruncationParamKey, param.Value)
 			} else {
 				modelParams[models.TruncationParamKey] = truncate
 			}
@@ -71,20 +72,23 @@ func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("voyageai rerank model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("voyageai rerank model name is required")
 	}
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := voyageaiProvider{
 		baseProvider:   baseProvider{batchSize: maxBatch},
 		voyageaiClient: voyageaiClient,
 		url:            url,
 		modelName:      modelName,
 		params:         modelParams,
+		timeoutMs:      timeoutMs,
 	}
 	return &provider, nil
 }
 
-func (provider *voyageaiProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.voyageaiClient.Rerank(provider.url, provider.modelName, query, docs, nil, 30)
+func (provider *voyageaiProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+	rerankResp, err := provider.voyageaiClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

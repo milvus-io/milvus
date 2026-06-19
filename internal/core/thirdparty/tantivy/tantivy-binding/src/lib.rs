@@ -23,6 +23,7 @@ mod index_writer_text_c;
 mod index_writer_v5;
 mod index_writer_v7;
 mod log;
+mod log_c;
 mod milvus_id_collector;
 mod string_c;
 mod token_stream_c;

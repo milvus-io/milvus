@@ -14,13 +14,13 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION 9fc3b64 )
+set( KNOWHERE_VERSION v3.0.4 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
 
-message(STATUS "Building knowhere-${KNOWHERE_SOURCE_VER} from source")
+message(STATUS "Building knowhere-${KNOWHERE_VERSION} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
@@ -37,9 +37,17 @@ endif()
 
 if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(WITH_CUVS ON CACHE BOOL "" FORCE )
+    set(raft_DIR "${FETCHCONTENT_BASE_DIR}/raft-build" CACHE PATH "Path to raft build directory" FORCE)
+    set(rmm_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" CACHE PATH "Path to rmm build directory" FORCE)
 endif ()
 
-set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
+if ( WITH_SVS STREQUAL "ON" )
+    set(WITH_SVS ON CACHE BOOL "" FORCE )
+else ()
+    set(WITH_SVS OFF CACHE BOOL "" FORCE )
+endif()
+
+# Conan 2.x: CMAKE_PREFIX_PATH is set by conan_toolchain.cmake
 FetchContent_Declare(
         knowhere
         GIT_REPOSITORY  ${GIT_REPOSITORY}
@@ -56,6 +64,42 @@ if ( NOT knowhere_POPULATED )
     # knowhere
     add_subdirectory( ${knowhere_SOURCE_DIR}
                       ${knowhere_BINARY_DIR} )
+endif()
+
+# Install the SVS runtime shared library alongside libknowhere.so so that
+# the Go linker (and the final binary at runtime) can find it.
+# svs_SOURCE_DIR is set inside knowhere's subdirectory scope and does not
+# propagate here, so we derive the path from FETCHCONTENT_BASE_DIR which
+# is in the CMake cache (set by internal/core/CMakeLists.txt).
+if ( WITH_SVS STREQUAL "ON" )
+    set( _SVS_LIB_DIR "${FETCHCONTENT_BASE_DIR}/svs-src/lib" )
+    if ( EXISTS "${_SVS_LIB_DIR}" )
+        install(DIRECTORY ${_SVS_LIB_DIR}/
+                DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                FILES_MATCHING PATTERN "libsvs_runtime.so*")
+    else()
+        message(WARNING "SVS enabled but ${_SVS_LIB_DIR} not found \u2014 libsvs_runtime.so will not be installed")
+    endif()
+endif()
+
+if ( WITH_CUVS STREQUAL "ON" )
+    set( _RMM_LIB_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" )
+    if ( EXISTS "${_RMM_LIB_DIR}" )
+        install(DIRECTORY ${_RMM_LIB_DIR}/
+                DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                FILES_MATCHING PATTERN "librmm.so*")
+    else()
+        message(WARNING "cuVS enabled but ${_RMM_LIB_DIR} not found \u2014 librmm.so will not be installed")
+    endif()
+
+    set( _RAPIDS_LOGGER_LIB_DIR "${FETCHCONTENT_BASE_DIR}/rapids_logger-build" )
+    if ( EXISTS "${_RAPIDS_LOGGER_LIB_DIR}" )
+        install(DIRECTORY ${_RAPIDS_LOGGER_LIB_DIR}/
+                DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                FILES_MATCHING PATTERN "librapids_logger.so*")
+    else()
+        message(WARNING "cuVS enabled but ${_RAPIDS_LOGGER_LIB_DIR} not found \u2014 librapids_logger.so will not be installed")
+    endif()
 endif()
 
 # get prometheus COMPILE_OPTIONS

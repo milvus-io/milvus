@@ -30,17 +30,18 @@ import (
 	"golang.org/x/exp/maps"
 
 	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestEmbedEtcd(te *testing.T) {
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	param := new(paramtable.ComponentParam)
 	te.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.auth.enabled", "false") // embedded etcd does not support auth
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 
 	dir := te.TempDir()
@@ -646,11 +647,14 @@ func TestEmbedEtcd(te *testing.T) {
 		defer watchKv.Close()
 		defer watchKv.RemoveWithPrefix(context.TODO(), "")
 
-		ch := watchKv.Watch(context.TODO(), "x")
+		watchCtx, cancel := context.WithCancel(context.TODO())
+		defer cancel()
+
+		ch := watchKv.Watch(watchCtx, "x")
 		resp := <-ch
 		assert.True(t, resp.Created)
 
-		ch = watchKv.WatchWithPrefix(context.TODO(), "x")
+		ch = watchKv.WatchWithPrefix(watchCtx, "x")
 		resp = <-ch
 		assert.True(t, resp.Created)
 	})
@@ -678,8 +682,12 @@ func TestEmbedEtcd(te *testing.T) {
 			err = metaKv.SaveBytes(context.TODO(), test.inKey, test.fistValue)
 			require.NoError(t, err)
 
-			_, _, revision, _ := metaKv.LoadBytesWithRevision(context.TODO(), test.inKey)
-			ch := metaKv.WatchWithRevision(context.TODO(), test.inKey, revision+1)
+			_, _, revision, err := metaKv.LoadBytesWithRevision(context.TODO(), test.inKey)
+			require.NoError(t, err)
+
+			watchCtx, cancel := context.WithCancel(context.TODO())
+			defer cancel()
+			ch := metaKv.WatchWithRevision(watchCtx, test.inKey, revision+1)
 
 			err = metaKv.SaveBytes(context.TODO(), test.inKey, test.secondValue)
 			require.NoError(t, err)
@@ -688,6 +696,7 @@ func TestEmbedEtcd(te *testing.T) {
 			assert.Equal(t, 1, len(resp.Events))
 			assert.Equal(t, test.secondValue, resp.Events[0].Kv.Value)
 			assert.Equal(t, revision+1, resp.Header.Revision)
+			cancel()
 		}
 
 		success, err := metaKv.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))
@@ -847,6 +856,7 @@ func (s *EmbedEtcdKVSuite) SetupSuite() {
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	param := new(paramtable.ComponentParam)
 	te.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.auth.enabled", "false") // embedded etcd does not support auth
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 
 	dir := te.TempDir()

@@ -19,22 +19,22 @@
 package function
 
 import (
-	"fmt"
+	"context"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const analyzerParams = "analyzer_params"
@@ -44,19 +44,53 @@ var (
 	analyzerPoolInitOnce sync.Once
 )
 
-func initAnalyzerPool() {
+func getAnalyzerPoolSize() int {
 	cpuNum := hardware.GetCPUNum()
-	initPoolSize := int(float64(cpuNum) * paramtable.Get().FunctionCfg.AnalyzerConcurrencyPerCPUCore.GetAsFloat())
-	if initPoolSize <= 0 {
-		log.Warn("analyzer pool size is less than 0, set to cpu num", zap.Int("cpuNum", cpuNum))
-		initPoolSize = cpuNum
+	poolSize := int(float64(cpuNum) * paramtable.Get().FunctionCfg.AnalyzerConcurrencyPerCPUCore.GetAsFloat())
+	if poolSize <= 0 {
+		log.Warn("analyzer pool size is not positive, set to cpu num", zap.Int("cpuNum", cpuNum))
+		poolSize = cpuNum
 	}
-	analyzerPool = conc.NewPool[struct{}](initPoolSize)
+	return poolSize
+}
+
+func initAnalyzerPool() {
+	analyzerPool = conc.NewPool[struct{}](getAnalyzerPoolSize())
+
+	pt := paramtable.Get()
+	pt.Watch(pt.FunctionCfg.AnalyzerConcurrencyPerCPUCore.Key, config.NewHandler("function.analyzer.concurrency", ResizeAnalyzerPool))
+}
+
+func resizeAnalyzerPool(pool *conc.Pool[struct{}], newSize int) {
+	log := log.Ctx(context.Background()).With(zap.Int("newSize", newSize))
+
+	if newSize <= 0 {
+		log.Warn("cannot set analyzer pool size to non-positive value")
+		return
+	}
+
+	if err := pool.Resize(newSize); err != nil {
+		log.Warn("failed to resize analyzer pool", zap.Error(err))
+		return
+	}
+	log.Info("analyzer pool resize successfully")
+}
+
+func ResizeAnalyzerPool(evt *config.Event) {
+	if !evt.HasUpdated {
+		return
+	}
+
+	resizeAnalyzerPool(getOrCreateAnalyzerPool(), getAnalyzerPoolSize())
 }
 
 func getOrCreateAnalyzerPool() *conc.Pool[struct{}] {
 	analyzerPoolInitOnce.Do(initAnalyzerPool)
 	return analyzerPool
+}
+
+func getAnalyzerRunnerConcurrency() int {
+	return paramtable.Get().FunctionCfg.GetAnalyzerRunnerConcurrency()
 }
 
 type Analyzer interface {
@@ -75,7 +109,6 @@ type BM25FunctionRunner struct {
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
 	inputField  *schemapb.FieldSchema
-	concurrency int
 }
 
 func getAnalyzerParams(field *schemapb.FieldSchema) string {
@@ -95,15 +128,14 @@ func NewAnalyzerRunner(field *schemapb.FieldSchema) (Analyzer, error) {
 	}
 
 	return &BM25FunctionRunner{
-		inputField:  field,
-		tokenizer:   tokenizer,
-		concurrency: 8,
+		inputField: field,
+		tokenizer:  tokenizer,
 	}, nil
 }
 
 func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
 	if len(schema.GetOutputFieldIds()) != 1 {
-		return nil, fmt.Errorf("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
+		return nil, merr.WrapErrParameterInvalidMsg("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
 	}
 
 	var inputField, outputField *schemapb.FieldSchema
@@ -119,7 +151,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	}
 
 	if outputField == nil {
-		return nil, errors.New("no output field")
+		return nil, merr.WrapErrParameterInvalidMsg("no output field")
 	}
 
 	if params, ok := getMultiAnalyzerParams(inputField); ok {
@@ -137,7 +169,6 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 		inputField:  inputField,
 		outputField: outputField,
 		tokenizer:   tokenizer,
-		concurrency: 8,
 	}, nil
 }
 
@@ -176,27 +207,28 @@ func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	defer v.mu.RUnlock()
 
 	if v.closed {
-		return nil, errors.New("analyzer receview request after function closed")
+		return nil, merr.WrapErrServiceInternalMsg("analyzer receview request after function closed")
 	}
 
 	if len(inputs) > 1 {
-		return nil, errors.New("BM25 function received more than one input column")
+		return nil, merr.WrapErrParameterInvalidMsg("BM25 function received more than one input column")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, errors.New("BM25 function batch input not string list")
+		return nil, merr.WrapErrParameterInvalidMsg("BM25 function batch input not string list")
 	}
 
 	rowNum := len(text)
 	embedData := make([]map[uint32]float32, rowNum)
 	wg := sync.WaitGroup{}
+	concurrency := getAnalyzerRunnerConcurrency()
 
-	errCh := make(chan error, v.concurrency)
-	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
+	errCh := make(chan error, concurrency)
+	for i, j := 0, 0; i < concurrency && j < rowNum; i++ {
 		start := j
-		end := start + rowNum/v.concurrency
-		if i < rowNum%v.concurrency {
+		end := start + rowNum/concurrency
+		if i < rowNum%concurrency {
 			end += 1
 		}
 		wg.Add(1)
@@ -258,27 +290,28 @@ func (v *BM25FunctionRunner) BatchAnalyze(withDetail bool, withHash bool, inputs
 	defer v.mu.RUnlock()
 
 	if v.closed {
-		return nil, errors.New("analyzer receview request after function closed")
+		return nil, merr.WrapErrServiceInternalMsg("analyzer receview request after function closed")
 	}
 
 	if len(inputs) > 1 {
-		return nil, errors.New("analyze received should only receive text input column(not set analyzer name)")
+		return nil, merr.WrapErrParameterInvalidMsg("analyze received should only receive text input column(not set analyzer name)")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, errors.New("batch input not string list")
+		return nil, merr.WrapErrParameterInvalidMsg("batch input not string list")
 	}
 
 	rowNum := len(text)
 	result := make([][]*milvuspb.AnalyzerToken, rowNum)
 	pool := getOrCreateAnalyzerPool()
-	futures := make([]*conc.Future[struct{}], 0, v.concurrency)
+	concurrency := getAnalyzerRunnerConcurrency()
+	futures := make([]*conc.Future[struct{}], 0, concurrency)
 
-	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
+	for i, j := 0, 0; i < concurrency && j < rowNum; i++ {
 		start := j
-		end := start + rowNum/v.concurrency
-		if i < rowNum%v.concurrency {
+		end := start + rowNum/concurrency
+		if i < rowNum%concurrency {
 			end += 1
 		}
 		future := pool.Submit(func() (struct{}, error) {

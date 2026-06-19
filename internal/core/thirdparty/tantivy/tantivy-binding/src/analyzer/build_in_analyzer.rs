@@ -30,6 +30,38 @@ pub fn chinese_analyzer(
     builder.build()
 }
 
+pub fn arabic_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
+    let builder = standard_builder()
+        .filter(LowerCaser)
+        .filter(DecimalDigitFilter)
+        .filter(ArabicNormalizationFilter)
+        .filter(Stemmer::new(Language::Arabic))
+        .filter(StopWordFilter::remove(
+            stop_words::ARABIC.iter().map(|&word| word.to_owned()),
+        ));
+
+    if stop_words.len() > 0 {
+        return builder.filter(StopWordFilter::remove(stop_words)).build();
+    }
+
+    builder.build()
+}
+
+pub fn thai_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
+    let builder = thai_builder()
+        .filter(LowerCaser)
+        .filter(DecimalDigitFilter)
+        .filter(StopWordFilter::remove(
+            stop_words::THAI.iter().map(|&word| word.to_owned()),
+        ));
+
+    if stop_words.len() > 0 {
+        return builder.filter(StopWordFilter::remove(stop_words)).build();
+    }
+
+    builder.build()
+}
+
 pub fn english_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
     let builder = standard_builder()
         .filter(LowerCaser)

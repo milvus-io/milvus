@@ -20,7 +20,7 @@ import (
 	"context"
 	"sync"
 
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // MsgQueue exposes the required operations. We include context support to meet the
@@ -115,7 +115,7 @@ func (q *msgQueue) Enqueue(ctx context.Context, msg message.ImmutableMessage) er
 	// Optional runtime check: enforce non-decreasing timetick
 	// if n := len(q.buf); n > 0 {
 	//     if q.buf[n-1].Timetick() > msg.Timetick() {
-	//         return fmt.Errorf("enqueue timetick order violation: last=%d new=%d", q.buf[n-1].Timetick(), msg.Timetick())
+	//         return merr.WrapErrParameterInvalidMsg("enqueue timetick order violation: last=%d new=%d", q.buf[n-1].Timetick(), msg.Timetick())
 	//     }
 	// }
 

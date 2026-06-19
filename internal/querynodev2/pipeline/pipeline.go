@@ -19,8 +19,8 @@ package pipeline
 import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // pipeline used for querynode
@@ -59,21 +59,13 @@ func NewPipeLine(
 	}
 
 	filterNode := newFilterNode(collectionID, channel, manager, delegator, pipelineQueueLength)
-
-	embeddingNode, err := newEmbeddingNode(collectionID, channel, manager, pipelineQueueLength)
+	insertNode, err := newInsertNode(collectionID, channel, manager, delegator, collection.Schema(), pipelineQueueLength)
 	if err != nil {
 		return nil, err
 	}
-
-	insertNode := newInsertNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 	deleteNode := newDeleteNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 
-	// skip add embedding node when collection has no function.
-	if embeddingNode != nil {
-		p.Add(filterNode, embeddingNode, insertNode, deleteNode)
-	} else {
-		p.Add(filterNode, insertNode, deleteNode)
-	}
+	p.Add(filterNode, insertNode, deleteNode)
 
 	return p, nil
 }

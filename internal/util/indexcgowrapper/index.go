@@ -11,7 +11,6 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"runtime"
 	"unsafe"
@@ -20,14 +19,15 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/cgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Blob = storage.Blob
@@ -53,6 +53,12 @@ type CgoIndex struct {
 	indexPtr C.CIndex
 	close    bool
 }
+
+var (
+	emptyFloatVectorPayload = []float32{0}
+	emptyByteVectorPayload  = []byte{0}
+	emptyInt8VectorPayload  = []int8{0}
+)
 
 // used only in test
 // TODO: use proto.Marshal instead of proto.MarshalTextString for better compatibility.
@@ -130,33 +136,6 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 	return index, nil
 }
 
-func CreateTextIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (map[string]int64, error) {
-	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
-	if err != nil {
-		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
-			zap.String("clusterID", buildIndexInfo.GetClusterID()),
-			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
-			zap.Error(err))
-		return nil, err
-	}
-	result := C.CreateProtoLayout()
-	defer C.ReleaseProtoLayout(result)
-	status := C.BuildTextIndex(result, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
-	if err := HandleCStatus(&status, "failed to build text index"); err != nil {
-		return nil, err
-	}
-	var indexStats cgopb.IndexStats
-	if err := segcore.UnmarshalProtoLayout(result, &indexStats); err != nil {
-		return nil, err
-	}
-
-	res := make(map[string]int64)
-	for _, indexInfo := range indexStats.GetSerializedIndexInfos() {
-		res[indexInfo.FileName] = indexInfo.FileSize
-	}
-	return res, nil
-}
-
 type JSONKeyStatsResult struct {
 	// MemSize is the actual memory size when loaded
 	MemSize int64
@@ -203,7 +182,7 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 func (index *CgoIndex) Build(dataset *Dataset) error {
 	switch dataset.DType {
 	case schemapb.DataType_None:
-		return fmt.Errorf("build index on supported data type: %s", dataset.DType.String())
+		return merr.WrapErrParameterInvalidMsg("build index on supported data type: %s", dataset.DType.String())
 	case schemapb.DataType_FloatVector:
 		return index.buildFloatVecIndex(dataset)
 	case schemapb.DataType_Float16Vector:
@@ -214,6 +193,8 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 		return index.buildBinaryVecIndex(dataset)
 	case schemapb.DataType_Int8Vector:
 		return index.buildInt8VecIndex(dataset)
+	case schemapb.DataType_SparseFloatVector:
+		return index.buildSparseFloatVecIndex(dataset)
 	case schemapb.DataType_Bool:
 		return index.buildBoolIndex(dataset)
 	case schemapb.DataType_Int8:
@@ -233,8 +214,46 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 	case schemapb.DataType_VarChar:
 		return index.buildStringIndex(dataset)
 	default:
-		return fmt.Errorf("build index on unsupported data type: %s", dataset.DType.String())
+		return merr.WrapErrParameterInvalidMsg("build index on unsupported data type: %s", dataset.DType.String())
 	}
+}
+
+func cFloatPtr(data []float32) *C.float {
+	if len(data) == 0 {
+		return (*C.float)(&emptyFloatVectorPayload[0])
+	}
+	return (*C.float)(&data[0])
+}
+
+func cUint8Ptr(data []byte) *C.uint8_t {
+	if len(data) == 0 {
+		return (*C.uint8_t)(&emptyByteVectorPayload[0])
+	}
+	return (*C.uint8_t)(&data[0])
+}
+
+func cInt8Ptr(data []int8) *C.int8_t {
+	if len(data) == 0 {
+		return (*C.int8_t)(&emptyInt8VectorPayload[0])
+	}
+	return (*C.int8_t)(&data[0])
+}
+
+func cBoolPtr(data []bool) *C.bool {
+	if len(data) == 0 {
+		return nil
+	}
+	return (*C.bool)(&data[0])
+}
+
+func validCount(validData []bool) int64 {
+	count := int64(0)
+	for _, valid := range validData {
+		if valid {
+			count++
+		}
+	}
+	return count
 }
 
 func (index *CgoIndex) buildFloatVecIndex(dataset *Dataset) error {
@@ -243,12 +262,12 @@ func (index *CgoIndex) buildFloatVecIndex(dataset *Dataset) error {
 		status := C.BuildFloatVecIndexWithValidData(
 			index.indexPtr,
 			(C.int64_t)(len(vectors)),
-			(*C.float)(&vectors[0]),
-			(*C.bool)(&validData[0]),
+			cFloatPtr(vectors),
+			cBoolPtr(validData),
 			(C.int64_t)(len(validData)))
 		return HandleCStatus(&status, "failed to build float vector index with valid data")
 	}
-	status := C.BuildFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
+	status := C.BuildFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cFloatPtr(vectors))
 	return HandleCStatus(&status, "failed to build float vector index")
 }
 
@@ -258,12 +277,12 @@ func (index *CgoIndex) buildFloat16VecIndex(dataset *Dataset) error {
 		status := C.BuildFloat16VecIndexWithValidData(
 			index.indexPtr,
 			(C.int64_t)(len(vectors)),
-			(*C.uint8_t)(&vectors[0]),
-			(*C.bool)(&validData[0]),
+			cUint8Ptr(vectors),
+			cBoolPtr(validData),
 			(C.int64_t)(len(validData)))
 		return HandleCStatus(&status, "failed to build float16 vector index with valid data")
 	}
-	status := C.BuildFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	status := C.BuildFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build float16 vector index")
 }
 
@@ -273,28 +292,35 @@ func (index *CgoIndex) buildBFloat16VecIndex(dataset *Dataset) error {
 		status := C.BuildBFloat16VecIndexWithValidData(
 			index.indexPtr,
 			(C.int64_t)(len(vectors)),
-			(*C.uint8_t)(&vectors[0]),
-			(*C.bool)(&validData[0]),
+			cUint8Ptr(vectors),
+			cBoolPtr(validData),
 			(C.int64_t)(len(validData)))
 		return HandleCStatus(&status, "failed to build bfloat16 vector index with valid data")
 	}
-	status := C.BuildBFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	status := C.BuildBFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build bfloat16 vector index")
 }
 
 func (index *CgoIndex) buildSparseFloatVecIndex(dataset *Dataset) error {
-	vectors := dataset.Data[keyRawArr].([]byte)
+	vectors, _ := dataset.Data[keyRawArr].([]byte)
 	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		validRows := validCount(validData)
+		if validRows > 0 && len(vectors) == 0 {
+			return merr.WrapErrParameterInvalidMsg("sparse float vector cgo build requires encoded sparse rows")
+		}
 		status := C.BuildSparseFloatVecIndexWithValidData(
 			index.indexPtr,
-			(C.int64_t)(len(validData)),
+			(C.int64_t)(validRows),
 			(C.int64_t)(0),
-			(*C.uint8_t)(&vectors[0]),
-			(*C.bool)(&validData[0]),
+			cUint8Ptr(vectors),
+			cBoolPtr(validData),
 			(C.int64_t)(len(validData)))
 		return HandleCStatus(&status, "failed to build sparse float vector index with valid data")
 	}
-	status := C.BuildSparseFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (C.int64_t)(0), (*C.uint8_t)(&vectors[0]))
+	if len(vectors) == 0 {
+		return merr.WrapErrParameterInvalidMsg("sparse float vector cgo build requires encoded sparse rows")
+	}
+	status := C.BuildSparseFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (C.int64_t)(0), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build sparse float vector index")
 }
 
@@ -304,12 +330,12 @@ func (index *CgoIndex) buildBinaryVecIndex(dataset *Dataset) error {
 		status := C.BuildBinaryVecIndexWithValidData(
 			index.indexPtr,
 			(C.int64_t)(len(vectors)),
-			(*C.uint8_t)(&vectors[0]),
-			(*C.bool)(&validData[0]),
+			cUint8Ptr(vectors),
+			cBoolPtr(validData),
 			(C.int64_t)(len(validData)))
 		return HandleCStatus(&status, "failed to build binary vector index with valid data")
 	}
-	status := C.BuildBinaryVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	status := C.BuildBinaryVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build binary vector index")
 }
 
@@ -319,12 +345,12 @@ func (index *CgoIndex) buildInt8VecIndex(dataset *Dataset) error {
 		status := C.BuildInt8VecIndexWithValidData(
 			index.indexPtr,
 			(C.int64_t)(len(vectors)),
-			(*C.int8_t)(&vectors[0]),
-			(*C.bool)(&validData[0]),
+			cInt8Ptr(vectors),
+			cBoolPtr(validData),
 			(C.int64_t)(len(validData)))
 		return HandleCStatus(&status, "failed to build int8 vector index with valid data")
 	}
-	status := C.BuildInt8VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.int8_t)(&vectors[0]))
+	status := C.BuildInt8VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), cInt8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build int8 vector index")
 }
 

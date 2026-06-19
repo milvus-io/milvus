@@ -18,39 +18,37 @@ package querycoordv2
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
 
 // checkAnyReplicaAvailable checks if the collection has enough distinct available shards. These shards
 // may come from different replica group. We only need these shards to form a replica that serves query
 // requests.
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
-	for _, replica := range s.meta.ReplicaManager.GetByCollection(s.ctx, collectionID) {
+	for _, replica := range s.meta.GetByCollection(s.ctx, collectionID) {
 		isAvailable := true
 		for _, node := range replica.GetRONodes() {
 			if s.nodeMgr.Get(node) == nil {
@@ -135,7 +133,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			utils.ManualBalance,
 			collectionID,
 			plan.Replica,
-			replica.LoadPriority(),
+			commonpb.LoadPriority_LOW, // Manual balance is not urgent
 			actions...,
 		)
 		if err != nil {
@@ -166,7 +164,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			log.Warn(msg, zap.Error(err))
-			return errors.Wrap(err, msg)
+			return merr.Wrapf(err, "%s", msg)
 		}
 	}
 
@@ -246,7 +244,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 		if err != nil {
 			msg := "failed to wait all balance task finished"
 			log.Warn(msg, zap.Error(err))
-			return errors.Wrap(err, msg)
+			return merr.Wrapf(err, "%s", msg)
 		}
 	}
 
@@ -322,7 +320,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		}
 		return string(bs), nil
 	}
-	return "", fmt.Errorf("invalid param value in=[%s], it should be qc or qn", in)
+	return "", merr.WrapErrParameterInvalidMsg("invalid param value in=[%s], it should be qc or qn", in)
 }
 
 // TODO(dragondriver): add more detail metrics
@@ -330,6 +328,20 @@ func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
 ) (string, error) {
+	coordTopology := s.getQueryCoordTopology(ctx, req)
+	resp, err := metricsinfo.MarshalTopology(coordTopology)
+	if err != nil {
+		return "", err
+	}
+	return resp, nil
+}
+
+// getQueryCoordTopology returns QueryCoord topology directly without JSON serialization
+// This is optimized for in-process calls in MixCoord mode to avoid marshal/unmarshal overhead
+func (s *Server) getQueryCoordTopology(
+	ctx context.Context,
+	req *milvuspb.GetMetricsRequest,
+) metricsinfo.QueryCoordTopology {
 	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
 		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
@@ -368,7 +380,7 @@ func (s *Server) getSystemInfoMetrics(
 	nodesMetrics := s.tryGetNodesMetrics(ctx, req, s.nodeMgr.GetAll()...)
 	s.fillMetricsWithNodes(&clusterTopology, nodesMetrics)
 
-	coordTopology := metricsinfo.QueryCoordTopology{
+	return metricsinfo.QueryCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
 			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, paramtable.GetNodeID()),
@@ -376,13 +388,6 @@ func (s *Server) getSystemInfoMetrics(
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
-
-	resp, err := metricsinfo.MarshalTopology(coordTopology)
-	if err != nil {
-		return "", err
-	}
-
-	return resp, nil
 }
 
 func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, nodeMetrics []*metricResp) {
@@ -431,6 +436,11 @@ func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, no
 				},
 			})
 			continue
+		}
+		// If this query node is embedded in a streaming node, relabel it as streamingnode.
+		if nodeInfo := s.nodeMgr.Get(infos.ID); nodeInfo != nil && nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+			infos.Type = typeutil.StreamingNodeRole
+			infos.Name = metricsinfo.ConstructComponentName(typeutil.StreamingNodeRole, infos.ID)
 		}
 		topo.ConnectedNodes = append(topo.ConnectedNodes, infos)
 	}
@@ -525,4 +535,14 @@ func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, wit
 	}
 	info.ShardReplicas = shardReplicas
 	return info
+}
+
+// GetQueryCoordTopology returns QueryCoord topology directly without JSON serialization
+// This is optimized for in-process calls in MixCoord mode to avoid marshal/unmarshal overhead
+func (s *Server) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return nil, err
+	}
+	topology := s.getQueryCoordTopology(ctx, req)
+	return &topology, nil
 }

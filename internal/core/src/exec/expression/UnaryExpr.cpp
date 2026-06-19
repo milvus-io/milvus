@@ -18,23 +18,19 @@
 
 #include <simdjson.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <cctype>
 #include <set>
 #include <unordered_set>
 #include <variant>
 
 #include "boost/container/vector.hpp"
 #include "boost/cstdint.hpp"
-#include "boost/regex/v5/basic_regex.hpp"
-#include "boost/regex/v5/perl_matcher_common.hpp"
-#include "boost/regex/v5/perl_matcher_non_recursive.hpp"
-#include "boost/regex/v5/regex.hpp"
-#include "boost/regex/v5/regex_fwd.hpp"
-#include "boost/regex/v5/regex_search.hpp"
 #include "bsoncxx/array/view.hpp"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -45,6 +41,7 @@
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "exec/expression/ExprCache.h"
+#include "exec/expression/ExprCacheHelper.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
@@ -88,44 +85,32 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
 template <>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
-    bool res;
-    if (!SegmentExpr::CanUseIndex()) {
-        use_index_ = res = false;
-        return res;
-    }
+    // HasCompatibleScalarIndex() is already confirmed by SegmentExpr::DetermineExecPath()
+    // before this is called. Only check index type compatibility here.
     switch (expr_->column_.element_type_) {
         case DataType::BOOL:
-            res = CanUseIndexForArray<bool>();
-            break;
+            return CanUseIndexForArray<bool>();
         case DataType::INT8:
-            res = CanUseIndexForArray<int8_t>();
-            break;
+            return CanUseIndexForArray<int8_t>();
         case DataType::INT16:
-            res = CanUseIndexForArray<int16_t>();
-            break;
+            return CanUseIndexForArray<int16_t>();
         case DataType::INT32:
-            res = CanUseIndexForArray<int32_t>();
-            break;
+            return CanUseIndexForArray<int32_t>();
         case DataType::INT64:
-            res = CanUseIndexForArray<int64_t>();
-            break;
+            return CanUseIndexForArray<int64_t>();
         case DataType::FLOAT:
         case DataType::DOUBLE:
             // not accurate on floating point number, rollback to bruteforce.
-            res = false;
-            break;
+            return false;
         case DataType::VARCHAR:
         case DataType::STRING:
-            res = CanUseIndexForArray<std::string_view>();
-            break;
+            return CanUseIndexForArray<std::string_view>();
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported element type when execute array "
                       "equal for index: {}",
                       expr_->column_.element_type_);
     }
-    use_index_ = res;
-    return res;
 }
 
 template <typename T>
@@ -236,7 +221,8 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<double>(context);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
@@ -248,8 +234,9 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
+            span.GetSpan()->SetAttribute("json_filter_expr_type",
+                                         "unary_range");
             auto val_type = expr_->val_.val_case();
-            auto val_type_inner = FromValCase(val_type);
             if (CanUseNgramIndex() && !has_offset_input_) {
                 auto res = ExecNgramMatch(context);
                 // If nullopt is returned, it means the query cannot be
@@ -260,7 +247,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
             }
 
-            if (CanUseIndexForJson(val_type_inner) && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 switch (val_type) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
@@ -314,24 +301,20 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto val_type = expr_->val_.val_case();
             switch (val_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<double>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<std::string>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kArrayVal:
-                    if (!has_offset_input_ &&
-                        CanUseIndexForArray<milvus::Array>()) {
+                    if (exec_path_ == ExprExecPath::ScalarIndex &&
+                        !has_offset_input_) {
                         result = ExecRangeVisitorImplArrayForIndex<
                             proto::plan::Array>(context);
                     } else {
@@ -513,6 +496,23 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             case proto::plan::Match: {
                 UnaryElementFuncForArray<ValueType,
                                          proto::plan::Match,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::RegexMatch: {
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::RegexMatch,
                                          filter_type>
                     func;
                 func(data,
@@ -711,12 +711,17 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                            ExprValueType>;
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
 
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer(
+            "unary_range_json_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecRangeVisitorImplJsonByStats<ExprValueType>();
     }
+
+    milvus::ScopedTimer timer("unary_range_json_bruteforce", [this](double us) {
+        json_filter_bruteforce_latency_us_ += us;
+    });
 
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
@@ -738,35 +743,44 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-#define UnaryRangeJSONCompare(cmp)                                  \
-    do {                                                            \
-        auto x = data[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                            \
-            if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                auto x = data[offset].template at<double>(pointer); \
-                res[i] = !x.error() && (cmp);                       \
-                break;                                              \
-            }                                                       \
-            res[i] = false;                                         \
-            break;                                                  \
-        }                                                           \
-        res[i] = (cmp);                                             \
+// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
+// number in a single parse.  Branches on actual type to preserve int64
+// precision; uint64 and double values fall back to double comparison,
+// consistent with the Tantivy index and JSON-stats paths.
+// - 'cmp' must reference 'value' (auto-typed as int64_t or double).
+// - 'error_result': result when JSON path is missing or type mismatch.
+#define UnaryRangeJSONCompareCore(cmp, error_result)                   \
+    do {                                                               \
+        if constexpr (std::is_same_v<GetType, int64_t>) {              \
+            auto x_num = data[offset].at_numeric(pointer);             \
+            if (x_num.error()) {                                       \
+                res[i] = (error_result);                               \
+                break;                                                 \
+            }                                                          \
+            auto n = x_num.value();                                    \
+            if (n.is_int64()) {                                        \
+                auto value = n.get_int64();                            \
+                res[i] = (cmp);                                        \
+            } else {                                                   \
+                auto value = n.is_uint64()                             \
+                                 ? static_cast<double>(n.get_uint64()) \
+                                 : n.get_double();                     \
+                res[i] = (cmp);                                        \
+            }                                                          \
+        } else {                                                       \
+            auto x = data[offset].template at<GetType>(pointer);       \
+            if (x.error()) {                                           \
+                res[i] = (error_result);                               \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value();                                    \
+            res[i] = (cmp);                                            \
+        }                                                              \
     } while (false)
 
-#define UnaryRangeJSONCompareNotEqual(cmp)                          \
-    do {                                                            \
-        auto x = data[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                            \
-            if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                auto x = data[offset].template at<double>(pointer); \
-                res[i] = x.error() || (cmp);                        \
-                break;                                              \
-            }                                                       \
-            res[i] = true;                                          \
-            break;                                                  \
-        }                                                           \
-        res[i] = (cmp);                                             \
-    } while (false)
+#define UnaryRangeJSONCompare(cmp) UnaryRangeJSONCompareCore(cmp, false)
+
+#define UnaryRangeJSONCompareNotEqual(cmp) UnaryRangeJSONCompareCore(cmp, true)
 
     int processed_cursor = 0;
     auto execute_sub_batch =
@@ -798,7 +812,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() > val);
+                        UnaryRangeJSONCompare(value > val);
                     }
                 }
                 break;
@@ -820,7 +834,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() >= val);
+                        UnaryRangeJSONCompare(value >= val);
                     }
                 }
                 break;
@@ -842,7 +856,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() < val);
+                        UnaryRangeJSONCompare(value < val);
                     }
                 }
                 break;
@@ -864,7 +878,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() <= val);
+                        UnaryRangeJSONCompare(value <= val);
                     }
                 }
                 break;
@@ -892,7 +906,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         }
                         res[i] = CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompare(x.value() == val);
+                        UnaryRangeJSONCompare(value == val);
                     }
                 }
                 break;
@@ -921,7 +935,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         }
                         res[i] = !CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompareNotEqual(x.value() != val);
+                        UnaryRangeJSONCompareNotEqual(value != val);
                     }
                 }
                 break;
@@ -945,35 +959,57 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(milvus::query::Match(
-                            ExprValueType(x.value()), val, op_type));
+                        UnaryRangeJSONCompare(
+                            milvus::query::Match(value, val, op_type));
                     }
                 }
                 break;
             }
             case proto::plan::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
-                for (size_t i = 0; i < size; ++i) {
-                    auto offset = i;
-                    if constexpr (filter_type == FilterType::random) {
-                        offset = (offsets) ? offsets[i] : i;
+                if constexpr (std::is_same_v<ExprValueType, std::string>) {
+                    LikePatternMatcher matcher(val);
+                    for (size_t i = 0; i < size; ++i) {
+                        auto offset = i;
+                        if constexpr (filter_type == FilterType::random) {
+                            offset = (offsets) ? offsets[i] : i;
+                        }
+                        if (valid_data != nullptr && !valid_data[offset]) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                        if (has_bitmap_input &&
+                            !bitmap_input[i + processed_cursor]) {
+                            continue;
+                        }
+                        UnaryRangeJSONCompare(matcher(value));
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
-                        res[i] = valid_res[i] = false;
-                        continue;
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation only supports string type");
+                }
+                break;
+            }
+            case proto::plan::RegexMatch: {
+                if constexpr (std::is_same_v<ExprValueType, std::string>) {
+                    PartialRegexMatcher matcher(val);
+                    for (size_t i = 0; i < size; ++i) {
+                        auto offset = i;
+                        if constexpr (filter_type == FilterType::random) {
+                            offset = (offsets) ? offsets[i] : i;
+                        }
+                        if (valid_data != nullptr && !valid_data[offset]) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                        if (has_bitmap_input &&
+                            !bitmap_input[i + processed_cursor]) {
+                            continue;
+                        }
+                        UnaryRangeJSONCompare(matcher(value));
                     }
-                    if (has_bitmap_input &&
-                        !bitmap_input[i + processed_cursor]) {
-                        continue;
-                    }
-                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        res[i] = false;
-                    } else {
-                        UnaryRangeJSONCompare(
-                            matcher(ExprValueType(x.value())));
-                    }
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "RegexMatch operation only supports string type");
                 }
                 break;
             }
@@ -1004,15 +1040,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
 
 std::pair<std::string, std::string>
 PhyUnaryRangeFilterExpr::SplitAtFirstSlashDigit(std::string input) {
-    boost::regex rgx("/\\d+");
-    boost::smatch match;
-    if (boost::regex_search(input, match, rgx)) {
-        std::string firstPart = input.substr(0, match.position());
-        std::string secondPart = input.substr(match.position());
-        return {firstPart, secondPart};
-    } else {
-        return {input, ""};
+    // Find pattern /\d+ (slash followed by ASCII digits) without regex
+    // Use explicit ASCII range check to avoid locale-dependent std::isdigit behavior
+    auto is_ascii_digit = [](char c) { return c >= '0' && c <= '9'; };
+    for (size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '/' && i + 1 < input.size() &&
+            is_ascii_digit(input[i + 1])) {
+            return {input.substr(0, i), input.substr(i)};
+        }
     }
+    return {input, ""};
 }
 
 template <typename ExprValueType>
@@ -1027,8 +1064,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         return nullptr;
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit from a prior Index/Stats path — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
         auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
         std::string pointer = pointerpair.first;
@@ -1086,10 +1126,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         {
             milvus::ScopedTimer timer(
-                "unary_json_stats_shredding_data", [](double ms) {
-                    milvus::monitor::internal_json_stats_latency_shredding
-                        .Observe(ms);
-                });
+                "unary_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
 
             if constexpr (std::is_same_v<GetType, bool>) {
                 try_execute(milvus::index::JSONType::BOOL,
@@ -1165,7 +1203,22 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         }
 
         // process shared data
-        auto shared_executor = [op_type, val, array_index, &res_view](
+        // Pre-construct context with LikePatternMatcher for Match ops on
+        // string types to avoid re-parsing the pattern on every row.
+        [[maybe_unused]] std::optional<LikePatternMatcher> like_matcher;
+        [[maybe_unused]] std::optional<PartialRegexMatcher> regex_matcher;
+        if constexpr (std::is_same_v<GetType, std::string> ||
+                      std::is_same_v<GetType, std::string_view>) {
+            if (op_type == proto::plan::OpType::Match) {
+                like_matcher.emplace(val);
+            } else if (op_type == proto::plan::OpType::RegexMatch) {
+                regex_matcher.emplace(val);
+            }
+        }
+        UnaryCompareContext context{
+            like_matcher.has_value() ? &like_matcher.value() : nullptr,
+            regex_matcher.has_value() ? &regex_matcher.value() : nullptr};
+        auto shared_executor = [op_type, val, array_index, &res_view, &context](
                                    milvus::BsonView bson,
                                    uint32_t row_id,
                                    uint32_t value_offset) {
@@ -1286,7 +1339,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                     return;
                 }
                 res_view[row_id] =
-                    UnaryCompare(get_value.value(), val, op_type);
+                    UnaryCompare(get_value.value(), val, op_type, &context);
             }
         };
 
@@ -1303,10 +1356,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         {
             milvus::ScopedTimer timer(
-                "unary_json_stats_shared_data", [](double ms) {
-                    milvus::monitor::internal_json_stats_latency_shared.Observe(
-                        ms);
-                });
+                "unary_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
 
             index->ExecuteForSharedData(
                 op_ctx_, bson_index_, pointer, shared_executor);
@@ -1317,14 +1368,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
             cached_index_chunk_res_->flip();
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename T>
@@ -1347,7 +1397,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
-    if (!has_offset_input_ && is_pk_field_ && IsCompareOp(expr_->op_type_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::PkIndex) {
         if (pk_type_ == DataType::VARCHAR) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
         } else {
@@ -1355,7 +1405,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
-    if (CanUseIndex<T>() && !has_offset_input_) {
+    if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
@@ -1397,12 +1447,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
         }
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename T>
@@ -1431,51 +1479,56 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryIndexFunc<T, proto::plan::GreaterThan> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::GreaterEqual: {
                 UnaryIndexFunc<T, proto::plan::GreaterEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessThan: {
                 UnaryIndexFunc<T, proto::plan::LessThan> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessEqual: {
                 UnaryIndexFunc<T, proto::plan::LessEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Equal: {
                 UnaryIndexFunc<T, proto::plan::Equal> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::NotEqual: {
                 UnaryIndexFunc<T, proto::plan::NotEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::PrefixMatch: {
                 UnaryIndexFunc<T, proto::plan::PrefixMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::PostfixMatch: {
                 UnaryIndexFunc<T, proto::plan::PostfixMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::InnerMatch: {
                 UnaryIndexFunc<T, proto::plan::InnerMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Match: {
                 UnaryIndexFunc<T, proto::plan::Match> func;
+                res = func(index_ptr, val);
+                break;
+            }
+            case proto::plan::RegexMatch: {
+                UnaryIndexFunc<T, proto::plan::RegexMatch> func;
                 res = std::move(func(index_ptr, val));
                 break;
             }
@@ -1513,11 +1566,10 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
                                  : batch_size_;
                 overflow_check_pos_ += batch_size;
             }
-            auto valid =
-                (input != nullptr)
-                    ? ProcessChunksForValidByOffsets<T>(
-                          SegmentExpr::CanUseIndex(), *input)
-                    : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+            auto valid = (input != nullptr)
+                             ? ProcessChunksForValidByOffsets<T>(
+                                   UseIndexCursor(), *input)
+                             : ProcessChunksForValid<T>(UseIndexCursor());
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
@@ -1592,10 +1644,23 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     auto expr_type = expr_->op_type_;
 
+    // Pre-build regex / LIKE pattern objects once for the entire segment
+    EnsureRegexCache();
+    EnsureLikeMatcherCache();
+    const PartialRegexMatcher* regex_matcher_ptr = cached_regex_matcher_.get();
+    const VolnitskySearcher* volnitsky_ptr = cached_volnitsky_searcher_.get();
+    const LikePatternMatcher* like_matcher_ptr = cached_like_matcher_.get();
+
     size_t processed_cursor = 0;
     auto execute_sub_batch =
-        [ expr_type, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [
+            expr_type,
+            &processed_cursor,
+            &bitmap_input,
+            regex_matcher_ptr,
+            volnitsky_ptr,
+            like_matcher_ptr
+        ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -1712,7 +1777,21 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                 break;
             }
             case proto::plan::Match: {
-                UnaryElementFunc<T, proto::plan::Match, filter_type> func;
+                UnaryElementFuncForMatch<T, filter_type> func;
+                func.matcher = like_matcher_ptr;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::RegexMatch: {
+                UnaryElementFuncForRegexMatch<T, filter_type> func;
+                func.matcher = regex_matcher_ptr;
+                func.searcher = volnitsky_ptr;
                 func(data,
                      size,
                      val,
@@ -1749,12 +1828,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func = [expr_type, val](const SkipIndex& skip_index,
-                                            FieldId field_id,
-                                            int64_t chunk_id) {
-        return skip_index.CanSkipUnaryRange<T>(
-            field_id, chunk_id, expr_type, val);
-    };
+    auto skip_index_func =
+        [op_ctx = op_ctx_, expr_type, val](
+            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
+            return skip_index.CanSkipUnaryRange<T>(
+                op_ctx, field_id, chunk_id, expr_type, val);
+        };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -1789,33 +1868,101 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     return res_vec;
 }
 
-template <typename T>
-bool
-PhyUnaryRangeFilterExpr::CanUseIndex() {
-    use_index_ = SegmentExpr::CanUseIndex() &&
-                 SegmentExpr::CanUseIndexForOp<T>(expr_->op_type_);
-    return use_index_;
-}
+void
+PhyUnaryRangeFilterExpr::DetermineExecPath() {
+    // TextMatch/PhraseMatch use a separate text index path (segment_->GetTextIndex()),
+    // not the pinned_index_ scalar index path.
+    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
+        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
+        exec_path_ = ExprExecPath::TextIndex;
+        return;
+    }
 
-bool
-PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
-    if (!SegmentExpr::CanUseIndex()) {
-        use_index_ = false;
-        return false;
+    // PkIndex: use primary key index for compare operations on PK fields.
+    if (is_pk_field_ && IsCompareOp(expr_->op_type_)) {
+        exec_path_ = ExprExecPath::PkIndex;
+        return;
     }
-    bool has_index = pinned_index_.size() > 0;
-    switch (val_type) {
-        case DataType::STRING:
-        case DataType::VARCHAR:
-            use_index_ = has_index &&
-                         expr_->op_type_ != proto::plan::OpType::Match &&
-                         expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
-                         expr_->op_type_ != proto::plan::OpType::InnerMatch;
+
+    // JsonStats: use JSON statistics to skip segments when possible.
+    if (CanUseJsonStatsAtInit()) {
+        exec_path_ = ExprExecPath::JsonStats;
+        return;
+    }
+
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    // Refine: check if the index supports this specific operation/type.
+    // May downgrade from ScalarIndex to RawData.
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    bool can_use = false;
+    switch (data_type) {
+        case DataType::BOOL:
+            can_use = SegmentExpr::CanUseIndexForOp<bool>(expr_->op_type_);
             break;
+        case DataType::INT8:
+            can_use = SegmentExpr::CanUseIndexForOp<int8_t>(expr_->op_type_);
+            break;
+        case DataType::INT16:
+            can_use = SegmentExpr::CanUseIndexForOp<int16_t>(expr_->op_type_);
+            break;
+        case DataType::INT32:
+            can_use = SegmentExpr::CanUseIndexForOp<int32_t>(expr_->op_type_);
+            break;
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            can_use = SegmentExpr::CanUseIndexForOp<int64_t>(expr_->op_type_);
+            break;
+        case DataType::FLOAT:
+            can_use = SegmentExpr::CanUseIndexForOp<float>(expr_->op_type_);
+            break;
+        case DataType::DOUBLE:
+            can_use = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
+            break;
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            can_use =
+                SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
+            break;
+        case DataType::JSON: {
+            auto val_type = FromValCase(expr_->val_.val_case());
+            switch (val_type) {
+                case DataType::STRING:
+                case DataType::VARCHAR:
+                    can_use =
+                        expr_->op_type_ != proto::plan::OpType::Match &&
+                        expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
+                        expr_->op_type_ != proto::plan::OpType::InnerMatch;
+                    break;
+                default:
+                    can_use = true;
+            }
+            break;
+        }
+        case DataType::ARRAY: {
+            auto val_type = expr_->val_.val_case();
+            switch (val_type) {
+                case proto::plan::GenericValue::ValCase::kArrayVal:
+                    can_use = CanUseIndexForArray<milvus::Array>();
+                    break;
+                default:
+                    can_use = false;
+            }
+            break;
+        }
         default:
-            use_index_ = has_index;
+            can_use = false;
     }
-    return use_index_;
+    if (!can_use) {
+        exec_path_ = ExprExecPath::RawData;
+    }
 }
 
 VectorPtr
@@ -1844,24 +1991,6 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     }
     auto op_type = expr_->op_type_;
 
-    // Process-level LRU cache lookup by (segment_id, expr signature)
-    if (cached_match_res_ == nullptr &&
-        exec::ExprResCacheManager::IsEnabled() &&
-        segment_->type() == SegmentType::Sealed) {
-        exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                           this->ToString()};
-        exec::ExprResCacheManager::Value v;
-        if (exec::ExprResCacheManager::Instance().Get(key, v)) {
-            cached_match_res_ = v.result;
-            cached_index_chunk_valid_res_ = v.valid_result;
-            AssertInfo(cached_match_res_->size() == active_count_,
-                       "internal error: expr res cache size {} not equal "
-                       "expect active count {}",
-                       cached_match_res_->size(),
-                       active_count_);
-        }
-    }
-
     uint32_t min_should_match = 1;  // default value
     if (op_type == proto::plan::OpType::TextMatch &&
         expr_->extra_values_.size() > 0) {
@@ -1870,51 +1999,57 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             GetValueFromProto<int64_t>(expr_->extra_values_[0]));
     }
 
-    auto func = [op_type, slop, min_should_match](
-                    Index* index, const std::string& query) -> TargetBitmap {
-        if (op_type == proto::plan::OpType::TextMatch) {
-            return index->MatchQuery(query, min_should_match);
-        } else if (op_type == proto::plan::OpType::PhraseMatch) {
-            return index->PhraseMatchQuery(query, slop);
-        } else {
-            ThrowInfo(OpTypeInvalid,
-                      "unsupported operator type for match query: {}",
-                      op_type);
-        }
-    };
-
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
+    // Cache lookup + full-bitset compute via helper
     if (cached_match_res_ == nullptr) {
-        auto pw = segment_->GetTextIndex(op_ctx_, field_id_);
-        auto index = pw.get();
-        auto res = std::move(func(index, query));
-        auto valid_res = index->IsNotNull();
-        cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
-        cached_index_chunk_valid_res_ =
-            std::make_shared<TargetBitmap>(std::move(valid_res));
-        if (cached_match_res_->size() < active_count_) {
-            // some entities are not visible in inverted index.
-            // only happend on growing segment.
-            TargetBitmap tail(active_count_ - cached_match_res_->size());
-            cached_match_res_->append(tail);
-            cached_index_chunk_valid_res_->append(tail);
-        }
+        auto cached = exec::ExprCacheHelper::GetOrCompute(
+            segment_,
+            this->ToString(),
+            active_count_,
+            [&]() -> exec::ExprCacheHelper::ComputeResult {
+                auto pw = segment_->GetTextIndex(op_ctx_, field_id_);
+                auto index = pw.get();
+                TargetBitmap res;
+                if (op_type == proto::plan::OpType::TextMatch) {
+                    res = index->MatchQuery(query, min_should_match);
+                } else if (op_type == proto::plan::OpType::PhraseMatch) {
+                    res = index->PhraseMatchQuery(query, slop);
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "unsupported operator type for match query: {}",
+                              op_type);
+                }
+                auto valid_res = index->IsNotNull();
+                if (res.size() < static_cast<size_t>(active_count_)) {
+                    // some entities are not visible in inverted index.
+                    // only happens on growing segment.
+                    TargetBitmap tail(active_count_ - res.size());
+                    res.append(tail);
+                    valid_res.append(tail);
+                } else if (res.size() > static_cast<size_t>(active_count_)) {
+                    // on growing segments, the text index may have indexed
+                    // rows beyond the query timestamp. Truncate to
+                    // active_count_.
+                    res.resize(active_count_);
+                    valid_res.resize(active_count_);
+                }
+                return {std::move(res), std::move(valid_res)};
+            },
+            enable_sub_expr_cache_write_);
+        cached_match_res_ = cached.result;
+        cached_index_chunk_valid_res_ = cached.valid;
+    }
 
-        // Insert into process-level cache
-        if (exec::ExprResCacheManager::IsEnabled() &&
-            segment_->type() == SegmentType::Sealed) {
-            exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                               this->ToString()};
-            exec::ExprResCacheManager::Value v;
-            v.result = cached_match_res_;
-            v.valid_result = cached_index_chunk_valid_res_;
-            v.active_count = active_count_;
-            exec::ExprResCacheManager::Instance().Put(key, v);
-        }
+    // When execute_all_at_once_ and result is not shared with cache, move to avoid copy
+    if (execute_all_at_once_ && cached_match_res_.use_count() == 1) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            std::move(*cached_match_res_),
+            std::move(*cached_index_chunk_valid_res_));
     }
 
     TargetBitmap result;
@@ -2004,7 +2139,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
         cached_phase1_res_ =
             std::make_shared<TargetBitmap>(std::move(candidates));
         cached_index_chunk_valid_res_ =
-            std::make_shared<TargetBitmap>(std::move(index->IsNotNull()));
+            std::make_shared<TargetBitmap>(index->IsNotNull());
     }
 
     // Phase 2: Execute per batch with batch-level bitmap_input

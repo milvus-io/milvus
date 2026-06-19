@@ -25,11 +25,13 @@
 #include "common/Tracer.h"
 #include "common/bson_view.h"
 #include "common/type_c.h"
+#include "common/ScopedTimer.h"
 #include "exec/expression/Utils.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
 #include "index/SkipIndex.h"
+#include "monitor/Monitor.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
 #include "log/Log.h"
@@ -99,6 +101,8 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
+            span.GetSpan()->SetAttribute("json_filter_expr_type",
+                                         "binary_range");
             auto lower_type = expr_->lower_val_.val_case();
             auto upper_type = expr_->upper_val_.val_case();
             // For numeric types, if either bound is float, use double for both.
@@ -113,7 +117,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                  (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
                   upper_type == proto::plan::GenericValue::ValCase::kFloatVal));
 
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 if (is_numeric) {
                     // Convert both bounds to double for index path
                     proto::plan::GenericValue double_lower_val;
@@ -175,17 +179,14 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto value_type = expr_->lower_val_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<int64_t>(context);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<double>(context);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kStringVal: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<std::string>(context);
                     break;
                 }
@@ -208,8 +209,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
-    if (!has_offset_input_ && is_pk_field_ &&
-        segment_->type() == SegmentType::Sealed) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::PkIndex) {
         if (pk_type_ == DataType::VARCHAR) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
         } else {
@@ -217,7 +217,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
-    if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+    if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
@@ -254,9 +254,8 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
         }
         auto valid_res =
             (input != nullptr)
-                ? ProcessChunksForValidByOffsets<T>(SegmentExpr::CanUseIndex(),
-                                                    *input)
-                : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+                ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
+                : ProcessChunksForValid<T>(UseIndexCursor());
 
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
@@ -309,13 +308,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return nullptr;
     }
 
-    auto execute_sub_batch =
-        [lower_inclusive, upper_inclusive](
-            Index* index_ptr, HighPrecisionType val1, HighPrecisionType val2) {
-            BinaryRangeIndexFunc<T> func;
-            return std::move(
-                func(index_ptr, val1, val2, lower_inclusive, upper_inclusive));
-        };
+    auto execute_sub_batch = [lower_inclusive, upper_inclusive](
+                                 Index* index_ptr,
+                                 HighPrecisionType val1,
+                                 HighPrecisionType val2) {
+        BinaryRangeIndexFunc<T> func;
+        return func(index_ptr, val1, val2, lower_inclusive, upper_inclusive);
+    };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val1, val2);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -331,7 +330,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
     typedef std::conditional_t<std::is_integral_v<IndexInnerType> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -422,12 +420,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         // there is a batch operation in BinaryRangeElementFunc,
         // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
         // but to mask res with valid_data after the batch operation.
-        if (valid_data != nullptr) {
+        if constexpr (filter_type == FilterType::sequential) {
+            // contiguous rows: reuse the vectorized shared helper
+            ApplyValidMask(valid_data, res, valid_res, size);
+        } else if (valid_data != nullptr) {
+            // scattered by offsets: gather, keep the per-row loop
             for (int i = 0; i < size; i++) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
+                auto offset = (offsets) ? offsets[i] : i;
                 if (!valid_data[offset]) {
                     res[i] = valid_res[i] = false;
                 }
@@ -437,20 +436,20 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     };
 
     auto skip_index_func =
-        [val1, val2, lower_inclusive, upper_inclusive](
+        [op_ctx = op_ctx_, val1, val2, lower_inclusive, upper_inclusive](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
             if (lower_inclusive && upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, true, true);
+                    op_ctx, field_id, chunk_id, val1, val2, true, true);
             } else if (lower_inclusive && !upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, true, false);
+                    op_ctx, field_id, chunk_id, val1, val2, true, false);
             } else if (!lower_inclusive && upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, false, true);
+                    op_ctx, field_id, chunk_id, val1, val2, false, true);
             } else {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, false, false);
+                    op_ctx, field_id, chunk_id, val1, val2, false, false);
             }
         };
     int64_t processed_size;
@@ -495,16 +494,20 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 template <typename ValueType>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer(
+            "binary_range_json_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecRangeVisitorImplForJsonStats<ValueType>();
     }
+
+    milvus::ScopedTimer timer(
+        "binary_range_json_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -649,8 +652,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
     ValueType val1 = GetValueWithCastNumber<ValueType>(expr_->lower_val_);
     ValueType val2 = GetValueWithCastNumber<ValueType>(expr_->upper_val_);
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -705,48 +711,54 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
             }
         };
 
-        if constexpr (std::is_same_v<GetType, int64_t>) {
-            // int64 compare
-            try_execute(milvus::index::JSONType::INT64,
-                        res_view,
-                        valid_res_view,
-                        int64_t{});
-            // and double compare
-            TargetBitmap res_double(active_count_, false);
-            TargetBitmapView res_double_view(res_double);
-            TargetBitmap res_double_valid(active_count_, true);
-            TargetBitmapView valid_res_double_view(res_double_valid);
-            try_execute(milvus::index::JSONType::DOUBLE,
-                        res_double_view,
-                        valid_res_double_view,
-                        double{});
-            res_view.inplace_or_with_count(res_double_view, active_count_);
-            valid_res_view.inplace_or_with_count(valid_res_double_view,
-                                                 active_count_);
+        {
+            milvus::ScopedTimer timer(
+                "binary_range_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
 
-        } else if constexpr (std::is_same_v<GetType, double>) {
-            try_execute(milvus::index::JSONType::DOUBLE,
-                        res_view,
-                        valid_res_view,
-                        double{});
-            // and int64 compare
-            TargetBitmap res_int64(active_count_, false);
-            TargetBitmapView res_int64_view(res_int64);
-            TargetBitmap res_int64_valid(active_count_, true);
-            TargetBitmapView valid_res_int64_view(res_int64_valid);
-            try_execute(milvus::index::JSONType::INT64,
-                        res_int64_view,
-                        valid_res_int64_view,
-                        int64_t{});
-            res_view.inplace_or_with_count(res_int64_view, active_count_);
-            valid_res_view.inplace_or_with_count(valid_res_int64_view,
-                                                 active_count_);
-        } else if constexpr (std::is_same_v<GetType, std::string_view> ||
-                             std::is_same_v<GetType, std::string>) {
-            try_execute(milvus::index::JSONType::STRING,
-                        res_view,
-                        valid_res_view,
-                        std::string_view{});
+            if constexpr (std::is_same_v<GetType, int64_t>) {
+                // int64 compare
+                try_execute(milvus::index::JSONType::INT64,
+                            res_view,
+                            valid_res_view,
+                            int64_t{});
+                // and double compare
+                TargetBitmap res_double(active_count_, false);
+                TargetBitmapView res_double_view(res_double);
+                TargetBitmap res_double_valid(active_count_, true);
+                TargetBitmapView valid_res_double_view(res_double_valid);
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_double_view,
+                            valid_res_double_view,
+                            double{});
+                res_view.inplace_or_with_count(res_double_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_double_view,
+                                                     active_count_);
+
+            } else if constexpr (std::is_same_v<GetType, double>) {
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_view,
+                            valid_res_view,
+                            double{});
+                // and int64 compare
+                TargetBitmap res_int64(active_count_, false);
+                TargetBitmapView res_int64_view(res_int64);
+                TargetBitmap res_int64_valid(active_count_, true);
+                TargetBitmapView valid_res_int64_view(res_int64_valid);
+                try_execute(milvus::index::JSONType::INT64,
+                            res_int64_view,
+                            valid_res_int64_view,
+                            int64_t{});
+                res_view.inplace_or_with_count(res_int64_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_int64_view,
+                                                     active_count_);
+            } else if constexpr (std::is_same_v<GetType, std::string_view> ||
+                                 std::is_same_v<GetType, std::string>) {
+                try_execute(milvus::index::JSONType::STRING,
+                            res_view,
+                            valid_res_view,
+                            std::string_view{});
+            }
         }
 
         // process shared data
@@ -794,25 +806,27 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                     }
                 }
             };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "binary_range_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }  // namespace exec
 
 template <typename ValueType>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
     auto real_batch_size =
@@ -984,12 +998,40 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
                                   cache_view);
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
+}
+
+void
+PhyBinaryRangeFilterExpr::DetermineExecPath() {
+    // PkIndex (binary range only supports PK on sealed segments)
+    if (is_pk_field_ && segment_->type() == SegmentType::Sealed) {
+        exec_path_ = ExprExecPath::PkIndex;
+        return;
+    }
+
+    // JsonStats
+    if (CanUseJsonStatsAtInit()) {
+        exec_path_ = ExprExecPath::JsonStats;
+        return;
+    }
+
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    // ARRAY type cannot use scalar index
+    if (data_type == DataType::ARRAY) {
+        exec_path_ = ExprExecPath::RawData;
+    }
 }
 
 }  // namespace exec

@@ -92,3 +92,27 @@ std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties);
+
+/**
+ * @brief Inject every external_spec-derived property for external collections.
+ *
+ * Emits two property families from a single external_spec JSON:
+ *   - extfs.{collectionID}.* — storage-layer: credentials, endpoint, bucket,
+ *     region, SSL, IAM. Three-layer model:
+ *       Layer 0: zero-init bool fields (no fs.* inheritance — Milvus-internal
+ *                credentials must never leak into external-table scope).
+ *       Layer 1: derive storage_type / use_ssl / bucket_name / address from
+ *                the external_source URI (Milvus form by default).
+ *       Layer 2: apply external_spec.extfs JSON with allowlist gating.
+ *       Post-process: AWS-form swap + Tier-1/2 endpoint derivation.
+ *   - format-layer — per-format keys derived from spec.format (e.g.
+ *     iceberg.snapshot_id when format="iceberg-table").
+ *
+ * The caller MUST have run ValidateExternalSource (Go side) first — this
+ * function asserts non-empty scheme and host on external_source.
+ */
+void
+InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
+                             int64_t collection_id,
+                             const std::string& external_source,
+                             const std::string& external_spec);

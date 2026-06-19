@@ -6,20 +6,21 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -39,6 +40,8 @@ const (
 type Highlighter interface {
 	AsSearchPipelineOperator(t *searchTask) (operator, error)
 	FieldIDs() []int64
+	RequiredFieldIDs() []int64
+	DynamicFieldNames() []string
 }
 
 // highlight task for one field
@@ -149,6 +152,14 @@ func (h *LexicalHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, 
 
 func (h *LexicalHighlighter) FieldIDs() []int64 {
 	return append(lo.Keys(h.tasks), h.extraFields...)
+}
+
+func (h *LexicalHighlighter) RequiredFieldIDs() []int64 {
+	return h.FieldIDs()
+}
+
+func (h *LexicalHighlighter) DynamicFieldNames() []string {
+	return []string{}
 }
 
 func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlighter, error) {
@@ -310,12 +321,27 @@ func newLexicalHighlightOperator(t *searchTask, tasks []*highlightTask) (operato
 	}, nil
 }
 
+func hasSearchResultHits(result *schemapb.SearchResultData) bool {
+	if result == nil {
+		return false
+	}
+
+	ids := result.GetIds()
+	return len(ids.GetIntId().GetData()) > 0 || len(ids.GetStrId().GetData()) > 0
+}
+
 func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
-	datas := result.GetResults().GetFieldsData()
-	// skip highlight if result is empty
-	if len(datas) == 0 {
+	resultData := result.GetResults()
+	// skip highlight if result has no hits. FieldsData may contain empty field templates
+	// even when Topks/Ids/Scores show zero matched rows.
+	if !hasSearchResultHits(resultData) {
 		return []any{result}, nil
+	}
+
+	datas := resultData.GetFieldsData()
+	if len(datas) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("get highlight failed, field data is empty for non-empty search result")
 	}
 
 	req := &querypb.GetHighlightRequest{
@@ -326,7 +352,7 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 	for _, task := range req.GetTasks() {
 		textFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == task.GetFieldId() })
 		if !ok {
-			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
+			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
 		}
 		texts := textFieldDatas.GetScalars().GetStringData().GetData()
 		task.Texts = append(task.Texts, texts...)
@@ -347,7 +373,7 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 		if nameFieldID > 0 {
 			analyzerFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == nameFieldID })
 			if !ok {
-				return nil, errors.Errorf("get highlight failed, analyzer name field: %d for multi analyzer not in output field", nameFieldID)
+				return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, analyzer name field: %d for multi analyzer not in output field", nameFieldID)
 			}
 			task.AnalyzerNames = append(task.AnalyzerNames, analyzerFieldDatas.GetScalars().GetStringData().GetData()...)
 		}
@@ -434,6 +460,14 @@ func (h *SemanticHighlighter) FieldIDs() []int64 {
 	return h.highlight.FieldIDs()
 }
 
+func (h *SemanticHighlighter) RequiredFieldIDs() []int64 {
+	return h.highlight.RequiredFieldIDs()
+}
+
+func (h *SemanticHighlighter) DynamicFieldNames() []string {
+	return h.highlight.DynamicFieldNames()
+}
+
 func (h *SemanticHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
 	return &semanticHighlightOperator{highlight: h.highlight}, nil
 }
@@ -444,35 +478,129 @@ type semanticHighlightOperator struct {
 
 func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
-	datas := result.Results.GetFieldsData()
-	if len(datas) == 0 {
+	resultData := result.GetResults()
+	if !hasSearchResultHits(resultData) {
 		return []any{result}, nil
 	}
+
+	datas := resultData.GetFieldsData()
+	if len(datas) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("get highlight failed, field data is empty for non-empty search result")
+	}
 	highlightResults := []*commonpb.HighlightResult{}
+	topks := result.Results.GetTopks()
+
+	// Process schema fields
 	for _, fieldID := range op.highlight.FieldIDs() {
 		fieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == fieldID })
 		if !ok {
-			return nil, errors.Errorf("get highlight failed, text field not in output field %d", fieldID)
+			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, text field not in output field %d", fieldID)
 		}
 		texts := fieldDatas.GetScalars().GetStringData().GetData()
-		highlights, scores, err := op.highlight.Process(ctx, result.Results.GetTopks(), texts)
+		fieldName := op.highlight.GetFieldName(fieldID)
+
+		highlightResult, err := op.processFieldHighlight(ctx, fieldName, texts, topks)
+		if err != nil {
+			return nil, err
+		}
+		highlightResults = append(highlightResults, highlightResult)
+	}
+
+	// Process dynamic fields
+	if op.highlight.HasDynamicFields() {
+		// Find $meta field data
+		dynamicFieldID := op.highlight.DynamicFieldID()
+		metaFieldData, ok := lo.Find(datas, func(data *schemapb.FieldData) bool {
+			return data.FieldId == dynamicFieldID || data.FieldName == common.MetaFieldName
+		})
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, dynamic field ($meta) not in output field")
+		}
+
+		// Safely get JSON data with nil checks
+		scalars := metaFieldData.GetScalars()
+		if scalars == nil {
+			return nil, merr.WrapErrServiceInternalMsg("get highlight failed, dynamic field ($meta) has no scalar data")
+		}
+		jsonData := scalars.GetJsonData()
+		if jsonData == nil {
+			return nil, merr.WrapErrServiceInternalMsg("get highlight failed, dynamic field ($meta) has no JSON data")
+		}
+		jsonDataBytes := jsonData.GetData()
+		dynFieldNames := op.highlight.DynamicFieldNames()
+
+		// Extract all dynamic fields in one pass to avoid parsing JSON multiple times
+		allDynFieldTexts, err := extractMultipleDynamicFieldTexts(jsonDataBytes, dynFieldNames)
 		if err != nil {
 			return nil, err
 		}
 
-		if len(highlights) != len(scores) {
-			return nil, errors.Errorf("Highlights size must equal to scores size, but got highlights size [%d], scores size [%d]", len(highlights), len(scores))
-		}
+		for _, dynFieldName := range dynFieldNames {
+			texts := allDynFieldTexts[dynFieldName]
 
-		singleFieldHighlights := &commonpb.HighlightResult{
-			FieldName: op.highlight.GetFieldName(fieldID),
-			Datas:     make([]*commonpb.HighlightData, len(highlights)),
+			highlightResult, err := op.processFieldHighlight(ctx, dynFieldName, texts, topks)
+			if err != nil {
+				return nil, err
+			}
+			highlightResults = append(highlightResults, highlightResult)
 		}
-		for i := range highlights {
-			singleFieldHighlights.Datas[i] = &commonpb.HighlightData{Fragments: highlights[i], Scores: scores[i]}
-		}
-		highlightResults = append(highlightResults, singleFieldHighlights)
 	}
+
 	result.Results.HighlightResults = highlightResults
 	return []any{result}, nil
+}
+
+// processFieldHighlight processes highlight for a single field and returns the result
+func (op *semanticHighlightOperator) processFieldHighlight(ctx context.Context, fieldName string, texts []string, topks []int64) (*commonpb.HighlightResult, error) {
+	highlights, scores, err := op.highlight.Process(ctx, topks, texts)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(highlights) != len(scores) {
+		return nil, merr.WrapErrServiceInternalMsg("Highlights size must equal to scores size, but got highlights size [%d], scores size [%d]", len(highlights), len(scores))
+	}
+
+	result := &commonpb.HighlightResult{
+		FieldName: fieldName,
+		Datas:     make([]*commonpb.HighlightData, len(highlights)),
+	}
+	for i := range highlights {
+		result.Datas[i] = &commonpb.HighlightData{Fragments: highlights[i], Scores: scores[i]}
+	}
+	return result, nil
+}
+
+// extractMultipleDynamicFieldTexts extracts text values from JSON data for multiple field names in one pass
+// This avoids parsing JSON multiple times when there are multiple dynamic fields
+func extractMultipleDynamicFieldTexts(jsonDataBytes [][]byte, fieldNames []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		result[fieldName] = make([]string, len(jsonDataBytes))
+	}
+
+	for i, jsonBytes := range jsonDataBytes {
+		if len(jsonBytes) == 0 {
+			// JSON is empty, all fields use empty string (graceful degradation)
+			continue
+		}
+
+		if !gjson.ValidBytes(jsonBytes) {
+			return nil, merr.WrapErrDataIntegrityMsg("failed to unmarshal JSON at index %d: invalid JSON", i)
+		}
+
+		for _, fieldName := range fieldNames {
+			r := gjson.GetBytes(jsonBytes, fieldName)
+			if !r.Exists() {
+				// field missing, use empty string (graceful degradation)
+				continue
+			}
+
+			if r.Type != gjson.String {
+				return nil, merr.WrapErrParameterInvalidMsg("dynamic field %s is not a string type, got %s", fieldName, r.Type.String())
+			}
+			result[fieldName][i] = r.String()
+		}
+	}
+	return result, nil
 }

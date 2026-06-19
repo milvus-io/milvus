@@ -21,7 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -126,7 +126,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "sq_reduce_result_latency",
 			Help:      "latency that proxy reduces search result",
-			Buckets:   buckets, // unit: ms
+			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyDecodeResultLatency record the time that the proxy decodes the search result.
@@ -213,7 +213,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "apply_pk_latency",
 			Help:      "latency that apply primary key",
-			Buckets:   buckets, // unit: ms
+			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName})
 
 	// ProxyApplyTimestampLatency record the latency that proxy apply timestamp.
@@ -223,7 +223,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "apply_timestamp_latency",
 			Help:      "latency that proxy apply timestamp",
-			Buckets:   buckets, // unit: ms
+			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName})
 
 	// ProxyFunctionCall records the number of times the function of the DDL operation was executed, like `CreateCollection`.
@@ -365,6 +365,17 @@ var (
 			nodeIDLabelName,
 		})
 
+	// ProxyShardLeaderPreferredNodeCount records preferred shard leader selection results.
+	ProxyShardLeaderPreferredNodeCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "shard_leader_preferred_node_count",
+			Help:      "counter of preferred shard leader selection results",
+		}, []string{
+			statusLabelName,
+		})
+
 	// ProxyRateLimitReqCount integrates a counter monitoring metric for the rate-limit rpc requests.
 	ProxyRateLimitReqCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -389,7 +400,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "req_in_queue_latency",
 			Help:      "latency which request waits in the queue",
-			Buckets:   buckets, // unit: ms
+			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName, functionLabelName})
 
 	MaxInsertRate = prometheus.NewGaugeVec(
@@ -453,7 +464,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "parse_expr_latency",
 			Help:      "the latency of parse expression",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
 	// ProxyFunctionlatency records the latency of function
 	ProxyFunctionlatency = prometheus.NewHistogramVec(
@@ -532,6 +543,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyWorkLoadScore)
 	registry.MustRegister(ProxyExecutingTotalNq)
+	registry.MustRegister(ProxyShardLeaderPreferredNodeCount)
 	registry.MustRegister(ProxyRateLimitReqCount)
 
 	registry.MustRegister(ProxySlowQueryCount)
@@ -628,6 +640,12 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 	ProxyCollectionSQLatency.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: QueryLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
+	})
+	ProxyCollectionSQLatency.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: UpsertQueryLabel,
 		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})

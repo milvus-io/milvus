@@ -26,10 +26,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type AdminSuite struct {
@@ -121,7 +121,7 @@ func (s *AdminSuite) TestBackupRBAC() {
 						},
 					},
 					Roles: []*milvuspb.RoleEntity{
-						{Name: "role1"},
+						{Name: "role1", Description: "role_desc"},
 					},
 					Grants: []*milvuspb.GrantEntity{
 						{
@@ -159,6 +159,7 @@ func (s *AdminSuite) TestBackupRBAC() {
 		s.NoError(err)
 		s.Len(meta.Users, 1)
 		s.Len(meta.Roles, 1)
+		s.Equal("role_desc", meta.Roles[0].Description)
 		s.Len(meta.RoleGrants, 1)
 		s.Len(meta.PrivilegeGroups, 1)
 	})
@@ -187,7 +188,7 @@ func (s *AdminSuite) TestRestoreRBAC() {
 				},
 			},
 			Roles: []*entity.Role{
-				{RoleName: "role1"},
+				{RoleName: "role1", Description: "role_desc"},
 			},
 			RoleGrants: []*entity.RoleGrants{
 				{
@@ -208,6 +209,8 @@ func (s *AdminSuite) TestRestoreRBAC() {
 		}
 
 		s.mock.EXPECT().RestoreRBAC(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rrr *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+			s.Require().Len(rrr.GetRBACMeta().GetRoles(), 1)
+			s.Equal("role_desc", rrr.GetRBACMeta().GetRoles()[0].GetDescription())
 			return merr.Success(), nil
 		}).Once()
 

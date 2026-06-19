@@ -5,11 +5,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestRewrite_Range_AND_Strengthen(t *testing.T) {
@@ -244,6 +244,8 @@ func buildSchemaHelperWithArraysT(t *testing.T) *typeutil.SchemaHelper {
 		{FieldID: 201, Name: "ArrayInt", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 		{FieldID: 202, Name: "ArrayFloat", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double},
 		{FieldID: 203, Name: "ArrayVarchar", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
+		{FieldID: 204, Name: "ArrayBool", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+		{FieldID: 205, Name: "NullableArrayInt", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
 	}
 	schema := &schemapb.CollectionSchema{
 		Name:   "rewrite_array_test",
@@ -428,6 +430,31 @@ func TestRewrite_Range_AND_InvalidRange_String_LowerGreaterThanUpper(t *testing.
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
+func TestRewrite_Range_AND_InvalidRange_Nullable_KeepsPredicate(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	expr, err := parser.ParseExpr(helper, `NullableInt64Field > 100 and NullableInt64Field < 50`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr), "nullable impossible range must not fold to valid false")
+	require.NotNil(t, expr.GetBinaryExpr())
+}
+
+func TestRewrite_Range_AND_InvalidRange_Nullable_UnderNotDoesNotBecomeAlwaysTrue(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	for _, exprStr := range []string{
+		`not (NullableInt64Field > 100 and NullableInt64Field < 50)`,
+		`not ((NullableInt64Field > 10 and NullableInt64Field < 20) and (NullableInt64Field > 30 and NullableInt64Field < 40))`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "nullable impossible range under NOT must preserve NULL semantics: %s", exprStr)
+		require.NotNil(t, expr.GetUnaryExpr(), "nullable impossible range under NOT should remain negated: %s", exprStr)
+	}
+}
+
 // Test AlwaysFalse propagation through nested AND expressions
 func TestRewrite_AlwaysFalse_Propagation_DeepNesting(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
@@ -540,7 +567,8 @@ func TestRewrite_ConstantFalse_GreaterThan(t *testing.T) {
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
-// Test rewriter directly with ValueExpr(bool=true) in AND — bypassing parser validation
+// Test rewriter directly with ValueExpr(bool=true) in AND — bypassing parser validation.
+// With optimize=false, the binary shape and ValueExpr should be preserved.
 func TestRewrite_Direct_ValueExprTrue_InAND(t *testing.T) {
 	// Construct: (Int64Field > 10) AND ValueExpr(true)
 	// This simulates what would happen if the parser allowed it
@@ -570,14 +598,13 @@ func TestRewrite_Direct_ValueExprTrue_InAND(t *testing.T) {
 		},
 	}
 	result := rewriter.RewriteExprWithConfig(input, false)
-	// ValueExpr(true) → AlwaysTrueExpr, then eliminated from AND → just Int64Field > 10
-	ure := result.GetUnaryRangeExpr()
-	require.NotNil(t, ure, "constant true should be eliminated from AND, leaving range expr")
-	require.Equal(t, planpb.OpType_GreaterThan, ure.GetOp())
-	require.Equal(t, int64(10), ure.GetValue().GetInt64Val())
+	binary := result.GetBinaryExpr()
+	require.NotNil(t, binary, "optimize=false should keep AND expression unchanged")
+	require.NotNil(t, binary.GetRight().GetValueExpr(), "optimize=false should keep ValueExpr child unchanged")
 }
 
-// Test rewriter directly with ValueExpr(bool=false) in AND — short-circuits to AlwaysFalse
+// Test rewriter directly with ValueExpr(bool=false) in AND.
+// With optimize=false, the binary shape and ValueExpr should be preserved.
 func TestRewrite_Direct_ValueExprFalse_InAND(t *testing.T) {
 	left := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
@@ -605,11 +632,13 @@ func TestRewrite_Direct_ValueExprFalse_InAND(t *testing.T) {
 		},
 	}
 	result := rewriter.RewriteExprWithConfig(input, false)
-	// ValueExpr(false) → AlwaysFalseExpr, then AND short-circuits → AlwaysFalse
-	require.True(t, rewriter.IsAlwaysFalseExpr(result))
+	binary := result.GetBinaryExpr()
+	require.NotNil(t, binary, "optimize=false should keep AND expression unchanged")
+	require.NotNil(t, binary.GetRight().GetValueExpr(), "optimize=false should keep ValueExpr child unchanged")
 }
 
-// Test rewriter directly with ValueExpr(bool=true) in OR — short-circuits to AlwaysTrue
+// Test rewriter directly with ValueExpr(bool=true) in OR.
+// With optimize=false, the binary shape and ValueExpr should be preserved.
 func TestRewrite_Direct_ValueExprTrue_InOR(t *testing.T) {
 	left := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
@@ -637,11 +666,13 @@ func TestRewrite_Direct_ValueExprTrue_InOR(t *testing.T) {
 		},
 	}
 	result := rewriter.RewriteExprWithConfig(input, false)
-	// ValueExpr(true) → AlwaysTrueExpr, then OR short-circuits → AlwaysTrue
-	require.True(t, rewriter.IsAlwaysTrueExpr(result))
+	binary := result.GetBinaryExpr()
+	require.NotNil(t, binary, "optimize=false should keep OR expression unchanged")
+	require.NotNil(t, binary.GetRight().GetValueExpr(), "optimize=false should keep ValueExpr child unchanged")
 }
 
-// Test rewriter directly with ValueExpr(bool=false) in OR — eliminated
+// Test rewriter directly with ValueExpr(bool=false) in OR.
+// With optimize=false, the binary shape and ValueExpr should be preserved.
 func TestRewrite_Direct_ValueExprFalse_InOR(t *testing.T) {
 	left := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
@@ -669,9 +700,7 @@ func TestRewrite_Direct_ValueExprFalse_InOR(t *testing.T) {
 		},
 	}
 	result := rewriter.RewriteExprWithConfig(input, false)
-	// ValueExpr(false) → AlwaysFalseExpr, then eliminated from OR → just Int64Field > 10
-	ure := result.GetUnaryRangeExpr()
-	require.NotNil(t, ure, "constant false should be eliminated from OR, leaving range expr")
-	require.Equal(t, planpb.OpType_GreaterThan, ure.GetOp())
-	require.Equal(t, int64(10), ure.GetValue().GetInt64Val())
+	binary := result.GetBinaryExpr()
+	require.NotNil(t, binary, "optimize=false should keep OR expression unchanged")
+	require.NotNil(t, binary.GetRight().GetValueExpr(), "optimize=false should keep ValueExpr child unchanged")
 }

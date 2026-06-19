@@ -26,17 +26,17 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ShardClientMgr interface {
@@ -151,9 +151,9 @@ func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName, cal
 	m.leaderMut.RUnlock()
 
 	if cacheShardLeaders != nil {
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), caller, metrics.CacheHitLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), caller, metrics.CacheHitLabel).Inc()
 	} else {
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), caller, metrics.CacheMissLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), caller, metrics.CacheMissLabel).Inc()
 	}
 
 	return cacheShardLeaders
@@ -167,7 +167,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 
 	method := "updateShardLocationCache"
 	tr := timerecord.NewTimeRecorder(method)
-	defer metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).
+	defer metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	req := &querypb.GetShardLeadersRequest{
@@ -189,7 +189,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
 	// convert shards map to string for logging
-	if log.Logger.Level() == zap.DebugLevel {
+	if log.Level() == zap.DebugLevel {
 		shardStr := make([]string, 0, len(shards))
 		for channel, nodes := range shards {
 			nodeStrs := make([]string, 0, len(nodes))

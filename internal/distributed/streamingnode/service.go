@@ -30,8 +30,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -44,20 +44,21 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/netutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Server is the grpc server of streamingnode.
@@ -259,9 +260,9 @@ func (s *Server) start() (err error) {
 func (s *Server) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
 	if s.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceUnavailable("session is nil, the etcd client connection may have failed")
 	}
-	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false, true)
+	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false)
 	paramtable.SetNodeID(s.session.ServerID)
 	log.Ctx(s.ctx).Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", s.listener.Address()))
 	return nil
@@ -273,7 +274,8 @@ func (s *Server) initMeta() error {
 	log := log.Ctx(s.ctx)
 	log.Info("data coordinator connecting to metadata store", zap.String("metaType", metaType))
 	metaRootPath := ""
-	if metaType == util.MetaStoreTypeTiKV {
+	switch metaType {
+	case util.MetaStoreTypeTiKV:
 		var err error
 		s.tikvCli, err = tikv.GetTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
@@ -282,11 +284,11 @@ func (s *Server) initMeta() error {
 		}
 		metaRootPath = params.TiKVCfg.MetaRootPath.GetValue()
 		s.metaKV = tikvkv.NewTiKV(s.tikvCli, metaRootPath,
-			tikvkv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
-	} else if metaType == util.MetaStoreTypeEtcd {
+			tikvkv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+	case util.MetaStoreTypeEtcd:
 		metaRootPath = params.EtcdCfg.MetaRootPath.GetValue()
 		s.metaKV = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
-			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	}
 	return nil
 }

@@ -22,10 +22,17 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+const (
+	loadConfigWatcherInterval           = time.Minute
+	loadConfigReplicaPromotionInterval  = 5 * time.Second
+	loadConfigWatcherBackoffInitial     = 10 * time.Millisecond
+	loadConfigWatcherBackoffMaxInterval = 10 * time.Minute
 )
 
 // NewLoadConfigWatcher creates a new load config watcher.
@@ -68,13 +75,15 @@ func (w *LoadConfigWatcher) background() {
 	w.Logger().Info("load config watcher started")
 
 	balanceTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
-		Default: time.Minute,
+		Default: loadConfigWatcherInterval,
 		Backoff: typeutil.BackoffConfig{
-			InitialInterval: 10 * time.Millisecond,
+			InitialInterval: loadConfigWatcherBackoffInitial,
 			Multiplier:      2,
-			MaxInterval:     10 * time.Minute,
+			MaxInterval:     loadConfigWatcherBackoffMaxInterval,
 		},
 	})
+	promotionTicker := time.NewTicker(loadConfigReplicaPromotionInterval)
+	defer promotionTicker.Stop()
 
 	for {
 		nextTimer, _ := balanceTimer.NextTimer()
@@ -84,6 +93,9 @@ func (w *LoadConfigWatcher) background() {
 		case <-w.triggerCh:
 			w.Logger().Info("load config watcher triggered")
 		case <-nextTimer:
+		case <-promotionTicker.C:
+			w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
+			continue
 		}
 		if err := w.applyLoadConfigChanges(); err != nil {
 			balanceTimer.EnableBackoff()
@@ -95,6 +107,8 @@ func (w *LoadConfigWatcher) background() {
 
 // applyLoadConfigChanges applies the load config changes.
 func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
+	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
+
 	newReplicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
 	newRGs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
 
@@ -135,10 +149,11 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		w.Logger().Info("no collection to update load config, skip it")
 	}
 
-	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs); err != nil {
+	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs, true); err != nil {
 		w.Logger().Warn("failed to update load config", zap.Error(err))
 		return err
 	}
+	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
 	w.Logger().Info("apply load config changes",
 		zap.Int64s("collectionIDs", collectionIDs),
 		zap.Int32("previousReplicaNum", w.previousReplicaNum),

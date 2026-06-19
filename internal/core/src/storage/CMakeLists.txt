@@ -32,11 +32,6 @@ if (ENABLE_AZURE_FS)
     add_subdirectory(azure)
 endif()
 
-if(USE_OPENDAL)
-    include_directories(${OPENDAL_INCLUDE_DIR})
-    set(SOURCE_FILES ${SOURCE_FILES} opendal/OpenDALChunkManager.cpp)
-endif()
-
 # Add loon_ffi subdirectory to include loon FFI source files
 add_subdirectory(loon_ffi)
 
@@ -44,3 +39,4 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/loon_ffi)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/plugin)
 
 add_library(milvus_storage OBJECT ${SOURCE_FILES})
+target_link_libraries(milvus_storage PUBLIC milvus_conan_deps)

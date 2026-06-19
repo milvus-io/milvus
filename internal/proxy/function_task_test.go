@@ -25,10 +25,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 )
 
 type FunctionTaskSuite struct {
@@ -199,7 +200,7 @@ func (f *FunctionTaskSuite) TestAddCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		m := mockey.Mock(validateFunction).Return(nil).Build()
+		m := mockey.Mock(validator.ValidateFunction).Return(nil).Build()
 		defer m.UnPatch()
 		globalMetaCache = cache
 		err := task.PreExecute(ctx)
@@ -360,7 +361,51 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(nil, nil).Maybe()
 		globalMetaCache = cache
 		err := task.PreExecute(ctx)
-		f.ErrorContains(err, "Invalid function config, name not match")
+		f.ErrorContains(err, "invalid function config, name not match")
+	}
+	{
+		functionSchema := &schemapb.FunctionSchema{
+			Name:             "test_function",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vec"},
+			Params:           []*commonpb.KeyValuePair{},
+		}
+
+		req := &milvuspb.AlterCollectionFunctionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_AlterCollectionFunction,
+			},
+			CollectionName: "test_collection",
+			CollectionID:   1,
+			FunctionName:   "test_function",
+			FunctionSchema: functionSchema,
+		}
+
+		task := &alterCollectionFunctionTask{
+			Condition:                      NewTaskCondition(ctx),
+			AlterCollectionFunctionRequest: req,
+		}
+		coll := &collectionInfo{
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
+						{Name: "vec", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+					},
+					Functions: []*schemapb.FunctionSchema{
+						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding},
+					},
+				},
+			},
+		}
+		cache := NewMockCache(f.T())
+		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
+		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
+		globalMetaCache = cache
+
+		err := task.PreExecute(ctx)
+		f.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
 	}
 	{
 		functionSchema := &schemapb.FunctionSchema{
@@ -398,7 +443,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
-		m := mockey.Mock(validateFunction).Return(nil).Build()
+		m := mockey.Mock(validator.ValidateFunction).Return(nil).Build()
 		defer m.UnPatch()
 		globalMetaCache = cache
 		err := task.PreExecute(ctx)
@@ -492,6 +537,42 @@ func (f *FunctionTaskSuite) TestDropCollectionFunctionTaskPreExecute() {
 
 		err := task.PreExecute(ctx)
 		f.NoError(err)
+	}
+	{
+		req := &milvuspb.DropCollectionFunctionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DropCollectionFunction,
+			},
+			CollectionName: "test_collection",
+			FunctionName:   "test_function",
+		}
+
+		task := &dropCollectionFunctionTask{
+			Condition:                     NewTaskCondition(ctx),
+			DropCollectionFunctionRequest: req,
+		}
+
+		coll := &collectionInfo{
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
+						{Name: "vec", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+					},
+					Functions: []*schemapb.FunctionSchema{
+						{Name: req.FunctionName},
+					},
+				},
+			},
+		}
+
+		cache := NewMockCache(f.T())
+		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
+		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
+		globalMetaCache = cache
+
+		err := task.PreExecute(ctx)
+		f.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
 	}
 }
 
@@ -745,6 +826,6 @@ func (f *FunctionTaskSuite) TestDropCollectionFunctionTaskExecute() {
 		}
 
 		err := task.Execute(ctx)
-		f.ErrorContains(err, "Currently does not support droping BM25 function")
+		f.ErrorContains(err, "currently does not support droping BM25 function")
 	}
 }

@@ -24,19 +24,20 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
 	"github.com/milvus-io/milvus/internal/cdc/util"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // Replicator is the client that replicates the message to the channel in the target cluster.
@@ -181,6 +182,17 @@ func (r *channelReplicator) startConsumeLoop() {
 func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoint, error) {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
 
+	// For pchannel-increasing tasks, the secondary WAL for new pchannels hasn't received the
+	// AlterReplicateConfig yet, so GetReplicateInfo would fail. Use InitializedCheckpoint directly.
+	if r.channel.Value.GetSkipGetReplicateCheckpoint() {
+		initializedCheckpoint := utility.NewReplicateCheckpointFromProto(r.channel.Value.InitializedCheckpoint)
+		logger.Info("skip get replicate checkpoint for pchannel-increasing task, use initialized checkpoint",
+			zap.Stringer("messageID", initializedCheckpoint.MessageID),
+			zap.Uint64("timeTick", initializedCheckpoint.TimeTick),
+		)
+		return initializedCheckpoint, nil
+	}
+
 	ctx, cancel := context.WithTimeout(r.asyncNotifier.Context(), 30*time.Second)
 	defer cancel()
 
@@ -191,7 +203,7 @@ func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoi
 	}
 	replicateInfo, err := r.targetClient.GetReplicateInfo(ctx, req)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get replicate info")
+		return nil, merr.Wrap(err, "failed to get replicate info")
 	}
 
 	checkpoint := replicateInfo.GetCheckpoint()

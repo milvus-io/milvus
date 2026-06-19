@@ -19,7 +19,7 @@ package replicateutil
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 // SanitizeReplicateConfiguration returns a deep copy of the configuration

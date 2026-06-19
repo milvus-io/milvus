@@ -23,12 +23,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestGetJSONParams(t *testing.T) {
 	paramtable.Init()
-	jsonStr, err := GenerateJSONParams()
+	jsonStr, err := GenerateJSONParams(nil)
 	assert.NoError(t, err)
 
 	storageVersion := storage.StorageV2
@@ -47,6 +47,11 @@ func TestGetJSONParams(t *testing.T) {
 		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 		StorageConfig:             CreateStorageConfig(),
+		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		LOBHoleRatioThreshold:     GetLOBHoleRatioThreshold(),
+		TextInlineThreshold:       getTextInlineThreshold(),
+		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
+		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}, result)
 }
 
@@ -83,15 +88,6 @@ func TestGetParamsFromJSON_InvalidJSON(t *testing.T) {
 func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 	// Test compatibility
 	emptyJSON := ``
-	result, err := ParseParamsFromJSON(emptyJSON)
-	assert.NoError(t, err)
-	assert.Equal(t, Params{
-		StorageVersion:            storage.StorageV2,
-		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
-		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
-		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
-		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
-		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
-		StorageConfig:             CreateStorageConfig(),
-	}, result)
+	_, err := ParseParamsFromJSON(emptyJSON)
+	assert.Error(t, err)
 }

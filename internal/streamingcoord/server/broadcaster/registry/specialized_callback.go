@@ -1,29 +1,22 @@
 package registry
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // init the message ack callbacks
 func init() {
 	resetMessageAckOnceCallbacks()
 	resetMessageAckCallbacks()
-	resetMessageCheckCallbacks()
-}
-
-var RegisterImportV1CheckCallback = registerMessageCheckCallback[*message.ImportMessageHeader, *msgpb.ImportMsg]
-
-// resetMessageCheckCallbacks resets the message check callbacks.
-func resetMessageCheckCallbacks() {
-	messageCheckCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerCheckCallback]{
-		message.MessageTypeImportV1: syncutil.NewFuture[messageInnerCheckCallback](),
-	}
+	// CheckCallback mechanism has been removed as part of import refactoring
+	// All validation is now done before broadcasting in the respective coordinators
 }
 
 var (
-	RegisterImportV1AckCallback = registerMessageAckCallback[*message.ImportMessageHeader, *msgpb.ImportMsg]
+	RegisterImportV1AckCallback              = registerMessageAckCallback[*message.ImportMessageHeader, *msgpb.ImportMsg]
+	RegisterBatchUpdateManifestV2AckCallback = registerMessageAckCallback[*message.BatchUpdateManifestMessageHeader, *message.BatchUpdateManifestMessageBody]
 
 	// Cluster
 	RegisterAlterReplicateConfigV2AckCallback = registerMessageAckCallback[*message.AlterReplicateConfigMessageHeader, *message.AlterReplicateConfigMessageBody]
@@ -74,15 +67,26 @@ var (
 	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
 
 	// Snapshot
-	RegisterCreateSnapshotV2AckCallback  = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
-	RegisterDropSnapshotV2AckCallback    = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
-	RegisterRestoreSnapshotV2AckCallback = registerMessageAckCallback[*message.RestoreSnapshotMessageHeader, *message.RestoreSnapshotMessageBody]
+	RegisterCreateSnapshotV2AckCallback            = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
+	RegisterDropSnapshotV2AckCallback              = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
+	RegisterRestoreSnapshotV2AckCallback           = registerMessageAckCallback[*message.RestoreSnapshotMessageHeader, *message.RestoreSnapshotMessageBody]
+	RegisterDropSnapshotsByCollectionV2AckCallback = registerMessageAckCallback[*message.DropSnapshotsByCollectionMessageHeader, *message.DropSnapshotsByCollectionMessageBody]
+
+	// External Collection
+	RegisterRefreshExternalCollectionV2AckCallback = registerMessageAckCallback[*message.RefreshExternalCollectionMessageHeader, *message.RefreshExternalCollectionMessageBody]
+
+	// Import 2PC
+	RegisterCommitImportV2AckCallback   = registerMessageAckCallback[*message.CommitImportMessageHeader, *message.CommitImportMessageBody]
+	RegisterRollbackImportV2AckCallback = registerMessageAckCallback[*message.RollbackImportMessageHeader, *message.RollbackImportMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
 func resetMessageAckCallbacks() {
+	messageAckCallbacksMu.Lock()
+	defer messageAckCallbacksMu.Unlock()
 	messageAckCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckCallback]{
-		message.MessageTypeImportV1: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeImportV1:              syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeBatchUpdateManifestV2: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Cluster
 		message.MessageTypeAlterReplicateConfigV2: syncutil.NewFuture[messageInnerAckCallback](),
@@ -133,8 +137,16 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Snapshot
-		message.MessageTypeCreateSnapshotV2:  syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropSnapshotV2:    syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeRestoreSnapshotV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeCreateSnapshotV2:            syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropSnapshotV2:              syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRestoreSnapshotV2:           syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropSnapshotsByCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
+
+		// External Collection
+		message.MessageTypeRefreshExternalCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
+
+		// Import 2PC
+		message.MessageTypeCommitImportV2:   syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRollbackImportV2: syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

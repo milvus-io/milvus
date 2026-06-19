@@ -33,11 +33,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -150,25 +150,30 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 			return err
 		}
 
-		reader, err := m.downloader.Reader(ctx, resource.GetPath())
-		if err != nil {
-			log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
-			return err
-		}
-		defer reader.Close()
+		if err := func() error {
+			reader, err := m.downloader.Reader(ctx, resource.GetPath())
+			if err != nil {
+				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
+				return err
+			}
+			defer reader.Close()
 
-		fileName := path.Join(localResourcePath, path.Base(resource.GetPath()))
-		file, err := os.Create(fileName)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
+			fileName := path.Join(localResourcePath, path.Base(resource.GetPath()))
+			file, err := os.Create(fileName)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
 
-		if _, err = io.Copy(file, reader); err != nil {
-			log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
+			if _, err = io.Copy(file, reader); err != nil {
+				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
+				return err
+			}
+			log.Info("sync file to local", zap.String("name", fileName), zap.Int64("id", resource.GetId()))
+			return nil
+		}(); err != nil {
 			return err
 		}
-		log.Info("sync file to local", zap.String("name", fileName), zap.Int64("id", resource.GetId()))
 	}
 
 	for name, id := range m.resourceMap {

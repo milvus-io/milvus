@@ -18,7 +18,7 @@ use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::index_reader_c::SetBitsetFn;
 use crate::index_writer::TantivyValue;
-use crate::util::c_ptr_to_str;
+use crate::util::{c_ptr_to_str, ptr_len_to_str};
 
 #[inline]
 pub(crate) fn schema_builder_add_field(
@@ -182,12 +182,40 @@ impl IndexWriterWrapperImpl {
         self.add_document(document, offset)
     }
 
+    pub fn add_array_keywords_with_len(
+        &mut self,
+        ptrs: &[*const u8],
+        lens: &[usize],
+        offset: u32,
+    ) -> Result<()> {
+        debug_assert_eq!(ptrs.len(), lens.len());
+        let mut document = TantivyDocument::default();
+        for i in 0..ptrs.len() {
+            let data = ptr_len_to_str(ptrs[i], lens[i])?;
+            document.add_field_value(self.field, data);
+        }
+
+        self.add_document(document, offset)
+    }
+
     pub fn add_json(&mut self, data: &str, offset: u32) -> Result<()> {
         let j = serde_json::from_str::<serde_json::Value>(data)?;
         let mut document = TantivyDocument::default();
         j.add_to_document(self.field.field_id(), &mut document);
 
         self.add_document(document, offset)
+    }
+
+    /// Batch add multiple JSON documents, each as a separate document with sequential offsets.
+    pub fn add_json_batch(&mut self, datas: &[*const c_char], offset_begin: u32) -> Result<()> {
+        for (i, &data_ptr) in datas.iter().enumerate() {
+            let data = c_ptr_to_str(data_ptr)?;
+            let j = serde_json::from_str::<serde_json::Value>(data)?;
+            let mut document = TantivyDocument::default();
+            j.add_to_document(self.field.field_id(), &mut document);
+            self.add_document(document, offset_begin + i as u32)?;
+        }
+        Ok(())
     }
 
     pub fn add_array_json(&mut self, datas: &[*const c_char], offset: u32) -> Result<()> {

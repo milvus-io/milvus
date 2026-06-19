@@ -8,18 +8,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestGrowingSegment(t *testing.T) {
@@ -114,6 +115,7 @@ func assertEqualCount(
 		typeutil.MaxTimestamp,
 		100,
 		0,
+		0,
 		0)
 	defer retrievePlan.Delete()
 
@@ -144,6 +146,42 @@ func assertEqualCount(
 	retrieveResult2.Release()
 }
 
+// TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp verifies that
+// ConvertToSegcoreSegmentLoadInfo handles a querypb.SegmentLoadInfo with
+// CommitTimestamp set without errors.  CommitTimestamp is NOT present in
+// segcorepb.SegmentLoadInfo; instead it is propagated to the C segment via
+// CreateCSegment -> seg.SetCommitTimestamp.  This test documents that contract:
+// the conversion function must succeed and preserve all other fields correctly.
+func TestConvertToSegcoreSegmentLoadInfo_CommitTimestamp(t *testing.T) {
+	// Non-zero CommitTimestamp: conversion must succeed and base fields are correct.
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       42,
+		CollectionID:    1,
+		PartitionID:     2,
+		CommitTimestamp: 9999,
+	}
+	result := segcore.ConvertToSegcoreSegmentLoadInfo(info)
+	assert.NotNil(t, result)
+	assert.Equal(t, int64(42), result.GetSegmentID(),
+		"SegmentID must be preserved through conversion")
+	assert.Equal(t, int64(1), result.GetCollectionID(),
+		"CollectionID must be preserved through conversion")
+	assert.Equal(t, int64(2), result.GetPartitionID(),
+		"PartitionID must be preserved through conversion")
+
+	// Zero CommitTimestamp: conversion must also succeed.
+	info2 := &querypb.SegmentLoadInfo{
+		SegmentID:    43,
+		CollectionID: 1,
+		PartitionID:  2,
+		// CommitTimestamp = 0
+	}
+	result2 := segcore.ConvertToSegcoreSegmentLoadInfo(info2)
+	assert.NotNil(t, result2)
+	assert.Equal(t, int64(43), result2.GetSegmentID(),
+		"SegmentID must be preserved through conversion when CommitTimestamp is zero")
+}
+
 func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 	t.Run("nil input", func(t *testing.T) {
 		result := segcore.ConvertToSegcoreSegmentLoadInfo(nil)
@@ -157,6 +195,7 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		assert.Equal(t, int64(0), result.SegmentID)
 		assert.Equal(t, int64(0), result.PartitionID)
 		assert.Equal(t, int64(0), result.CollectionID)
+		assert.False(t, result.UseTakeForOutput)
 	})
 
 	t.Run("full conversion", func(t *testing.T) {
@@ -275,7 +314,8 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 					JsonKeyStatsDataFormat: 1,
 				},
 			},
-			Priority: commonpb.LoadPriority_HIGH,
+			Priority:         commonpb.LoadPriority_HIGH,
+			UseTakeForOutput: true,
 		}
 
 		// Convert to segcorepb.SegmentLoadInfo
@@ -296,6 +336,7 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		assert.Equal(t, src.IsSorted, result.IsSorted)
 		assert.Equal(t, src.Priority, result.Priority)
 		assert.Equal(t, src.CompactionFrom, result.CompactionFrom)
+		assert.Equal(t, src.UseTakeForOutput, result.UseTakeForOutput)
 
 		// Validate BinlogPaths conversion
 		assert.Equal(t, len(src.BinlogPaths), len(result.BinlogPaths))
@@ -397,4 +438,28 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		assert.Equal(t, 1, len(result.JsonKeyStatsLogs))
 		assert.NotNil(t, result.JsonKeyStatsLogs[400])
 	})
+}
+
+func TestConvertToSegcoreSegmentLoadInfo_IndexStorePathVersion(t *testing.T) {
+	src := &querypb.SegmentLoadInfo{
+		SegmentID:      10,
+		PartitionID:    20,
+		CollectionID:   30,
+		StorageVersion: storage.StorageV3,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:               101,
+				IndexID:               201,
+				BuildID:               301,
+				IndexVersion:          1,
+				IndexFilePaths:        []string{"index_v1/30/20/10/301/1/index_data"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			},
+		},
+	}
+
+	result := segcore.ConvertToSegcoreSegmentLoadInfo(src)
+	assert.NotNil(t, result)
+	assert.Len(t, result.GetIndexInfos(), 1)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, result.GetIndexInfos()[0].GetIndexStorePathVersion())
 }

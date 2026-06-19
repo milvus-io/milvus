@@ -1,10 +1,11 @@
 {
     "packages": {
-        "msgpb": "github.com/milvus-io/milvus-proto/go-api/v2/msgpb",
-        "messagespb": "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+        "msgpb": "github.com/milvus-io/milvus-proto/go-api/v3/msgpb",
+        "messagespb": "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
     },
     "consts": {
         "FieldMaskDB": "db",
+        "FieldMaskCollectionExternalSpec": "external_spec",
         "FieldMaskCollectionName": "collection_name",
         "FieldMaskCollectionDescription": "description",
         "FieldMaskCollectionSchema": "schema",
@@ -112,6 +113,26 @@
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeImport",
                 "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CommitImportMessageHeader",
+                "BodyType": "messagespb.CommitImportMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCommitImport",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RollbackImportMessageHeader",
+                "BodyType": "messagespb.RollbackImportMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRollbackImport",
+                "Version": 2
             }
         },
         {
@@ -487,11 +508,41 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropSnapshotsByCollectionMessageHeader",
+                "BodyType": "messagespb.DropSnapshotsByCollectionMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropSnapshotsByCollection",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.AlterWALMessageHeader",
                 "BodyType": "messagespb.AlterWALMessageBody"
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeAlterWAL",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.BatchUpdateManifestMessageHeader",
+                "BodyType": "messagespb.BatchUpdateManifestMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeBatchUpdateManifest",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RefreshExternalCollectionMessageHeader",
+                "BodyType": "messagespb.RefreshExternalCollectionMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRefreshExternalCollection",
                 "Version": 2
             }
         }

@@ -98,12 +98,12 @@ class BitmapIndex : public ScalarIndex<T> {
     IsNotNull() override;
 
     const TargetBitmap
-    Range(T value, OpType op) override;
+    Range(const T& value, OpType op) override;
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override;
 
     std::optional<T>
@@ -195,9 +195,16 @@ class BitmapIndex : public ScalarIndex<T> {
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
     bool
     SupportPatternMatch() const override {
-        return SupportRegexQuery();
+        return std::is_same_v<T, std::string>;
     }
 
     const TargetBitmap
@@ -212,24 +219,88 @@ class BitmapIndex : public ScalarIndex<T> {
                 return Query(std::move(dataset));
             }
             case proto::plan::OpType::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(pattern);
-                return RegexQuery(regex_pattern);
+                return PatternQuery(pattern);
+            }
+            case proto::plan::OpType::RegexMatch: {
+                if constexpr (!std::is_same_v<T, std::string>) {
+                    ThrowInfo(ErrorCode::OpTypeInvalid,
+                              "RegexMatch only supported for string type");
+                    return TargetBitmap{};
+                } else {
+                    AssertInfo(is_built_, "index has not been built");
+                    PartialRegexMatcher matcher(pattern);
+                    TargetBitmap res(total_num_rows_, false);
+                    if (is_mmap_) {
+                        for (const auto& [key, bitmap] : bitmap_info_map_) {
+                            if (matcher(key)) {
+                                for (const auto& v : bitmap) {
+                                    res.set(v);
+                                }
+                            }
+                        }
+                    } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+                        for (const auto& [key, bitmap] : data_) {
+                            if (matcher(key)) {
+                                for (const auto& v : bitmap) {
+                                    res.set(v);
+                                }
+                            }
+                        }
+                    } else {
+                        for (const auto& [key, bitset] : bitsets_) {
+                            if (matcher(key)) {
+                                res |= bitset;
+                            }
+                        }
+                    }
+                    return res;
+                }
             }
             default:
                 ThrowInfo(ErrorCode::OpTypeInvalid,
-                          "not supported op type: {} for index PatterMatch",
+                          "not supported op type: {} for index PatternMatch",
                           op);
         }
     }
 
-    bool
-    SupportRegexQuery() const override {
-        return std::is_same_v<T, std::string>;
-    }
-
+ protected:
     const TargetBitmap
-    RegexQuery(const std::string& regex_pattern) override;
+    PatternQuery(const std::string& pattern) override {
+        if constexpr (!std::is_same_v<T, std::string>) {
+            ThrowInfo(ErrorCode::OpTypeInvalid,
+                      "pattern query only supported for string type");
+            return TargetBitmap{};
+        }
+
+        AssertInfo(is_built_, "index has not been built");
+
+        LikePatternMatcher matcher(pattern);
+        TargetBitmap res(total_num_rows_, false);
+        if (is_mmap_) {
+            for (const auto& [key, bitmap] : bitmap_info_map_) {
+                if (matcher(key)) {
+                    for (const auto& v : bitmap) {
+                        res.set(v);
+                    }
+                }
+            }
+        } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+            for (const auto& [key, bitmap] : data_) {
+                if (matcher(key)) {
+                    for (const auto& v : bitmap) {
+                        res.set(v);
+                    }
+                }
+            }
+        } else {
+            for (const auto& [key, bitset] : bitsets_) {
+                if (matcher(key)) {
+                    res |= bitset;
+                }
+            }
+        }
+        return res;
+    }
 
  public:
     int64_t
@@ -259,16 +330,35 @@ class BitmapIndex : public ScalarIndex<T> {
     SerializeIndexData(uint8_t* index_data_ptr);
 
     std::pair<std::shared_ptr<uint8_t[]>, size_t>
+    SerializeValidBitsetData() const;
+
+    std::pair<std::shared_ptr<uint8_t[]>, size_t>
     SerializeIndexMeta();
 
     std::pair<size_t, size_t>
     DeserializeIndexMeta(const uint8_t* data_ptr, size_t data_size);
 
+    void
+    DeserializeValidBitsetData(const uint8_t* data_ptr, size_t data_size);
+
     T
     ParseKey(const uint8_t** ptr);
 
+    // Deserialize posting data.
+    //
+    // New bitmap index formats persist valid_bitset_, which is the
+    // authoritative source of row validity. Legacy formats do not, so we may
+    // rebuild validity from postings as a backward-compatibility fallback for
+    // nullable fields. Non-nullable fields do not persist valid_bitset_ and
+    // are treated as all-valid on load.
+    //
+    // Rebuilding validity from postings is lossy for ARRAY fields: empty
+    // arrays have no element postings, so they cannot be distinguished from
+    // null arrays during reconstruction.
     void
-    DeserializeIndexData(const uint8_t* data_ptr, size_t index_length);
+    DeserializeIndexData(const uint8_t* data_ptr,
+                         size_t index_length,
+                         bool rebuild_validity_from_postings);
 
     void
     BuildOffsetCache();
@@ -286,38 +376,50 @@ class BitmapIndex : public ScalarIndex<T> {
     ConvertRoaringToBitset(const roaring::Roaring& values);
 
     TargetBitmap
-    RangeForRoaring(T value, OpType op);
+    RangeForRoaring(const T& value, OpType op);
 
     TargetBitmap
-    RangeForBitset(T value, OpType op);
+    RangeForBitset(const T& value, OpType op);
 
     TargetBitmap
-    RangeForMmap(T value, OpType op);
+    RangeForMmap(const T& value, OpType op);
 
     TargetBitmap
-    RangeForRoaring(T lower_bound_value,
+    RangeForRoaring(const T& lower_bound_value,
                     bool lb_inclusive,
-                    T upper_bound_value,
+                    const T& upper_bound_value,
                     bool ub_inclusive);
 
     TargetBitmap
-    RangeForBitset(T lower_bound_value,
+    RangeForBitset(const T& lower_bound_value,
                    bool lb_inclusive,
-                   T upper_bound_value,
+                   const T& upper_bound_value,
                    bool ub_inclusive);
 
     TargetBitmap
-    RangeForMmap(T lower_bound_value,
+    RangeForMmap(const T& lower_bound_value,
                  bool lb_inclusive,
-                 T upper_bound_value,
+                 const T& upper_bound_value,
                  bool ub_inclusive);
 
+    // Build mmap-backed posting storage from serialized bitmap index data.
+    //
+    // New bitmap index formats persist valid_bitset_, which is the
+    // authoritative source of row validity. Legacy formats do not, so we may
+    // rebuild validity from postings as a backward-compatibility fallback for
+    // nullable fields. Non-nullable fields do not persist valid_bitset_ and
+    // are treated as all-valid on load.
+    //
+    // Rebuilding validity from postings is lossy for ARRAY fields: empty
+    // arrays have no element postings, so they cannot be distinguished from
+    // null arrays during reconstruction.
     void
     MMapIndexData(const std::string& filepath,
                   const uint8_t* data,
                   size_t data_size,
                   size_t index_length,
-                  milvus::proto::common::LoadPriority priority);
+                  milvus::proto::common::LoadPriority priority,
+                  bool rebuild_validity_from_postings);
 
     void
     UnmapIndexData();
@@ -340,7 +442,6 @@ class BitmapIndex : public ScalarIndex<T> {
         bitsets_offsets_cache_;
     std::vector<typename std::map<T, roaring::Roaring>::iterator>
         mmap_offsets_cache_;
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 
     // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
     TargetBitmap valid_bitset_;

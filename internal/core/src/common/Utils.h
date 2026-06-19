@@ -12,6 +12,7 @@
 #pragma once
 
 #include <fcntl.h>
+#include "common/FastMem.h"
 #include <fmt/core.h>
 #include <google/protobuf/text_format.h>
 #include <sys/mman.h>
@@ -88,12 +89,7 @@ PrefixMatch(const std::string_view str, const std::string_view prefix) {
     if (prefix.length() > str.length()) {
         return false;
     }
-    auto ret = strncmp(str.data(), prefix.data(), prefix.length());
-    if (ret != 0) {
-        return false;
-    }
-
-    return true;
+    return memcmp(str.data(), prefix.data(), prefix.length()) == 0;
 }
 
 inline DatasetPtr
@@ -126,20 +122,8 @@ PostfixMatch(const std::string_view str, const std::string_view postfix) {
         return false;
     }
 
-    int offset = str.length() - postfix.length();
-    auto ret = strncmp(str.data() + offset, postfix.data(), postfix.length());
-    if (ret != 0) {
-        return false;
-    }
-    //
-    //    int i = postfix.length() - 1;
-    //    int j = str.length() - 1;
-    //    for (; i >= 0; i--, j--) {
-    //        if (postfix[i] != str[j]) {
-    //            return false;
-    //        }
-    //    }
-    return true;
+    size_t offset = str.length() - postfix.length();
+    return memcmp(str.data() + offset, postfix.data(), postfix.length()) == 0;
 }
 
 inline bool
@@ -148,6 +132,21 @@ InnerMatch(const std::string_view str, const std::string_view pattern) {
         return false;
     }
     return str.find(pattern) != std::string::npos;
+}
+
+// Escape LIKE metacharacters (%, _, \) in a string so it can be safely
+// embedded in a LIKE pattern. Uses '\' as the escape character.
+inline std::string
+EscapeLikePattern(const std::string& literal) {
+    std::string escaped;
+    escaped.reserve(literal.size());
+    for (char c : literal) {
+        if (c == '%' || c == '_' || c == '\\') {
+            escaped.push_back('\\');
+        }
+        escaped.push_back(c);
+    }
+    return escaped;
 }
 
 inline int64_t
@@ -224,13 +223,17 @@ IsInteger(const std::string& str) {
     if (str.empty())
         return false;
 
-    try {
-        size_t pos;
-        std::stoi(str, &pos);
-        return pos == str.length();
-    } catch (...) {
-        return false;
+    size_t start = 0;
+    if (str[0] == '+' || str[0] == '-') {
+        start = 1;
+        if (str.size() == 1)
+            return false;
     }
+    for (size_t i = start; i < str.size(); ++i) {
+        if (str[i] < '0' || str[i] > '9')
+            return false;
+    }
+    return true;
 }
 
 inline std::string
@@ -273,7 +276,7 @@ CopyAndWrapSparseRow(const void* data,
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
-    std::memcpy(row.data(), data, size);
+    milvus::fastmem::FastMemcpy(row.data(), data, size);
     if (validate) {
         AssertInfo(size % knowhere::sparse::SparseRow<
                               SparseValueType>::element_size() ==
@@ -321,7 +324,8 @@ SparseBytesToRows(const Iterable& rows, const bool validate = false) {
 // SparseRowsToProto converts a list of knowhere::sparse::SparseRow<SparseValueType> to
 // a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
 // of the source data. source(i) returns the i-th row to be copied.
-inline void SparseRowsToProto(
+inline void
+SparseRowsToProto(
     const std::function<
         const knowhere::sparse::SparseRow<SparseValueType>*(size_t)>& source,
     int64_t rows,

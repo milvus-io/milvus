@@ -29,8 +29,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -76,10 +77,13 @@ type grpcConfig struct {
 	ServerPemPath ParamItem `refreshable:"false"`
 	ServerKeyPath ParamItem `refreshable:"false"`
 	CaPemPath     ParamItem `refreshable:"false"`
+
+	base *BaseTable // stored for dynamic per-cluster TLS lookups
 }
 
 func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.Domain = domain
+	p.base = base
 	p.IPItem = ParamItem{
 		Key:     p.Domain + ".ip",
 		Version: "2.3.3",
@@ -135,6 +139,24 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.CaPemPath.Init(base.mgr)
 }
 
+// GetClusterTLSConfig returns per-cluster outbound TLS cert paths for CDC connections.
+// Reads from tls.clusters.<clusterID>.{caPemPath,clientPemPath,clientKeyPath}.
+// Returns empty strings if the cluster has no TLS config.
+func (p *grpcConfig) GetClusterTLSConfig(clusterID string) (caPemPath, clientPemPath, clientKeyPath string) {
+	prefix := "tls.clusters." + clusterID + "."
+	caPemPath = p.base.Get(prefix + "caPemPath")
+	clientPemPath = p.base.Get(prefix + "clientPemPath")
+	clientKeyPath = p.base.Get(prefix + "clientKeyPath")
+	return
+}
+
+// GetClusterAuthority returns the gRPC :authority header for CDC outbound connections.
+// Reads from grpc.clusters.<clusterID>.authority.
+// Returns empty string if not configured.
+func (p *grpcConfig) GetClusterAuthority(clusterID string) string {
+	return p.base.Get("grpc.clusters." + clusterID + ".authority")
+}
+
 // GetAddress return grpc address
 func (p *grpcConfig) GetAddress() string {
 	return p.IP + ":" + p.Port.GetValue()
@@ -155,7 +177,7 @@ type GrpcServerConfig struct {
 }
 
 func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
-	p.grpcConfig.init(domain, base)
+	p.init(domain, base)
 
 	maxSendSize := strconv.FormatInt(DefaultServerMaxSendSize, 10)
 	p.ServerMaxSendSize = ParamItem{
@@ -236,7 +258,7 @@ type GrpcClientConfig struct {
 }
 
 func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
-	p.grpcConfig.init(domain, base)
+	p.init(domain, base)
 
 	maxSendSize := strconv.FormatInt(DefaultClientMaxSendSize, 10)
 	p.ClientMaxSendSize = ParamItem{
@@ -595,7 +617,7 @@ func (p *InternalTLSConfig) GetClientCreds(ctx context.Context) (credentials.Tra
 	creds, err := credentials.NewClientTLSFromFile(caPemPath, sni)
 	if err != nil {
 		log.Ctx(ctx).Error("Failed to create internal TLS credentials", zap.Error(err))
-		return nil, fmt.Errorf("failed to create internal TLS credentials: %w", err)
+		return nil, merr.Wrap(err, "failed to create internal TLS credentials")
 	}
 	return creds, nil
 }

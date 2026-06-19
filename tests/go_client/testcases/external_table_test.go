@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 
 // TestCreateExternalCollection tests creating an external collection
 func TestCreateExternalCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -23,7 +26,7 @@ func TestCreateExternalCollection(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet"}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("text").
@@ -54,10 +57,25 @@ func TestCreateExternalCollection(t *testing.T) {
 
 	// Verify external source and spec
 	require.Equal(t, "s3://test-bucket/data/", coll.Schema.ExternalSource)
-	require.Equal(t, `{"format": "parquet"}`, coll.Schema.ExternalSpec)
+	var spec struct {
+		Format string            `json:"format"`
+		Extfs  map[string]string `json:"extfs"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(coll.Schema.ExternalSpec), &spec))
+	require.Equal(t, "parquet", spec.Format)
+	require.Equal(t, "aws", spec.Extfs["cloud_provider"])
+	require.Equal(t, "us-east-1", spec.Extfs["region"])
+	require.Equal(t, "***", spec.Extfs["access_key_id"])
+	require.Equal(t, "***", spec.Extfs["access_key_value"])
 
-	// Verify fields
-	require.Len(t, coll.Schema.Fields, 2)
+	// Verify fields (user-defined fields + auto-generated __virtual_pk__)
+	require.Len(t, coll.Schema.Fields, 3)
+
+	// Verify virtual PK field
+	vpkField := findFieldByName(coll.Schema.Fields, "__virtual_pk__")
+	require.NotNil(t, vpkField)
+	require.True(t, vpkField.PrimaryKey)
+	require.True(t, vpkField.AutoID)
 
 	// Verify text field
 	textField := findFieldByName(coll.Schema.Fields, "text")
@@ -80,6 +98,8 @@ func TestCreateExternalCollection(t *testing.T) {
 // TestCreateExternalCollectionMissingExternalField tests that creating external collection
 // without external_field mapping fails
 func TestCreateExternalCollectionMissingExternalField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -89,7 +109,7 @@ func TestCreateExternalCollectionMissingExternalField(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet"}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("text").
@@ -113,6 +133,8 @@ func TestCreateExternalCollectionMissingExternalField(t *testing.T) {
 // TestCreateExternalCollectionWithPrimaryKey tests that creating external collection
 // with primary key field fails
 func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -122,7 +144,7 @@ func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet"}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -140,12 +162,14 @@ func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
 
 	// Create collection should fail - external collections don't support primary key
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	common.CheckErr(t, err, false, "does not support primary key")
+	common.CheckErr(t, err, false, "does not support user-defined primary key")
 }
 
 // TestCreateExternalCollectionWithDynamicField tests that creating external collection
 // with dynamic field enabled fails
 func TestCreateExternalCollectionWithDynamicField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -155,7 +179,7 @@ func TestCreateExternalCollectionWithDynamicField(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet"}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithDynamicFieldEnabled(true).
 		WithField(
 			entity.NewField().
@@ -180,6 +204,8 @@ func TestCreateExternalCollectionWithDynamicField(t *testing.T) {
 // TestCreateExternalCollectionWithAutoID tests that creating external collection
 // with auto ID field fails
 func TestCreateExternalCollectionWithAutoID(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -189,7 +215,7 @@ func TestCreateExternalCollectionWithAutoID(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet"}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -213,6 +239,8 @@ func TestCreateExternalCollectionWithAutoID(t *testing.T) {
 // TestCreateExternalCollectionWithPartitionKey tests that creating external collection
 // with partition key field fails
 func TestCreateExternalCollectionWithPartitionKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -222,7 +250,7 @@ func TestCreateExternalCollectionWithPartitionKey(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet"}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("category").
@@ -247,6 +275,8 @@ func TestCreateExternalCollectionWithPartitionKey(t *testing.T) {
 // TestCreateExternalCollectionMultipleVectorFields tests creating external collection
 // with multiple vector fields
 func TestCreateExternalCollectionMultipleVectorFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -256,7 +286,7 @@ func TestCreateExternalCollectionMultipleVectorFields(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet"}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("text").
@@ -290,8 +320,8 @@ func TestCreateExternalCollectionMultipleVectorFields(t *testing.T) {
 	// Verify external source
 	require.Equal(t, "s3://test-bucket/data/", coll.Schema.ExternalSource)
 
-	// Verify fields
-	require.Len(t, coll.Schema.Fields, 3)
+	// Verify fields (user-defined fields + auto-generated __virtual_pk__)
+	require.Len(t, coll.Schema.Fields, 4)
 
 	// Verify vector fields
 	denseField := findFieldByName(coll.Schema.Fields, "dense_embedding")

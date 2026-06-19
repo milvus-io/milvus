@@ -25,15 +25,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type DDLCallbacksCollectionFunctionTestSuite struct {
@@ -142,7 +142,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Su
 	core.meta = mockMeta
 
 	// Mock meta calls for getCacheExpireForCollection
-	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return(coll, nil)
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 	mockMeta.EXPECT().ListAliases(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return([]string{}, nil)
 
 	// Mock broadcaster
@@ -167,7 +167,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Ge
 	core.meta = mockMeta
 
 	// Mock meta calls to return error
-	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return(nil, errors.New("cache expire error"))
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).Return(nil, errors.New("cache expire error"))
 
 	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, dbName, collectionName)
 	suite.Error(err)
@@ -186,7 +186,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 	core.meta = mockMeta
 
 	// Mock meta calls for getCacheExpireForCollection
-	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return(coll, nil)
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 	mockMeta.EXPECT().ListAliases(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return([]string{}, nil)
 
 	// Mock broadcaster to return error
@@ -245,7 +245,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(ctx, fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Function non_existent_function not exists")
+	suite.Contains(err.Error(), "function non_existent_function not exists")
 }
 
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCollection_InputFieldNotExists() {
@@ -412,7 +412,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(context.Background(), fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Old version function's output field non_existent_output not exists")
+	suite.Contains(err.Error(), "old version function's output field non_existent_output not exists")
 }
 
 // Test with empty collections and functions
@@ -429,7 +429,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(context.Background(), fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Function test_function not exists")
+	suite.Contains(err.Error(), "function test_function not exists")
 }
 
 // Test max function ID calculation
@@ -460,7 +460,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AlterCollectionFunctionRequest{
@@ -479,6 +479,28 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
 		suite.NoError(err)
 	})
+
+	suite.Run("external collection rejected", func() {
+		coll := suite.createTestCollection()
+		coll.Fields[2].ExternalField = "text_col"
+
+		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		suite.core.meta = mockMeta
+
+		req := &milvuspb.AlterCollectionFunctionRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			FunctionSchema: &schemapb.FunctionSchema{
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{"text_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		}
+		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
+		suite.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
+	})
 }
 
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForDropFunction() {
@@ -486,7 +508,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.DropCollectionFunctionRequest{
@@ -502,7 +524,31 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		suite.NoError(err)
 	})
 
+	suite.Run("external collection rejected", func() {
+		coll := suite.createTestCollection()
+		coll.Fields[2].ExternalField = "text_col"
+
+		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		suite.core.meta = mockMeta
+
+		req := &milvuspb.DropCollectionFunctionRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			FunctionName:   "test_function",
+		}
+
+		err := suite.core.broadcastAlterCollectionForDropFunction(context.Background(), req)
+		suite.ErrorContains(err, externalCollectionFunctionMutationUnsupportedMsg)
+	})
+
 	suite.Run("function not exists", func() {
+		coll := suite.createTestCollection()
+
+		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		suite.core.meta = mockMeta
+
 		req := &milvuspb.DropCollectionFunctionRequest{
 			DbName:         "test_db",
 			CollectionName: "test_collection",
@@ -522,7 +568,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AddCollectionFunctionRequest{
@@ -546,7 +592,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 	suite.Run("function input field not exists", func() {
 		coll := suite.createTestCollection()
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AddCollectionFunctionRequest{
@@ -572,7 +618,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AddCollectionFunctionRequest{

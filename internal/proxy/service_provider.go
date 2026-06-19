@@ -10,16 +10,17 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type Request interface {
@@ -57,7 +58,7 @@ func NewInterceptor[Req Request, Resp Response](proxy *Proxy, method string) (*I
 		}
 		return interface{}(interceptor).(*InterceptorImpl[Req, Resp]), nil
 	default:
-		return nil, fmt.Errorf("method %s not supported", method)
+		return nil, merr.WrapErrParameterInvalidMsg("method %s not supported", method)
 	}
 }
 
@@ -109,6 +110,7 @@ func cloneStructArrayFields(fields []*schemapb.StructArrayFieldSchema) []*schema
 			Name:        field.Name,
 			Description: field.Description,
 			Fields:      make([]*schemapb.FieldSchema, len(field.Fields)),
+			Nullable:    field.Nullable,
 		}
 
 		// Deep copy sub-fields
@@ -199,19 +201,20 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 
 	// skip dynamic fields, see describeCollectionTask.Execute
 	resp.Schema = &schemapb.CollectionSchema{
-		Name:        c.schema.CollectionSchema.Name,
-		Description: c.schema.CollectionSchema.Description,
-		AutoID:      c.schema.CollectionSchema.AutoID,
-		Fields: lo.Filter(c.schema.CollectionSchema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
-			return !field.IsDynamic
+		Name:        c.schema.Name,
+		Description: c.schema.Description,
+		AutoID:      c.schema.AutoID,
+		Fields: lo.Filter(c.schema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
+			return !field.IsDynamic && field.Name != common.NamespaceFieldName
 		}),
-		StructArrayFields:  cloneStructArrayFields(c.schema.CollectionSchema.StructArrayFields),
-		EnableDynamicField: c.schema.CollectionSchema.EnableDynamicField,
-		Properties:         c.schema.CollectionSchema.Properties,
-		Functions:          c.schema.CollectionSchema.Functions,
-		DbName:             c.schema.CollectionSchema.DbName,
-		ExternalSource:     c.schema.CollectionSchema.ExternalSource,
-		ExternalSpec:       c.schema.CollectionSchema.ExternalSpec,
+		StructArrayFields:  cloneStructArrayFields(c.schema.StructArrayFields),
+		EnableDynamicField: c.schema.EnableDynamicField,
+		Properties:         c.schema.Properties,
+		Functions:          c.schema.Functions,
+		DbName:             c.schema.DbName,
+		ExternalSource:     c.schema.ExternalSource,
+		ExternalSpec:       c.schema.ExternalSpec,
+		Version:            c.schema.Version,
 	}
 
 	// Restore struct field names from internal format (structName[fieldName]) to original format
@@ -238,12 +241,10 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	resp.ShardsNum = c.shardsNum
 	resp.Aliases = c.aliases
 	resp.Properties = c.properties
-
 	log.Debug("DescribeCollection done",
 		zap.Int64("collectionID", resp.GetCollectionID()),
 		zap.Any("schema", resp.GetSchema()),
 	)
-
 	return resp, nil
 }
 
@@ -289,7 +290,7 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 			zap.Uint64("EndTS", dct.EndTs()))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+			failMetricLabel(err), request.GetDbName(), request.GetCollectionName()).Inc()
 
 		return nil, err
 	}

@@ -8,15 +8,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
@@ -36,7 +35,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 					{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 					{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
 				},
-				Properties: []*commonpb.KeyValuePair{{Key: common.NamespaceEnabledKey, Value: "true"}},
+				EnableNamespace: true,
 			}
 			return newSchemaInfo(schema), nil
 		}).Build()
@@ -46,10 +45,10 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		// Capture plan to verify namespace by mocking tryGeneratePlan
 		var capturedPlan *planpb.PlanNode
-		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, error) {
+		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 			capturedPlan = &planpb.PlanNode{}
 			qi := &planpb.QueryInfo{Topk: 10, MetricType: "L2", QueryFieldId: 101, GroupByFieldId: -1}
-			return capturedPlan, qi, 0, false, nil, nil
+			return capturedPlan, qi, 0, false, nil, internalpb.SearchType_DEFAULT, nil
 		}).Build()
 
 		// Build task
@@ -80,7 +79,7 @@ func TestSearchTask_RequeryPlanNamespace(t *testing.T) {
 				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
 			},
-			Properties: []*commonpb.KeyValuePair{{Key: common.NamespaceEnabledKey, Value: "true"}},
+			EnableNamespace: true,
 		}
 		tsk := &searchTask{
 			Condition:     NewTaskCondition(context.Background()),

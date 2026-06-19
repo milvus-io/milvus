@@ -63,13 +63,15 @@ class Collection {
         }
     }
 
-    IndexMetaPtr&
+    IndexMetaPtr
     get_index_meta() {
+        std::shared_lock lock(index_meta_mutex_);
         return index_meta_;
     }
 
     void
     set_index_meta(const IndexMetaPtr index_meta) {
+        std::unique_lock lock(index_meta_mutex_);
         index_meta_ = index_meta;
     }
 
@@ -83,6 +85,7 @@ class Collection {
     SchemaPtr schema_;
     std::shared_mutex schema_mutex_;
     IndexMetaPtr index_meta_;
+    std::shared_mutex index_meta_mutex_;
 };
 
 using CollectionPtr = std::unique_ptr<Collection>;

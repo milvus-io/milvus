@@ -22,7 +22,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 type SegmentSuite struct {
@@ -61,6 +62,30 @@ func (s *SegmentSuite) TestClone() {
 	s.Equal(segment.Deltalogs(), cloned.Deltalogs())
 	s.Equal(segment.Bm25logs(), cloned.Bm25logs())
 	s.Equal(segment.GetBM25Stats(), cloned.GetBM25Stats())
+}
+
+func (s *SegmentSuite) TestRecoverCurrentSplitFormat() {
+	info := &datapb.SegmentInfo{
+		ID:             10,
+		StorageVersion: storage.StorageV3,
+		Binlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     100,
+				ChildFields: []int64{100, 101},
+				Format:      "parquet",
+			},
+			{
+				FieldID:     102,
+				ChildFields: []int64{102},
+				Format:      "vortex",
+			},
+		},
+	}
+
+	segment := NewSegmentInfo(info, pkoracle.NewBloomFilterSet(), nil)
+
+	s.Equal("parquet", segment.GetCurrentSplit()[0].Format)
+	s.Equal("vortex", segment.GetCurrentSplit()[1].Format)
 }
 
 func TestSegment(t *testing.T) {

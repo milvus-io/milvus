@@ -17,11 +17,11 @@
 package utils
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func CreateTestLeaderView(id, collection int64, channel string, segments map[int64]int64, growings map[int64]*meta.Segment) *meta.LeaderView {
@@ -85,6 +85,16 @@ func CreateTestCollection(collection int64, replica int32) *meta.Collection {
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collection,
 			ReplicaNumber: replica,
+		},
+	}
+}
+
+func CreateTestCollectionWithStatus(collection int64, replica int32, status querypb.LoadStatus) *meta.Collection {
+	return &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collection,
+			ReplicaNumber: replica,
+			Status:        status,
 		},
 	}
 }

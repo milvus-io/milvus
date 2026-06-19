@@ -1,7 +1,7 @@
 package rewriter
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
@@ -42,7 +42,7 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 	out := make([]*planpb.Expr, 0, len(parts))
 	out = append(out, others...)
 	for _, g := range groups {
-		if shouldMergeToIn(g.col.GetDataType(), len(g.values)) {
+		if len(g.values) >= 2 {
 			g.values = sortGenericValues(g.values)
 			out = append(out, newTermExpr(g.col, g.values))
 		} else {
@@ -92,7 +92,13 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out := make([]*planpb.Expr, 0, len(parts))
 	out = append(out, others...)
 	for _, g := range groups {
-		if shouldMergeToIn(g.col.GetDataType(), len(g.values)) {
+		if len(g.values) >= 2 {
+			if hasMissingPathNotEqualSemantics(g.col, g.values...) {
+				for _, i := range g.origIndices {
+					out = append(out, indexToExpr[i])
+				}
+				continue
+			}
 			g.values = sortGenericValues(g.values)
 			in := newTermExpr(g.col, g.values)
 			out = append(out, notExpr(in))
@@ -179,6 +185,9 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		}
 		// If multiple different equals present, AND implies contradiction unless identical.
 		if len(eqUnique) > 1 {
+			if hasNullableFieldSemantics(g.col) {
+				continue
+			}
 			for _, ti := range g.termIdxs {
 				used[ti] = true
 			}
@@ -197,6 +206,9 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 				inSet = true
 				break
 			}
+		}
+		if !inSet && hasNullableFieldSemantics(g.col) {
+			continue
 		}
 		for _, ti := range g.termIdxs {
 			used[ti] = true
@@ -267,8 +279,8 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		if g.term == nil || len(g.eqIdxs) == 0 {
 			continue
 		}
-		// union all equal values into term set
-		union := g.term.GetValues()
+		// union all equal values into term set; copy to avoid aliasing proto's backing array
+		union := append([]*planpb.GenericValue(nil), g.term.GetValues()...)
 		for i, ev := range g.eqVals {
 			union = append(union, ev)
 			used[g.eqIdxs[i]] = true
@@ -352,13 +364,13 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 		comparable := true
 		for _, tv := range termVals {
 			if g.lower != nil {
-				if !(areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.lower)) || (isNumericCase(valueCaseWithNil(tv)) && isNumericCase(valueCaseWithNil(g.lower)))) {
+				if !areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.lower)) && (!isNumericCase(valueCaseWithNil(tv)) || !isNumericCase(valueCaseWithNil(g.lower))) {
 					comparable = false
 					break
 				}
 			}
 			if comparable && g.upper != nil {
-				if !(areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.upper)) || (isNumericCase(valueCaseWithNil(tv)) && isNumericCase(valueCaseWithNil(g.upper)))) {
+				if !areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.upper)) && (!isNumericCase(valueCaseWithNil(tv)) || !isNumericCase(valueCaseWithNil(g.upper))) {
 					comparable = false
 					break
 				}
@@ -368,6 +380,9 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		filtered := filterValuesByRange(effectiveDataType(g.col), termVals, g.lower, g.lowerInc, g.upper, g.upperInc)
+		if len(filtered) == 0 && hasNullableFieldSemantics(g.col) {
+			continue
+		}
 		used[g.termIdx] = true
 		for _, ri := range g.rangeIdxs {
 			used[ri] = true
@@ -493,6 +508,9 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 				inter = append(inter, v)
 			}
 		}
+		if len(inter) == 0 && hasNullableFieldSemantics(g.col) {
+			continue
+		}
 		for _, i := range g.idxs {
 			used[i] = true
 		}
@@ -568,6 +586,9 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 			if !excluded {
 				filtered = append(filtered, tv)
 			}
+		}
+		if len(filtered) == 0 && hasNullableFieldSemantics(g.col) {
+			continue
 		}
 		used[g.termIdx] = true
 		for _, ni := range g.neqIdxs {
@@ -647,11 +668,14 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			}
 		}
 		if containsAny {
+			if !canFoldInNotEqualTautologyToTrue(g.col) {
+				continue
+			}
 			used[g.termIdx] = true
 			for _, ni := range g.neqIdxs {
 				used[ni] = true
 			}
-			out = append(out, newBoolConstExpr(true))
+			out = append(out, newAlwaysTrueExpr())
 		} else {
 			// drop the IN; keep != as-is
 			used[g.termIdx] = true

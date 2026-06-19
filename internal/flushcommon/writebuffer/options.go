@@ -3,15 +3,22 @@ package writebuffer
 import (
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type WriteBufferOption func(opt *writeBufferOption)
 
 type TaskObserverCallback func(t syncmgr.Task, err error)
+
+// GrowingSourceResolver resolves an optional in-memory growing segment source
+// for growing-source flush. GrowingSourcePending means the growing source exists but has not
+// caught up to targetOffset yet; WriteBuffer should only be used when the state
+// is GrowingSourceUnavailable.
+type GrowingSourceResolver func(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState)
 
 type writeBufferOption struct {
 	idAllocator  allocator.Interface
@@ -22,6 +29,9 @@ type writeBufferOption struct {
 	errorHandler         func(error)
 	taskObserverCallback TaskObserverCallback
 	storageVersion       int64
+
+	growingSourceResolver      GrowingSourceResolver
+	growingSourceRetryInterval time.Duration
 }
 
 func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
@@ -74,5 +84,11 @@ func WithErrorHandler(handler func(err error)) WriteBufferOption {
 func WithTaskObserverCallback(callback TaskObserverCallback) WriteBufferOption {
 	return func(opt *writeBufferOption) {
 		opt.taskObserverCallback = callback
+	}
+}
+
+func WithGrowingSourceResolver(resolver GrowingSourceResolver) WriteBufferOption {
+	return func(opt *writeBufferOption) {
+		opt.growingSourceResolver = resolver
 	}
 }

@@ -172,13 +172,13 @@ func TestPriorityQueue_WithAssignedScore(t *testing.T) {
 	pq := NewPriorityQueue()
 
 	item1 := NewNodeItem(100, 1)
-	item1.SetAssignedScore(50) // Priority: 100 - 50 = 50
+	item1.AddAssignedScore(50) // Priority: 100 - 50 = 50
 
 	item2 := NewNodeItem(80, 2)
-	item2.SetAssignedScore(50) // Priority: 80 - 50 = 30
+	item2.AddAssignedScore(50) // Priority: 80 - 50 = 30
 
 	item3 := NewNodeItem(120, 3)
-	item3.SetAssignedScore(50) // Priority: 120 - 50 = 70
+	item3.AddAssignedScore(50) // Priority: 120 - 50 = 70
 
 	pq.Push(&item1)
 	pq.Push(&item2)

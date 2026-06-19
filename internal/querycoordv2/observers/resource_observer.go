@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -25,8 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // ResourceObserver is used to observe resource group status.
@@ -48,7 +49,7 @@ func NewResourceObserver(meta *meta.Meta) *ResourceObserver {
 
 func (ob *ResourceObserver) Start() {
 	ob.startOnce.Do(func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored and called in Stop()
 		ob.cancel = cancel
 
 		ob.wg.Add(1)
@@ -69,7 +70,7 @@ func (ob *ResourceObserver) schedule(ctx context.Context) {
 	defer ob.wg.Done()
 	log.Info("Start check resource group loop")
 
-	listener := ob.meta.ResourceManager.ListenResourceGroupChanged(ctx)
+	listener := ob.meta.ListenResourceGroupChanged(ctx)
 	for {
 		ob.waitRGChangedOrTimeout(ctx, listener)
 		// stop if the context is canceled.
@@ -104,6 +105,10 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup(ctx context.Context) {
 
 	log.Debug("recover resource groups...")
 	// Recover all resource group into expected configuration.
+	// Sort RG names lexicographically so that nodes from __default_resource_group are
+	// preferentially allocated to the lexicographically smallest RG first, maintaining
+	// QN assignment stability during scale-up.
+	sort.Strings(rgNames)
 	for _, rgName := range rgNames {
 		if err := manager.MeetRequirement(ctx, rgName); err != nil {
 			log.Info("found resource group need to be recovered",

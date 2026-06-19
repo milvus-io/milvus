@@ -6,12 +6,13 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar/pulsarlog"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar/pulsarlog"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func init() {
@@ -50,7 +51,7 @@ func (b *builderImpl) getPulsarClientOptions() (pulsar.ClientOptions, tenant, er
 	cfg := &paramtable.Get().PulsarCfg
 	auth, err := pulsar.NewAuthentication(cfg.AuthPlugin.GetValue(), cfg.AuthParams.GetValue())
 	if err != nil {
-		return pulsar.ClientOptions{}, tenant{}, errors.New("build authencation from config failed")
+		return pulsar.ClientOptions{}, tenant{}, merr.WrapErrParameterInvalidMsg("build authencation from config failed")
 	}
 	options := pulsar.ClientOptions{
 		URL:              cfg.Address.GetValue(),

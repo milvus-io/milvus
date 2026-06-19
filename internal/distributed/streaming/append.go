@@ -1,28 +1,18 @@
 package streaming
 
 import (
-	"context"
-
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
-
-// appendToWAL appends the message to the wal.
-func (w *walAccesserImpl) appendToWAL(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
-	pchannel := funcutil.ToPhysicalChannel(msg.VChannel())
-	p := w.getProducer(pchannel)
-	return p.Produce(ctx, msg)
-}
 
 // createOrGetProducer creates or get a producer.
 // vchannel in same pchannel can share the same producer.
-func (w *walAccesserImpl) getProducer(pchannel string) *producer.ResumableProducer {
+func (w *walAccesserImpl) getProducer(channel string) *producer.ResumableProducer {
+	pchannel := funcutil.ToPhysicalChannel(channel)
 	w.producerMutex.Lock()
 	defer w.producerMutex.Unlock()
 
-	// TODO: A idle producer should be removed maybe?
 	if p, ok := w.producers[pchannel]; ok {
 		return p
 	}
@@ -55,14 +45,5 @@ func assertValidBroadcastMessage(msg message.BroadcastMutableMessage) {
 	}
 	if msg.MessageType().IsSelfControlled() {
 		panic("self controlled message is not allowed to broadcast append from client")
-	}
-}
-
-// We only support delete and insert message for txn now.
-func assertIsDmlMessage(msgs ...message.MutableMessage) {
-	for _, msg := range msgs {
-		if msg.MessageType() != message.MessageTypeInsert && msg.MessageType() != message.MessageTypeDelete {
-			panic("only insert and delete message is allowed in txn")
-		}
 	}
 }

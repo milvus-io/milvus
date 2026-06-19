@@ -24,13 +24,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	taskcommon "github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const NullNodeID = -1
@@ -138,19 +138,23 @@ func (s *globalTaskScheduler) Stop() {
 }
 
 func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
+	var fallbackNodeID int64 = NullNodeID
 	var maxAvailable int64 = -1
-	var nodeID int64 = NullNodeID
 
-	for id, ws := range workerSlots {
+	for nodeID, ws := range workerSlots {
+		if ws.AvailableSlots >= taskSlot {
+			ws.AvailableSlots -= taskSlot
+			return nodeID
+		}
 		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
 			maxAvailable = ws.AvailableSlots
-			nodeID = id
+			fallbackNodeID = nodeID
 		}
 	}
 
-	if nodeID != NullNodeID {
-		workerSlots[nodeID].AvailableSlots = 0
-		return nodeID
+	if fallbackNodeID != NullNodeID {
+		workerSlots[fallbackNodeID].AvailableSlots = 0
+		return fallbackNodeID
 	}
 	return NullNodeID
 }

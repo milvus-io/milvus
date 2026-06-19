@@ -34,18 +34,46 @@ const (
 	RetryLabel    = "retry"
 	RejectedLabel = "rejected"
 
+	// Fine-grained hard-failure labels (composite status values, not a new
+	// dimension label, to keep Prometheus cardinality additive rather than
+	// multiplicative). They split the coarse "fail"/"rejected" into the
+	// responsible party so monitoring/alerting can tell a user-input error
+	// (the caller must fix the request) apart from an internal system error
+	// (operators must intervene). MIGRATION: old queries on status="fail" must
+	// move to status=~"fail_.*" (fail_input/fail_system), and old queries on
+	// status="rejected" must move to status=~"rejected_.*" (rejected_user for
+	// caller-side auth/privilege/bad-arg rejections, rejected_system otherwise).
+	// Dashboards still matching the bare "fail"/"rejected" values return nothing
+	// after this split.
+	FailInputLabel      = "fail_input"
+	FailSystemLabel     = "fail_system"
+	RejectedSystemLabel = "rejected_system"
+	RejectedUserLabel   = "rejected_user"
+
 	HybridSearchLabel = "hybrid_search"
 
-	InsertLabel    = "insert"
-	DeleteLabel    = "delete"
-	UpsertLabel    = "upsert"
-	SearchLabel    = "search"
-	QueryLabel     = "query"
-	CacheHitLabel  = "hit"
-	CacheMissLabel = "miss"
-	TimetickLabel  = "timetick"
-	AllLabel       = "all"
+	InsertLabel      = "insert"
+	DeleteLabel      = "delete"
+	UpsertLabel      = "upsert"
+	SearchLabel      = "search"
+	QueryLabel       = "query"
+	UpsertQueryLabel = "upsert_query"
+	DeleteQueryLabel = "delete_query"
+	ReQueryLabel     = "requery"
+	CacheHitLabel    = "hit"
+	CacheMissLabel   = "miss"
+	TimetickLabel    = "timetick"
+	AllLabel         = "all"
+)
 
+const (
+	PreferredNodeHitLabel         = "hit"
+	PreferredNodeMissLabel        = "miss"
+	PreferredNodeUnavailableLabel = "unavailable"
+	PreferredNodeRejectedLabel    = "rejected"
+)
+
+const (
 	UnissuedIndexTaskLabel   = "unissued"
 	InProgressIndexTaskLabel = "in-progress"
 	FinishedIndexTaskLabel   = "finished"
@@ -73,8 +101,7 @@ const (
 	ReduceSegments = "segments"
 	ReduceShards   = "shards"
 
-	BatchReduce  = "batch_reduce"
-	StreamReduce = "stream_reduce"
+	BatchReduce = "batch_reduce"
 
 	Pending   = "pending"
 	Executing = "executing"
@@ -110,6 +137,7 @@ const (
 	segmentLevelLabelName          = "segment_level"
 	segmentIsSortedLabelName       = "segment_is_sorted"
 	segmentStorageVersionLabelName = "segment_storage_version"
+	segmentFormatLabelName         = "segment_format"
 	usernameLabelName              = "username"
 	roleNameLabelName              = "role_name"
 	cacheNameLabelName             = "cache_name"
@@ -130,6 +158,8 @@ const (
 	cgoNameLabelName               = `cgo_name`
 	cgoTypeLabelName               = `cgo_type`
 	queueTypeLabelName             = `queue_type`
+	poolNameLabelName              = "pool_name"
+	outcomeLabelName               = "outcome"
 
 	// model function/UDF labels
 	functionTypeName = "function_type_name"
@@ -142,12 +172,20 @@ const (
 
 	TaskTypeLabel  = "task_type"
 	TaskStateLabel = "task_state"
+
+	filesystemKeyLabelName = "fs"
+	reasonLabelName        = "reason"
 )
 
 var (
 	// buckets involves durations in milliseconds,
 	// [1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 1.31072e+05]
 	buckets = prometheus.ExponentialBuckets(1, 2, 18)
+
+	// subMsBuckets extends buckets with sub-millisecond boundaries for histograms
+	// whose observations can fall below 1ms (e.g. in-memory or queue-wait paths).
+	// [0.1 0.25 0.5 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 1.31072e+05]
+	subMsBuckets = append([]float64{0.1, 0.25, 0.5}, prometheus.ExponentialBuckets(1, 2, 18)...)
 
 	// longTaskBuckets provides long task duration in milliseconds
 	longTaskBuckets = []float64{1, 100, 500, 1000, 5000, 10000, 20000, 50000, 100000, 250000, 500000, 1000000, 3600000, 5000000, 10000000} // unit milliseconds
@@ -194,5 +232,6 @@ func Register(r prometheus.Registerer) {
 	r.MustRegister(BuildInfo)
 	r.MustRegister(RuntimeInfo)
 	r.MustRegister(ThreadNum)
+	r.MustRegister(ThreadCPUActiveNumByPool)
 	metricRegisterer = r
 }

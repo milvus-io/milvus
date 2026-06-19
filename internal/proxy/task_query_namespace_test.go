@@ -7,14 +7,13 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
@@ -35,7 +34,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 					{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 					{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
 				},
-				Properties: []*commonpb.KeyValuePair{{Key: common.NamespaceEnabledKey, Value: "true"}},
+				EnableNamespace: true,
 			}
 			return newSchemaInfo(schema), nil
 		}).Build()
@@ -52,7 +51,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		task := &queryTask{
 			Condition:       NewTaskCondition(context.Background()),
-			RetrieveRequest: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}},
+			RetrieveRequest: &internalpb.RetrieveRequest{QueryLabel: "query", Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}},
 			ctx:             context.Background(),
 			request:         &milvuspb.QueryRequest{CollectionName: "test_collection", Expr: "id > 0"},
 			result:          &milvuspb.QueryResults{Status: merr.Success()},
@@ -66,7 +65,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
 			},
-			Properties: []*commonpb.KeyValuePair{{Key: common.NamespaceEnabledKey, Value: "true"}},
+			EnableNamespace: true,
 		})
 		// Skip partition name translation to avoid meta fetch
 		task.reQuery = true

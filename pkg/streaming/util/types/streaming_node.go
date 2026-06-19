@@ -6,9 +6,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -80,6 +80,12 @@ type StreamingNodeInfo struct {
 // String returns the string representation of the streaming node info.
 func (n StreamingNodeInfo) String() string {
 	return fmt.Sprintf("%d@%s", n.ServerID, n.Address)
+}
+
+// StreamingNodeInfoWithResourceGroup extends StreamingNodeInfo with resource group information.
+type StreamingNodeInfoWithResourceGroup struct {
+	StreamingNodeInfo
+	ResourceGroup string // Resource group label from session's ServerLabels, if empty, it means the streaming node doesn't have a resource group.
 }
 
 // StreamingNodeStatus is the information of a streaming node.

@@ -3,7 +3,6 @@ package streamingnode
 import (
 	"context"
 	"fmt"
-	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,13 +10,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // NewCataLog creates a new streaming-node catalog instance.
@@ -60,7 +60,7 @@ type catalog struct {
 
 // ListVChannel lists the vchannel info of the pchannel.
 func (c *catalog) ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error) {
-	prefix := buildVChannelMetaPath(pchannelName)
+	prefix := buildVChannelPrefix(pchannelName)
 	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
@@ -152,12 +152,12 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 	removes := make([]string, 0, len(info.CollectionInfo.Schemas)+1)
 	kvs := make(map[string]string, len(info.CollectionInfo.Schemas)+1)
 
-	key := buildVChannelMetaPathOfVChannel(pchannelName, info.GetVchannel())
+	key := buildVChannelKey(pchannelName, info.GetVchannel())
 	if info.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
 		// Dropped vchannel should be removed from meta
 		for _, schema := range info.GetCollectionInfo().GetSchemas() {
 			// Also remove the schema of the vchannel.
-			removes = append(removes, buildVChannelSchemaPath(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick()))
+			removes = append(removes, buildVChannelSchemaKey(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick()))
 		}
 		removes = append(removes, key)
 		return removes, kvs, nil
@@ -168,13 +168,13 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 		switch schema.State {
 		case streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED:
 			// Dropped schema should be removed from meta
-			removes = append(removes, buildVChannelSchemaPath(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick()))
+			removes = append(removes, buildVChannelSchemaKey(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick()))
 		default:
 			data, err := proto.Marshal(schema)
 			if err != nil {
 				return nil, nil, errors.Wrapf(err, "marshal schema %d at pchannel %s failed", schema.GetCheckpointTimeTick(), pchannelName)
 			}
-			kvs[buildVChannelSchemaPath(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick())] = string(data)
+			kvs[buildVChannelSchemaKey(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick())] = string(data)
 		}
 	}
 	// Schema is saved in the other key, so we don't need to save it in the vchannel meta.
@@ -192,7 +192,7 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 
 // ListSegmentAssignment lists the segment assignment info of the pchannel.
 func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error) {
-	prefix := buildSegmentAssignmentMetaPath(pChannelName)
+	prefix := buildSegmentAssignmentPrefix(pChannelName)
 	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
@@ -214,7 +214,7 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 	kvs := make(map[string]string, len(infos))
 	removes := make([]string, 0)
 	for _, info := range infos {
-		key := buildSegmentAssignmentMetaPathOfSegment(pChannelName, info.GetSegmentId())
+		key := buildSegmentAssignmentKey(pChannelName, info.GetSegmentId())
 		if info.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
 			// Flushed segment should be removed from meta
 			removes = append(removes, key)
@@ -247,7 +247,7 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 
 // GetConsumeCheckpoint gets the consuming checkpoint of the wal.
 func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string) (*streamingpb.WALCheckpoint, error) {
-	key := buildConsumeCheckpointPath(pchannelName)
+	key := buildConsumeCheckpointKey(pchannelName)
 	value, err := c.metaKV.Load(ctx, key)
 	if errors.Is(err, merr.ErrIoKeyNotFound) {
 		return nil, nil
@@ -264,7 +264,7 @@ func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string)
 
 // SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
 func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string, checkpoint *streamingpb.WALCheckpoint) error {
-	key := buildConsumeCheckpointPath(pchannelName)
+	key := buildConsumeCheckpointKey(pchannelName)
 	value, err := proto.Marshal(checkpoint)
 	if err != nil {
 		return err
@@ -272,9 +272,72 @@ func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string
 	return c.metaKV.Save(ctx, key, string(value))
 }
 
-// buildVChannelMetaPath builds the path for vchannel meta
-func buildVChannelMetaPath(pChannelName string) string {
-	return path.Join(buildWALDirectory(pChannelName), DirectoryVChannel) + "/"
+// SaveSalvageCheckpoint saves the salvage checkpoint, keyed by the source cluster ID.
+// Multiple salvage checkpoints can exist for a channel (one per source cluster).
+func (c *catalog) SaveSalvageCheckpoint(ctx context.Context, pchannelName string, checkpoint *commonpb.ReplicateCheckpoint) error {
+	key := buildSalvageCheckpointPath(pchannelName, checkpoint.GetClusterId())
+	value, err := proto.Marshal(checkpoint)
+	if err != nil {
+		return err
+	}
+	return c.metaKV.Save(ctx, key, string(value))
+}
+
+// GetSalvageCheckpoint gets all salvage checkpoints for a channel (one per source cluster).
+func (c *catalog) GetSalvageCheckpoint(ctx context.Context, pchannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
+	prefix := buildSalvageCheckpointPrefix(pchannelName)
+	_, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	checkpoints := make([]*commonpb.ReplicateCheckpoint, 0, len(values))
+	for _, value := range values {
+		val := &commonpb.ReplicateCheckpoint{}
+		if err = proto.Unmarshal([]byte(value), val); err != nil {
+			return nil, err
+		}
+		checkpoints = append(checkpoints, val)
+	}
+	return checkpoints, nil
+}
+
+// Prefix functions: return paths ending with "/" for LoadWithPrefix queries.
+
+// buildWALPrefix returns the prefix for all WAL metadata under a pchannel.
+func buildWALPrefix(pchannelName string) string {
+	return MetaPrefix + "/" + DirectoryWAL + "/" + pchannelName + "/"
+}
+
+// buildVChannelPrefix returns the prefix for all vchannel metadata under a pchannel.
+func buildVChannelPrefix(pChannelName string) string {
+	return buildWALPrefix(pChannelName) + DirectoryVChannel + "/"
+}
+
+// buildSegmentAssignmentPrefix returns the prefix for all segment assignment metadata under a pchannel.
+func buildSegmentAssignmentPrefix(pChannelName string) string {
+	return buildWALPrefix(pChannelName) + DirectorySegmentAssign + "/"
+}
+
+// Key functions: return exact keys for individual records.
+
+// buildVChannelKey returns the key for a specific vchannel's metadata.
+func buildVChannelKey(pChannelName string, vchannelName string) string {
+	return buildVChannelPrefix(pChannelName) + vchannelName
+}
+
+// buildVChannelSchemaKey returns the key for a specific vchannel schema version.
+func buildVChannelSchemaKey(pChannelName string, vchannelName string, version uint64) string {
+	return buildVChannelKey(pChannelName, vchannelName) + "/" + DirectorySchema + "/" + strconv.FormatUint(version, 10)
+}
+
+// buildSegmentAssignmentKey returns the key for a specific segment assignment.
+func buildSegmentAssignmentKey(pChannelName string, segmentID int64) string {
+	return buildSegmentAssignmentPrefix(pChannelName) + strconv.FormatInt(segmentID, 10)
+}
+
+// buildConsumeCheckpointKey returns the key for the consume checkpoint of a pchannel.
+func buildConsumeCheckpointKey(pchannelName string) string {
+	return buildWALPrefix(pchannelName) + KeyConsumeCheckpoint
 }
 
 // removePrefix removes the prefix from the keys.
@@ -285,32 +348,12 @@ func removePrefix(prefix string, keys []string) []string {
 	return keys
 }
 
-// buildVChannelMetaPathOfVChannel builds the path for vchannel meta
-func buildVChannelMetaPathOfVChannel(pChannelName string, vchannelName string) string {
-	return path.Join(buildVChannelMetaPath(pChannelName), vchannelName)
+// buildSalvageCheckpointPrefix builds the prefix for all salvage checkpoints under a pchannel.
+func buildSalvageCheckpointPrefix(pchannelName string) string {
+	return buildWALPrefix(pchannelName) + KeySalvageCheckpoint + "/"
 }
 
-// buildVChannelSchemaPath builds the path for vchannel schema
-func buildVChannelSchemaPath(pChannelName string, vchannelName string, version uint64) string {
-	return path.Join(buildVChannelMetaPathOfVChannel(pChannelName, vchannelName), DirectorySchema, strconv.FormatUint(version, 10))
-}
-
-// buildSegmentAssignmentMetaPath builds the path for segment assignment
-func buildSegmentAssignmentMetaPath(pChannelName string) string {
-	return path.Join(buildWALDirectory(pChannelName), DirectorySegmentAssign) + "/"
-}
-
-// buildSegmentAssignmentMetaPathOfSegment builds the path for segment assignment
-func buildSegmentAssignmentMetaPathOfSegment(pChannelName string, segmentID int64) string {
-	return path.Join(buildWALDirectory(pChannelName), DirectorySegmentAssign, strconv.FormatInt(segmentID, 10))
-}
-
-// buildConsumeCheckpointPath builds the path for consume checkpoint
-func buildConsumeCheckpointPath(pchannelName string) string {
-	return path.Join(buildWALDirectory(pchannelName), KeyConsumeCheckpoint)
-}
-
-// buildWALDirectory builds the path for wal directory
-func buildWALDirectory(pchannelName string) string {
-	return path.Join(MetaPrefix, DirectoryWAL, pchannelName) + "/"
+// buildSalvageCheckpointPath builds the path for salvage checkpoint for a specific source cluster.
+func buildSalvageCheckpointPath(pchannelName, sourceClusterID string) string {
+	return buildSalvageCheckpointPrefix(pchannelName) + sourceClusterID
 }

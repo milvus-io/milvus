@@ -23,20 +23,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	mock1 "github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var mockErr = errors.New("mock grpc err")
@@ -186,6 +188,10 @@ func Test_NewClient(t *testing.T) {
 		}
 		{
 			r, err := client.CreateRole(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.AlterRole(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
 		{
@@ -565,6 +571,10 @@ func Test_NewClient(t *testing.T) {
 		retCheck(rTimeout, err)
 	}
 	{
+		rTimeout, err := client.AlterRole(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
 		rTimeout, err := client.DropRole(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
@@ -630,6 +640,9 @@ func Test_Flush(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -661,9 +674,8 @@ func Test_Flush(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.Flush(ctx, &datapb.FlushRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -685,6 +697,9 @@ func Test_GetSegmentStates(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -715,9 +730,8 @@ func Test_GetSegmentStates(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentStates(ctx, &datapb.GetSegmentStatesRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -739,6 +753,9 @@ func Test_GetInsertBinlogPaths(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -769,9 +786,8 @@ func Test_GetInsertBinlogPaths(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetInsertBinlogPaths(ctx, &datapb.GetInsertBinlogPathsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -793,6 +809,9 @@ func Test_GetCollectionStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -823,9 +842,8 @@ func Test_GetCollectionStatistics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetCollectionStatistics(ctx, &datapb.GetCollectionStatisticsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -847,6 +865,9 @@ func Test_GetPartitionStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -877,9 +898,8 @@ func Test_GetPartitionStatistics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetPartitionStatistics(ctx, &datapb.GetPartitionStatisticsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -901,6 +921,9 @@ func Test_GetSegmentInfo(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -932,9 +955,8 @@ func Test_GetSegmentInfo(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -956,6 +978,9 @@ func Test_SaveBinlogPaths(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -987,9 +1012,8 @@ func Test_SaveBinlogPaths(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1011,6 +1035,9 @@ func Test_GetRecoveryInfo(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1042,9 +1069,8 @@ func Test_GetRecoveryInfo(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetRecoveryInfo(ctx, &datapb.GetRecoveryInfoRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1065,6 +1091,9 @@ func Test_GetRecoveryInfoV2(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1096,9 +1125,8 @@ func Test_GetRecoveryInfoV2(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetRecoveryInfoV2(ctx, &datapb.GetRecoveryInfoRequestV2{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1120,6 +1148,9 @@ func Test_GetFlushedSegments(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1151,9 +1182,8 @@ func Test_GetFlushedSegments(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1175,6 +1205,9 @@ func Test_GetSegmentsByStates(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1206,9 +1239,8 @@ func Test_GetSegmentsByStates(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1229,6 +1261,9 @@ func Test_ManualCompaction(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1260,9 +1295,8 @@ func Test_ManualCompaction(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1283,6 +1317,9 @@ func Test_GetCompactionState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1314,9 +1351,8 @@ func Test_GetCompactionState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1337,6 +1373,9 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1368,9 +1407,8 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1391,6 +1429,9 @@ func Test_WatchChannels(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1422,9 +1463,8 @@ func Test_WatchChannels(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.WatchChannels(ctx, &datapb.WatchChannelsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1445,6 +1485,9 @@ func Test_GetFlushState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1476,9 +1519,8 @@ func Test_GetFlushState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetFlushState(ctx, &datapb.GetFlushStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1499,6 +1541,9 @@ func Test_GetFlushAllState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1530,9 +1575,8 @@ func Test_GetFlushAllState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1554,6 +1598,9 @@ func Test_DropVirtualChannel(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1585,9 +1632,8 @@ func Test_DropVirtualChannel(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1609,6 +1655,9 @@ func Test_SetSegmentState(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1640,9 +1689,8 @@ func Test_SetSegmentState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.SetSegmentState(ctx, &datapb.SetSegmentStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1664,6 +1712,9 @@ func Test_UpdateSegmentStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1689,9 +1740,8 @@ func Test_UpdateSegmentStatistics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.UpdateSegmentStatistics(ctx, &datapb.UpdateSegmentStatisticsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1713,6 +1763,9 @@ func Test_UpdateChannelCheckpoint(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1738,9 +1791,8 @@ func Test_UpdateChannelCheckpoint(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.UpdateChannelCheckpoint(ctx, &datapb.UpdateChannelCheckpointRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1762,6 +1814,9 @@ func Test_MarkSegmentsDropped(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1788,9 +1843,8 @@ func Test_MarkSegmentsDropped(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.MarkSegmentsDropped(ctx, &datapb.MarkSegmentsDroppedRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1811,6 +1865,9 @@ func Test_BroadcastAlteredCollection(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1837,9 +1894,8 @@ func Test_BroadcastAlteredCollection(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1860,6 +1916,9 @@ func Test_GcConfirm(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1887,9 +1946,8 @@ func Test_GcConfirm(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GcConfirm(ctx, &datapb.GcConfirmRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1910,6 +1968,9 @@ func Test_CreateIndex(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1942,9 +2003,8 @@ func Test_CreateIndex(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1965,6 +2025,9 @@ func Test_GetSegmentIndexState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2001,9 +2064,8 @@ func Test_GetSegmentIndexState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2024,6 +2086,9 @@ func Test_GetIndexState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2059,9 +2124,8 @@ func Test_GetIndexState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetIndexState(ctx, &indexpb.GetIndexStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2082,6 +2146,9 @@ func Test_GetIndexInfos(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2118,9 +2185,8 @@ func Test_GetIndexInfos(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2141,6 +2207,9 @@ func Test_DescribeIndex(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2177,9 +2246,8 @@ func Test_DescribeIndex(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2200,6 +2268,9 @@ func Test_GetIndexStatistics(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2236,9 +2307,8 @@ func Test_GetIndexStatistics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2259,6 +2329,9 @@ func Test_GetIndexBuildProgress(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2295,9 +2368,8 @@ func Test_GetIndexBuildProgress(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2318,6 +2390,9 @@ func Test_DropIndex(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2351,9 +2426,8 @@ func Test_DropIndex(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.DropIndex(ctx, &indexpb.DropIndexRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2374,6 +2448,9 @@ func Test_ReportDataNodeTtMsgs(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2400,9 +2477,8 @@ func Test_ReportDataNodeTtMsgs(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2423,6 +2499,9 @@ func Test_GcControl(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2449,9 +2528,8 @@ func Test_GcControl(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GcControl(ctx, &datapb.GcControlRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2472,6 +2550,9 @@ func Test_ListIndexes(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2523,6 +2604,9 @@ func Test_GetChannelRecoveryInfo(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2574,6 +2658,9 @@ func Test_GetQuotaMetrics(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
@@ -2607,6 +2694,9 @@ func Test_FlushAll(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2638,9 +2728,8 @@ func Test_FlushAll(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2662,6 +2751,9 @@ func TestClient_TruncateCollection(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2693,9 +2785,8 @@ func TestClient_TruncateCollection(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2715,6 +2806,9 @@ func TestClient_GetRestoreSnapshotState(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2753,9 +2847,8 @@ func TestClient_GetRestoreSnapshotState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2775,6 +2868,9 @@ func TestClient_ListRestoreSnapshotJobs(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2811,9 +2907,262 @@ func TestClient_ListRestoreSnapshotJobs(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestClient_BatchUpdateManifest(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().BatchUpdateManifest(mock1.Anything, mock1.Anything).Return(merr.Success(), nil)
+	resp, err := client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+		CollectionId: 100,
+		Items: []*datapb.BatchUpdateManifestItem{
+			{SegmentId: 1, ManifestVersion: 10},
+		},
+	})
+	assert.Nil(t, err)
+	assert.True(t, merr.Ok(resp))
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().BatchUpdateManifest(mock1.Anything, mock1.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+
+	rsp, err := client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+		CollectionId: 100,
+		Items: []*datapb.BatchUpdateManifestItem{
+			{SegmentId: 1, ManifestVersion: 10},
+		},
+	})
+	assert.NotEqual(t, int32(0), rsp.GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().BatchUpdateManifest(mock1.Anything, mock1.Anything).Return(merr.Success(), mockErr)
+
+	_, err = client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+		CollectionId: 100,
+		Items: []*datapb.BatchUpdateManifestItem{
+			{SegmentId: 1, ManifestVersion: 10},
+		},
+	})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	_, err = client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func Test_RefreshExternalCollection(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	config := &Params.RootCoordGrpcClientCfg
+	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
+	client.(*Client).grpcClient = grpcClient
+	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
+		Return(nil).Build()
+	defer mockClose.UnPatch()
+	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
+		Return(1).Build()
+	defer mockGetNodeID.UnPatch()
+
+	mockMix := MixCoordClient{
+		DataCoordClient: datapb.NewDataCoordClient(nil),
+	}
+
+	req := &datapb.RefreshExternalCollectionRequest{
+		CollectionId:   1001,
+		CollectionName: "test_collection",
+	}
+
+	// Test success case
+	mockRefresh := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "RefreshExternalCollection")).
+		Return(&datapb.RefreshExternalCollectionResponse{
+			Status: merr.Success(),
+			JobId:  54321,
+		}, nil).Build()
+
+	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+
+	resp, err := client.RefreshExternalCollection(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(54321), resp.GetJobId())
+	mockRefresh.UnPatch()
+	mockReCall.UnPatch()
+
+	// Test error case
+	mockRefreshErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "RefreshExternalCollection")).
+		Return(nil, mockErr).Build()
+	defer mockRefreshErr.UnPatch()
+
+	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+	defer mockReCall.UnPatch()
+
+	_, err = client.RefreshExternalCollection(ctx, req)
+	assert.NotNil(t, err)
+}
+
+func Test_GetRefreshExternalCollectionProgress(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	config := &Params.RootCoordGrpcClientCfg
+	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
+	client.(*Client).grpcClient = grpcClient
+	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
+		Return(nil).Build()
+	defer mockClose.UnPatch()
+	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
+		Return(1).Build()
+	defer mockGetNodeID.UnPatch()
+
+	mockMix := MixCoordClient{
+		DataCoordClient: datapb.NewDataCoordClient(nil),
+	}
+
+	req := &datapb.GetRefreshExternalCollectionProgressRequest{
+		JobId: 54321,
+	}
+
+	// Test success case
+	mockProgress := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "GetRefreshExternalCollectionProgress")).
+		Return(&datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Success(),
+			JobInfo: &datapb.ExternalCollectionRefreshJob{
+				JobId:    54321,
+				Progress: 50,
+			},
+		}, nil).Build()
+
+	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+
+	resp, err := client.GetRefreshExternalCollectionProgress(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(54321), resp.GetJobInfo().GetJobId())
+	mockProgress.UnPatch()
+	mockReCall.UnPatch()
+
+	// Test error case
+	mockProgressErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "GetRefreshExternalCollectionProgress")).
+		Return(nil, mockErr).Build()
+	defer mockProgressErr.UnPatch()
+
+	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+	defer mockReCall.UnPatch()
+
+	_, err = client.GetRefreshExternalCollectionProgress(ctx, req)
+	assert.NotNil(t, err)
+}
+
+func Test_ListRefreshExternalCollectionJobs(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	config := &Params.RootCoordGrpcClientCfg
+	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
+	client.(*Client).grpcClient = grpcClient
+	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
+		Return(nil).Build()
+	defer mockClose.UnPatch()
+	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
+		Return(1).Build()
+	defer mockGetNodeID.UnPatch()
+
+	mockMix := MixCoordClient{
+		DataCoordClient: datapb.NewDataCoordClient(nil),
+	}
+
+	req := &datapb.ListRefreshExternalCollectionJobsRequest{
+		CollectionId: 1001,
+	}
+
+	// Test success case
+	mockList := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "ListRefreshExternalCollectionJobs")).
+		Return(&datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Success(),
+			Jobs: []*datapb.ExternalCollectionRefreshJob{
+				{
+					JobId:    54321,
+					Progress: 100,
+				},
+			},
+		}, nil).Build()
+
+	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+
+	resp, err := client.ListRefreshExternalCollectionJobs(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(resp.GetJobs()))
+	mockList.UnPatch()
+	mockReCall.UnPatch()
+
+	// Test error case
+	mockListErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "ListRefreshExternalCollectionJobs")).
+		Return(nil, mockErr).Build()
+	defer mockListErr.UnPatch()
+
+	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+	defer mockReCall.UnPatch()
+
+	_, err = client.ListRefreshExternalCollectionJobs(ctx, req)
+	assert.NotNil(t, err)
 }

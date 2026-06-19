@@ -19,28 +19,25 @@ package replicatestream
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/cdc/util"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-)
-
-const (
-	// TODO: sheep, make these parameters configurable
-	pendingMessageQueueLength  = 128
-	pendingMessageQueueMaxSize = 128 * 1024 * 1024
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var ErrReplicationRemoved = errors.New("replication removed")
@@ -65,8 +62,8 @@ func NewReplicateStreamClient(ctx context.Context, c cluster.MilvusClient, chann
 	ctx1 = contextutil.WithClusterID(ctx1, channel.Value.GetTargetCluster().GetClusterId())
 
 	options := MsgQueueOptions{
-		Capacity: pendingMessageQueueLength,
-		MaxSize:  pendingMessageQueueMaxSize,
+		Capacity: paramtable.Get().StreamingCfg.ReplicationPendingMessagesQueueLength.GetAsInt(),
+		MaxSize:  paramtable.Get().StreamingCfg.ReplicationPendingMessagesQueueMaxSize.GetAsInt(),
 	}
 	pendingMessages := NewMsgQueue(options)
 	rs := &replicateStreamClient{
@@ -155,6 +152,12 @@ func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needR
 	} else if errors.Is(chErr, ErrReplicationRemoved) {
 		logger.Info("close replicate stream client due to replication removed")
 		return false
+	} else if isStreamIdleTimeout(chErr) {
+		// Stream idle timeout is expected when no data is being replicated on the source channel.
+		// See isStreamIdleTimeout for details.
+		logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(chErr))
+		r.metrics.OnDisconnect()
+		return true
 	} else {
 		logger.Warn("restart replicate stream client due to unexpected error", zap.Error(chErr))
 		r.metrics.OnDisconnect()
@@ -284,7 +287,11 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	defer func() {
 		if err != nil && !errors.Is(err, ErrReplicationRemoved) {
-			logger.Warn("recv loop closed by unexpected error", zap.Error(err))
+			if isStreamIdleTimeout(err) {
+				logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(err))
+			} else {
+				logger.Warn("recv loop closed by unexpected error", zap.Error(err))
+			}
 		} else {
 			logger.Info("recv loop closed", zap.Error(err))
 		}
@@ -296,7 +303,11 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 		default:
 			resp, err := r.client.Recv()
 			if err != nil {
-				logger.Warn("replicate stream recv failed", zap.Error(err))
+				if isStreamIdleTimeout(err) {
+					logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(err))
+				} else {
+					logger.Warn("replicate stream recv failed", zap.Error(err))
+				}
 				return err
 			}
 			lastConfirmedMessageInfo := resp.GetReplicateConfirmedMessageInfo()
@@ -320,6 +331,14 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.ImmutableMessage) (replicationRemoved bool) {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	logger.Info("handle AlterReplicateConfigMessage", log.FieldMessage(msg))
+
+	// Check ignore field - if true, skip processing
+	// This is used for incomplete switchover messages that should be ignored after force promote
+	alterMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
+	if alterMsg.Header().Ignore {
+		logger.Info("AlterReplicateConfig message has ignore flag set, skipping processing")
+		return false
+	}
 
 	replicationRemoved = util.IsReplicationRemovedByAlterReplicateConfigMessage(msg, r.channel.Value)
 	if replicationRemoved {
@@ -356,4 +375,18 @@ func (r *replicateStreamClient) BlockUntilFinish() {
 func (r *replicateStreamClient) Close() {
 	r.cancel()
 	<-r.finishedCh
+}
+
+// isStreamIdleTimeout checks if the error is a gRPC "stream timeout" error.
+// This is typically caused by envoy sidecar's stream_idle_timeout (default 5m):
+// when no application-level DATA frames flow on a gRPC bidirectional stream,
+// envoy considers the stream idle and terminates it, even though gRPC transport-level
+// keepalive pings are still active (PING frames don't reset stream_idle_timeout).
+// This is expected when no data is being replicated on the source channel.
+func isStreamIdleTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	s, ok := status.FromError(err)
+	return ok && s.Code() == codes.Unknown && strings.Contains(s.Message(), "stream timeout")
 }

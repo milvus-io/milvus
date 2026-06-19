@@ -29,9 +29,9 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -600,5 +600,23 @@ func TestHandlers(t *testing.T) {
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 		})
+	}
+}
+
+func TestLowLevelSearchRejectSearchAggregation(t *testing.T) {
+	h := NewHandlers(&mockProxyComponent{})
+	testEngine := gin.New()
+	h.RegisterRoutesTo(testEngine)
+
+	for _, body := range [][]byte{
+		[]byte(`{"collection_name":"book","searchAggregation":{"fields":["brand"],"size":1}}`),
+		[]byte(`{"collection_name":"book","search_aggregation":{"fields":["brand"],"size":1}}`),
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/search", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "searchAggregation is not supported for low-level REST search")
 	}
 }

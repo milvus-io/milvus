@@ -269,4 +269,9 @@ struct TagDispatchTrait<std::string> {
     using Tag = StringTag;
 };
 
+template <>
+struct TagDispatchTrait<std::string_view> {
+    using Tag = StringTag;
+};
+
 }  // namespace milvus

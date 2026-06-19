@@ -9,10 +9,12 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // NewMutableMessageBeforeAppend creates a new mutable message.
@@ -68,7 +70,7 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) (Replic
 	messageID := MustUnmarshalMessageID(im.GetId())
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties()).(*immutableMessageImpl)
 	if msg.ReplicateHeader() != nil {
-		return nil, errors.New("message is already a replicate message")
+		return nil, merr.WrapErrParameterInvalidMsg("message is already a replicate message")
 	}
 
 	m := &messageImpl{
@@ -179,6 +181,7 @@ func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
 }
 
 // WithBroadcast creates a new builder with broadcast property.
+// !!! This method should only be called from coordinator side.
 func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, opts ...OptBuildBroadcast) *mutableMesasgeBuilder[H, B] {
 	if len(vchannels) < 1 {
 		panic("broadcast message must have at least one vchannel")
@@ -202,6 +205,41 @@ func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, opts ...
 		panic("failed to encode vchannels")
 	}
 	b.properties.Set(messageBroadcastHeader, bh)
+	return b
+}
+
+// WithClusterLevelBroadcast creates a new builder with cluster-level broadcast property.
+// It builds the broadcast channel list from cc by substituting the control channel
+// for the pchannel it resides on, marks the message as pchannel-level.
+// Panics if cc.Channels is empty or cc.ControlChannel does not belong to any pchannel.
+// !!! This method should only be called from coordinator side.
+func (b *mutableMesasgeBuilder[H, B]) WithClusterLevelBroadcast(cc ClusterChannels, opts ...OptBuildBroadcast) *mutableMesasgeBuilder[H, B] {
+	if len(cc.Channels) == 0 {
+		panic("ClusterChannels.Channels must not be empty")
+	}
+	if cc.ControlChannel == "" {
+		panic("ClusterChannels.ControlChannel must not be empty")
+	}
+
+	found := false
+	broadcastChannels := make([]string, 0, len(cc.Channels))
+	for _, ch := range cc.Channels {
+		if funcutil.IsOnPhysicalChannel(cc.ControlChannel, ch) {
+			broadcastChannels = append(broadcastChannels, cc.ControlChannel)
+			found = true
+		} else {
+			if !funcutil.IsPhysicalChannel(ch) {
+				panic(fmt.Sprintf("ClusterChannels.Channels contains non-pchannel %q", ch))
+			}
+			broadcastChannels = append(broadcastChannels, ch)
+		}
+	}
+	if !found {
+		panic(fmt.Sprintf("ClusterChannels.ControlChannel %q does not reside on any pchannel in %v", cc.ControlChannel, cc.Channels))
+	}
+
+	b.WithBroadcast(broadcastChannels, opts...)
+	b.properties.Set(messagePChannelLevel, "")
 	return b
 }
 

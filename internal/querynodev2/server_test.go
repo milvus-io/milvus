@@ -19,28 +19,32 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"gopkg.in/yaml.v3"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/mocks/util/searchutil/mock_optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type QueryNodeSuite struct {
@@ -110,7 +114,6 @@ func (suite *QueryNodeSuite) TestBasic() {
 	suite.True(suite.node.lifetime.GetState() == commonpb.StateCode_Healthy)
 
 	// register node to etcd
-	suite.node.session.TriggerKill = false
 	err = suite.node.Register()
 	suite.NoError(err)
 
@@ -163,9 +166,14 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	suite.node.queryHook = mockHook
 	suite.node.handleQueryHookEvent()
 
-	yamlWriter := viper.New()
-	yamlWriter.SetConfigFile("../../configs/milvus.yaml")
-	yamlWriter.ReadInConfig()
+	configPath := "../../configs/milvus.yaml"
+	origConfig, err := os.ReadFile(configPath)
+	suite.Require().NoError(err)
+	suite.T().Cleanup(func() {
+		os.WriteFile(configPath, origConfig, 0o600) //nolint:gosec // configPath is a hardcoded test path
+	})
+
+	yamlWriter := newYamlConfigWriter(configPath)
 	var x1, x2, x3 int32
 	suite.Equal(atomic.LoadInt32(&x1), int32(0))
 	suite.Equal(atomic.LoadInt32(&x2), int32(0))
@@ -176,8 +184,8 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	}).Return(nil)
 
 	// create tuning conf
-	yamlWriter.Set("autoIndex.params.tuning.1238", "xxxx")
-	yamlWriter.WriteConfig()
+	yamlWriter.set("autoIndex.params.tuning.1238", "xxxx")
+	yamlWriter.writeConfig()
 	suite.Eventually(func() bool {
 		return atomic.LoadInt32(&x1) == int32(6)
 	}, 20*time.Second, time.Second)
@@ -185,19 +193,19 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	mockHook.EXPECT().Init(mock.Anything).Run(func(params string) {
 		atomic.StoreInt32(&x2, 5)
 	}).Return(nil)
-	yamlWriter.Set("autoIndex.params.search", "aaaa")
-	yamlWriter.WriteConfig()
+	yamlWriter.set("autoIndex.params.search", "aaaa")
+	yamlWriter.writeConfig()
 	suite.Eventually(func() bool {
 		return atomic.LoadInt32(&x2) == int32(5)
 	}, 20*time.Second, time.Second)
-	yamlWriter.Set("autoIndex.params.search", "")
-	yamlWriter.WriteConfig()
+	yamlWriter.set("autoIndex.params.search", "")
+	yamlWriter.writeConfig()
 
 	atomic.StoreInt32(&x1, 0)
 	suite.Equal(atomic.LoadInt32(&x1), int32(0))
 	// update tuning conf
-	yamlWriter.Set("autoIndex.params.tuning.1238", "yyyy")
-	yamlWriter.WriteConfig()
+	yamlWriter.set("autoIndex.params.tuning.1238", "yyyy")
+	yamlWriter.writeConfig()
 	suite.Eventually(func() bool {
 		return atomic.LoadInt32(&x1) == int32(6)
 	}, 20*time.Second, time.Second)
@@ -207,8 +215,8 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	}).Return(nil)
 
 	// delete tuning conf
-	yamlWriter.Set("autoIndex.params.tuning", "")
-	yamlWriter.WriteConfig()
+	yamlWriter.set("autoIndex.params.tuning", "")
+	yamlWriter.writeConfig()
 	suite.Eventually(func() bool {
 		return atomic.LoadInt32(&x3) == int32(7)
 	}, 20*time.Second, time.Second)
@@ -245,6 +253,101 @@ func (suite *QueryNodeSuite) TestStop() {
 	suite.True(suite.node.manager.Segment.Empty())
 }
 
+func TestResizeThreadPools(t *testing.T) {
+	paramtable.Init()
+
+	// not updated event should be no-op
+	evt := &config.Event{HasUpdated: false}
+	assert.NotPanics(t, func() { ResizeHighPriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeMiddlePriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeLowPriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeAllPools(evt) })
+
+	// updated event should resize without panic
+	evt = &config.Event{HasUpdated: true}
+	assert.NotPanics(t, func() { ResizeHighPriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeMiddlePriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeLowPriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeAllPools(evt) })
+}
+
+func TestRegisterSegcoreConfigWatcher(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	node := &QueryNode{}
+
+	assert.NotPanics(t, func() { node.RegisterSegcoreConfigWatcher() })
+
+	// verify watchers are triggered by saving config values
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key, "10")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, "5")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, "1")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576")
+	})
+}
+
 func TestQueryNode(t *testing.T) {
 	suite.Run(t, new(QueryNodeSuite))
+}
+
+// yamlConfigWriter is a minimal viper replacement for test config manipulation.
+type yamlConfigWriter struct {
+	path string
+	data map[string]interface{}
+}
+
+func newYamlConfigWriter(path string) *yamlConfigWriter {
+	w := &yamlConfigWriter{path: path}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	w.data = make(map[string]interface{})
+	if err := yaml.Unmarshal(raw, &w.data); err != nil {
+		panic(err)
+	}
+	return w
+}
+
+func (w *yamlConfigWriter) set(key string, value interface{}) {
+	parts := strings.Split(key, ".")
+	m := w.data
+	for _, p := range parts[:len(parts)-1] {
+		child, ok := m[p]
+		if !ok {
+			child = make(map[string]interface{})
+			m[p] = child
+		}
+		if cm, ok := child.(map[string]interface{}); ok {
+			m = cm
+		} else {
+			nm := make(map[string]interface{})
+			m[p] = nm
+			m = nm
+		}
+	}
+	m[parts[len(parts)-1]] = value
+}
+
+func (w *yamlConfigWriter) writeConfig() {
+	out, err := yaml.Marshal(w.data)
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(w.path, out, 0o600); err != nil {
+		panic(err)
+	}
 }

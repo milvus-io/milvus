@@ -25,6 +25,7 @@
 #include "common/FieldMeta.h"
 #include "common/QueryInfo.h"
 #include "common/RangeSearchHelper.h"
+#include "common/FastMem.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -135,6 +136,7 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         // ditto
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            query_ds.query_offsets);
+        query_dataset->Set(knowhere::meta::NQ, query_ds.num_queries);
 
         query_dataset->SetRows(query_ds.query_offsets[query_ds.num_queries]);
     }
@@ -180,10 +182,6 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     }
 
     if (search_cfg.contains(RADIUS)) {
-        AssertInfo(data_type != DataType::VECTOR_ARRAY,
-                   "Vector array(embedding list) is not supported for range "
-                   "search");
-
         if (search_cfg.contains(RANGE_FILTER)) {
             CheckRangeSearchParam(search_cfg[RADIUS],
                                   search_cfg[RANGE_FILTER],
@@ -225,9 +223,14 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         auto result =
             ReGenRangeSearchResult(res.value(), topk, nq, query_ds.metric_type);
         milvus::tracer::AddEvent("ReGenRangeSearchResult");
-        std::copy_n(GetDatasetIDs(result), nq * topk, sub_result.get_offsets());
-        std::copy_n(
-            GetDatasetDistance(result), nq * topk, sub_result.get_distances());
+        milvus::fastmem::FastMemcpy(
+            sub_result.get_offsets(),
+            GetDatasetIDs(result),
+            nq * topk * sizeof(*sub_result.get_offsets()));
+        milvus::fastmem::FastMemcpy(
+            sub_result.get_distances(),
+            GetDatasetDistance(result),
+            nq * topk * sizeof(*sub_result.get_distances()));
     } else {
         knowhere::Status stat;
         if (data_type == DataType::VECTOR_FLOAT) {
@@ -292,7 +295,8 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
             ThrowInfo(KnowhereError,
-                      "Brute force search fail: " + KnowhereStatusString(stat));
+                      "Brute force search fail: {}",
+                      KnowhereStatusString(stat));
         }
     }
     sub_result.round_values();
@@ -311,23 +315,23 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
             return knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_FLOAT16:
             return knowhere::BruteForce::AnnIterator<float16>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_BFLOAT16:
             return knowhere::BruteForce::AnnIterator<bfloat16>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_SPARSE_U32_F32:
             return knowhere::BruteForce::AnnIterator<
                 knowhere::sparse::SparseRow<SparseValueType>>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_INT8:
             return knowhere::BruteForce::AnnIterator<int8>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_BINARY:
             return knowhere::BruteForce::AnnIterator<bin1>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         default:
             ThrowInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force iterator:{}",
@@ -343,7 +347,6 @@ GetBruteForceSearchIterators(
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
     DataType data_type) {
-    auto nq = query_ds.num_queries;
     auto [query_dataset, base_dataset] =
         PrepareBFDataSet(query_ds, raw_ds, data_type);
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);
@@ -363,17 +366,18 @@ PackBruteForceSearchIteratorsIntoSubResult(
     auto iterators_val = GetBruteForceSearchIterators(
         query_ds, raw_ds, search_info, index_info, bitset, data_type);
     if (iterators_val.has_value()) {
+        auto& iterators = iterators_val.value();
         AssertInfo(
-            iterators_val.value().size() == nq,
+            iterators.size() == nq,
             "Wrong state, initialized knowhere_iterators count:{} is not "
             "equal to nq:{} for single chunk",
-            iterators_val.value().size(),
+            iterators.size(),
             nq);
         return SubSearchResult(query_ds.num_queries,
                                query_ds.topk,
                                query_ds.metric_type,
                                query_ds.round_decimal,
-                               iterators_val.value());
+                               iterators);
     } else {
         LOG_ERROR(
             "Failed to get valid knowhere brute-force-iterators from chunk, "

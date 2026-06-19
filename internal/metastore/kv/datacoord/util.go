@@ -24,11 +24,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func ValidateSegment(segment *datapb.SegmentInfo) error {
@@ -46,7 +47,7 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 				zap.Any("binlogs", segment.GetBinlogs()),
 				zap.Any("stats", segment.GetBinlogs()),
 			)
-			return fmt.Errorf("segment can not be saved because of L0 segment get more than delta logs: collection %v, segment %v",
+			return merr.WrapErrServiceInternalMsg("segment can not be saved because of L0 segment get more than delta logs: collection %v, segment %v",
 				segment.GetCollectionID(), segment.GetID())
 		}
 		return nil
@@ -62,7 +63,7 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 			zap.Any("binlogs", segment.GetBinlogs()),
 			zap.Any("stats", segment.GetBinlogs()),
 		)
-		return fmt.Errorf("segment can not be saved because of binlog file or stat log file lack: collection %v, segment %v",
+		return merr.WrapErrServiceInternalMsg("segment can not be saved because of binlog file or stat log file lack: collection %v, segment %v",
 			segment.GetCollectionID(), segment.GetID())
 	}
 
@@ -76,7 +77,7 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 			zap.Any("binlogs", segment.GetBinlogs()),
 			zap.Any("stats", segment.GetStatslogs()),
 		)
-		return fmt.Errorf("segment can not be saved because of binlog file not match stat log number: collection %v, segment %v",
+		return merr.WrapErrServiceInternalMsg("segment can not be saved because of binlog file not match stat log number: collection %v, segment %v",
 			segment.GetCollectionID(), segment.GetID())
 	}
 
@@ -147,10 +148,10 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 	checkLogID := func(fieldBinlog *datapb.FieldBinlog) error {
 		for _, binlog := range fieldBinlog.GetBinlogs() {
 			if binlog.GetLogID() == 0 {
-				return fmt.Errorf("invalid log id, binlog:%v", binlog)
+				return merr.WrapErrServiceInternalMsg("invalid log id, binlog:%v", binlog)
 			}
 			if binlog.GetLogPath() != "" {
-				return fmt.Errorf("fieldBinlog no need to store logpath, binlog:%v", binlog)
+				return merr.WrapErrServiceInternalMsg("fieldBinlog no need to store logpath, binlog:%v", binlog)
 			}
 		}
 		return nil
@@ -163,7 +164,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		}
 		binlogBytes, err := proto.Marshal(binlog)
 		if err != nil {
-			return nil, fmt.Errorf("marshal binlogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, binlog.FieldID, err)
+			return nil, merr.WrapErrSerializationFailed(err, "marshal binlogs failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, binlog.FieldID)
 		}
 		key := buildFieldBinlogPath(collectionID, partitionID, segmentID, binlog.FieldID)
 		kv[key] = string(binlogBytes)
@@ -176,7 +177,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		}
 		binlogBytes, err := proto.Marshal(deltalog)
 		if err != nil {
-			return nil, fmt.Errorf("marshal deltalogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, deltalog.FieldID, err)
+			return nil, merr.WrapErrSerializationFailed(err, "marshal deltalogs failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, deltalog.FieldID)
 		}
 		key := buildFieldDeltalogPath(collectionID, partitionID, segmentID, deltalog.FieldID)
 		kv[key] = string(binlogBytes)
@@ -189,7 +190,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		}
 		binlogBytes, err := proto.Marshal(statslog)
 		if err != nil {
-			return nil, fmt.Errorf("marshal statslogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, statslog.FieldID, err)
+			return nil, merr.WrapErrSerializationFailed(err, "marshal statslogs failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, statslog.FieldID)
 		}
 		key := buildFieldStatslogPath(collectionID, partitionID, segmentID, statslog.FieldID)
 		kv[key] = string(binlogBytes)
@@ -202,7 +203,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		}
 		binlogBytes, err := proto.Marshal(bm25log)
 		if err != nil {
-			return nil, fmt.Errorf("marshal bm25log failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, bm25log.FieldID, err)
+			return nil, merr.WrapErrSerializationFailed(err, "marshal bm25log failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, bm25log.FieldID)
 		}
 		key := buildFieldBM25StatslogPath(collectionID, partitionID, segmentID, bm25log.FieldID)
 		kv[key] = string(binlogBytes)
@@ -226,12 +227,13 @@ func CloneSegmentWithExcludeBinlogs(segment *datapb.SegmentInfo) (*datapb.Segmen
 }
 
 func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
-	// Compress TextStatsLogs paths to filenames before marshaling to save etcd space
+	// Keep etcd metadata compact and format-stable. Runtime paths are rebuilt after loading.
 	metautil.ExtractTextLogFilenames(segment.GetTextStatsLogs())
+	metautil.ExtractJSONKeyStatsRelativePaths(segment.GetJsonKeyStats())
 
 	segBytes, err := proto.Marshal(segment)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal segment: %d, err: %w", segment.ID, err)
+		return "", merr.WrapErrSerializationFailed(err, "marshal segment: %d", segment.ID)
 	}
 
 	return string(segBytes), nil
@@ -249,7 +251,7 @@ func buildSegmentKv(segment *datapb.SegmentInfo) (string, string, error) {
 func buildCompactionTaskKV(task *datapb.CompactionTask) (string, string, error) {
 	valueBytes, err := proto.Marshal(task)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal CompactionTask: %d/%d/%d, err: %w", task.TriggerID, task.PlanID, task.CollectionID, err)
+		return "", "", merr.WrapErrSerializationFailed(err, "marshal CompactionTask: %d/%d/%d", task.TriggerID, task.PlanID, task.CollectionID)
 	}
 	key := buildCompactionTaskPath(task)
 	return key, string(valueBytes), nil
@@ -262,7 +264,7 @@ func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
 	valueBytes, err := proto.Marshal(info)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal collection clustering compaction info: %d, err: %w", info.CollectionID, err)
+		return "", "", merr.WrapErrSerializationFailed(err, "marshal collection clustering compaction info: %d", info.CollectionID)
 	}
 	key := buildPartitionStatsInfoPath(info)
 	return key, string(valueBytes), nil
@@ -301,15 +303,15 @@ func buildFieldBM25StatslogPath(collectionID typeutil.UniqueID, partitionID type
 }
 
 func buildFieldBinlogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d/%d", SegmentBinlogPathPrefix, collectionID, partitionID, segmentID)
+	return fmt.Sprintf("%s/%d/%d/%d/", SegmentBinlogPathPrefix, collectionID, partitionID, segmentID)
 }
 
 func buildFieldDeltalogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d/%d", SegmentDeltalogPathPrefix, collectionID, partitionID, segmentID)
+	return fmt.Sprintf("%s/%d/%d/%d/", SegmentDeltalogPathPrefix, collectionID, partitionID, segmentID)
 }
 
 func buildFieldStatslogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d/%d", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID)
+	return fmt.Sprintf("%s/%d/%d/%d/", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID)
 }
 
 // buildChannelRemovePath builds vchannel remove flag path
@@ -329,12 +331,16 @@ func BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) s
 	return fmt.Sprintf("%s/%d/%d/%d/%d", util.SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
 }
 
+func buildSegmentIndexCollectionPrefix(collectionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/", util.SegmentIndexPrefix, collectionID)
+}
+
 func buildCollectionPrefix(collectionID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d", SegmentPrefix, collectionID)
+	return fmt.Sprintf("%s/%d/", SegmentPrefix, collectionID)
 }
 
 func buildPartitionPrefix(collectionID, partitionID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d", SegmentPrefix, collectionID, partitionID)
+	return fmt.Sprintf("%s/%d/%d/", SegmentPrefix, collectionID, partitionID)
 }
 
 func buildImportJobKey(jobID int64) string {
@@ -365,8 +371,12 @@ func buildStatsTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", StatsTaskPrefix, taskID)
 }
 
-func buildUpdateExternalCollectionTaskKey(taskID int64) string {
-	return fmt.Sprintf("%s/%d", UpdateExternalCollectionTaskPrefix, taskID)
+func buildExternalCollectionRefreshJobKey(jobID int64) string {
+	return fmt.Sprintf("%s/%d", ExternalCollectionRefreshJobPrefix, jobID)
+}
+
+func buildExternalCollectionRefreshTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", ExternalCollectionRefreshTaskPrefix, taskID)
 }
 
 func buildSnapshotKey(collectionID int64, snapshotID int64) string {

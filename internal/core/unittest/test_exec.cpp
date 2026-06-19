@@ -17,7 +17,9 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <queue>
 #include <string>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -33,6 +35,7 @@
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
+#include "exec/operator/RescoresNode.h"
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/function/FunctionFactory.h"
@@ -43,9 +46,9 @@
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
+#include "rescores/Scorer.h"
 #include "query/PlanNode.h"
 #include "query/Utils.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -70,8 +73,7 @@ class TaskTest : public testing::TestWithParam<DataType> {
         factory.Initialize();
 
         auto schema = std::make_shared<Schema>();
-        auto vec_fid = schema->AddDebugField(
-            "fakevec", GetParam(), 16, knowhere::metric::L2);
+        schema->AddDebugField("fakevec", GetParam(), 16, knowhere::metric::L2);
         auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
         field_map_.insert({"bool", bool_fid});
         auto bool_1_fid = schema->AddDebugField("bool1", DataType::BOOL);
@@ -131,6 +133,158 @@ INSTANTIATE_TEST_SUITE_P(TaskTestSuite,
                          TaskTest,
                          ::testing::Values(DataType::VECTOR_FLOAT,
                                            DataType::VECTOR_SPARSE_U32_F32));
+
+namespace {
+
+bool
+PlanTreeContainsRescoresNode(
+    const std::shared_ptr<milvus::plan::PlanNode>& root) {
+    std::queue<std::shared_ptr<milvus::plan::PlanNode>> queue;
+    if (root != nullptr) {
+        queue.push(root);
+    }
+
+    while (!queue.empty()) {
+        auto node = queue.front();
+        queue.pop();
+        if (std::dynamic_pointer_cast<milvus::plan::RescoresNode>(node) !=
+            nullptr) {
+            return true;
+        }
+        for (const auto& source : node->sources()) {
+            queue.push(source);
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST(PlanProtoTest, ScorersDoNotInsertRescoresNode) {
+    using namespace milvus;
+    using namespace milvus::query;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    proto::plan::PlanNode plan_node;
+    auto anns = plan_node.mutable_vector_anns();
+    anns->set_vector_type(proto::plan::VectorType::FloatVector);
+    anns->set_field_id(vec_fid.get());
+    anns->set_placeholder_tag("$0");
+    auto query_info = anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_metric_type(knowhere::metric::L2);
+    query_info->set_search_params(R"({"nprobe": 10})");
+
+    auto scorer = plan_node.add_scorers();
+    scorer->set_weight(2.0F);
+    scorer->set_type(proto::plan::FunctionType::FunctionTypeWeight);
+    plan_node.mutable_score_option()->set_boost_mode(
+        proto::plan::BoostMode::BoostModeMultiply);
+    plan_node.mutable_score_option()->set_function_mode(
+        proto::plan::FunctionMode::FunctionModeSum);
+
+    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    ASSERT_NE(plan, nullptr);
+    ASSERT_NE(plan->plan_node_, nullptr);
+    ASSERT_NE(plan->plan_node_->plannodes_, nullptr);
+    EXPECT_FALSE(PlanTreeContainsRescoresNode(plan->plan_node_->plannodes_));
+}
+
+TEST(RescoresNodeTest, ReturnsNullBeforeNoMoreInputAndPassesThroughNullInput) {
+    proto::plan::ScoreOption option;
+    option.set_boost_mode(proto::plan::BoostModeMultiply);
+    option.set_function_mode(proto::plan::FunctionModeSum);
+    std::vector<std::shared_ptr<rescores::Scorer>> scorers;
+    auto logical_node = std::make_shared<plan::RescoresNode>(
+        "rescore", scorers, option, std::vector<plan::PlanNodePtr>{});
+    auto query_context =
+        std::make_shared<QueryContext>("rescore-test",
+                                       nullptr,
+                                       0,
+                                       MAX_TIMESTAMP,
+                                       0,
+                                       0,
+                                       query::PlanOptions{false},
+                                       std::make_shared<QueryConfig>());
+    auto task = Task::Create("rescore-test-task",
+                             plan::PlanFragment(logical_node),
+                             0,
+                             query_context);
+    DriverContext driver_context(task, 0, 0, 0, 0);
+    PhyRescoresNode node(0, &driver_context, logical_node);
+
+    EXPECT_TRUE(node.NeedInput());
+    EXPECT_EQ(node.GetOutput(), nullptr);
+
+    node.NoMoreInput();
+    EXPECT_EQ(node.GetOutput(), nullptr);
+    EXPECT_TRUE(node.IsFinished());
+    EXPECT_FALSE(node.NeedInput());
+}
+
+TEST(RescoresNodeTest, AppliesBoostAndSortsSearchResult) {
+    proto::plan::ScoreOption option;
+    option.set_boost_mode(proto::plan::BoostModeMultiply);
+    option.set_function_mode(proto::plan::FunctionModeSum);
+    std::vector<std::shared_ptr<rescores::Scorer>> scorers{
+        std::make_shared<rescores::WeightScorer>(nullptr, 10.0F),
+    };
+    auto logical_node = std::make_shared<plan::RescoresNode>(
+        "rescore", scorers, option, std::vector<plan::PlanNodePtr>{});
+
+    SearchResult search_result;
+    search_result.total_nq_ = 1;
+    search_result.unity_topK_ = 4;
+    search_result.total_data_cnt_ = 4;
+    search_result.distances_ = {0.4F, 0.1F, 0.3F, 0.2F};
+    search_result.seg_offsets_ = {4, -1, 3, 2};
+
+    SearchInfo search_info;
+    search_info.topk_ = 4;
+    search_info.metric_type_ = knowhere::metric::IP;
+
+    auto query_context =
+        std::make_shared<QueryContext>("rescore-test",
+                                       nullptr,
+                                       4,
+                                       MAX_TIMESTAMP,
+                                       0,
+                                       0,
+                                       query::PlanOptions{false},
+                                       std::make_shared<QueryConfig>());
+    OpContext op_context;
+    query_context->set_op_context(&op_context);
+    query_context->set_search_info(search_info);
+    query_context->set_search_result(std::move(search_result));
+
+    auto task = Task::Create("rescore-test-task",
+                             plan::PlanFragment(logical_node),
+                             0,
+                             query_context);
+    DriverContext driver_context(task, 0, 0, 0, 0);
+    PhyRescoresNode node(0, &driver_context, logical_node);
+    auto input = std::make_shared<RowVector>(std::vector<VectorPtr>{});
+    auto expected_input = input;
+    node.AddInput(input);
+    node.NoMoreInput();
+
+    auto output = node.GetOutput();
+    EXPECT_EQ(output, expected_input);
+    EXPECT_TRUE(node.IsFinished());
+
+    auto rescored = query_context->get_search_result();
+    EXPECT_EQ(rescored.seg_offsets_, (std::vector<int64_t>{4, 3, 2, -1}));
+    ASSERT_EQ(rescored.distances_.size(), 4);
+    EXPECT_FLOAT_EQ(rescored.distances_[0], 4.0F);
+    EXPECT_FLOAT_EQ(rescored.distances_[1], 3.0F);
+    EXPECT_FLOAT_EQ(rescored.distances_[2], 2.0F);
+    EXPECT_FLOAT_EQ(rescored.distances_[3], 0.1F);
+}
 
 TEST_P(TaskTest, RegisterFunction) {
     milvus::exec::expression::FunctionFactory& factory =
@@ -217,7 +371,6 @@ TEST_P(TaskTest, UnaryExpr) {
     auto start = std::chrono::steady_clock::now();
     auto task = Task::Create("task_unary_expr", plan, 0, query_context);
     int64_t num_rows = 0;
-    int i = 0;
     for (;;) {
         auto result = task->Next();
         if (!result) {
@@ -832,4 +985,359 @@ TEST(TaskTest, SkipIndexWithBitmapInputAlignment) {
     //
     // With the fix: 1 row should match correctly.
     EXPECT_EQ(num_matched, 1);
+}
+
+// Test CSearchFilterOnly for two-stage search
+// This tests the filter-only search path where we only execute the filter
+// and return valid_count without performing actual vector search
+TEST(FilterOnlySearchTest, CSearchFilterOnlyBasic) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    int dim = 16;
+    int N = 1000;
+    // DataGen produces age values 0..N-1, so age >= 100 matches rows
+    // 100..999 = exactly 900 rows.  An inverted-bitset bug would yield 100.
+    int64_t filter_threshold = 100;
+    int expected_valid_count = N - filter_threshold;  // 900
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto int64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    auto raw_data = DataGen(schema, N);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Create a search plan with filter: age >= 100
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                predicates: <
+                                    unary_range_expr: <
+                                        column_info: <
+                                            field_id: 101
+                                            data_type: Int64
+                                        >
+                                        op: GreaterEqual
+                                        value: <
+                                            int64_val: 100
+                                        >
+                                    >
+                                >
+                                query_info: <
+                                    topk: 10
+                                    metric_type: "L2"
+                                    search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+            >)";
+
+    proto::plan::PlanNode plan_node;
+    auto ok =
+        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+    ASSERT_TRUE(ok);
+
+    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    ASSERT_NE(plan, nullptr);
+
+    // Execute filter-only search
+    auto search_result = segment->Search(plan.get(),
+                                         nullptr,
+                                         MAX_TIMESTAMP,
+                                         folly::CancellationToken(),
+                                         0,
+                                         0,
+                                         0,
+                                         true);
+
+    // Verify filter-only results
+    ASSERT_NE(search_result, nullptr);
+    EXPECT_EQ(search_result->valid_count_, expected_valid_count);
+
+    // In filter-only mode, distances and seg_offsets should be empty
+    EXPECT_TRUE(search_result->distances_.empty());
+    EXPECT_TRUE(search_result->seg_offsets_.empty());
+}
+
+// Test CSearchFilterOnly with no filter (all rows should be valid)
+TEST(FilterOnlySearchTest, CSearchFilterOnlyNoFilter) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    int dim = 16;
+    int N = 500;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto int64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    auto raw_data = DataGen(schema, N);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Create a search plan without filter
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                query_info: <
+                                    topk: 10
+                                    metric_type: "L2"
+                                    search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+            >)";
+
+    proto::plan::PlanNode plan_node;
+    auto ok =
+        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+    ASSERT_TRUE(ok);
+
+    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    ASSERT_NE(plan, nullptr);
+
+    // Execute filter-only search
+    auto search_result = segment->Search(plan.get(),
+                                         nullptr,
+                                         MAX_TIMESTAMP,
+                                         folly::CancellationToken(),
+                                         0,
+                                         0,
+                                         0,
+                                         true);
+
+    // Without filter, all rows should be valid
+    ASSERT_NE(search_result, nullptr);
+    EXPECT_EQ(search_result->valid_count_, N);
+}
+
+// Test CSearchFilterOnly with filter that matches no rows
+TEST(FilterOnlySearchTest, CSearchFilterOnlyNoMatch) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    int dim = 16;
+    int N = 500;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto int64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    auto raw_data = DataGen(schema, N);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Create a search plan with filter that matches nothing: age > 10000
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                predicates: <
+                                    unary_range_expr: <
+                                        column_info: <
+                                            field_id: 101
+                                            data_type: Int64
+                                        >
+                                        op: GreaterThan
+                                        value: <
+                                            int64_val: 10000
+                                        >
+                                    >
+                                >
+                                query_info: <
+                                    topk: 10
+                                    metric_type: "L2"
+                                    search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+            >)";
+
+    proto::plan::PlanNode plan_node;
+    auto ok =
+        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+    ASSERT_TRUE(ok);
+
+    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    ASSERT_NE(plan, nullptr);
+
+    // Execute filter-only search
+    auto search_result = segment->Search(plan.get(),
+                                         nullptr,
+                                         MAX_TIMESTAMP,
+                                         folly::CancellationToken(),
+                                         0,
+                                         0,
+                                         0,
+                                         true);
+
+    // Filter matches nothing, valid_count should be 0
+    ASSERT_NE(search_result, nullptr);
+    EXPECT_EQ(search_result->valid_count_, 0);
+}
+
+// Test ExtractFilterOnlyPlan function with various inputs
+TEST(ExtractFilterOnlyPlanTest, NullInput) {
+    using namespace milvus::query;
+
+    // Test with nullptr input
+    auto result = ProtoParser::ExtractFilterOnlyPlan(nullptr);
+    EXPECT_EQ(result, nullptr);
+}
+
+TEST(ExtractFilterOnlyPlanTest, VectorSearchNodeWithNoSources) {
+    using namespace milvus::query;
+
+    // Create a VectorSearchNode without any sources
+    auto vector_search_node =
+        std::make_shared<milvus::plan::VectorSearchNode>("test_vector_search");
+
+    // ExtractFilterOnlyPlan should return nullptr because there are no sources
+    auto result = ProtoParser::ExtractFilterOnlyPlan(vector_search_node);
+    EXPECT_EQ(result, nullptr);
+}
+
+TEST(ExtractFilterOnlyPlanTest, VectorSearchNodeWithSources) {
+    using namespace milvus::query;
+
+    // Create a filter node (MvccNode) as the source
+    auto mvcc_node = std::make_shared<milvus::plan::MvccNode>("mvcc_node");
+
+    // Create a VectorSearchNode with the filter node as source
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    sources.push_back(mvcc_node);
+    auto vector_search_node = std::make_shared<milvus::plan::VectorSearchNode>(
+        "test_vector_search", std::move(sources));
+
+    // ExtractFilterOnlyPlan should return the source subtree (mvcc_node)
+    auto result = ProtoParser::ExtractFilterOnlyPlan(vector_search_node);
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->name(), "MvccNode");
+}
+
+TEST(ExtractFilterOnlyPlanTest, NonVectorSearchNode) {
+    using namespace milvus::query;
+
+    // Create a node that is not a VectorSearchNode (e.g., MvccNode)
+    auto mvcc_node = std::make_shared<milvus::plan::MvccNode>("test_mvcc");
+
+    // ExtractFilterOnlyPlan should return nullptr because there's no VectorSearchNode
+    auto result = ProtoParser::ExtractFilterOnlyPlan(mvcc_node);
+    EXPECT_EQ(result, nullptr);
+}
+
+TEST(ExtractFilterOnlyPlanTest, NestedVectorSearchNode) {
+    using namespace milvus::query;
+
+    // Create a filter node chain: MvccNode -> FilterBitsNode
+    auto mvcc_node = std::make_shared<milvus::plan::MvccNode>("mvcc_node");
+
+    // Create a VectorSearchNode with the filter node as source
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    sources.push_back(mvcc_node);
+    auto vector_search_node = std::make_shared<milvus::plan::VectorSearchNode>(
+        "vector_search", std::move(sources));
+
+    // Wrap VectorSearchNode in another node (e.g., SearchGroupByNode)
+    std::vector<milvus::plan::PlanNodePtr> group_sources;
+    group_sources.push_back(vector_search_node);
+    auto group_by_node = std::make_shared<milvus::plan::SearchGroupByNode>(
+        "group_by", std::move(group_sources));
+
+    // ExtractFilterOnlyPlan should find the VectorSearchNode and return its source
+    auto result = ProtoParser::ExtractFilterOnlyPlan(group_by_node);
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->name(), "MvccNode");
+}
+
+// Test GetSearchResultValidCount C API function
+TEST(GetSearchResultValidCountTest, NullInput) {
+    // Test with nullptr input
+    int64_t result = GetSearchResultValidCount(nullptr);
+    EXPECT_EQ(result, -1);
+}
+
+TEST(GetSearchResultValidCountTest, ValidSearchResult) {
+    // Create a SearchResult with valid_count set
+    auto search_result = new milvus::SearchResult();
+    search_result->valid_count_ = 42;
+
+    int64_t result = GetSearchResultValidCount(search_result);
+    EXPECT_EQ(result, 42);
+
+    delete search_result;
+}
+
+TEST(GetSearchResultValidCountTest, DefaultValidCount) {
+    // Create a SearchResult with default valid_count (-1)
+    auto search_result = new milvus::SearchResult();
+
+    int64_t result = GetSearchResultValidCount(search_result);
+    EXPECT_EQ(result, -1);
+
+    delete search_result;
+}
+
+// Test filter-only search on an empty segment (active_count == 0)
+TEST(FilterOnlySearchTest, CSearchFilterOnlyEmptySegment) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    int dim = 16;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto int64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    // Create an empty growing segment (no data inserted)
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    // Create a search plan with filter
+    const char* raw_plan = R"(vector_anns: <
+                                field_id: 100
+                                predicates: <
+                                    unary_range_expr: <
+                                        column_info: <
+                                            field_id: 101
+                                            data_type: Int64
+                                        >
+                                        op: GreaterThan
+                                        value: <
+                                            int64_val: 500
+                                        >
+                                    >
+                                >
+                                query_info: <
+                                    topk: 10
+                                    metric_type: "L2"
+                                    search_params: "{\"nprobe\": 10}"
+                                >
+                                placeholder_tag: "$0"
+            >)";
+
+    proto::plan::PlanNode plan_node;
+    auto ok =
+        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+    ASSERT_TRUE(ok);
+
+    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    ASSERT_NE(plan, nullptr);
+
+    // Execute filter-only search on empty segment
+    auto search_result = segment->Search(plan.get(),
+                                         nullptr,
+                                         MAX_TIMESTAMP,
+                                         folly::CancellationToken(),
+                                         0,
+                                         0,
+                                         0,
+                                         true);
+
+    // Empty segment should return valid_count = 0
+    ASSERT_NE(search_result, nullptr);
+    EXPECT_EQ(search_result->valid_count_, 0);
 }

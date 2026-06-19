@@ -437,7 +437,7 @@ TEST_P(RetrieveTest, LargeTimestamp) {
             target_num = req_size;
         }
 
-        for (auto field_data : retrieve_results->fields_data()) {
+        for (const auto& field_data : retrieve_results->fields_data()) {
             if (DataType(field_data.type()) == DataType::INT64) {
                 Assert(field_data.scalars().long_data().data_size() ==
                        target_num);

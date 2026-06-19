@@ -28,32 +28,32 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/clusteringpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -105,6 +105,9 @@ type clusteringCompactionTask struct {
 	bm25FieldIds []int64
 
 	compactionParams compaction.Params
+
+	// lobContext holds LOB compaction strategy decisions for TEXT columns
+	lobContext *compaction.LOBCompactionContext
 }
 
 type ClusterBuffer struct {
@@ -266,6 +269,12 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 		return nil, err
 	}
 
+	// 0.5, init LOB compaction context for TEXT columns (if any)
+	if err := t.initLOBCompactionContext(ctx); err != nil {
+		log.Error("failed to init LOB compaction context", zap.Error(err))
+		return nil, err
+	}
+
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, ctx.Err()
@@ -315,12 +324,11 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	}
 
 	metrics.DataNodeCompactionLatency.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
+		WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	log.Info("Clustering compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()), zap.Int64("flushTimes", t.flushCount.Load()))
 	// clear the buffer cache
 	t.keyToBufferFunc = nil
-
 	return planResult, nil
 }
 
@@ -346,9 +354,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+			t.getWriterOpts()...,
 		)
 		if err != nil {
 			return err
@@ -371,9 +377,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+			t.getWriterOpts()...,
 		)
 		if err != nil {
 			return err
@@ -433,9 +437,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+			t.getWriterOpts()...,
 		)
 		if err != nil {
 			return err
@@ -576,17 +578,15 @@ func (t *clusteringCompactionTask) mappingSegment(
 	processStart := time.Now()
 	var remained int64 = 0
 
-	deltaPaths := make([]string, 0)
-	for _, d := range segment.GetDeltalogs() {
-		for _, l := range d.GetBinlogs() {
-			deltaPaths = append(deltaPaths, l.GetLogPath())
-		}
+	options := []storage.RwOption{
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, deltaPaths)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField.DataType, segment, options...)
 	if err != nil {
 		return err
 	}
-	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
@@ -615,37 +615,26 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return merr.WrapErrIllegalCompactionPlan()
 	}
 
-	var rr storage.RecordReader
-	if segment.GetManifest() != "" {
-		rr, err = storage.NewManifestRecordReader(ctx,
-			segment.GetManifest(),
-			t.plan.Schema,
-			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-				return t.binlogIO.Download(ctx, paths)
-			}),
-			storage.WithCollectionID(t.GetCollection()),
-			storage.WithVersion(segment.StorageVersion),
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		)
-	} else {
-		rr, err = storage.NewBinlogRecordReader(ctx,
-			segment.GetFieldBinlogs(),
-			t.plan.Schema,
-			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-				return t.binlogIO.Download(ctx, paths)
-			}),
-			storage.WithCollectionID(t.GetCollection()),
-			storage.WithVersion(segment.StorageVersion),
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		)
-	}
-
+	rr, existingFields, err := newCompactionSegmentRecordReader(ctx, segment, t.plan.Schema, t.compactionParams.StorageConfig,
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return t.binlogIO.Download(ctx, paths)
+		}),
+		storage.WithCollectionID(t.GetCollection()),
+		storage.WithVersion(segment.StorageVersion),
+		storage.WithBufferSize(t.bufferSize),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
 	}
+	materializer, err := NewRecordMaterializer(t.plan.Schema, t.plan.Schema.GetFunctions(), existingFields)
+	if err != nil {
+		rr.Close()
+		log.Warn("new record materializer wrong", zap.Error(err))
+		return err
+	}
+	rr = newMaterializedRecordReader(rr, materializer)
 	defer rr.Close()
 
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
@@ -662,7 +651,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 
 		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
+		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, true); err != nil {
 			log.Warn("compact wrong, failed to deserialize data", zap.Error(err))
 			return err
 		}
@@ -670,10 +659,10 @@ func (t *clusteringCompactionTask) mappingSegment(
 		for _, v := range vs {
 			offset++
 
-			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
+			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
 				log.Warn("convert interface to map wrong")
-				return errors.New("unexpected error")
+				return merr.WrapErrServiceInternalMsg("unexpected error")
 			}
 			expireTs := int64(-1)
 			if hasTTLField {
@@ -683,8 +672,14 @@ func (t *clusteringCompactionTask) mappingSegment(
 					}
 				}
 			}
-			if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp), expireTs) {
+			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp), expireTs) {
 				continue
+			}
+
+			// Normalize import segment timestamps: overwrite to commit_ts
+			// so the output segment becomes a normal segment (commit_ts = 0).
+			if commitTs := segment.GetCommitTimestamp(); commitTs != 0 {
+				v.Timestamp = int64(commitTs)
 			}
 
 			clusteringKey := row[t.clusteringKeyField.FieldID]
@@ -915,9 +910,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
 
-	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
-	binlogs := make([]*datapb.FieldBinlog, 0)
-
+	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	requiredFields := typeutil.NewSet[int64]()
 	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
 	if t.ttlFieldID >= common.StartOfUserFieldID {
@@ -926,49 +919,20 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	selectedFields := lo.Filter(t.plan.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
 		return requiredFields.Contain(field.GetFieldID())
 	})
+	readSchema := proto.Clone(t.plan.GetSchema()).(*schemapb.CollectionSchema)
+	readSchema.Fields = selectedFields
+	readSchema.StructArrayFields = nil
 
-	switch segment.GetStorageVersion() {
-	case storage.StorageV1:
-		for _, fieldBinlog := range segment.GetFieldBinlogs() {
-			if requiredFields.Contain(fieldBinlog.GetFieldID()) {
-				binlogs = append(binlogs, fieldBinlog)
-			}
-		}
-	case storage.StorageV2, storage.StorageV3:
-		binlogs = segment.GetFieldBinlogs()
-	default:
-		log.Warn("unsupported storage version", zap.Int64("storage version", segment.GetStorageVersion()))
-		return nil, fmt.Errorf("unsupported storage version %d", segment.GetStorageVersion())
-	}
-	var rr storage.RecordReader
-	var err error
-	if segment.GetManifest() != "" {
-		rr, err = storage.NewManifestRecordReader(ctx,
-			segment.GetManifest(),
-			t.plan.GetSchema(),
-			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-				return t.binlogIO.Download(ctx, paths)
-			}),
-			storage.WithVersion(segment.StorageVersion),
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithNeededFields(requiredFields),
-			storage.WithCollectionID(t.GetCollection()),
-		)
-	} else {
-		rr, err = storage.NewBinlogRecordReader(ctx,
-			binlogs,
-			t.plan.GetSchema(),
-			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-				return t.binlogIO.Download(ctx, paths)
-			}),
-			storage.WithVersion(segment.StorageVersion),
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithNeededFields(requiredFields),
-			storage.WithCollectionID(t.GetCollection()),
-		)
-	}
+	rr, _, err := newCompactionSegmentRecordReader(ctx, segment, readSchema, t.compactionParams.StorageConfig,
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return t.binlogIO.Download(ctx, paths)
+		}),
+		storage.WithVersion(segment.StorageVersion),
+		storage.WithBufferSize(t.bufferSize),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithNeededFields(requiredFields),
+		storage.WithCollectionID(t.GetCollection()),
+	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return make(map[interface{}]int64), err
@@ -992,8 +956,8 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
-		remained      int64                 = 0
-		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
+		remained      int64 = 0
+		analyzeResult       = make(map[interface{}]int64, 0)
 	)
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 	for {
@@ -1011,7 +975,7 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 		// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
 		if !ok {
-			return nil, 0, errors.New("unexpected error")
+			return nil, 0, merr.WrapErrServiceInternalMsg("unexpected error")
 		}
 
 		expireTs := int64(-1)
@@ -1103,4 +1067,93 @@ func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{
 
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
+}
+
+func (t *clusteringCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
+	return t.compactionParams.StorageConfig
+}
+
+// getWriterOpts returns common writer options for all cluster buffer writers.
+// Includes TEXT column configs when lobContext requires REWRITE_ALL.
+func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
+	opts := []storage.RwOption{
+		storage.WithBufferSize(t.bufferSize),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+	}
+
+	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
+		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
+		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
+			common.SegmentInsertLogPath, metautil.JoinIDPath(t.collectionID, t.partitionID))
+		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
+			lobBasePath,
+			t.compactionParams.TextInlineThreshold,
+			t.compactionParams.TextMaxLobFileBytes,
+			t.compactionParams.TextFlushThresholdBytes,
+		)
+		if len(textColumnConfigs) > 0 {
+			opts = append(opts, storage.WithTextColumnConfigs(textColumnConfigs))
+			log.Info("clustering compaction: TEXT column REWRITE_ALL mode enabled",
+				zap.Int("rewriteFieldCount", len(textColumnConfigs)),
+			)
+		}
+	}
+
+	return opts
+}
+
+// initLOBCompactionContext initializes the LOB compaction context for TEXT columns.
+// For clustering compaction, data is repartitioned by clustering key, so TEXT columns
+// always require REWRITE_ALL strategy (LOB references become invalid after repartition).
+func (t *clusteringCompactionTask) initLOBCompactionContext(ctx context.Context) error {
+	// check if there are TEXT fields in schema
+	textFieldIDs := compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())
+	if len(textFieldIDs) == 0 {
+		return nil // no TEXT fields, nothing to do
+	}
+
+	// only apply for manifest-based storage (storage v2/v3)
+	hasManifest := false
+	for _, seg := range t.plan.GetSegmentBinlogs() {
+		if seg.GetManifest() != "" {
+			hasManifest = true
+			break
+		}
+	}
+	if !hasManifest {
+		return nil // no manifest-based segments, nothing to do
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int64s("textFieldIDs", textFieldIDs),
+	)
+	log.Info("initializing LOB compaction context for TEXT columns (clustering compaction)")
+
+	// create LOB compaction context
+	// for clustering compaction, we always use REWRITE_ALL (forced strategy)
+	// no need to collect LOB files or calculate hole ratio
+	t.lobContext = compaction.NewLOBCompactionContext()
+
+	// set compaction type - clustering compaction forces REWRITE_ALL
+	sourceSegmentCount := len(t.plan.GetSegmentBinlogs())
+	// target segment count is unknown for clustering compaction (determined by clustering)
+	t.lobContext.SetCompactionType(datapb.CompactionType_ClusteringCompaction, sourceSegmentCount, 0)
+
+	// compute strategies (will use forced REWRITE_ALL for all TEXT fields)
+	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+
+	// log strategy decisions
+	for fieldID, decision := range t.lobContext.Decisions {
+		log.Info("LOB compaction strategy decided",
+			zap.Int64("fieldID", fieldID),
+			zap.String("strategy", "REWRITE_ALL"),
+			zap.Bool("isForced", t.lobContext.IsForced),
+			zap.Int("sourceSegmentCount", sourceSegmentCount),
+			zap.Float64("holeRatio", decision.OverallHoleRatio),
+		)
+	}
+
+	return nil
 }

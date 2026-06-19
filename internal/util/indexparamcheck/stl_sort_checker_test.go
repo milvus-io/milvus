@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func Test_STLSORTIndexChecker(t *testing.T) {
@@ -18,5 +18,35 @@ func Test_STLSORTIndexChecker(t *testing.T) {
 	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{DataType: schemapb.DataType_VarChar}))
 
 	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{DataType: schemapb.DataType_Bool}))
-	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{DataType: schemapb.DataType_JSON}))
+	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{DataType: schemapb.DataType_JSON}))
+
+	// struct sub-fields: name follows "structName[fieldName]" convention, DataType is Array
+	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}))
+	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float}))
+	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[name]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar}))
+	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[flag]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool}))
+	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[meta]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_JSON}))
+
+	// regular Array field (not a struct sub-field) should still be rejected
+	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}))
+
+	// JSON path index: CheckTrain validation
+	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "DOUBLE", "json_path": "/price",
+	}))
+	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "VARCHAR", "json_path": "/name",
+	}))
+	// missing json_cast_type
+	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_path": "/price",
+	}))
+	// missing json_path
+	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "DOUBLE",
+	}))
+	// unsupported cast type for STL_SORT
+	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "BOOL", "json_path": "/flag",
+	}))
 }

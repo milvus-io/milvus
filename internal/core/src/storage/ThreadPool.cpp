@@ -24,6 +24,8 @@
 namespace milvus {
 
 int CPU_NUM = DEFAULT_CPU_NUM;
+std::atomic<int> THREAD_POOL_MAX_THREADS_SIZE(
+    DEFAULT_THREAD_POOL_MAX_THREADS_SIZE);
 
 std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT(
     DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT);
@@ -56,6 +58,12 @@ SetLowPriorityThreadCoreCoefficient(const float coefficient) {
 void
 InitCpuNum(const int num) {
     CPU_NUM = num;
+}
+
+void
+SetThreadPoolMaxThreadsSize(const int size) {
+    THREAD_POOL_MAX_THREADS_SIZE.store(size);
+    LOG_INFO("set thread pool max threads size: {}", size);
 }
 
 void
@@ -109,15 +117,31 @@ ThreadPool::Worker() {
     while (!shutdown_) {
         std::unique_lock<std::mutex> lock(mutex_);
         idle_threads_size_++;
+        if (metric_idle_) {
+            metric_idle_->Set(idle_threads_size_);
+        }
+        if (metric_active_) {
+            metric_active_->Set(current_threads_size_ - idle_threads_size_);
+        }
         auto is_timeout = !condition_lock_.wait_for(
             lock, std::chrono::seconds(WAIT_SECONDS), [this]() {
                 return shutdown_ || !work_queue_.empty();
             });
         idle_threads_size_--;
+        if (metric_idle_) {
+            metric_idle_->Set(idle_threads_size_);
+        }
+        if (metric_active_) {
+            metric_active_->Set(current_threads_size_ - idle_threads_size_);
+        }
         if (work_queue_.empty()) {
             // Dynamic reduce thread number
             if (shutdown_) {
                 current_threads_size_--;
+                if (metric_active_) {
+                    metric_active_->Set(current_threads_size_ -
+                                        idle_threads_size_);
+                }
                 return;
             }
             if (is_timeout) {
@@ -125,16 +149,26 @@ ThreadPool::Worker() {
                 if (current_threads_size_ > min_threads_size_) {
                     need_finish_threads_.enqueue(std::this_thread::get_id());
                     current_threads_size_--;
+                    if (metric_active_) {
+                        metric_active_->Set(current_threads_size_ -
+                                            idle_threads_size_);
+                    }
                     return;
                 }
                 continue;
             }
         }
         dequeue = work_queue_.dequeue(func);
+        if (metric_queue_depth_) {
+            metric_queue_depth_->Set(work_queue_.size());
+        }
         lock.unlock();
         if (dequeue) {
             func();
             func = nullptr;
+            if (metric_completed_) {
+                metric_completed_->Increment();
+            }
         }
     }
 }

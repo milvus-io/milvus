@@ -62,6 +62,7 @@ class MinAggregateBase
 
     void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
         BaseAggregate::template updateOneGroup<TAccumulator>(
             group, input[0], &updateSingleValue<TAccumulator>);
@@ -101,12 +102,11 @@ class MinAggregateBase
     }
 };
 
-// String min aggregate: store pointer to std::string in group row.
-// IMPORTANT: This class stores pointers to strings in the input vectors rather
-// than copying the string content. The input vectors passed to addRawInput()
-// and addSingleGroupRawInput() MUST outlive the aggregation lifecycle until
-// extractValues() is called, otherwise the stored pointers will become
-// dangling and cause undefined behavior.
+// String min aggregate: store owned std::string copies in group row.
+// We copy string candidates into per-group state instead of storing pointers
+// into input ColumnVectors because those vectors can be released before
+// extractValues() materializes the final result. Borrowed pointers would then
+// dangle and can trigger use-after-free in ASan and production builds alike.
 class MinStringAggregate final : public Aggregate {
  public:
     explicit MinStringAggregate(DataType resultType) : Aggregate(resultType) {
@@ -114,7 +114,7 @@ class MinStringAggregate final : public Aggregate {
 
     int32_t
     accumulatorFixedWidthSize() const override {
-        return sizeof(const std::string*);
+        return sizeof(std::string*);
     }
 
     void
@@ -132,17 +132,17 @@ class MinStringAggregate final : public Aggregate {
                 result_column->nullAt(i);
             } else {
                 result_column->clearNullAt(i);
-                auto ptr = *value<const std::string*>(group);
+                auto& ptr = *value<std::string*>(group);
                 AssertInfo(ptr != nullptr,
                            "min string aggregate should not have null pointer "
                            "when group is not null");
                 result_column->SetValueAt<std::string>(i, *ptr);
+                delete ptr;
+                ptr = nullptr;
             }
         }
     }
 
-    // NOTE: The input vector must remain valid until extractValues() is called,
-    // as this method stores pointers to strings in the input vector.
     void
     addRawInput(char** groups,
                 int numGroups,
@@ -157,14 +157,13 @@ class MinStringAggregate final : public Aggregate {
             if (!column->ValidAt(i)) {
                 continue;
             }
-            updateOne(groups[i], &raw[i]);
+            updateOne(groups[i], raw[i]);
         }
     }
 
-    // NOTE: The input vector must remain valid until extractValues() is called,
-    // as this method stores pointers to strings in the input vector.
     void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    "min aggregate expects exactly one input column");
@@ -176,7 +175,7 @@ class MinStringAggregate final : public Aggregate {
             if (!column->ValidAt(i)) {
                 continue;
             }
-            updateOne(group, &raw[i]);
+            updateOne(group, raw[i]);
         }
     }
 
@@ -185,23 +184,25 @@ class MinStringAggregate final : public Aggregate {
         char** groups, folly::Range<const vector_size_t*> indices) override {
         setAllNulls(groups, indices);
         for (auto i : indices) {
-            *value<const std::string*>(groups[i]) = nullptr;
+            *value<std::string*>(groups[i]) = nullptr;
         }
     }
 
  private:
-    // Stores a pointer to the candidate string (not a copy).
-    // The candidate pointer must remain valid until extractValues() is called.
     inline void
-    updateOne(char* group, const std::string* candidate) {
+    updateOne(char* group, const std::string& candidate) {
         if (isNull(group)) {
             clearNull(group);
-            *value<const std::string*>(group) = candidate;
+            *value<std::string*>(group) = new std::string(candidate);
             return;
         }
-        auto& current = *value<const std::string*>(group);
-        if (current == nullptr || (*candidate < *current)) {
-            current = candidate;
+        auto& current = *value<std::string*>(group);
+        if (current == nullptr) {
+            current = new std::string(candidate);
+            return;
+        }
+        if (candidate < *current) {
+            *current = candidate;
         }
     }
 };

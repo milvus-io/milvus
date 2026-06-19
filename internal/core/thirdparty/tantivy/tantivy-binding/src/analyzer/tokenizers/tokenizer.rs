@@ -6,7 +6,7 @@ use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 
 use super::{
     CharGroupTokenizer, GrpcTokenizer, IcuTokenizer, JiebaTokenizer, LangIdentTokenizer,
-    LinderaTokenizer,
+    LinderaTokenizer, ThaiTokenizer,
 };
 
 use crate::error::{Result, TantivyBindingError};
@@ -21,6 +21,10 @@ pub fn whitespace_builder() -> TextAnalyzerBuilder {
 
 pub fn icu_builder() -> TextAnalyzerBuilder {
     TextAnalyzer::builder(IcuTokenizer::new()).dynamic()
+}
+
+pub fn thai_builder() -> TextAnalyzerBuilder {
+    TextAnalyzer::builder(ThaiTokenizer::new()).dynamic()
 }
 
 pub fn lang_ident_builder(
@@ -53,13 +57,14 @@ pub fn jieba_builder(
 
 pub fn lindera_builder(
     params: Option<&json::Map<String, json::Value>>,
+    helper: &mut FileResourcePathHelper,
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
         return Err(TantivyBindingError::InvalidArgument(format!(
             "lindera tokenizer must be customized"
         )));
     }
-    let tokenizer = LinderaTokenizer::from_json(params.unwrap())?;
+    let tokenizer = LinderaTokenizer::from_json(params.unwrap(), helper)?;
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
@@ -121,9 +126,10 @@ pub fn get_builder_with_tokenizer(
         "standard" => Ok(standard_builder()),
         "whitespace" => Ok(whitespace_builder()),
         "jieba" => jieba_builder(params_map, helper),
-        "lindera" => lindera_builder(params_map),
+        "lindera" => lindera_builder(params_map, helper),
         "char_group" => char_group_builder(params_map),
         "icu" => Ok(icu_builder()),
+        "thai" => Ok(thai_builder()),
         "language_identifier" => lang_ident_builder(params_map, helper, fc),
         "grpc" => grpc_builder(params_map),
         other => {

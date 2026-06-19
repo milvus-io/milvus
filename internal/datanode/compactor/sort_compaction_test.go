@@ -32,11 +32,12 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSortCompactionTaskSuite(t *testing.T) {
@@ -63,7 +64,7 @@ func (s *SortCompactionTaskSuite) setupTest() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMeta()
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	s.NoError(err)
 
 	plan := &datapb.CompactionPlan{
@@ -93,10 +94,18 @@ func (s *SortCompactionTaskSuite) setupTest() {
 }
 
 func (s *SortCompactionTaskSuite) SetupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 	s.setupTest()
 }
 
 func (s *SortCompactionTaskSuite) TearDownTest() {
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *SortCompactionTaskSuite) TestNewSortCompactionTask() {
@@ -207,7 +216,7 @@ func (s *SortCompactionTaskSuite) TestSortCompactionBasic() {
 
 func (s *SortCompactionTaskSuite) TestSortCompactionWithBM25() {
 	s.setupBM25Test()
-	s.prepareSortCompactionWithBM25Task()
+	s.prepareSortCompactionWithBM25Task(false)
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -225,11 +234,62 @@ func (s *SortCompactionTaskSuite) TestSortCompactionWithBM25() {
 	s.Empty(segment.Deltalogs)
 }
 
+func (s *SortCompactionTaskSuite) TestSortCompactionMaterializesMissingBM25OutputFromOldSegment() {
+	s.setupBM25Test()
+	s.prepareSortCompactionWithBM25Task(true)
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(1, segment.GetNumOfRows())
+	s.True(segment.GetIsSorted())
+	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionMaterializesNullableAddedFieldFromOldSegment() {
+	segmentID := int64(1001)
+	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+
+	s.initSegBuffer(1, segmentID)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	s.Require().NoError(err)
+	removeFieldBinlogForTest(kvs, fBinlogs, StringField)
+
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+		left, right := lo.Difference(keys, lo.Keys(kvs))
+		return len(left) == 0 && len(right) == 0
+	})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+		return downloadValuesForPathsForTest(kvs, keys)
+	}).Once()
+
+	s.task.plan.TotalRows = 1
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		{
+			SegmentID:    segmentID,
+			CollectionID: CollectionID,
+			PartitionID:  PartitionID,
+			FieldBinlogs: lo.Values(fBinlogs),
+		},
+	}
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(1, segment.GetNumOfRows())
+	s.True(segment.GetIsSorted())
+	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetInsertLogs(), StringField))
+}
+
 func (s *SortCompactionTaskSuite) setupBM25Test() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.mockChunkManager = mocks.NewChunkManager(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	if err != nil {
 		panic(err)
 	}
@@ -258,7 +318,7 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 	s.task.binlogIO = s.mockBinlogIO
 }
 
-func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
+func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task(removeBM25Output bool) {
 	segmentID := int64(1001)
 	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
@@ -266,11 +326,16 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
 	s.initSegBufferWithBM25(segmentID)
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
+	if removeBM25Output {
+		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+	}
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 		left, right := lo.Difference(keys, lo.Keys(kvs))
 		return len(left) == 0 && len(right) == 0
-	})).Return(lo.Values(kvs), nil).Once()
+	})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+		return downloadValuesForPathsForTest(kvs, keys)
+	}).Once()
 
 	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{

@@ -45,6 +45,8 @@
 #include "knowhere/index/index_factory.h"
 #include "knowhere/version.h"
 #include "pb/common.pb.h"
+#include "pb/cgo_msg.pb.h"
+#include "pb/index_coord.pb.h"
 #include "pb/plan.pb.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
@@ -53,8 +55,8 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/collection_c.h"
+#include "segcore/load_index_c.h"
 #include "segcore/plan_c.h"
-#include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -146,6 +148,43 @@ TEST(CApiTest, LoadIndexSearch) {
         knowhere::GenDataSet(num_query, DIM, raw_data.data() + BIAS * DIM);
 
     auto result = indexing.Search(query_dataset, conf, nullptr);
+}
+
+TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesIndexStorePathVersion) {
+    milvus::proto::cgo::LoadIndexInfo proto;
+    proto.set_collectionid(100);
+    proto.set_partitionid(20);
+    proto.set_segmentid(30);
+    auto* field = proto.mutable_field();
+    field->set_fieldid(100);
+    field->set_name("vec");
+    field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim_param = field->add_type_params();
+    dim_param->set_key("dim");
+    dim_param->set_value("128");
+    proto.set_indexid(50);
+    proto.set_index_buildid(60);
+    proto.set_index_version(1);
+    proto.set_index_engine_version(1);
+    proto.set_index_file_size(1024);
+    proto.set_num_rows(1000);
+    proto.set_index_store_path_version(
+        milvus::proto::index::IndexStorePathVersion::
+            INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+
+    std::string serialized;
+    ASSERT_TRUE(proto.SerializeToString(&serialized));
+
+    milvus::segcore::LoadIndexInfo load_index_info;
+    auto status =
+        FinishLoadIndexInfo(static_cast<CLoadIndexInfo>(&load_index_info),
+                            reinterpret_cast<const uint8_t*>(serialized.data()),
+                            serialized.size());
+
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(load_index_info.index_store_path_version,
+              milvus::proto::index::IndexStorePathVersion::
+                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
 }
 
 template <class TraitType>
@@ -1301,24 +1340,15 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                                         &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    std::vector<CSearchResult> results;
-    results.push_back(c_search_result_on_bigIndex);
-
-    auto slice_nqs = std::vector<int64_t>{num_queries};
-    auto slice_topKs = std::vector<int64_t>{topK};
-
-    CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData({},
-                                            &cSearchResultData,
-                                            plan,
-                                            results.data(),
-                                            results.size(),
-                                            slice_nqs.data(),
-                                            slice_topKs.data(),
-                                            slice_nqs.size());
-    ASSERT_EQ(status.error_code, Success);
-
+    // This test asserts on seg_offsets_/distances_ via topk_per_nq_prefix_sum_.
+    // The full reduce pipeline isn't needed — just materialize the prefix sum
+    // for the dense (no invalid rows) search result.
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    search_result_on_bigIndex->topk_per_nq_prefix_sum_.resize(num_queries + 1);
+    for (int64_t i = 0; i <= num_queries; ++i) {
+        search_result_on_bigIndex->topk_per_nq_prefix_sum_[i] = i * topK;
+    }
+
     for (int i = 0; i < num_queries; ++i) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
                   search_result_on_bigIndex->total_nq_ + 1);
@@ -1334,7 +1364,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
-    DeleteSearchResultDataBlobs(cSearchResultData);
 }
 
 TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
@@ -1452,24 +1481,14 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                         &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    std::vector<CSearchResult> results;
-    results.push_back(c_search_result_on_bigIndex);
-
-    auto slice_nqs = std::vector<int64_t>{num_queries};
-    auto slice_topKs = std::vector<int64_t>{topK};
-
-    CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData({},
-                                            &cSearchResultData,
-                                            plan,
-                                            results.data(),
-                                            results.size(),
-                                            slice_nqs.data(),
-                                            slice_topKs.data(),
-                                            slice_nqs.size());
-    ASSERT_EQ(status.error_code, Success);
-
+    // See the sibling test above — manually materialize topk_per_nq_prefix_sum_
+    // instead of running the full reduce pipeline.
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
+    search_result_on_bigIndex->topk_per_nq_prefix_sum_.resize(num_queries + 1);
+    for (int64_t i = 0; i <= num_queries; ++i) {
+        search_result_on_bigIndex->topk_per_nq_prefix_sum_[i] = i * topK;
+    }
+
     for (int i = 0; i < num_queries; ++i) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
                   search_result_on_bigIndex->total_nq_ + 1);
@@ -1485,5 +1504,4 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
-    DeleteSearchResultDataBlobs(cSearchResultData);
 }

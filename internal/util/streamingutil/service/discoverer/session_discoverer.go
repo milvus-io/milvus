@@ -14,8 +14,9 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // NewSessionDiscoverer returns a new Discoverer for the milvus session registration.
@@ -120,7 +121,7 @@ func (sw *sessionDiscoverer) watch(ctx context.Context, cb func(VersionedState) 
 		case event, ok := <-eventCh:
 			// Break the loop if the watch is failed.
 			if !ok {
-				return errors.New("etcd watch channel closed unexpectedly")
+				return status.NewInner("etcd watch channel closed unexpectedly")
 			}
 			if err := sw.handleETCDEvent(event); err != nil {
 				return err
@@ -172,6 +173,10 @@ func (sw *sessionDiscoverer) initDiscover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Clear stale sessions before re-populating.
+	// On retry (e.g. after etcd watch compaction), sessions deleted during the
+	// watch gap would otherwise persist forever because initDiscover only adds entries.
+	sw.peerSessions = make(map[string]*sessionutil.SessionRaw, len(resp.Kvs))
 	for _, kv := range resp.Kvs {
 		logger := sw.Logger().With(zap.String("sessionKey", string(kv.Key)), zap.String("sessionValue", string(kv.Value)))
 		session, err := sw.parseSession(kv.Value)

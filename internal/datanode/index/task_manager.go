@@ -25,15 +25,15 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type IndexTaskInfo struct {
@@ -45,6 +45,7 @@ type IndexTaskInfo struct {
 	FailReason                string
 	CurrentIndexVersion       int32
 	CurrentScalarIndexVersion int32
+	IndexStorePathVersion     indexpb.IndexStorePathVersion
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -60,6 +61,7 @@ func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 		FailReason:                i.FailReason,
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
+		IndexStorePathVersion:     i.IndexStorePathVersion,
 		statistic:                 typeutil.Clone(i.statistic),
 	}
 }
@@ -74,6 +76,7 @@ func (i *IndexTaskInfo) ToIndexTaskInfo(buildID int64) *workerpb.IndexTaskInfo {
 		FailReason:                i.FailReason,
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
+		IndexStorePathVersion:     i.IndexStorePathVersion,
 	}
 }
 
@@ -145,6 +148,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 	memSize uint64,
 	currentIndexVersion int32,
 	currentScalarIndexVersion int32,
+	indexStorePathVersion indexpb.IndexStorePathVersion,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
@@ -155,6 +159,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 		info.MemSize = memSize
 		info.CurrentIndexVersion = currentIndexVersion
 		info.CurrentScalarIndexVersion = currentScalarIndexVersion
+		info.IndexStorePathVersion = indexStorePathVersion
 		return
 	}
 }
@@ -354,6 +359,7 @@ type StatsTaskInfo struct {
 	Bm25Logs         []*datapb.FieldBinlog
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 	FileResources    []*internalpb.FileResourceInfo
+	Manifest         string
 }
 
 func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
@@ -372,6 +378,7 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 		Bm25Logs:         s.CloneBm25Logs(),
 		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
 		FileResources:    s.CloneFileResources(),
+		Manifest:         s.Manifest,
 	}
 }
 
@@ -390,6 +397,7 @@ func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 		Bm25Logs:         s.Bm25Logs,
 		NumRows:          s.NumRows,
 		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
+		Manifest:         s.Manifest,
 	}
 }
 
@@ -487,6 +495,7 @@ func (m *TaskManager) StorePKSortStatsResult(
 	insertLogs []*datapb.FieldBinlog,
 	statsLogs []*datapb.FieldBinlog,
 	bm25Logs []*datapb.FieldBinlog,
+	manifest string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
@@ -500,6 +509,7 @@ func (m *TaskManager) StorePKSortStatsResult(
 		info.InsertLogs = insertLogs
 		info.StatsLogs = statsLogs
 		info.Bm25Logs = bm25Logs
+		info.Manifest = manifest
 		return
 	}
 }
@@ -512,6 +522,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 	segID typeutil.UniqueID,
 	channel string,
 	texIndexLogs map[int64]*datapb.TextIndexStats,
+	manifest string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
@@ -522,6 +533,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.Manifest = manifest
 	}
 }
 
@@ -533,6 +545,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 	segID typeutil.UniqueID,
 	channel string,
 	jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats,
+	manifest string,
 ) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
@@ -543,6 +556,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.Manifest = manifest
 	}
 }
 

@@ -3,12 +3,12 @@ package exprutil
 import (
 	"math"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type KeyType int64
@@ -22,7 +22,7 @@ func ParseExprFromPlan(plan *planpb.PlanNode) (*planpb.Expr, error) {
 	node := plan.GetNode()
 
 	if node == nil {
-		return nil, errors.New("can't get expr from empty plan node")
+		return nil, merr.WrapErrParameterInvalidMsg("can't get expr from empty plan node")
 	}
 
 	var expr *planpb.Expr
@@ -32,7 +32,7 @@ func ParseExprFromPlan(plan *planpb.PlanNode) (*planpb.Expr, error) {
 	case *planpb.PlanNode_Query:
 		expr = node.Query.GetPredicates()
 	default:
-		return nil, errors.New("unsupported plan node type")
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported plan node type")
 	}
 
 	return expr, nil
@@ -145,6 +145,44 @@ func IntersectKeys(l []*planpb.GenericValue, r []*planpb.GenericValue) []*planpb
 		})
 	}
 	return nil
+}
+
+// HasOptimizablePkPredicate checks whether the expression tree contains a PK predicate
+// that can be optimized by bloom filter or min/max pruning.
+//
+// Rules:
+//   - TermExpr on PK:           optimizable (BF + min/max)
+//   - UnaryRangeExpr on PK:     optimizable (min/max pruning; Equal also enables BF)
+//   - AND(left, right):         either side having PK is sufficient
+//   - OR(left, right):          both sides must have PK — otherwise one side is unconstrained
+//   - NOT(inner):               not optimizable (negation cannot narrow segment set)
+func HasOptimizablePkPredicate(expr *planpb.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		return e.TermExpr.GetColumnInfo().GetIsPrimaryKey()
+	case *planpb.Expr_UnaryRangeExpr:
+		return e.UnaryRangeExpr.GetColumnInfo().GetIsPrimaryKey()
+	case *planpb.Expr_BinaryRangeExpr:
+		return e.BinaryRangeExpr.GetColumnInfo().GetIsPrimaryKey()
+	case *planpb.Expr_BinaryExpr:
+		left := HasOptimizablePkPredicate(e.BinaryExpr.GetLeft())
+		right := HasOptimizablePkPredicate(e.BinaryExpr.GetRight())
+		switch e.BinaryExpr.GetOp() {
+		case planpb.BinaryExpr_LogicalAnd:
+			return left || right
+		case planpb.BinaryExpr_LogicalOr:
+			return left && right
+		default:
+			return false
+		}
+	case *planpb.Expr_UnaryExpr:
+		return false
+	default:
+		return false
+	}
 }
 
 func ParseKeys(expr *planpb.Expr, kType KeyType) []*planpb.GenericValue {
@@ -304,7 +342,7 @@ func ValidatePartitionKeyIsolation(expr *planpb.Expr) error {
 		return err
 	}
 	if !foundPartitionKey {
-		return errors.New("partition key not found in expr or the expr is invalid when validating partition key isolation")
+		return merr.WrapErrParameterInvalidMsg("partition key not found in expr or the expr is invalid when validating partition key isolation")
 	}
 	return nil
 }
@@ -351,7 +389,7 @@ func validatePartitionKeyIsolationFromBinaryExpr(expr *planpb.BinaryExpr) (bool,
 		// if either side has partition key, but OR them
 		// e.g. partition_key_field == 1 || other_field > 10
 		if leftRes || rightRes {
-			return true, errors.New("partition key isolation does not support OR")
+			return true, merr.WrapErrParameterInvalidMsg("partition key isolation does not support OR")
 		}
 		// if none of them has partition key
 		return false, nil
@@ -366,7 +404,7 @@ func validatePartitionKeyIsolationFromUnaryExpr(expr *planpb.UnaryExpr) (bool, e
 	}
 	if expr.Op == planpb.UnaryExpr_Not {
 		if res {
-			return true, errors.New("partition key isolation does not support NOT")
+			return true, merr.WrapErrParameterInvalidMsg("partition key isolation does not support NOT")
 		}
 		return false, nil
 	}
@@ -376,7 +414,7 @@ func validatePartitionKeyIsolationFromUnaryExpr(expr *planpb.UnaryExpr) (bool, e
 func validatePartitionKeyIsolationFromTermExpr(expr *planpb.TermExpr) (bool, error) {
 	if expr.GetColumnInfo().GetIsPartitionKey() {
 		// e.g. partition_key_field in [1, 2, 3]
-		return true, errors.New("partition key isolation does not support IN")
+		return true, merr.WrapErrParameterInvalidMsg("partition key isolation does not support IN")
 	}
 	return false, nil
 }
@@ -387,14 +425,14 @@ func validatePartitionKeyIsolationFromRangeExpr(expr *planpb.UnaryRangeExpr) (bo
 			// e.g. partition_key_field == 1
 			return true, nil
 		}
-		return true, errors.Newf("partition key isolation does not support %s", expr.GetOp().String())
+		return true, merr.WrapErrParameterInvalidMsg("partition key isolation does not support %s", expr.GetOp().String())
 	}
 	return false, nil
 }
 
 func validatePartitionKeyIsolationFromBinaryRangeExpr(expr *planpb.BinaryRangeExpr) (bool, error) {
 	if expr.GetColumnInfo().GetIsPartitionKey() {
-		return true, errors.New("partition key isolation does not support BinaryRange")
+		return true, merr.WrapErrParameterInvalidMsg("partition key isolation does not support BinaryRange")
 	}
 	return false, nil
 }

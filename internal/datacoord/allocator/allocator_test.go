@@ -18,6 +18,7 @@ package allocator
 
 import (
 	"context"
+	"math"
 	"math/rand"
 	"testing"
 
@@ -26,8 +27,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type RootCoordAllocatorSuite struct {
@@ -90,6 +91,20 @@ func (s *RootCoordAllocatorSuite) TestAllocID() {
 }
 
 func (s *RootCoordAllocatorSuite) TestAllocN() {
+	s.Run("too_large", func() {
+		ms := mocks.NewMixCoord(s.T())
+		allocator := NewRootCoordAllocator(ms)
+		ms.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			Status: merr.Success(),
+		}, nil).Maybe()
+
+		_, _, err := allocator.AllocN(math.MaxUint32 + 1)
+		s.Require().Error(err)
+		s.ErrorIs(err, merr.ErrParameterInvalid)
+		s.Contains(err.Error(), "too large to allocate IDs in a single batch: requested 4294967296, max 4294967295")
+		ms.AssertNotCalled(s.T(), "AllocID", mock.Anything, mock.Anything)
+	})
+
 	s.Run("normal", func() {
 		n := rand.Int63n(100) + 1
 		id := rand.Int63n(1000000)

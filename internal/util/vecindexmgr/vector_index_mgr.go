@@ -30,9 +30,9 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 const (
@@ -183,20 +183,22 @@ func (mgr *vecIndexMgrImpl) IsDataTypeSupport(indexType IndexType, dataType sche
 		dataType = elementType
 	}
 
-	if dataType == schemapb.DataType_BinaryVector {
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
 		return mgr.IsBinaryVectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_FloatVector {
+	case schemapb.DataType_FloatVector:
 		return mgr.IsFloat32VectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_BFloat16Vector {
+	case schemapb.DataType_BFloat16Vector:
 		return mgr.IsBFloat16VectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_Float16Vector {
+	case schemapb.DataType_Float16Vector:
 		return mgr.IsFloat16VectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_SparseFloatVector {
+	case schemapb.DataType_SparseFloatVector:
 		return mgr.IsSparseFloat32VectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_Int8Vector {
+	case schemapb.DataType_Int8Vector:
 		return mgr.IsInt8VectorSupport(indexType, isEmbeddingList)
+	default:
+		return false
 	}
-	return false
 }
 
 func (mgr *vecIndexMgrImpl) IsFlatVecIndex(indexType IndexType) bool {

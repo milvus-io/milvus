@@ -40,6 +40,12 @@ class PhyLikeConjunctExpr : public Expr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    MoveCursor() override {
+        auto real_batch_size = GetNextBatchSize();
+        current_pos_ += real_batch_size;
+    }
+
     std::string
     ToString() const override {
         return "PhyLikeConjunctExpr";

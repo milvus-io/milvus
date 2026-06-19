@@ -12,9 +12,16 @@ import (
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
+
+// OptWriteBufferManager provides a write buffer manager to the resource (test only).
+func OptWriteBufferManager(wbMgr writebuffer.BufferManager) optResourceInit {
+	return func(r *resourceImpl) {
+		r.wbMgr = wbMgr
+	}
+}
 
 // InitForTest initializes the singleton of resources for test.
 func InitForTest(t *testing.T, opts ...optResourceInit) {
@@ -24,7 +31,7 @@ func InitForTest(t *testing.T, opts ...optResourceInit) {
 	for _, opt := range opts {
 		opt(r)
 	}
-	if r.chunkManager != nil {
+	if r.wbMgr == nil && r.chunkManager != nil {
 		r.syncMgr = syncmgr.NewSyncManager(r.chunkManager)
 		r.wbMgr = writebuffer.NewManager(r.syncMgr)
 	}

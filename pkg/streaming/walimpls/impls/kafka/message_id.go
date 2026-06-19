@@ -6,8 +6,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func UnmarshalMessageID(data string) (message.MessageID, error) {
@@ -19,7 +19,7 @@ func UnmarshalMessageID(data string) (message.MessageID, error) {
 }
 
 func unmarshalMessageID(data string) (kafkaID, error) {
-	v, err := message.DecodeUint64(data)
+	v, err := message.DecodeInt64(data)
 	if err != nil {
 		return 0, errors.Wrapf(message.ErrInvalidMessageID, "decode kafkaID fail with err: %s, id: %s", err.Error(), data)
 	}

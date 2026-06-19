@@ -18,7 +18,7 @@
 
 #include "common/EasyAssert.h"
 #include "indexbuilder/IndexCreatorBase.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/type_c.h"
@@ -60,6 +60,7 @@ class IndexFactory {
             case DataType::DOUBLE:
             case DataType::VARCHAR:
             case DataType::STRING:
+            case DataType::TEXT:
             case DataType::ARRAY:
             case DataType::JSON:
             case DataType::GEOMETRY:

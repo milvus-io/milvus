@@ -13,6 +13,7 @@ As for everything else in the project, the contributions to Milvus are governed 
   - [How can you contribute?](#how-can-you-contribute)
     - [Contributing code](#contributing-code)
     - [GitHub workflow](#github-workflow)
+    - [Design documents](#design-documents)
     - [General guidelines](#general-guidelines)
     - [Developer Certificate of Origin (DCO)](#developer-certificate-of-origin-dco)
   - [Coding Style](#coding-style)
@@ -55,8 +56,8 @@ As for everything else in the project, the contributions to Milvus are governed 
 **If you require a new feature or major enhancement, you can**
 
 - (**Recommended**) File an issue about the feature/enhancement with reasons.
-- Provide an MEP for the feature/enhancement.
-- Pull a request to implement the MEP.
+- Provide a [design document](#design-documents) for the feature/enhancement.
+- Pull a request to implement the design.
 
 **If you are a reviewer/approver of Milvus, you can**
 
@@ -97,6 +98,49 @@ git checkout upstream/master -b my-topic-branch
 ```
 
 ![](docs/developer_guides/figs/local-develop-steps.png)
+
+### Design documents
+
+Milvus feature pull requests must provide a design document. This applies when the pull request title starts with `feat:` or the pull request is labeled `kind/feature`. Large enhancements that introduce new architecture, storage formats, public behavior, or upgrade impact should also include a design document; reviewers may add `kind/feature` when the design-doc requirement applies.
+
+To satisfy the requirement, do one of the following:
+
+- Add or update the design document in the same pull request as the related implementation.
+- Link an existing in-repo design document in the pull request description.
+
+Use this pull request description format when linking an existing document:
+
+```markdown
+design doc: docs/design-docs/design_docs/YYYYMMDD-short-descriptive-name.md
+```
+
+Design documents must live under `docs/design-docs/design_docs/`. Name each file `YYYYMMDD-short-descriptive-name.md`, keep one design per file, and put images or diagrams under `docs/design-docs/assets/graphs/` or `docs/design-docs/assets/images/`. External design-doc repository links do not satisfy this requirement. Mergify adds the `do-not-merge/missing-design-doc` label to feature PRs until this requirement is met.
+
+Start each design document with a clear title and metadata block:
+
+```markdown
+# MEP: <Title>
+
+- **Created:** YYYY-MM-DD
+- **Author(s):** @github-handle
+- **Status:** Draft | Under Review | Approved | Implemented | Deprecated
+- **Component:** DataNode | QueryNode | Proxy | Coordinator | Storage | Index | SDK | Other
+- **Related Issues:** #xxx
+- **Released:** Milvus release version, if applicable
+```
+
+Every design document should explain the problem, the proposed design, and how the design will be verified. Use these sections:
+
+- **Summary:** Briefly describe the change.
+- **Motivation:** Explain the user problem, operational problem, or architectural limitation being solved.
+- **Public Interfaces:** List API, proto, SDK, config, metrics, or behavior changes that users or other components will observe.
+- **Design Details:** Describe the architecture, data flow, component responsibilities, persistence/metadata changes, and important failure cases.
+- **Compatibility, Deprecation, and Migration Plan:** Call out upgrade, rollback, data-format, API compatibility, and migration impact.
+- **Test Plan:** Describe unit, integration, E2E, upgrade, performance, or failure-injection tests needed to prove the design works.
+- **Rejected Alternatives:** Record meaningful alternatives and why they were not chosen.
+- **References:** Link related issues, pull requests, previous designs, or external references.
+
+Update the design document when review changes the approach, so the merged document matches the implementation.
 
 ### General guidelines
 

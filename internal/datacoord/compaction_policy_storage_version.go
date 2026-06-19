@@ -23,12 +23,13 @@ import (
 	"github.com/blang/semver/v4"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type storageVersionUpgradePolicy struct {
@@ -51,8 +52,13 @@ func newStorageVersionUpgradePolicy(meta *meta, allocator allocator.Allocator, h
 	}
 }
 
+func (policy *storageVersionUpgradePolicy) Name() string {
+	return "storageVersionUpgrade"
+}
+
 func (policy *storageVersionUpgradePolicy) Enable() bool {
-	return paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool()
+	return paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool() ||
+		paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.GetAsBool()
 }
 
 func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
@@ -61,6 +67,28 @@ func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
 		targetVersion = storage.StorageV3
 	}
 	return targetVersion
+}
+
+func segmentColumnGroupFormatsAllEqual(segment *SegmentInfo, targetFormat string) bool {
+	if targetFormat == "" || segment.GetStorageVersion() != storage.StorageV3 {
+		return true
+	}
+
+	binlogs := segment.GetBinlogs()
+	if len(binlogs) == 0 {
+		log.Warn("unexpected empty binlogs for V3 segment during storage format compaction",
+			zap.Int64("segmentID", segment.GetID()),
+			zap.Int64("collectionID", segment.GetCollectionID()),
+			zap.String("targetFormat", targetFormat))
+		return false
+	}
+
+	for _, fieldBinlog := range binlogs {
+		if fieldBinlog.GetFormat() != targetFormat {
+			return false
+		}
+	}
+	return true
 }
 
 func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
@@ -91,6 +119,11 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 		if policy.currentCount >= maxCount {
 			break
 		}
+		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+			log.Info("skip storage version compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("collectionID", collection.ID))
+			continue
+		}
 		collectionViews, err := policy.triggerOneCollection(ctx, collection.ID, maxCount)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
@@ -114,6 +147,10 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 		log.Warn("fail to apply storageVersionUpgradePolicy, collection not exist")
 		return nil, nil
 	}
+	if collection.IsExternal() {
+		log.Info("skip storage version compaction for external collection")
+		return nil, nil
+	}
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
@@ -128,6 +165,23 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 	}
 
 	targetVersion := policy.targetVersion()
+	// TEXT fields require V3 manifest storage for LOB support and cannot be
+	// downgraded. If the configured target version is lower than V3 for a
+	// collection that has a TEXT field, skip this collection entirely instead
+	// of silently bumping the target
+	if targetVersion < storage.StorageV3 {
+		for _, field := range collection.Schema.GetFields() {
+			if field.GetDataType() == schemapb.DataType_Text {
+				log.Warn("storage version upgrade policy skipped: collection has TEXT field but configured target storage version is lower than V3, refusing to downgrade",
+					zap.Int64("targetVersion", targetVersion),
+					zap.Int64("requiredVersion", storage.StorageV3))
+				return nil, nil
+			}
+		}
+	}
+	versionEnabled := paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool()
+	formatEnabled := paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.GetAsBool()
+	targetFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
@@ -135,7 +189,12 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 			!segment.isCompacting &&
 			!segment.GetIsImporting() &&
 			segment.GetLevel() != datapb.SegmentLevel_L0 &&
-			segment.GetStorageVersion() != targetVersion
+			!policy.meta.isSegmentCompactionProtected(segment.GetID()) &&
+			((versionEnabled && segment.GetStorageVersion() != targetVersion) ||
+				(formatEnabled &&
+					targetVersion == storage.StorageV3 &&
+					segment.GetStorageVersion() == storage.StorageV3 &&
+					!segmentColumnGroupFormatsAllEqual(segment, targetFormat)))
 	}))
 
 	views := make([]CompactionView, 0, len(segments))

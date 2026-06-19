@@ -27,9 +27,9 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue string) error
@@ -133,8 +133,10 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 	if pi.manager == nil {
 		panic(fmt.Sprintf("manager is nil %s", pi.Key))
 	}
-	// raw value set only once
+	// raw is always the primary key's value, used for CAS comparison.
+	// effectiveRaw is the value actually used for computing result (may come from fallback).
 	_, raw, err = pi.manager.GetConfig(pi.Key)
+	effectiveRaw := raw
 	if err != nil || raw == pi.DefaultValue {
 		// try fallback if the entry is not exist or default value,
 		//  because default value may already defined in milvus.yaml
@@ -143,16 +145,17 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 			var fallbackRaw string
 			_, fallbackRaw, err = pi.manager.GetConfig(key)
 			if err == nil {
-				raw = fallbackRaw
+				effectiveRaw = fallbackRaw
 				break
 			}
 		}
 	}
 	if err != nil {
 		// use default value
+		effectiveRaw = pi.DefaultValue
 		raw = pi.DefaultValue
 	}
-	result = raw
+	result = effectiveRaw
 	if pi.Formatter != nil {
 		result = pi.Formatter(result)
 	}
@@ -324,7 +327,12 @@ func (pi *ParamItem) GetAsRoleDetails() map[string](map[string]([](map[string]st
 }
 
 func (pi *ParamItem) GetAsDurationByParse() time.Duration {
-	val, _ := pi.get()
+	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+		if durationVal, ok := val.(time.Duration); ok {
+			return durationVal
+		}
+	}
+	val, raw, _ := pi.getWithRaw()
 	durationVal, err := time.ParseDuration(val)
 	if err != nil {
 		durationVal, err = time.ParseDuration(pi.DefaultValue)
@@ -332,6 +340,7 @@ func (pi *ParamItem) GetAsDurationByParse() time.Duration {
 			panic(fmt.Sprintf("unreachable: parse duration from default value failed, %s, err: %s", pi.DefaultValue, err.Error()))
 		}
 	}
+	pi.manager.CASCachedValue(pi.Key, raw, durationVal)
 	return durationVal
 }
 

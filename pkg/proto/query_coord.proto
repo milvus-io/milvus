@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.query;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/querypb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
 import "milvus.proto";
@@ -98,6 +98,7 @@ service QueryCoord {
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
+  rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
@@ -173,6 +174,7 @@ service QueryNode {
     rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
     } 
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
+    rpc UpdateIndex(UpdateIndexRequest) returns (common.Status) {}
 
     rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
     rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
@@ -182,6 +184,7 @@ service QueryNode {
     
     // file resource
     rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
+    rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
     rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
 }
@@ -404,6 +407,14 @@ message SegmentLoadInfo {
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
     common.LoadPriority priority = 23;
     string manifest_path = 24;
+    int32 data_version = 25;
+    bool use_take_for_output = 26;
+    int64 estimated_bytes_per_row = 27;
+    // commit_timestamp mirrors data_coord.SegmentInfo.commit_timestamp.
+    // QueryNode uses it for: delete-buffer pinning, ListAfter calls, and
+    // passing to C++ segcore to overwrite the in-memory timestamp column
+    // (enabling correct MVCC visibility and TTL evaluation).
+    uint64 commit_timestamp = 28;
 }
 
 message FieldIndexInfo {
@@ -421,6 +432,7 @@ message FieldIndexInfo {
     int32 current_index_version = 11;
     int64 index_store_version = 12 [deprecated = true];
     int32 current_scalar_index_version = 13;
+    index.IndexStorePathVersion index_store_path_version = 14;
 }
 
 message JsonStatsInfo {
@@ -478,6 +490,11 @@ message SearchRequest {
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
     int32 total_channel_num = 6;
+    // If true, only execute filter and return valid counts per segment (two-stage search stage 1).
+    bool filter_only = 7;
+    // If true, enable expression filter cache for two-stage search.
+    // Stage 1 caches filter bitset, Stage 2 reuses it to skip re-execution.
+    bool enable_expr_cache = 8;
 }
 
 message QueryRequest {
@@ -695,8 +712,11 @@ message SegmentVersionInfo {
     data.SegmentLevel level = 8;
     bool is_sorted = 9;
     repeated int64 field_json_index_stats = 10;
-    map<int64, JsonStatsInfo> json_stats_info = 11; 
+    map<int64, JsonStatsInfo> json_stats_info = 11;
     string manifest_path = 12;
+    // optional so QueryCoord can distinguish "not reported" (old QueryNode)
+    // from an explicit zero value during a mixed-version rollout.
+    optional int32 data_version = 13;
 }
 
 message ChannelVersionInfo {
@@ -1011,6 +1031,24 @@ message UpdateSchemaRequest {
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
     uint64 version = 4;
+}
+
+message UpdateIndexRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    message AddIndex {
+        index.IndexInfo index_info = 1;
+    }
+    message DropIndex {
+        int64 index_id = 1;
+    }
+    message Action {
+        oneof op {
+            AddIndex add_index_request = 1;
+            DropIndex drop_index_request = 2;
+        }
+    }
+    Action action = 3;
 }
 
 message RunAnalyzerRequest{

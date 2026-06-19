@@ -28,9 +28,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -38,13 +38,14 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestManagerOptions(t *testing.T) {
@@ -231,7 +232,7 @@ func TestLastExpireReset(t *testing.T) {
 	// assign segments, set max segment to only 1MB, equalling to 10485 rows
 	var bigRows, smallRows int64 = 10000, 1000
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
-	initSegment.SegmentInfo.State = commonpb.SegmentState_Dropped
+	initSegment.State = commonpb.SegmentState_Dropped
 	meta.segments.SetSegment(1, initSegment)
 	allocs, _ := segmentManager.AllocSegment(context.Background(), collID, 0, channelName, bigRows, storage.StorageV1)
 	segmentID1, expire1 := allocs[0].SegmentID, allocs[0].ExpireTime
@@ -1092,4 +1093,54 @@ func TestDropSegmentOfPartition(t *testing.T) {
 	segmentManager.DropSegmentsOfPartition(context.Background(), "c1", []int64{100})
 	segment = meta.GetHealthySegment(context.TODO(), segID)
 	assert.NotNil(t, segment)
+}
+
+func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	mockAllocator := newMockAllocator(t)
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.AllocID(ctx)
+	assert.NoError(t, err)
+	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+
+	t.Run("StorageV3 segment has manifest path", func(t *testing.T) {
+		segID, err := mockAllocator.AllocID(ctx)
+		assert.NoError(t, err)
+		segment, err := segmentManager.AllocNewGrowingSegment(ctx, AllocNewGrowingSegmentRequest{
+			CollectionID:         collID,
+			PartitionID:          100,
+			SegmentID:            segID,
+			ChannelName:          "c1",
+			StorageVersion:       storage.StorageV3,
+			IsCreatedByStreaming: true,
+		})
+		assert.NoError(t, err)
+		assert.NotEmpty(t, segment.ManifestPath)
+
+		// Verify the manifest path can be unmarshalled
+		basePath, ver, unmarshalErr := packed.UnmarshalManifestPath(segment.ManifestPath)
+		assert.NoError(t, unmarshalErr)
+		assert.NotEmpty(t, basePath)
+		assert.Equal(t, packed.ManifestEarliest, ver)
+	})
+
+	t.Run("StorageV2 segment has no manifest path", func(t *testing.T) {
+		segID, err := mockAllocator.AllocID(ctx)
+		assert.NoError(t, err)
+		segment, err := segmentManager.AllocNewGrowingSegment(ctx, AllocNewGrowingSegmentRequest{
+			CollectionID:         collID,
+			PartitionID:          100,
+			SegmentID:            segID,
+			ChannelName:          "c2",
+			StorageVersion:       storage.StorageV2,
+			IsCreatedByStreaming: true,
+		})
+		assert.NoError(t, err)
+		assert.Empty(t, segment.ManifestPath)
+	})
 }

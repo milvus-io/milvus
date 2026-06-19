@@ -18,21 +18,19 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type watchInfo struct {
@@ -60,6 +58,7 @@ type Broker interface {
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	// notify observer to clean their meta cache
 	BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error
+	ShowResourceGroups(ctx context.Context) ([]string, error)
 }
 
 type ServerBroker struct {
@@ -83,7 +82,7 @@ func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID Uniqu
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("failed to release collection, code: %s, reason: %s", resp.GetErrorCode(), resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Ctx(ctx).Info("done to release collection", zap.Int64("collection", collectionID))
@@ -106,7 +105,7 @@ func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID Uniqu
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("release partition failed, reason: %s", resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Info("release partitions done")
@@ -126,7 +125,7 @@ func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID
 	}
 
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("sync new partition failed, reason: %s", resp.GetReason())
+		return merr.Error(resp)
 	}
 
 	log.Info("sync new partition done")
@@ -181,7 +180,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 	}
 
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return fmt.Errorf("failed to watch channels, code: %s, reason: %s", resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
+		return merr.Error(resp.GetStatus())
 	}
 
 	log.Ctx(ctx).Info("done to watch channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
@@ -210,7 +209,7 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 		return err
 	}
 	if rsp.ErrorCode != commonpb.ErrorCode_Success {
-		return fmt.Errorf("%s", rsp.Reason)
+		return merr.Error(rsp)
 	}
 
 	log.Ctx(ctx).Info("done to drop collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))
@@ -253,33 +252,43 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 		partitionIDs = append(partitionIDs, p.PartitionID)
 	}
 	dcReq := &datapb.AlterCollectionRequest{
-		CollectionID: collectionID,
-		Schema: &schemapb.CollectionSchema{
-			Name:              colMeta.Name,
-			Description:       colMeta.Description,
-			AutoID:            colMeta.AutoID,
-			Fields:            model.MarshalFieldModels(colMeta.Fields),
-			StructArrayFields: model.MarshalStructArrayFieldModels(colMeta.StructArrayFields),
-			Functions:         model.MarshalFunctionModels(colMeta.Functions),
-			Properties:        colMeta.Properties,
-		},
+		CollectionID:   collectionID,
+		Schema:         colMeta.ToCollectionSchemaPB(),
 		PartitionIDs:   partitionIDs,
 		StartPositions: colMeta.StartPositions,
 		Properties:     colMeta.Properties,
 		DbID:           db.ID,
 		VChannels:      colMeta.VirtualChannelNames,
 	}
-
 	resp, err := b.s.mixCoord.BroadcastAlteredCollection(ctx, dcReq)
 	if err != nil {
 		return err
 	}
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(resp.Reason)
+		return merr.Error(resp)
 	}
-	log.Ctx(ctx).Info("done to broadcast request to alter collection", zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", collectionID), zap.Any("props", colMeta.Properties), zap.Any("field", colMeta.Fields))
+	log.Ctx(ctx).Info("done to broadcast request to alter collection",
+		zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", dcReq.GetCollectionID()),
+		zap.Any("props", colMeta.Properties), zap.Any("fields", colMeta.Fields),
+		zap.Int32("schemaVersion", colMeta.SchemaVersion))
 	return nil
+}
+
+func (b *ServerBroker) ShowResourceGroups(ctx context.Context) ([]string, error) {
+	resp, err := b.s.mixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ListResourceGroups),
+			commonpbutil.WithSourceID(b.s.session.GetServerID()),
+		),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return nil, err
+	}
+	return resp.GetResourceGroups(), nil
 }
 
 func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {

@@ -2,24 +2,22 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -72,6 +70,11 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("targetSize", targetSize))
+	if policy.meta.isCollectionCompactionBlocked(collectionID) {
+		log.Info("skip force merge compaction for collection due to unloaded protected snapshot RefIndex",
+			zap.Int64("collectionID", collectionID))
+		return nil, 0, nil
+	}
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		return nil, 0, err
@@ -98,15 +101,11 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 
 	configMaxSize := getExpectedSegmentSize(policy.meta, collectionID, collection.Schema)
 	if targetSizeBytes < configMaxSize {
-		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("targetSize %d MB should be greater than or equal to configMaxSize %d MB", targetSize, configMaxSize/(1024*1024)))
+		return nil, 0, merr.WrapErrParameterInvalidMsg("targetSize %d MB should be greater than or equal to configMaxSize %d MB", targetSize, configMaxSize/(1024*1024))
 	}
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) &&
-			isFlushed(segment) &&
-			!segment.isCompacting &&
-			!segment.GetIsImporting() &&
-			segment.GetLevel() != datapb.SegmentLevel_L0
+		return isNormalManualCompactionCandidate(policy.meta, segment)
 	}))
 
 	if len(segments) == 0 {
@@ -182,7 +181,7 @@ var _ CollectionTopologyQuerier = (*metricsNodeMemoryQuerier)(nil)
 func (q *metricsNodeMemoryQuerier) GetCollectionTopology(ctx context.Context, collectionID int64) (*CollectionTopology, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 	if q.mixCoord == nil {
-		return nil, fmt.Errorf("mixCoord not available for topology query")
+		return nil, merr.WrapErrServiceInternalMsg("mixCoord not available for topology query")
 	}
 
 	// 1. Get replica information

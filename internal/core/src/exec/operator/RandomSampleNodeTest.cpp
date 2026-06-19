@@ -84,12 +84,13 @@ TEST_P(RandomSampleTest, SampleOnly) {
     auto retrieve_results = RetrieveWithDefaultOutputSizeAndLargeTimestamp(
         segment.get(), plan.get());
 
-    Assert(retrieve_results->fields_data_size() == target_offsets.size());
+    ASSERT_TRUE(retrieve_results->fields_data_size() == target_offsets.size());
     auto field = retrieve_results->fields_data(0);
     int data_size = field.scalars().long_data().data_size();
     int expected_size = static_cast<int>(N * sample_factor);
     // We can accept size one difference due to the float point calculation in sampling.
-    assert(expected_size - 1 <= data_size && data_size <= expected_size + 1);
+    ASSERT_TRUE(expected_size - 1 <= data_size &&
+                data_size <= expected_size + 1);
 }
 
 TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
@@ -149,7 +150,8 @@ TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
 
     int expected_size = static_cast<int>(N * sample_factor) / 3;
     // We can accept size one difference due to the float point calculation in sampling.
-    assert(expected_size - 1 <= data_size && data_size <= expected_size + 1);
+    ASSERT_TRUE(expected_size - 1 <= data_size &&
+                data_size <= expected_size + 1);
 }
 
 TEST(RandomSampleTest, SampleWithEmptyInput) {
@@ -187,5 +189,5 @@ TEST(RandomSampleTest, SampleWithEmptyInput) {
     auto field_data = field.scalars().long_data();
     int data_size = field.scalars().long_data().data_size();
 
-    assert(data_size == 0);
+    ASSERT_EQ(data_size, 0);
 }

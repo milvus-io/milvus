@@ -133,12 +133,12 @@ class RTreeIndex : public ScalarIndex<T> {
     NotIn(size_t n, const T* values) override;
 
     const TargetBitmap
-    Range(T value, OpType op) override;
+    Range(const T& value, OpType op) override;
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override;
 
     const bool
@@ -191,11 +191,17 @@ class RTreeIndex : public ScalarIndex<T> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  protected:
     void
     finish();
 
- protected:
     std::shared_ptr<RTreeIndexWrapper> wrapper_;
     std::string path_;
     proto::schema::FieldSchema schema_;

@@ -60,3 +60,18 @@ type ReplicateHeader struct {
 	TimeTick               uint64
 	VChannel               string
 }
+
+// ClearReplicateHeader removes replicate header from a mutable message.
+// Used during force promote fix to re-append as primary messages.
+func ClearReplicateHeader(msg MutableMessage) MutableMessage {
+	if msg == nil {
+		return nil
+	}
+	if impl, ok := msg.(*messageImpl); ok {
+		impl.properties.Delete(messageReplicateMesssageHeader)
+		return impl
+	}
+	raw := msg.Properties().ToRawMap()
+	delete(raw, messageReplicateMesssageHeader)
+	return NewMutableMessageBeforeAppend(msg.Payload(), raw)
+}

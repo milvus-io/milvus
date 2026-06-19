@@ -26,14 +26,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestImportTask_TaskTime(t *testing.T) {
@@ -271,8 +272,11 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
 		task := &importTask{
-			alloc:      nil,
-			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			alloc: nil,
+			meta: &meta{
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:    NewSegmentsInfo(),
+			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}
@@ -287,6 +291,66 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		im.(*importMeta).catalog = catalog
 		task.QueryTaskOnWorker(cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+	})
+
+	t.Run("QueryImport rpc failed resets NumOfRows", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+
+		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+		assert.NoError(t, err)
+
+		taskProto := &datapb.ImportTaskV2{
+			JobID:        1,
+			TaskID:       2,
+			CollectionID: 3,
+			SegmentIDs:   []int64{5, 6},
+			NodeID:       7,
+			State:        datapb.ImportTaskStateV2_InProgress,
+		}
+		segCatalog := mocks.NewDataCoordCatalog(t)
+		segCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+		task := &importTask{
+			alloc: nil,
+			meta: &meta{
+				catalog:     segCatalog,
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:    NewSegmentsInfo(),
+			},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
+		}
+		task.task.Store(taskProto)
+		err = im.AddTask(context.TODO(), task)
+		assert.NoError(t, err)
+
+		task.meta.segments.SetSegment(5, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        5,
+				State:     commonpb.SegmentState_Importing,
+				NumOfRows: 100,
+				MaxRowNum: 100,
+			},
+		})
+		task.meta.segments.SetSegment(6, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        6,
+				State:     commonpb.SegmentState_Importing,
+				NumOfRows: 50,
+				MaxRowNum: 50,
+			},
+		})
+
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+		task.QueryTaskOnWorker(cluster)
+
+		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		assert.EqualValues(t, 0, task.meta.segments.GetSegment(5).GetNumOfRows())
+		assert.EqualValues(t, 0, task.meta.segments.GetSegment(6).GetNumOfRows())
 	})
 
 	t.Run("import failed", func(t *testing.T) {

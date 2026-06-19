@@ -5,24 +5,29 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // broadcastAlterCollectionForAlterCollection broadcasts the put collection message for alter collection.
@@ -43,6 +48,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
 	}
 
+	if err := common.ValidateNamespaceShardingEnabledNotAltered(req.GetProperties(), req.GetDeleteKeys()); err != nil {
+		return err
+	}
+
 	if funcutil.SliceContain(req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
 		return merr.WrapErrParameterInvalidMsg("cannot delete key %s, dynamic field schema could support set to true/false", common.EnableDynamicSchemaKey)
 	}
@@ -55,7 +64,8 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	isEnableDynamicSchema, targetValue, err := common.IsEnableDynamicSchema(req.GetProperties())
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid dynamic schema property value: %s", req.GetProperties()[0].GetValue())
+		rawValue, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.EnableDynamicSchemaKey, req.GetProperties())
+		return merr.WrapErrParameterInvalidMsg("invalid dynamic schema property value: %s", rawValue)
 	}
 	if isEnableDynamicSchema {
 		// if there's dynamic schema property, it will add a new dynamic field into the collection.
@@ -70,7 +80,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	defer broadcaster.Close()
 
 	// check if the collection exists
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -103,6 +113,22 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			if lv, ok := unmarshalConsistencyLevel(prop.GetValue()); ok && lv != coll.ConsistencyLevel {
 				udpates.ConsistencyLevel = lv
 				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionConsistencyLevel)
+			}
+		case common.CollectionExternalSource:
+			if udpates.Schema == nil {
+				udpates.Schema = &schemapb.CollectionSchema{}
+			}
+			udpates.Schema.ExternalSource = prop.GetValue()
+			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			}
+		case common.CollectionExternalSpec:
+			if udpates.Schema == nil {
+				udpates.Schema = &schemapb.CollectionSchema{}
+			}
+			udpates.Schema.ExternalSpec = prop.GetValue()
+			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
 			}
 		default:
 			newProperties[prop.GetKey()] = prop.GetValue()
@@ -145,16 +171,15 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		}
 
 		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
-		schema := &schemapb.CollectionSchema{
-			Name:               coll.Name,
-			Description:        coll.Description,
-			AutoID:             coll.AutoID,
-			Fields:             model.MarshalFieldModels(coll.Fields),
-			StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-			Functions:          model.MarshalFunctionModels(coll.Functions),
-			EnableDynamicField: coll.EnableDynamicField,
-			Properties:         newPropsKeyValuePairs,
-			Version:            coll.SchemaVersion,
+		schema := coll.ToCollectionSchemaPB()
+		schema.Properties = newPropsKeyValuePairs
+		// Preserve ExternalSource/ExternalSpec from current collection state
+		// unless this alter is itself updating them (refresh-completion sync).
+		if udpates.Schema != nil && udpates.Schema.ExternalSource != "" {
+			schema.ExternalSource = udpates.Schema.ExternalSource
+		}
+		if udpates.Schema != nil && udpates.Schema.ExternalSpec != "" {
+			schema.ExternalSpec = udpates.Schema.ExternalSpec
 		}
 		udpates.Schema = schema
 	}
@@ -188,25 +213,37 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	if len(req.GetProperties()) != 1 {
 		return merr.WrapErrParameterInvalidMsg("cannot alter dynamic schema with other properties at the same time")
 	}
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
+	if err != nil {
+		return err
+	}
+	if coll.EnableDynamicField == targetValue {
+		return errIgnoredAlterCollection
+	}
+	if !targetValue {
+		if err := waitUntilSchemaDropReady(ctx); err != nil {
+			return err
+		}
+	}
+
+	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), coll.Name)
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
 
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
-
-	// return nil for no-op
 	if coll.EnableDynamicField == targetValue {
 		return errIgnoredAlterCollection
 	}
 
-	// not support disabling since remove field not support yet.
+	// Disable dynamic field: remove $meta field from schema.
 	if !targetValue {
-		return merr.WrapErrParameterInvalidMsg("dynamic schema cannot supported to be disabled")
+		return c.broadcastDisableDynamicField(ctx, req, coll, broadcaster)
 	}
 
 	// convert to add $meta json field, nullable, default value `{}`
@@ -225,19 +262,13 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		return err
 	}
 
-	fieldSchema.FieldID = nextFieldID(coll)
-	schema := &schemapb.CollectionSchema{
-		Name:               coll.Name,
-		Description:        coll.Description,
-		AutoID:             coll.AutoID,
-		Fields:             model.MarshalFieldModels(coll.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(coll.Functions),
-		EnableDynamicField: targetValue,
-		Properties:         coll.Properties,
-		Version:            coll.SchemaVersion + 1,
-	}
+	schema := coll.ToCollectionSchemaPB()
+	fieldSchema.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
+	schema.Version = coll.SchemaVersion + 1
+	schema.EnableDynamicField = targetValue
 	schema.Fields = append(schema.Fields, fieldSchema)
+	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
+	schema.Properties = properties
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
@@ -252,13 +283,14 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
 			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema},
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema: schema,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).
@@ -269,9 +301,68 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	return nil
 }
 
+// broadcastDisableDynamicField removes the $meta field to disable dynamic schema.
+func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.AlterCollectionRequest, coll *model.Collection, bc broadcaster.BroadcastAPI) error {
+	// Find and remove $meta field, record its ID for cascade index cleanup.
+	fields := model.MarshalFieldModels(coll.Fields)
+	var dynamicFieldID int64
+	newFields := make([]*schemapb.FieldSchema, 0, len(fields))
+	for _, f := range fields {
+		if f.IsDynamic {
+			dynamicFieldID = f.FieldID
+		} else {
+			newFields = append(newFields, f)
+		}
+	}
+	if dynamicFieldID == 0 {
+		return merr.WrapErrParameterInvalidMsg("dynamic field not found")
+	}
+
+	schema := coll.ToCollectionSchemaPB()
+	maxFieldID := maxAssignedFieldIDFromSchema(schema)
+	properties := updateMaxFieldIDProperty(coll.Properties, maxFieldID)
+	schema.Fields = newFields
+	schema.EnableDynamicField = false
+	schema.Properties = properties
+	schema.Version = coll.SchemaVersion + 1
+
+	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	channels = append(channels, coll.VirtualChannelNames...)
+	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			DbId:         coll.DBID,
+			CollectionId: coll.CollectionID,
+			UpdateMask: &fieldmaskpb.FieldMask{
+				Paths: []string{
+					message.FieldMaskCollectionSchema,
+					message.FieldMaskCollectionProperties,
+				},
+			},
+			CacheExpirations: cacheExpirations,
+			DroppedFieldIds:  []int64{dynamicFieldID},
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Schema:     schema,
+				Properties: properties,
+			},
+		}).
+		WithBroadcast(channels).
+		MustBuildBroadcast()
+	if _, err := bc.Broadcast(ctx, msg); err != nil {
+		return err
+	}
+	return nil
+}
+
 // getCacheExpireForCollection gets the cache expirations for collection.
 func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, collectionNameOrAlias string) (*message.CacheExpirations, error) {
-	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp, false)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +415,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			log.Ctx(ctx).Warn("alter a non-existent collection, ignore it", log.FieldMessage(result.Message))
 			return nil
 		}
-		return errors.Wrap(err, "failed to alter collection")
+		return merr.Wrap(err, "failed to alter collection")
 	}
 	if body.Updates.AlterLoadConfig != nil {
 		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
@@ -332,12 +423,97 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			ReplicaNumber:  body.Updates.AlterLoadConfig.ReplicaNumber,
 			ResourceGroups: body.Updates.AlterLoadConfig.ResourceGroups,
 		})
+		if err != nil {
+			return merr.Wrap(err, "failed to update load config")
+		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return errors.Wrap(err, "failed to update load config")
+			if errors.Is(err, merr.ErrResourceGroupNotFound) {
+				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				return nil
+			}
+			return merr.Wrap(err, "failed to update load config")
 		}
 	}
-	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
-		return errors.Wrap(err, "failed to broadcast altered collection")
+	if err := c.cascadeDropFieldIndexesInline(ctx, result); err != nil {
+		return err
 	}
+	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
+		return merr.Wrap(err, "failed to broadcast altered collection")
+	}
+
+	// If the collection was renamed or moved to a different DB, grants were migrated
+	// in MetaTable.AlterCollection. Refresh the RBAC policy cache on all proxies so
+	// they pick up the new grant keys.
+	for _, path := range header.UpdateMask.GetPaths() {
+		if path == message.FieldMaskCollectionName || path == message.FieldMaskDB {
+			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: int32(typeutil.CacheRefresh),
+			}); err != nil {
+				log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after collection rename, skipping", zap.Error(err))
+			}
+			break
+		}
+	}
+
 	return c.ExpireCaches(ctx, header)
+}
+
+// cascadeDropFieldIndexesInline drops indexes on dropped fields by inlining the
+// DropIndex ack callback, same pattern as dropCollectionV1AckCallback.
+// Cannot use DropIndex RPC here because it would deadlock on the resource key lock.
+func (c *DDLCallback) cascadeDropFieldIndexesInline(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	header := result.Message.Header()
+	droppedFieldIDs := header.GetDroppedFieldIds()
+	if len(droppedFieldIDs) == 0 {
+		return nil
+	}
+
+	resp, err := c.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: header.CollectionId,
+		IndexName:    "",
+	})
+	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
+		if merr.ErrIndexNotFound.Is(err) {
+			return nil
+		}
+		return errors.Wrap(err, "failed to describe indexes for cascade drop")
+	}
+
+	droppedFieldSet := make(map[int64]struct{}, len(droppedFieldIDs))
+	for _, fid := range droppedFieldIDs {
+		droppedFieldSet[fid] = struct{}{}
+	}
+	var indexIDs []int64
+	for _, indexInfo := range resp.GetIndexInfos() {
+		if _, ok := droppedFieldSet[indexInfo.GetFieldID()]; ok {
+			log.Ctx(ctx).Info("cascade dropping index on dropped field",
+				log.FieldMessage(result.Message),
+				zap.Int64("fieldID", indexInfo.GetFieldID()),
+				zap.String("indexName", indexInfo.GetIndexName()),
+				zap.Int64("indexID", indexInfo.GetIndexID()),
+			)
+			indexIDs = append(indexIDs, indexInfo.GetIndexID())
+		}
+	}
+	if len(indexIDs) == 0 {
+		return nil
+	}
+
+	controlChannelResult := result.GetControlChannelResult()
+	dropIndexMsg := message.NewDropIndexMessageBuilderV2().
+		WithHeader(&message.DropIndexMessageHeader{
+			CollectionId: header.CollectionId,
+			IndexIds:     indexIDs,
+		}).
+		WithBody(&message.DropIndexMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast().
+		WithBroadcastID(result.Message.BroadcastHeader().BroadcastID)
+
+	if err := registry.CallMessageAckCallback(ctx, dropIndexMsg, map[string]*message.AppendResult{
+		streaming.WAL().ControlChannel(): controlChannelResult,
+	}); err != nil {
+		return errors.Wrap(err, "failed to cascade drop field indexes")
+	}
+	return nil
 }

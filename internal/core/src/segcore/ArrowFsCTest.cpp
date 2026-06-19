@@ -20,11 +20,19 @@
 #include "common/common_type_c.h"
 #include "gtest/gtest.h"
 #include "segcore/arrow_fs_c.h"
+#include "test_utils/Constants.h"
 
-TEST(ArrowFileSystemSingleton, LocalArrowFileSystemSingleton) {
-    const char* path = "/tmp";
-    CStatus status = InitLocalArrowFileSystemSingleton(path);
+TEST(ArrowFileSystem, InitAndClean) {
+    CStorageConfig config = {};
+    config.root_path = TestLocalPath.c_str();
+    config.storage_type = "local";
+
+    CStatus status = InitArrowFileSystem(config);
     EXPECT_EQ(status.error_code, 0);
 
-    CleanArrowFileSystemSingleton();
+    CleanArrowFileSystem();
+
+    // Reinitialize so subsequent tests can use it
+    status = InitArrowFileSystem(config);
+    EXPECT_EQ(status.error_code, 0);
 }

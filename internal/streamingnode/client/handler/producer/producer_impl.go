@@ -12,12 +12,13 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ProducerOptions is the options for creating a producer.
@@ -58,6 +59,8 @@ func CreateProducer(
 
 	// Initialize the producer client finished.
 	cli := &producerImpl{
+		RateLimitObserverRegistryImpl: ratelimit.NewRateLimitObserverRegistry(),
+
 		assignment: *opts.Assignment,
 		walName:    createResp.GetWalName(),
 		logger: log.With(
@@ -89,6 +92,8 @@ func CreateProducer(
 // ProduceRequest 3 -> ProduceResponse Or Error 3
 // CloseProducer
 type producerImpl struct {
+	*ratelimit.RateLimitObserverRegistryImpl
+
 	assignment       types.PChannelInfoAssigned
 	walName          string
 	logger           *log.MLogger
@@ -245,7 +250,7 @@ func (p *producerImpl) sendLoop() (err error) {
 	for {
 		select {
 		case <-p.recvExitCh:
-			return errors.New("recv arm of stream closed")
+			return status.NewOnShutdownError("recv arm of stream closed")
 		case req, ok := <-p.requestCh:
 			if !ok {
 				// all message has been sent, sent close response.
@@ -286,6 +291,11 @@ func (p *producerImpl) recvLoop() (err error) {
 			return err
 		}
 		switch resp := resp.Response.(type) {
+		case *streamingpb.ProduceResponse_RateLimit:
+			p.NotifyRateLimitStateChange(ratelimit.RateLimitState{
+				State: resp.RateLimit.State,
+				Rate:  resp.RateLimit.Rate,
+			})
 		case *streamingpb.ProduceResponse_Produce:
 			var result produceResponse
 			switch produceResp := resp.Produce.Response.(type) {
@@ -308,11 +318,23 @@ func (p *producerImpl) recvLoop() (err error) {
 					},
 				}
 			case *streamingpb.ProduceMessageResponse_Error:
+				statusErr := status.New(produceResp.Error.Code, produceResp.Error.Cause)
+				if statusErr.IsRateLimitRejected() {
+					p.NotifyRateLimitStateChange(ratelimit.RateLimitState{
+						State: streamingpb.WALRateLimitState_WAL_RATE_LIMIT_STATE_REJECT,
+						Rate:  0,
+					})
+				}
 				result = produceResponse{
-					err: status.New(produceResp.Error.Code, produceResp.Error.Cause),
+					err: statusErr,
 				}
 			default:
-				panic("unreachable")
+				// unreachable code.
+				// should return error to client to promise better compatibility.
+				// should never reach here.
+				result = produceResponse{
+					err: status.NewUnknownError(fmt.Sprintf("unknown response type: %T", resp.Produce.Response)),
+				}
 			}
 			p.notifyRequest(resp.Produce.RequestId, result)
 		case *streamingpb.ProduceResponse_Close:

@@ -24,16 +24,15 @@ package proxy
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func AddRootUserToAdminRole() {
@@ -54,7 +53,8 @@ func InitEmptyGlobalCache() {
 	var err error
 	emptyMock := common.NewEmptyMockT()
 	mixcoord := mocks.NewMockMixCoordClient(emptyMock)
-	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("collection not found"))
+	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.WrapErrParameterInvalidMsg("collection not found"))
+	mixcoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.WrapErrParameterInvalidMsg("alias not found"))
 	globalMetaCache, err = NewMetaCache(mixcoord)
 	if err != nil {
 		panic(err)

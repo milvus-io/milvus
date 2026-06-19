@@ -17,13 +17,13 @@
 package metacache
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type segmentCriterion struct {
@@ -223,6 +223,14 @@ func StartSyncing(batchSize int64) SegmentAction {
 	}
 }
 
+func AbortSyncing(batchSize int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.syncingRows -= batchSize
+		info.bufferRows += batchSize
+		info.syncingTasks--
+	}
+}
+
 func FinishSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows += batchSize
@@ -246,6 +254,18 @@ func SetStartPosRecorded(flag bool) SegmentAction {
 func UpdateManifestPath(manifestPath string) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.manifestPath = manifestPath
+	}
+}
+
+// SetFlushSourceMode records which subsystem owns the segment's payload at
+// flush time. The decision is sticky: once a non-Unknown mode is set, later
+// calls with a different mode are no-ops, so the source for a given segment
+// stays consistent across its lifetime.
+func SetFlushSourceMode(mode FlushSourceMode) SegmentAction {
+	return func(info *SegmentInfo) {
+		if info.flushSourceMode == FlushSourceUnknown {
+			info.flushSourceMode = mode
+		}
 	}
 }
 

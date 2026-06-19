@@ -19,15 +19,14 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // BinlogReader is an object to read binlog file. Binlog file's format can be
@@ -43,7 +42,7 @@ type BinlogReader struct {
 // NextEventReader iters all events reader to read the binlog file.
 func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.isClose {
-		return nil, errors.New("bin log reader is closed")
+		return nil, merr.WrapErrStorageMsg("bin log reader is closed")
 	}
 	if reader.buffer.Len() <= 0 {
 		return nil, nil
@@ -52,11 +51,11 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.eventReader != nil {
 		reader.eventReader.Close()
 	}
-	nullable, err := reader.descriptorEvent.GetNullable()
+	nullable, err := reader.GetNullable()
 	if err != nil {
 		return nil, err
 	}
-	reader.eventReader, err = newEventReader(reader.descriptorEvent.PayloadDataType, reader.buffer, nullable)
+	reader.eventReader, err = newEventReader(reader.PayloadDataType, reader.buffer, nullable)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +68,7 @@ func readMagicNumber(buffer io.Reader) (int32, error) {
 		return -1, err
 	}
 	if magicNumber != MagicNumber {
-		return -1, fmt.Errorf("parse magic number failed, expected: %d, actual: %d", MagicNumber, magicNumber)
+		return -1, merr.WrapErrServiceInternalMsg("parse magic number failed, expected: %d, actual: %d", MagicNumber, magicNumber)
 	}
 
 	return magicNumber, nil
@@ -111,7 +110,7 @@ type BinlogReaderOption func(base *BinlogReader) error
 
 func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 	return func(base *BinlogReader) error {
-		edek, ok := base.descriptorEvent.GetEdek()
+		edek, ok := base.GetEdek()
 		if !ok {
 			return nil
 		}
@@ -129,7 +128,7 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 
 		log.Debug("Binlog reader starts to decypt cipher text",
 			zap.Int64("collectionID", collectionID),
-			zap.Int64("fieldID", base.descriptorEvent.FieldID),
+			zap.Int64("fieldID", base.FieldID),
 			zap.Int("cipher size", len(cipherText)),
 		)
 		decrypted, err := decryptor.Decrypt(cipherText)
@@ -139,7 +138,7 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 		}
 		log.Debug("Binlog reader decrypted cipher text",
 			zap.Int64("collectionID", collectionID),
-			zap.Int64("fieldID", base.descriptorEvent.FieldID),
+			zap.Int64("fieldID", base.FieldID),
 			zap.Int("cipher size", len(cipherText)),
 			zap.Int("plain size", len(decrypted)),
 		)

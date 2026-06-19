@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <exception>
 #include <map>
+#include <memory>
 #include <optional>
 #include <type_traits>
 
@@ -25,7 +26,6 @@
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
-
 InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     std::shared_ptr<ChunkedColumnInterface> vec_data,
     int64_t segment_id,
@@ -39,7 +39,6 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     const std::string& warmup_policy)
     : vec_data_(vec_data),
       segment_id_(segment_id),
-      field_id_(field_id),
       index_type_(index_type),
       metric_type_(metric_type),
       build_config_(build_config),
@@ -97,8 +96,7 @@ InterimSealedIndexTranslator::estimated_byte_size_of_cell(
     } else if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
         // fp16/bf16 all use float32 to build index
         int64_t fp32_size = row_count * sizeof(float) * dim_;
-        return {{fp32_size, 0},
-                {static_cast<int64_t>(fp32_size + fp32_size * 0.5), 0}};
+        return {{fp32_size, 0}, {static_cast<int64_t>(fp32_size * 0.5), 0}};
     } else {
         // SPARSE_WAND_CC and SPARSE_INVERTED_INDEX_CC basically has the same size as the
         // raw data.
@@ -121,20 +119,43 @@ InterimSealedIndexTranslator::get_cells(
         ctx, segment_id_, "InterimSealedIndexTranslator::get_cells()");
 
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
-    if (!is_sparse_) {
-        knowhere::ViewDataOp view_data = [field_raw_data_ptr =
-                                              vec_data_](size_t id) {
-            const void* data;
-            int64_t data_id = id;
+    auto num_chunk = vec_data_->num_chunks();
+    if (vec_data_->IsNullable()) {
+        vec_data_->BuildValidRowIds(ctx);
+    }
+    const auto& offset_mapping = vec_data_->GetOffsetMapping();
+    bool nullable = offset_mapping.IsEnabled();
 
-            field_raw_data_ptr->BulkValueAt(
-                nullptr,
-                [&data, &data_id](const char* value, size_t i) {
-                    data = static_cast<const void*>(value);
-                },
-                &data_id,
-                1);
-            return data;
+    if (!is_sparse_) {
+        auto rows_until_chunk = std::make_shared<std::vector<int64_t>>();
+        rows_until_chunk->reserve(num_chunk + 1);
+        rows_until_chunk->push_back(0);
+        for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
+            const auto chunk_rows =
+                nullable ? vec_data_->GetValidCountInChunk(chunk_id)
+                         : vec_data_->chunk_row_nums(chunk_id);
+            rows_until_chunk->push_back(rows_until_chunk->back() + chunk_rows);
+        }
+
+        knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data_,
+                                          rows_until_chunk,
+                                          num_chunk](size_t id) {
+            auto compact_offset = static_cast<int64_t>(id);
+            auto it = std::upper_bound(rows_until_chunk->begin(),
+                                       rows_until_chunk->end(),
+                                       compact_offset);
+            AssertInfo(it != rows_until_chunk->begin(),
+                       "Compact offset {} is out of range",
+                       id);
+            const auto chunk_id =
+                std::distance(rows_until_chunk->begin(), it) - 1;
+            AssertInfo(
+                chunk_id < num_chunk, "Compact offset {} is out of range", id);
+            compact_offset -= (*rows_until_chunk)[chunk_id];
+
+            auto pw = field_raw_data_ptr->GetChunk(nullptr, chunk_id);
+            auto chunk = pw.get();
+            return static_cast<const void*>(chunk->ValueAt(compact_offset));
         };
 
         if (vec_data_type_ == DataType::VECTOR_FLOAT) {
@@ -172,12 +193,6 @@ InterimSealedIndexTranslator::get_cells(
             false);
     }
 
-    auto num_chunk = vec_data_->num_chunks();
-    const auto& offset_mapping = vec_data_->GetOffsetMapping();
-    bool nullable = offset_mapping.IsEnabled();
-    const auto& valid_count_per_chunk =
-        nullable ? vec_data_->GetValidCountPerChunk() : std::vector<int64_t>{};
-
     int64_t total_valid_count =
         nullable ? offset_mapping.GetValidCount() : vec_data_->NumRows();
 
@@ -194,11 +209,11 @@ InterimSealedIndexTranslator::get_cells(
 
     bool first_build = true;
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = vec_data_->GetChunk(nullptr, i);
+        auto pw = vec_data_->GetChunk(ctx, i);
         auto chunk = pw.get();
 
-        int64_t actual_row_count =
-            nullable ? valid_count_per_chunk[i] : vec_data_->chunk_row_nums(i);
+        int64_t actual_row_count = nullable ? vec_data_->GetValidCountInChunk(i)
+                                            : vec_data_->chunk_row_nums(i);
 
         if (actual_row_count == 0) {
             continue;

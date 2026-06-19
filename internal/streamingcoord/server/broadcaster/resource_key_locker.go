@@ -5,10 +5,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // errFastLockFailed is the error for fast lock failed.
@@ -99,7 +100,7 @@ func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, 
 			continue
 		}
 		g.Unlock()
-		return nil, errors.Wrapf(errFastLockFailed, "fast lock failed at resource key %s", key.String())
+		return nil, merr.Wrapf(errFastLockFailed, "fast lock failed at resource key %s", key.String())
 	}
 	return g, nil
 }

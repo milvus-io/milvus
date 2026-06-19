@@ -11,22 +11,22 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/distance"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/distance"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type PruneInfo struct {
@@ -170,14 +170,14 @@ func PruneSegments(ctx context.Context,
 			bias = float64(maxSegmentCount) / float64(minSegmentCount)
 		}
 		metrics.QueryNodeSegmentPruneBias.
-			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			WithLabelValues(paramtable.GetStringNodeID(),
 				fmt.Sprint(collectionID),
 				pruneType,
 			).Set(bias)
 
 		filterRatio := float32(realFilteredSegments) / float32(totalSegNum)
 		metrics.QueryNodeSegmentPruneRatio.
-			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			WithLabelValues(paramtable.GetStringNodeID(),
 				fmt.Sprint(collectionID),
 				pruneType,
 			).Set(float64(filterRatio))
@@ -190,7 +190,7 @@ func PruneSegments(ctx context.Context,
 	}
 
 	metrics.QueryNodeSegmentPruneLatency.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		fmt.Sprint(collectionID),
 		pruneType).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -335,4 +335,81 @@ func FilterSegmentsOnScalarField(partitionStats *storage.PartitionStatsSnapshot,
 			}
 		}
 	}
+}
+
+// PruneSealedSegmentsByPKFilter prunes sealedSegments in-place by evaluating the
+// PK predicate from serializedExprPlan against each segment's bloom-filter candidate.
+// Segments whose candidate data proves they cannot contain a matching PK are removed.
+// Workers that end up with no segments are skipped entirely by organizeSubTask.
+func PruneSealedSegmentsByPKFilter(
+	ctx context.Context,
+	serializedExprPlan []byte,
+	pkFilter int32,
+	sealedSegments []SnapshotItem,
+	collectionID int64,
+	queryType string,
+) {
+	if pkFilter == common.PkFilterNoPkFilter {
+		return
+	}
+
+	plan := &planpb.PlanNode{}
+	if err := proto.Unmarshal(serializedExprPlan, plan); err != nil {
+		log.Ctx(ctx).Warn("PruneSealedSegmentsByPKFilter: failed to unmarshal plan, skipping",
+			zap.Error(err))
+		return
+	}
+
+	expr := BuildPKFilterExpr(plan, pkFilter)
+	if expr == nil {
+		return
+	}
+
+	totalCount := 0
+	skippedCount := 0
+
+	for idx, item := range sealedSegments {
+		totalCount += len(item.Segments)
+
+		// Collect candidates with valid BF data as PKFilterTargets.
+		targets := make([]PKFilterTarget, 0, len(item.Segments))
+		for _, entry := range item.Segments {
+			if entry.Candidate != nil {
+				targets = append(targets, entry.Candidate)
+			}
+		}
+
+		ids, all := CheckPKFilter(expr, targets)
+		if all {
+			continue
+		}
+
+		newSegs := make([]SegmentEntry, 0, len(item.Segments))
+		for _, entry := range item.Segments {
+			if entry.Candidate == nil || ids.Contain(entry.SegmentID) {
+				newSegs = append(newSegs, entry)
+			} else {
+				skippedCount++
+			}
+		}
+		item.Segments = newSegs
+		sealedSegments[idx] = item
+	}
+
+	observePKFilterMetrics(collectionID, queryType, totalCount, skippedCount)
+}
+
+func observePKFilterMetrics(collectionID int64, queryType string, totalCount, skippedCount int) {
+	nodeID := paramtable.GetStringNodeID()
+	collectionIDLabel := fmt.Sprint(collectionID)
+
+	metrics.QueryNodeSegmentFilterTotalSegmentNum.
+		WithLabelValues(nodeID, collectionIDLabel, queryType).
+		Observe(float64(totalCount))
+	metrics.QueryNodeSegmentFilterSkippedSegmentNum.
+		WithLabelValues(nodeID, collectionIDLabel, queryType).
+		Observe(float64(skippedCount))
+	metrics.QueryNodeSegmentFilterHitSegmentNum.
+		WithLabelValues(nodeID, collectionIDLabel, queryType).
+		Observe(float64(totalCount - skippedCount))
 }

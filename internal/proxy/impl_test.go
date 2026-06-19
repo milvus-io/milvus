@@ -19,9 +19,9 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -33,10 +33,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -46,18 +47,20 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
@@ -177,6 +180,86 @@ func TestProxy_CheckHealth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, true, resp.IsHealthy)
 	})
+}
+
+func TestProxyRoleDescriptionValidation(t *testing.T) {
+	paramtable.Init()
+	node := &Proxy{mixCoord: NewMixCoordMock()}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := context.Background()
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxRoleDescriptionLength.Key, "4")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleDescriptionLength.Key)
+
+	status, err := node.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{
+			Name:        "role_desc",
+			Description: "12345",
+		},
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	status, err = node.AlterRole(ctx, &milvuspb.AlterRoleRequest{
+		RoleName:    "role_desc",
+		Description: "12345",
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	status, err = node.AlterRole(ctx, &milvuspb.AlterRoleRequest{
+		RoleName:    util.RoleAdmin,
+		Description: "ok",
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	status, err = node.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Roles: []*milvuspb.RoleEntity{
+				{
+					Name:        "role_desc",
+					Description: "12345",
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
+func TestProxyRoleDescriptionForwarding(t *testing.T) {
+	paramtable.Init()
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	node := &Proxy{mixCoord: mixCoord}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := context.Background()
+
+	mixCoord.EXPECT().CreateRole(mock.Anything, mock.MatchedBy(func(req *milvuspb.CreateRoleRequest) bool {
+		return req.GetBase().GetMsgType() == commonpb.MsgType_CreateRole &&
+			req.GetEntity().GetName() == "role_desc_forward" &&
+			req.GetEntity().GetDescription() == "role description"
+	})).Return(merr.Success(), nil).Once()
+	status, err := node.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		Entity: &milvuspb.RoleEntity{
+			Name:        "role_desc_forward",
+			Description: "role description",
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(status))
+
+	mixCoord.EXPECT().AlterRole(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterRoleRequest) bool {
+		return req.GetBase().GetMsgType() == commonpb.MsgType_AlterRole &&
+			req.GetRoleName() == "role_desc_forward" &&
+			req.GetDescription() == "updated role description"
+	})).Return(merr.Success(), nil).Once()
+	status, err = node.AlterRole(ctx, &milvuspb.AlterRoleRequest{
+		RoleName:    "role_desc_forward",
+		Description: "updated role description",
+	})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(status))
 }
 
 func TestProxyRenameCollection(t *testing.T) {
@@ -478,9 +561,7 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
+		mockey.Mock(globalMetaCache.RemoveDatabase).Return().Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
@@ -534,9 +615,7 @@ func TestProxy_FlushAll_ServerAbnormal(t *testing.T) {
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
+		mockey.Mock(globalMetaCache.RemoveDatabase).Return().Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
@@ -982,8 +1061,19 @@ func TestProxyDropDatabase(t *testing.T) {
 	t.Run("drop database ok", func(t *testing.T) {
 		mix := mocks.NewMockMixCoordClient(t)
 		mix.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		mix.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+		}, nil).Maybe()
+		mix.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 		node.mixCoord = mix
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+		cache := NewMockCache(t)
+		cache.EXPECT().RemoveDatabase(mock.Anything, mock.AnythingOfType("string")).Return()
+		globalMetaCache = cache
+
 		ctx := context.Background()
 
 		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
@@ -1431,6 +1521,20 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 
+		// schema has no fields
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		}, nil).Once()
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		}, nil).Once()
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
 		// get channel failed
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
@@ -1471,7 +1575,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{},
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
 		globalMetaCache = mc
@@ -1483,7 +1587,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{},
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		globalMetaCache = mc
@@ -1504,16 +1608,23 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 
 		// normal case
-		rc := mocks.NewMockRootCoordClient(t)
-		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-			ID:    rand.Int63(),
-			Count: 1,
-		}, nil).Once()
-		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
-		assert.NoError(t, err)
-		node.rowIDAllocator = idAllocator
-		err = idAllocator.Start()
-		assert.NoError(t, err)
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID: 1,
+		}, nil)
+		globalMetaCache = mc
+
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			JobID:  "123456789",
+		}, nil)
+		node.mixCoord = mixCoord
 
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{
 			CollectionName: "aaa",
@@ -1524,6 +1635,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+		assert.Equal(t, "123456789", rsp.GetJobID())
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -2106,7 +2218,7 @@ func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
 		Name:           "external_col",
 		ExternalSource: "s3://bucket/path",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2138,7 +2250,7 @@ func TestProxy_Insert_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2167,7 +2279,7 @@ func TestProxy_Delete_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2197,7 +2309,7 @@ func TestProxy_Upsert_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2226,7 +2338,7 @@ func TestProxy_Flush_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2255,7 +2367,7 @@ func TestProxy_CreatePartition_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2285,7 +2397,7 @@ func TestProxy_DropPartition_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2315,7 +2427,7 @@ func TestProxy_ImportV2_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2337,35 +2449,241 @@ func TestProxy_ImportV2_ExternalCollection(t *testing.T) {
 }
 
 func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-	globalMetaCache = &MetaCache{}
+	node := createTestProxy()
+	defer node.sched.Close()
 
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
-
-	m1 := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+	mockDescribe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		Status: merr.Success(),
 		Schema: externalSchema,
 	}, nil).Build()
-	defer m1.UnPatch()
+	defer mockDescribe.UnPatch()
 
-	proxy := &Proxy{}
-	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	mockEnqueue := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, queued task) error {
+		_ = queued.OnEnqueue()
+		addTask := queued.(*addCollectionFieldTask)
+		assert.Equal(t, externalSchema, addTask.oldSchema)
+		addTask.result = merr.Success()
+		return nil
+	}).Build()
+	defer mockEnqueue.UnPatch()
 
-	req := &milvuspb.AddCollectionFieldRequest{
+	mockWait := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+	defer mockWait.UnPatch()
+
+	resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
 		DbName:         "default",
 		CollectionName: "external_col",
+		Schema:         []byte{1},
+	})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+}
+
+func TestProxy_AddCollectionField_TextValidation(t *testing.T) {
+	baseSchema := &schemapb.CollectionSchema{
+		Name: "test_coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:    101,
+				Name:       "vec",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+			},
+		},
 	}
 
-	resp, err := proxy.AddCollectionField(context.Background(), req)
-	assert.NoError(t, err)
-	assert.Error(t, merr.Error(resp))
-	assert.Contains(t, resp.GetReason(), "add field operation is not supported for external collection")
+	for _, tc := range []struct {
+		name        string
+		storageV3   string
+		field       *schemapb.FieldSchema
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:      "text nullable allowed when storage v3 enabled",
+			storageV3: "true",
+			field: &schemapb.FieldSchema{
+				Name:     "text_field",
+				DataType: schemapb.DataType_Text,
+				Nullable: true,
+			},
+		},
+		{
+			name:      "text requires storage v3",
+			storageV3: "false",
+			field: &schemapb.FieldSchema{
+				Name:     "text_field",
+				DataType: schemapb.DataType_Text,
+				Nullable: true,
+			},
+			wantErr:     true,
+			errContains: "TEXT field requires StorageV3",
+		},
+		{
+			name:      "text must be nullable",
+			storageV3: "true",
+			field: &schemapb.FieldSchema{
+				Name:     "text_not_nullable",
+				DataType: schemapb.DataType_Text,
+				Nullable: false,
+			},
+			wantErr:     true,
+			errContains: "added field must be nullable",
+		},
+		{
+			name:      "text default value rejected",
+			storageV3: "true",
+			field: &schemapb.FieldSchema{
+				Name:     "text_default",
+				DataType: schemapb.DataType_Text,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: "default text"},
+				},
+			},
+			wantErr:     true,
+			errContains: "default value is not supported when adding TEXT field",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, tc.storageV3)
+			t.Cleanup(func() {
+				paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+			})
+
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockDescribe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: proto.Clone(baseSchema).(*schemapb.CollectionSchema),
+			}, nil).Build()
+			defer mockDescribe.UnPatch()
+
+			mockEnqueue := mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, queued task) error {
+				require.NoError(t, queued.OnEnqueue())
+				addTask := queued.(*addCollectionFieldTask)
+				err := addTask.PreExecute(context.Background())
+				if err != nil {
+					addTask.result = merr.Status(err)
+				} else {
+					addTask.result = merr.Success()
+				}
+				addTask.Notify(err)
+				return nil
+			}).Build()
+			defer mockEnqueue.UnPatch()
+
+			fieldBytes, err := proto.Marshal(tc.field)
+			require.NoError(t, err)
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+				Schema:         fieldBytes,
+			})
+			require.NoError(t, err)
+			if tc.wantErr {
+				require.Error(t, merr.Error(resp))
+				require.Contains(t, resp.GetReason(), tc.errContains)
+				return
+			}
+			require.True(t, merr.Ok(resp), resp.GetReason())
+		})
+	}
+}
+
+func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
+	t.Run("does not query schema version stats before enqueue", func(t *testing.T) {
+		mockey.PatchConvey("AddCollectionField skips schema version stats gate", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(*Proxy, context.Context, *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					require.FailNow(t, "AddCollectionField should not query collection statistics")
+					return nil, errors.New("unexpected GetCollectionStatistics call")
+				}).Build()
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				addTask := t.(*addCollectionFieldTask)
+				addTask.result = merr.Success()
+				return nil
+			}).Build()
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp))
+		})
+	})
+
+	t.Run("allows overlapping requests for same collection", func(t *testing.T) {
+		mockey.PatchConvey("AddCollectionField has no proxy-local in-flight gate", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+			mockey.Mock((*Proxy).GetCollectionStatistics).Return(&milvuspb.GetCollectionStatisticsResponse{
+				Status: merr.Success(),
+			}, nil).Build()
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				addTask := t.(*addCollectionFieldTask)
+				addTask.result = merr.Success()
+				return nil
+			}).Build()
+
+			firstWaitStarted := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			var waitCalls atomic.Int32
+			mockey.Mock((*TaskCondition).WaitToFinish).To(func(*TaskCondition) error {
+				if waitCalls.Add(1) == 1 {
+					close(firstWaitStarted)
+					<-releaseFirst
+				}
+				return nil
+			}).Build()
+
+			firstDone := make(chan *commonpb.Status, 1)
+			go func() {
+				resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+					DbName:         "default",
+					CollectionName: "test_coll",
+				})
+				require.NoError(t, err)
+				firstDone <- resp
+			}()
+			<-firstWaitStarted
+
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp))
+			assert.Equal(t, int32(2), waitCalls.Load())
+
+			close(releaseFirst)
+			assert.True(t, merr.Ok(<-firstDone))
+		})
+	})
 }
 
 func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
@@ -2376,7 +2694,7 @@ func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2456,4 +2774,545 @@ func TestProxy_GetReplicateConfiguration_Error(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Error(t, merr.Error(resp.GetStatus()))
 	assert.Nil(t, resp.GetConfiguration())
+}
+
+func TestHybridSearchRequestExprLogger_String(t *testing.T) {
+	t.Run("empty requests", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("single request", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: "id > 100"},
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: id > 100]", result)
+	})
+
+	t.Run("multiple requests", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: "id > 100"},
+					{Dsl: "name == 'test'"},
+					{Dsl: "age < 30"},
+				},
+			},
+		}
+		result := logger.String()
+		expected := "[No.0 req, expr: id > 100][No.1 req, expr: name == 'test'][No.2 req, expr: age < 30]"
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("request with empty dsl", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: ""},
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: ]", result)
+	})
+
+	t.Run("nil sub request in slice", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					nil,
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: ]", result)
+	})
+}
+
+func TestProxy_BatchUpdateManifest(t *testing.T) {
+	t.Run("unhealthy", func(t *testing.T) {
+		mockey.PatchConvey("TestProxy_BatchUpdateManifest_unhealthy", t, func() {
+			globalMetaCache = &MetaCache{}
+			mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+				return UniqueID(0), nil
+			}).Build()
+			mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) {}).Build()
+
+			mockey.Mock(paramtable.Init).Return().Build()
+			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			node.UpdateStateCode(commonpb.StateCode_Abnormal)
+			resp, err := node.BatchUpdateManifest(context.Background(), &milvuspb.BatchUpdateManifestRequest{
+				CollectionName: "test_collection",
+				Items: []*milvuspb.BatchUpdateManifestItem{
+					{SegmentId: 1, ManifestVersion: 10},
+				},
+			})
+
+			assert.NoError(t, err)
+			assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
+		})
+	})
+
+	t.Run("success", func(t *testing.T) {
+		mockey.PatchConvey("TestProxy_BatchUpdateManifest_success", t, func() {
+			globalMetaCache = &MetaCache{}
+			mockey.Mock((*MetaCache).GetCollectionID).To(func(m *MetaCache, ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+				return UniqueID(100), nil
+			}).Build()
+			mockey.Mock((*MetaCache).RemoveDatabase).To(func(m *MetaCache, ctx context.Context, dbName string) {}).Build()
+
+			mockey.Mock(paramtable.Init).Return().Build()
+			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mixcoord := &grpcmixcoordclient.Client{}
+			node.mixCoord = mixcoord
+			mockey.Mock((*grpcmixcoordclient.Client).BatchUpdateManifest).To(func(c *grpcmixcoordclient.Client, ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				return merr.Success(), nil
+			}).Build()
+
+			resp, err := node.BatchUpdateManifest(context.Background(), &milvuspb.BatchUpdateManifestRequest{
+				CollectionName: "test_collection",
+				Items: []*milvuspb.BatchUpdateManifestItem{
+					{SegmentId: 1, ManifestVersion: 10},
+					{SegmentId: 2, ManifestVersion: 20},
+				},
+			})
+
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp))
+		})
+	})
+}
+
+func TestProxy_AlterCollectionSchema(t *testing.T) {
+	t.Run("unhealthy node", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+		resp, err := proxy.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetAlterStatus()))
+	})
+
+	t.Run("DescribeCollection fails", func(t *testing.T) {
+		mockey.PatchConvey("DescribeCollection fails", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Status(merr.ErrCollectionNotFound),
+			}, nil).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("external collection rejected", func(t *testing.T) {
+		mockey.PatchConvey("external collection", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{
+					Name: "ext_col",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
+					},
+				},
+			}, nil).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "ext_col",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+			assert.Contains(t, resp.GetAlterStatus().GetReason(), "external collection")
+		})
+	})
+
+	t.Run("does not query schema version stats before enqueue", func(t *testing.T) {
+		mockey.PatchConvey("AlterCollectionSchema skips schema version stats gate", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(*Proxy, context.Context, *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					require.FailNow(t, "AlterCollectionSchema should not query collection statistics")
+					return nil, errors.New("unexpected GetCollectionStatistics call")
+				}).Build()
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				alterTask := t.(*alterCollectionSchemaTask)
+				alterTask.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
+				return nil
+			}).Build()
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("allows overlapping requests for same collection", func(t *testing.T) {
+		mockey.PatchConvey("AlterCollectionSchema has no proxy-local in-flight gate", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+			mockey.Mock((*Proxy).GetCollectionStatistics).Return(&milvuspb.GetCollectionStatisticsResponse{
+				Status: merr.Success(),
+			}, nil).Build()
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				alterTask := t.(*alterCollectionSchemaTask)
+				alterTask.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}
+				return nil
+			}).Build()
+
+			firstWaitStarted := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			var waitCalls atomic.Int32
+			mockey.Mock((*TaskCondition).WaitToFinish).To(func(*TaskCondition) error {
+				if waitCalls.Add(1) == 1 {
+					close(firstWaitStarted)
+					<-releaseFirst
+				}
+				return nil
+			}).Build()
+
+			firstDone := make(chan *milvuspb.AlterCollectionSchemaResponse, 1)
+			go func() {
+				resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+					DbName:         "default",
+					CollectionName: "test_coll",
+				})
+				require.NoError(t, err)
+				firstDone <- resp
+			}()
+			<-firstWaitStarted
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp.GetAlterStatus()))
+			assert.Equal(t, int32(2), waitCalls.Load())
+
+			close(releaseFirst)
+			assert.True(t, merr.Ok((<-firstDone).GetAlterStatus()))
+		})
+	})
+
+	t.Run("enqueue fails", func(t *testing.T) {
+		mockey.PatchConvey("enqueue fails", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, _ task) error {
+				return errors.New("queue full")
+			}).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("WaitToFinish fails", func(t *testing.T) {
+		mockey.PatchConvey("WaitToFinish fails", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			// Call OnEnqueue so task.Base is initialized (BeginTs/EndTs are logged after Enqueue).
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				return nil
+			}).Build()
+
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(errors.New("timeout")).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("happy path", func(t *testing.T) {
+		mockey.PatchConvey("happy path", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			// Call OnEnqueue so task.Base is initialized (BeginTs/EndTs are logged after Enqueue).
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				return nil
+			}).Build()
+
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+
+			_, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+		})
+	})
+}
+
+func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cases := []struct {
+		name       string
+		src, spec  string
+		wantSubstr string
+	}{
+		{"source only rejected", "s3://bucket/p", "", "both provided or both omitted"},
+		{"spec only rejected", "", `{"format":"parquet"}`, "both provided or both omitted"},
+		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "scheme"},
+		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "scheme"},
+		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "scheme"},
+		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "scheme"},
+		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+				CollectionName: "any_collection",
+				ExternalSource: tc.src,
+				ExternalSpec:   tc.spec,
+			})
+			require.NoError(t, err)
+			require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+			if tc.wantSubstr != "" {
+				assert.Contains(t, resp.GetStatus().GetReason(), tc.wantSubstr)
+			}
+		})
+	}
+}
+
+func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	mkInfo := func(src, spec string) *collectionInfo {
+		schema := &schemapb.CollectionSchema{
+			Name:           "demo",
+			ExternalSource: src,
+			ExternalSpec:   spec,
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			},
+		}
+		return &collectionInfo{
+			collID: 1,
+			schema: &schemaInfo{CollectionSchema: schema},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		persisted *collectionInfo
+		wantErr   bool
+	}{
+		{"persisted both empty rejected", mkInfo("", ""), true},
+		{"persisted source empty rejected", mkInfo("", `{"format":"parquet"}`), true},
+		{"persisted spec empty rejected", mkInfo("s3://bucket/p", ""), true},
+	}
+	cacheBak := globalMetaCache
+	defer func() { globalMetaCache = cacheBak }()
+	globalMetaCache = &MetaCache{}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mockey.Mock((*MetaCache).GetCollectionInfo).Return(tc.persisted, nil).Build()
+			defer m.UnPatch()
+
+			resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+				CollectionName: "demo",
+			})
+			require.NoError(t, err)
+			if tc.wantErr {
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				assert.Contains(t, resp.GetStatus().GetReason(), "no persisted external_source")
+			} else {
+				require.NoError(t, merr.Error(resp.GetStatus()))
+			}
+		})
+	}
+}
+
+func TestProxy_ListRefreshExternalCollectionJobs_ListAll(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	node := &Proxy{mixCoord: &MixCoordMock{}}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cacheBak := globalMetaCache
+	globalMetaCache = &MetaCache{}
+	defer func() { globalMetaCache = cacheBak }()
+
+	cacheCalled := false
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).To(
+		func(_ *MetaCache, _ context.Context, _ string, _ string, _ int64) (*collectionInfo, error) {
+			cacheCalled = true
+			return nil, errors.New("collection cache should not be used for list all")
+		}).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	var capturedCollectionID int64
+	mockList := mockey.Mock((*MixCoordMock).ListRefreshExternalCollectionJobs).To(
+		func(_ *MixCoordMock, _ context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, _ ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+			capturedCollectionID = req.GetCollectionId()
+			return &datapb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Success(),
+				Jobs: []*datapb.ExternalCollectionRefreshJob{
+					{
+						JobId:          1,
+						CollectionName: "allowed",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+					},
+					{
+						JobId:          2,
+						CollectionName: "blocked",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockList.UnPatch()
+
+	resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+		DbName: "default",
+	})
+
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	assert.Equal(t, int64(0), capturedCollectionID)
+	assert.False(t, cacheCalled)
+	require.Len(t, resp.GetJobs(), 2)
+	assert.Equal(t, int64(1), resp.GetJobs()[0].GetJobId())
+	assert.Equal(t, "allowed", resp.GetJobs()[0].GetCollectionName())
+	assert.Equal(t, int64(2), resp.GetJobs()[1].GetJobId())
+	assert.Equal(t, "blocked", resp.GetJobs()[1].GetCollectionName())
+}
+
+func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	node := &Proxy{mixCoord: &MixCoordMock{}}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cacheBak := globalMetaCache
+	globalMetaCache = &MetaCache{}
+	defer func() { globalMetaCache = cacheBak }()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "external_collection",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+		},
+	}
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		collID: 101,
+		schema: &schemaInfo{
+			CollectionSchema: schema,
+		},
+	}, nil).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	var capturedCollectionID int64
+	mockList := mockey.Mock((*MixCoordMock).ListRefreshExternalCollectionJobs).To(
+		func(_ *MixCoordMock, _ context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, _ ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+			capturedCollectionID = req.GetCollectionId()
+			return &datapb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Success(),
+				Jobs: []*datapb.ExternalCollectionRefreshJob{
+					{
+						JobId:          1,
+						CollectionName: "external_collection",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+						ExternalSpec:   `{"format":"parquet","extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-east-1"}}`,
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockList.UnPatch()
+
+	resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+		DbName:         "default",
+		CollectionName: "external_collection",
+	})
+
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	assert.Equal(t, int64(101), capturedCollectionID)
+	require.Len(t, resp.GetJobs(), 1)
+	redactedSpec := resp.GetJobs()[0].GetExternalSpec()
+	assert.Contains(t, redactedSpec, `"access_key_id":"***"`)
+	assert.Contains(t, redactedSpec, `"access_key_value":"***"`)
+	assert.Contains(t, redactedSpec, `"region":"us-east-1"`)
+	assert.NotContains(t, redactedSpec, "AKIAEXAMPLE")
+	assert.NotContains(t, redactedSpec, "SUPERSECRET")
 }

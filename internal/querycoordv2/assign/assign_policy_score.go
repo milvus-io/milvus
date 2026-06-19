@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ScoreBasedAssignPolicy implements score-based assignment strategy for both segments and channels
@@ -243,9 +243,9 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64,
 	delegatorOverloadFactor := params.Params.QueryCoordCfg.DelegatorMemoryOverloadFactor.GetAsFloat()
 	for _, node := range nodeIDs {
 		if allNodeHasMemInfo {
-			nodeScoreMap[node].SetAssignedScore(nodeMemMap[node] * average)
+			nodeScoreMap[node].AddAssignedScore(nodeMemMap[node] * average)
 		} else {
-			nodeScoreMap[node].SetAssignedScore(average)
+			nodeScoreMap[node].AddAssignedScore(average)
 		}
 
 		// Add delegator overhead
@@ -437,9 +437,9 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsByChannel(collectionID int64,
 
 	for _, node := range nodeIDs {
 		if allNodeHasMemInfo {
-			nodeScoreMap[node].SetAssignedScore(nodeMemMap[node] * average)
+			nodeScoreMap[node].AddAssignedScore(nodeMemMap[node] * average)
 		} else {
-			nodeScoreMap[node].SetAssignedScore(average)
+			nodeScoreMap[node].AddAssignedScore(average)
 		}
 	}
 

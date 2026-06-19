@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,12 +16,21 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
+const (
+	internalTakeDim          = 8
+	internalTakeBinaryDim    = 16
+	internalTakeInt8VecField = "int8Vec"
+	internalTakeTsField      = "ts"
+)
+
 func TestSearchDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -39,6 +49,8 @@ func TestSearchDefault(t *testing.T) {
 }
 
 func TestSearchDefaultGrowing(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -57,6 +69,8 @@ func TestSearchDefaultGrowing(t *testing.T) {
 
 // test search collection and partition name not exist
 func TestSearchInvalidCollectionPartitionName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -112,6 +126,8 @@ func TestSearchEmptyCollection(t *testing.T) {
 }
 
 func TestSearchEmptySparseCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -130,6 +146,8 @@ func TestSearchEmptySparseCollection(t *testing.T) {
 
 // test search with partition names []string{}, specify partitions
 func TestSearchPartitions(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -178,6 +196,453 @@ func TestSearchPartitions(t *testing.T) {
 		require.Contains(t, searchResult[1].IDs.(*column.ColumnInt64).Data(), _parId0)
 		require.EqualValues(t, searchResult[0].GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data()[0], vectors[0])
 		require.EqualValues(t, searchResult[1].GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data()[0], vectors[1])
+	}
+}
+
+func TestInternalCollectionTakeOutputFields(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	requireInternalTakeStorageV2(t)
+	enableInternalTakeForOutput(t)
+
+	collName := common.GenRandomString("internal_take_all", 6)
+	schema, outputFields := buildInternalTakeAllTypesSchema(collName)
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+	})
+
+	data := buildInternalTakeAllTypesData(t, 12)
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, data.columns...))
+	common.CheckErr(t, err, true)
+
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, flushTask.Await(ctx), true)
+
+	indexes := map[string]index.Index{
+		common.DefaultFloatVecFieldName:    index.NewFlatIndex(entity.L2),
+		common.DefaultBinaryVecFieldName:   index.NewBinFlatIndex(entity.HAMMING),
+		common.DefaultFloat16VecFieldName:  index.NewFlatIndex(entity.L2),
+		common.DefaultBFloat16VecFieldName: index.NewFlatIndex(entity.L2),
+		internalTakeInt8VecField: index.NewGenericIndex("int8_hnsw", map[string]string{
+			index.MetricTypeKey: string(entity.COSINE),
+			index.IndexTypeKey:  "HNSW",
+			"M":                 "8",
+			"efConstruction":    "64",
+		}),
+		common.DefaultSparseVecFieldName: index.NewSparseInvertedIndex(entity.IP, 0.3),
+	}
+	for fieldName, idx := range indexes {
+		idxTask, idxErr := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, fieldName, idx))
+		common.CheckErr(t, idxErr, true)
+		require.NoError(t, idxTask.Await(ctx), "create index on %s", fieldName)
+	}
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	expr := fmt.Sprintf("%s in [0, 2, 4]", common.DefaultInt64FieldName)
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter(expr).
+		WithOutputFields(outputFields...))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 3, queryRes.ResultCount)
+	common.CheckOutputFields(t, outputFields, queryRes.Fields)
+	require.ElementsMatch(t, []int64{0, 2, 4}, queryRes.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data())
+	assertInternalTakeAllTypesResult(t, queryRes, data, outputFields)
+
+	vectors := make([]entity.Vector, 0, queryRes.ResultCount)
+	for _, vec := range queryRes.GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector).Data() {
+		require.Len(t, vec, internalTakeDim)
+		vectors = append(vectors, vec)
+	}
+
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, 3, vectors).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField(common.DefaultFloatVecFieldName).
+		WithOutputFields(outputFields...))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, len(vectors), 3)
+	for _, result := range searchRes {
+		common.CheckOutputFields(t, outputFields, result.Fields)
+		assertInternalTakeAllTypesResult(t, result, data, outputFields)
+	}
+}
+
+func TestInternalCollectionTakeStructArrayOutputFields(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	requireInternalTakeStorageV2(t)
+	enableInternalTakeForOutput(t)
+
+	collName, _, data := canonicalStructArrayCollection(t, ctx, mc, 32)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+	})
+
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("id in [0, 2, 4]").
+		WithOutputFields("id", "clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 3, queryRes.ResultCount)
+	common.CheckOutputFields(t, []string{"id", "clips"}, queryRes.Fields)
+	assertStructArrayOutput(t, queryRes)
+
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 3,
+		[]entity.Vector{entity.FloatVector(data.NormalVectors[0])}).
+		WithANNSField("normal_vector").
+		WithOutputFields("id", "clips").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, 1, 3)
+	common.CheckOutputFields(t, []string{"id", "clips"}, searchRes[0].Fields)
+	assertStructArrayOutput(t, searchRes[0])
+}
+
+type internalTakeAllTypesData struct {
+	columns       []column.Column
+	bools         []bool
+	int8s         []int8
+	int16s        []int16
+	int32s        []int32
+	int64s        []int64
+	floats        []float32
+	doubles       []float64
+	varchars      []string
+	jsons         [][]byte
+	geometries    []string
+	timestamps    []time.Time
+	boolArrays    [][]bool
+	int8Arrays    [][]int8
+	int16Arrays   [][]int16
+	int32Arrays   [][]int32
+	int64Arrays   [][]int64
+	floatArrays   [][]float32
+	doubleArrays  [][]float64
+	varcharArrays [][]string
+	floatVecs     [][]float32
+	binaryVecs    [][]byte
+	float16Vecs   [][]byte
+	bfloat16Vecs  [][]byte
+	int8Vecs      [][]int8
+	sparseVecs    []entity.SparseEmbedding
+}
+
+func requireInternalTakeStorageV2(t *testing.T) {
+	t.Helper()
+
+	value, err := hp.GetServerConfig("common.storage.useLoonFFI")
+	require.NoError(t, err)
+	if !strings.EqualFold(value, "true") {
+		t.Skipf("internal take requires StorageV2/V3 reader, common.storage.useLoonFFI=%q", value)
+	}
+}
+
+func enableInternalTakeForOutput(t *testing.T) {
+	t.Helper()
+
+	configKey := "queryNode.internalCollection.useTakeForOutput"
+	prevConfig, err := hp.AlterServerConfig(configKey, "true")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if prevConfig == "" {
+			prevConfig = "false"
+		}
+		_, _ = hp.AlterServerConfig(configKey, prevConfig)
+	})
+}
+
+func buildInternalTakeAllTypesSchema(collName string) (*entity.Schema, []string) {
+	outputFields := []string{
+		common.DefaultInt64FieldName,
+		common.DefaultBoolFieldName,
+		common.DefaultInt8FieldName,
+		common.DefaultInt16FieldName,
+		common.DefaultInt32FieldName,
+		common.DefaultFloatFieldName,
+		common.DefaultDoubleFieldName,
+		common.DefaultVarcharFieldName,
+		common.DefaultJSONFieldName,
+		common.DefaultGeometryFieldName,
+		internalTakeTsField,
+		common.DefaultBoolArrayField,
+		common.DefaultInt8ArrayField,
+		common.DefaultInt16ArrayField,
+		common.DefaultInt32ArrayField,
+		common.DefaultInt64ArrayField,
+		common.DefaultFloatArrayField,
+		common.DefaultDoubleArrayField,
+		common.DefaultVarcharArrayField,
+		common.DefaultFloatVecFieldName,
+		common.DefaultBinaryVecFieldName,
+		common.DefaultFloat16VecFieldName,
+		common.DefaultBFloat16VecFieldName,
+		internalTakeInt8VecField,
+		common.DefaultSparseVecFieldName,
+	}
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithField(entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName(common.DefaultBoolFieldName).WithDataType(entity.FieldTypeBool)).
+		WithField(entity.NewField().WithName(common.DefaultInt8FieldName).WithDataType(entity.FieldTypeInt8)).
+		WithField(entity.NewField().WithName(common.DefaultInt16FieldName).WithDataType(entity.FieldTypeInt16)).
+		WithField(entity.NewField().WithName(common.DefaultInt32FieldName).WithDataType(entity.FieldTypeInt32)).
+		WithField(entity.NewField().WithName(common.DefaultFloatFieldName).WithDataType(entity.FieldTypeFloat)).
+		WithField(entity.NewField().WithName(common.DefaultDoubleFieldName).WithDataType(entity.FieldTypeDouble)).
+		WithField(entity.NewField().WithName(common.DefaultVarcharFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(common.TestMaxLen)).
+		WithField(entity.NewField().WithName(common.DefaultJSONFieldName).WithDataType(entity.FieldTypeJSON)).
+		WithField(entity.NewField().WithName(common.DefaultGeometryFieldName).WithDataType(entity.FieldTypeGeometry)).
+		WithField(entity.NewField().WithName(internalTakeTsField).WithDataType(entity.FieldTypeTimestamptz)).
+		WithField(entity.NewField().WithName(common.DefaultBoolArrayField).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeBool).WithMaxCapacity(common.TestCapacity)).
+		WithField(entity.NewField().WithName(common.DefaultInt8ArrayField).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt8).WithMaxCapacity(common.TestCapacity)).
+		WithField(entity.NewField().WithName(common.DefaultInt16ArrayField).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt16).WithMaxCapacity(common.TestCapacity)).
+		WithField(entity.NewField().WithName(common.DefaultInt32ArrayField).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt32).WithMaxCapacity(common.TestCapacity)).
+		WithField(entity.NewField().WithName(common.DefaultInt64ArrayField).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt64).WithMaxCapacity(common.TestCapacity)).
+		WithField(entity.NewField().WithName(common.DefaultFloatArrayField).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeFloat).WithMaxCapacity(common.TestCapacity)).
+		WithField(entity.NewField().WithName(common.DefaultDoubleArrayField).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeDouble).WithMaxCapacity(common.TestCapacity)).
+		WithField(entity.NewField().WithName(common.DefaultVarcharArrayField).WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeVarChar).WithMaxLength(common.TestMaxLen).WithMaxCapacity(common.TestCapacity)).
+		WithField(entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(internalTakeDim)).
+		WithField(entity.NewField().WithName(common.DefaultBinaryVecFieldName).WithDataType(entity.FieldTypeBinaryVector).WithDim(internalTakeBinaryDim)).
+		WithField(entity.NewField().WithName(common.DefaultFloat16VecFieldName).WithDataType(entity.FieldTypeFloat16Vector).WithDim(internalTakeDim)).
+		WithField(entity.NewField().WithName(common.DefaultBFloat16VecFieldName).WithDataType(entity.FieldTypeBFloat16Vector).WithDim(internalTakeDim)).
+		WithField(entity.NewField().WithName(internalTakeInt8VecField).WithDataType(entity.FieldTypeInt8Vector).WithDim(internalTakeDim)).
+		WithField(entity.NewField().WithName(common.DefaultSparseVecFieldName).WithDataType(entity.FieldTypeSparseVector))
+	return schema, outputFields
+}
+
+func buildInternalTakeAllTypesData(t *testing.T, nb int) internalTakeAllTypesData {
+	t.Helper()
+
+	data := internalTakeAllTypesData{
+		bools:         make([]bool, 0, nb),
+		int8s:         make([]int8, 0, nb),
+		int16s:        make([]int16, 0, nb),
+		int32s:        make([]int32, 0, nb),
+		int64s:        make([]int64, 0, nb),
+		floats:        make([]float32, 0, nb),
+		doubles:       make([]float64, 0, nb),
+		varchars:      make([]string, 0, nb),
+		jsons:         make([][]byte, 0, nb),
+		geometries:    make([]string, 0, nb),
+		timestamps:    make([]time.Time, 0, nb),
+		boolArrays:    make([][]bool, 0, nb),
+		int8Arrays:    make([][]int8, 0, nb),
+		int16Arrays:   make([][]int16, 0, nb),
+		int32Arrays:   make([][]int32, 0, nb),
+		int64Arrays:   make([][]int64, 0, nb),
+		floatArrays:   make([][]float32, 0, nb),
+		doubleArrays:  make([][]float64, 0, nb),
+		varcharArrays: make([][]string, 0, nb),
+		floatVecs:     make([][]float32, 0, nb),
+		binaryVecs:    make([][]byte, 0, nb),
+		float16Vecs:   make([][]byte, 0, nb),
+		bfloat16Vecs:  make([][]byte, 0, nb),
+		int8Vecs:      make([][]int8, 0, nb),
+		sparseVecs:    make([]entity.SparseEmbedding, 0, nb),
+	}
+	baseTime := time.Date(2026, time.May, 26, 8, 0, 0, 0, time.UTC)
+	for i := 0; i < nb; i++ {
+		id := int64(i)
+		floatVec := internalTakeFloatVector(i)
+		fp16 := entity.FloatVector(floatVec).ToFloat16Vector()
+		bf16 := entity.FloatVector(floatVec).ToBFloat16Vector()
+		sparse, err := entity.NewSliceSparseEmbedding(
+			[]uint32{uint32(i + 1), uint32(i + 17)},
+			[]float32{float32(i) + 0.25, float32(i) + 0.75})
+		require.NoError(t, err)
+
+		data.int64s = append(data.int64s, id)
+		data.bools = append(data.bools, i%2 == 0)
+		data.int8s = append(data.int8s, int8(i-6))
+		data.int16s = append(data.int16s, int16(i*10))
+		data.int32s = append(data.int32s, int32(i*100))
+		data.floats = append(data.floats, float32(i)+0.25)
+		data.doubles = append(data.doubles, float64(i)+0.5)
+		data.varchars = append(data.varchars, fmt.Sprintf("varchar_%02d", i))
+		data.jsons = append(data.jsons, []byte(fmt.Sprintf(`{"id":%d,"tag":"row_%02d"}`, i, i)))
+		data.geometries = append(data.geometries, fmt.Sprintf("POINT (%d %d)", i, i+1))
+		data.timestamps = append(data.timestamps, baseTime.Add(time.Duration(i)*time.Minute))
+		data.boolArrays = append(data.boolArrays, []bool{i%2 == 0, i%3 == 0})
+		data.int8Arrays = append(data.int8Arrays, []int8{int8(i), int8(i + 1)})
+		data.int16Arrays = append(data.int16Arrays, []int16{int16(i * 10), int16(i*10 + 1)})
+		data.int32Arrays = append(data.int32Arrays, []int32{int32(i * 100), int32(i*100 + 1)})
+		data.int64Arrays = append(data.int64Arrays, []int64{id, id + 100})
+		data.floatArrays = append(data.floatArrays, []float32{float32(i) + 0.1, float32(i) + 0.2})
+		data.doubleArrays = append(data.doubleArrays, []float64{float64(i) + 0.01, float64(i) + 0.02})
+		data.varcharArrays = append(data.varcharArrays, []string{fmt.Sprintf("a_%02d", i), fmt.Sprintf("b_%02d", i)})
+		data.floatVecs = append(data.floatVecs, floatVec)
+		data.binaryVecs = append(data.binaryVecs, []byte{byte(i), byte(i + 16)})
+		data.float16Vecs = append(data.float16Vecs, []byte(fp16))
+		data.bfloat16Vecs = append(data.bfloat16Vecs, []byte(bf16))
+		data.int8Vecs = append(data.int8Vecs, internalTakeInt8Vector(i))
+		data.sparseVecs = append(data.sparseVecs, sparse)
+	}
+
+	data.columns = []column.Column{
+		column.NewColumnInt64(common.DefaultInt64FieldName, data.int64s),
+		column.NewColumnBool(common.DefaultBoolFieldName, data.bools),
+		column.NewColumnInt8(common.DefaultInt8FieldName, data.int8s),
+		column.NewColumnInt16(common.DefaultInt16FieldName, data.int16s),
+		column.NewColumnInt32(common.DefaultInt32FieldName, data.int32s),
+		column.NewColumnFloat(common.DefaultFloatFieldName, data.floats),
+		column.NewColumnDouble(common.DefaultDoubleFieldName, data.doubles),
+		column.NewColumnVarChar(common.DefaultVarcharFieldName, data.varchars),
+		column.NewColumnJSONBytes(common.DefaultJSONFieldName, data.jsons),
+		column.NewColumnGeometryWKT(common.DefaultGeometryFieldName, data.geometries),
+		column.NewColumnTimestamptz(internalTakeTsField, data.timestamps),
+		column.NewColumnBoolArray(common.DefaultBoolArrayField, data.boolArrays),
+		column.NewColumnInt8Array(common.DefaultInt8ArrayField, data.int8Arrays),
+		column.NewColumnInt16Array(common.DefaultInt16ArrayField, data.int16Arrays),
+		column.NewColumnInt32Array(common.DefaultInt32ArrayField, data.int32Arrays),
+		column.NewColumnInt64Array(common.DefaultInt64ArrayField, data.int64Arrays),
+		column.NewColumnFloatArray(common.DefaultFloatArrayField, data.floatArrays),
+		column.NewColumnDoubleArray(common.DefaultDoubleArrayField, data.doubleArrays),
+		column.NewColumnVarCharArray(common.DefaultVarcharArrayField, data.varcharArrays),
+		column.NewColumnFloatVector(common.DefaultFloatVecFieldName, internalTakeDim, data.floatVecs),
+		column.NewColumnBinaryVector(common.DefaultBinaryVecFieldName, internalTakeBinaryDim, data.binaryVecs),
+		column.NewColumnFloat16Vector(common.DefaultFloat16VecFieldName, internalTakeDim, data.float16Vecs),
+		column.NewColumnBFloat16Vector(common.DefaultBFloat16VecFieldName, internalTakeDim, data.bfloat16Vecs),
+		column.NewColumnInt8Vector(internalTakeInt8VecField, internalTakeDim, data.int8Vecs),
+		column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, data.sparseVecs),
+	}
+	return data
+}
+
+func internalTakeFloatVector(row int) []float32 {
+	vector := make([]float32, internalTakeDim)
+	for dim := range vector {
+		vector[dim] = float32(row) + float32(dim)/10
+	}
+	return vector
+}
+
+func internalTakeInt8Vector(row int) []int8 {
+	vector := make([]int8, internalTakeDim)
+	for dim := range vector {
+		vector[dim] = int8(row + dim)
+	}
+	return vector
+}
+
+func assertInternalTakeAllTypesResult(t *testing.T, result client.ResultSet, data internalTakeAllTypesData, outputFields []string) {
+	t.Helper()
+
+	for _, fieldName := range outputFields {
+		col := result.GetColumn(fieldName)
+		require.NotNil(t, col, "missing output field %s", fieldName)
+		require.Equal(t, result.ResultCount, col.Len(), "field %s row count", fieldName)
+	}
+	for i := 0; i < result.ResultCount; i++ {
+		id, err := result.GetColumn(common.DefaultInt64FieldName).GetAsInt64(i)
+		require.NoError(t, err)
+		row := int(id)
+		require.GreaterOrEqual(t, row, 0)
+		require.Less(t, row, len(data.int64s))
+
+		boolVal, err := result.GetColumn(common.DefaultBoolFieldName).GetAsBool(i)
+		require.NoError(t, err)
+		require.Equal(t, data.bools[row], boolVal)
+
+		int8Val, err := result.GetColumn(common.DefaultInt8FieldName).GetAsInt64(i)
+		require.NoError(t, err)
+		require.EqualValues(t, data.int8s[row], int8Val)
+
+		int16Val, err := result.GetColumn(common.DefaultInt16FieldName).GetAsInt64(i)
+		require.NoError(t, err)
+		require.EqualValues(t, data.int16s[row], int16Val)
+
+		int32Val, err := result.GetColumn(common.DefaultInt32FieldName).GetAsInt64(i)
+		require.NoError(t, err)
+		require.EqualValues(t, data.int32s[row], int32Val)
+
+		floatVal, err := result.GetColumn(common.DefaultFloatFieldName).GetAsDouble(i)
+		require.NoError(t, err)
+		require.InDelta(t, data.floats[row], floatVal, 1e-6)
+
+		doubleVal, err := result.GetColumn(common.DefaultDoubleFieldName).GetAsDouble(i)
+		require.NoError(t, err)
+		require.InDelta(t, data.doubles[row], doubleVal, 1e-9)
+
+		varcharVal, err := result.GetColumn(common.DefaultVarcharFieldName).GetAsString(i)
+		require.NoError(t, err)
+		require.Equal(t, data.varchars[row], varcharVal)
+
+		jsonRaw, err := result.GetColumn(common.DefaultJSONFieldName).Get(i)
+		require.NoError(t, err)
+		require.Equal(t, data.jsons[row], jsonRaw.([]byte))
+
+		geometryVal, err := result.GetColumn(common.DefaultGeometryFieldName).GetAsString(i)
+		require.NoError(t, err)
+		require.NotEmpty(t, geometryVal)
+
+		tsVal, err := result.GetColumn(internalTakeTsField).GetAsString(i)
+		require.NoError(t, err)
+		require.NotEmpty(t, tsVal)
+
+		assertColumnValue(t, result, common.DefaultBoolArrayField, i, data.boolArrays[row])
+		assertColumnValue(t, result, common.DefaultInt8ArrayField, i, data.int8Arrays[row])
+		assertColumnValue(t, result, common.DefaultInt16ArrayField, i, data.int16Arrays[row])
+		assertColumnValue(t, result, common.DefaultInt32ArrayField, i, data.int32Arrays[row])
+		assertColumnValue(t, result, common.DefaultInt64ArrayField, i, data.int64Arrays[row])
+		assertColumnValue(t, result, common.DefaultFloatArrayField, i, data.floatArrays[row])
+		assertColumnValue(t, result, common.DefaultDoubleArrayField, i, data.doubleArrays[row])
+		assertColumnValue(t, result, common.DefaultVarcharArrayField, i, data.varcharArrays[row])
+
+		floatVecRaw, err := result.GetColumn(common.DefaultFloatVecFieldName).Get(i)
+		require.NoError(t, err)
+		require.Equal(t, data.floatVecs[row], []float32(floatVecRaw.(entity.FloatVector)))
+
+		binaryVecRaw, err := result.GetColumn(common.DefaultBinaryVecFieldName).Get(i)
+		require.NoError(t, err)
+		require.Equal(t, data.binaryVecs[row], []byte(binaryVecRaw.(entity.BinaryVector)))
+
+		fp16Raw, err := result.GetColumn(common.DefaultFloat16VecFieldName).Get(i)
+		require.NoError(t, err)
+		require.Equal(t, data.float16Vecs[row], []byte(fp16Raw.(entity.Float16Vector)))
+
+		bf16Raw, err := result.GetColumn(common.DefaultBFloat16VecFieldName).Get(i)
+		require.NoError(t, err)
+		require.Equal(t, data.bfloat16Vecs[row], []byte(bf16Raw.(entity.BFloat16Vector)))
+
+		int8VecRaw, err := result.GetColumn(internalTakeInt8VecField).Get(i)
+		require.NoError(t, err)
+		require.Equal(t, data.int8Vecs[row], []int8(int8VecRaw.(entity.Int8Vector)))
+
+		sparseRaw, err := result.GetColumn(common.DefaultSparseVecFieldName).Get(i)
+		require.NoError(t, err)
+		require.Equal(t, data.sparseVecs[row].Serialize(), sparseRaw.(entity.SparseEmbedding).Serialize())
+	}
+}
+
+func assertColumnValue(t *testing.T, result client.ResultSet, fieldName string, idx int, expected any) {
+	t.Helper()
+
+	raw, err := result.GetColumn(fieldName).Get(idx)
+	require.NoError(t, err)
+	require.Equal(t, expected, raw)
+}
+
+func assertStructArrayOutput(t *testing.T, result client.ResultSet) {
+	t.Helper()
+
+	clips := result.GetColumn("clips")
+	require.NotNil(t, clips)
+	require.Equal(t, result.ResultCount, clips.Len())
+	for i := 0; i < result.ResultCount; i++ {
+		raw, err := clips.Get(i)
+		require.NoError(t, err)
+		row, ok := raw.(map[string]any)
+		require.Truef(t, ok, "clips row %d has unexpected type %T", i, raw)
+		require.Contains(t, row, "clip_str")
+		require.Contains(t, row, "clip_embedding1")
+		require.Contains(t, row, "clip_embedding2")
 	}
 }
 
@@ -338,6 +803,8 @@ func TestSearchOutputSparse(t *testing.T) {
 
 // test search with invalid vector field name: not exist; non-vector field, empty fiend name, json and dynamic field -> error
 func TestSearchInvalidVectorField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -455,6 +922,8 @@ func TestSearchEmptyInvalidVectors(t *testing.T) {
 
 // test search metric type isn't the same with index metric type
 func TestSearchNotMatchMetricType(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -472,6 +941,8 @@ func TestSearchNotMatchMetricType(t *testing.T) {
 
 // test search with invalid topK -> error
 func TestSearchInvalidTopK(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -490,6 +961,8 @@ func TestSearchInvalidTopK(t *testing.T) {
 
 // test search with invalid topK -> error
 func TestSearchInvalidOffset(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -508,6 +981,8 @@ func TestSearchInvalidOffset(t *testing.T) {
 
 // test search with invalid search params
 func TestSearchInvalidSearchParams(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -542,6 +1017,8 @@ func TestSearchInvalidSearchParams(t *testing.T) {
 
 // search with index scann search param ef < topK -> error
 func TestSearchInvalidScannReorderK(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -613,6 +1090,8 @@ func TestSearchScannAllMetricsWithRawData(t *testing.T) {
 
 // test search with valid expression
 func TestSearchExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -725,6 +1204,8 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 }
 
 func TestSearchDynamicFieldExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection
@@ -786,6 +1267,8 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 }
 
 func TestSearchArrayFieldExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -864,6 +1347,8 @@ func TestSearchNotExistedExpr(t *testing.T) {
 
 // test search with fp16/ bf16 /binary vector
 func TestSearchMultiVectors(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1021,6 +1506,8 @@ func TestSearchWithEmptySparseVector(t *testing.T) {
 
 // test search from empty sparse vectors collection
 func TestSearchFromEmptySparseVector(t *testing.T) {
+	t.Parallel()
+
 	idxInverted := index.NewSparseInvertedIndex(entity.IP, 0.1)
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1100,10 +1587,14 @@ func TestSearchSparseVectorPagination(t *testing.T) {
 
 // test sparse vector unsupported search: TODO iterator search
 func TestSearchSparseVectorNotSupported(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("Go-sdk support iterator search in progress")
 }
 
 func TestRangeSearchSparseVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

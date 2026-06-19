@@ -23,16 +23,18 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type BinlogRecordWriter interface {
@@ -65,6 +67,10 @@ type packedBinlogRecordWriterBase struct {
 	columnGroups         []storagecommon.ColumnGroup
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
+	// basePath is the segment data root, populated by initWriters. The
+	// underlying packed batch writers do not return a manifest path; the
+	// caller builds the manifest update against this base path.
+	basePath string
 
 	pkCollector         *PkStatsCollector
 	bm25Collector       *Bm25StatsCollector
@@ -156,6 +162,12 @@ func (pw *packedBinlogRecordWriterBase) GetLogs() (
 
 func (pw *packedBinlogRecordWriterBase) GetRowNum() int64 {
 	return pw.rowNum
+}
+
+func (pw *packedBinlogRecordWriterBase) fillV3ColumnGroupFormats() (string, []string) {
+	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
+	pw.columnGroups = storagecommon.FillColumnGroupFormats(pw.columnGroups, writerFormat)
+	return writerFormat, storagecommon.ColumnGroupFormats(pw.columnGroups, writerFormat)
 }
 
 func (pw *packedBinlogRecordWriterBase) FlushChunk() error {
@@ -251,7 +263,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 
 	err := pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -275,7 +287,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 		}
 		pw.writer, err = NewPackedRecordWriter(pw.storageConfig.GetBucketName(), paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
 		if err != nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
+			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
 	}
 	return nil
@@ -330,7 +342,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedBinlogRecordWriter{
@@ -375,7 +387,7 @@ var _ BinlogRecordWriter = (*PackedManifestRecordWriter)(nil)
 type PackedManifestRecordWriter struct {
 	packedBinlogRecordWriterBase
 	// writer and stats generated at runtime
-	writer *packedRecordManifestWriter
+	writer *packedRecordBatchWriter
 }
 
 func (pw *PackedManifestRecordWriter) Write(r Record) error {
@@ -408,7 +420,7 @@ func (pw *PackedManifestRecordWriter) Write(r Record) error {
 
 	err := pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -420,13 +432,14 @@ func (pw *PackedManifestRecordWriter) initWriters(r Record) error {
 			allFields := typeutil.GetAllFieldSchemas(pw.schema)
 			pw.columnGroups = storagecommon.SplitColumns(allFields, pw.getColumnStatsFromRecord(r, allFields), storagecommon.DefaultPolicies()...)
 		}
+		writerFormat, schemaBasedFormats := pw.fillV3ColumnGroupFormats()
 
 		var err error
 		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
-		basePath := path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-		pw.writer, err = NewPackedRecordManifestWriter(basePath, -1, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
+		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+		pw.writer, err = NewPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, writerFormat, schemaBasedFormats)
 		if err != nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
+			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
 	}
 	return nil
@@ -446,6 +459,7 @@ func (pw *PackedManifestRecordWriter) finalizeBinlogs() {
 			pw.fieldBinlogs[columnGroupID] = &datapb.FieldBinlog{
 				FieldID:     columnGroupID,
 				ChildFields: columnGroup.Fields,
+				Format:      columnGroup.Format,
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
@@ -458,18 +472,83 @@ func (pw *PackedManifestRecordWriter) finalizeBinlogs() {
 			FieldNullCounts: pw.getFieldNullCountsForColumnGroup(columnGroup),
 		})
 	}
-	pw.manifest = pw.writer.GetWrittenManifest()
 }
 
+// Close finalizes the V3 segment. It closes the underlying packed writer to
+// get column groups, serializes bloom filter / BM25 stat blobs, writes
+// those blobs to storage, then performs a single packed.CommitManifestUpdates
+// that registers inserts + all stats atomically.
 func (pw *PackedManifestRecordWriter) Close() error {
-	if pw.writer != nil {
-		if err := pw.writer.Close(); err != nil {
-			return err
-		}
+	if pw.writer == nil {
+		return nil
+	}
+	out, err := pw.writer.Close()
+	if err != nil {
+		return err
+	}
+	if out != nil {
+		defer out.Destroy()
 	}
 	pw.finalizeBinlogs()
-	if err := pw.writeStats(); err != nil {
+	if out == nil {
+		return nil
+	}
+
+	updates := &packed.ManifestUpdates{NewFiles: out}
+	if err := pw.appendV3Stats(updates); err != nil {
 		return err
+	}
+	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig, updates)
+	if err != nil {
+		return merr.Wrap(err, "PackedManifestRecordWriter.Close commit")
+	}
+	pw.manifest = newManifest
+	return nil
+}
+
+// appendV3Stats serializes bloom filter / BM25 stat blobs, writes them to
+// storage, and appends StatEntry records onto updates so the surrounding
+// commit registers inserts + stats atomically. Leaves pw.statsLog and
+// pw.bm25StatsLog nil so callers know stats are embedded in the manifest.
+func (pw *PackedManifestRecordWriter) appendV3Stats(updates *packed.ManifestUpdates) error {
+	statsBlob, pkFieldID, err := pw.pkCollector.SerializeBlob(pw.rowNum)
+	if err != nil {
+		return err
+	}
+	if statsBlob != nil {
+		id, err := pw.allocator.AllocOne()
+		if err != nil {
+			return err
+		}
+		fullPath := path.Join(pw.basePath, fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, id))
+		if err := packed.WriteFile(pw.storageConfig, fullPath, statsBlob.Value); err != nil {
+			return merr.Wrap(err, "appendV3Stats: failed to write bloom filter stats")
+		}
+		updates.Stats = append(updates.Stats, packed.StatEntry{
+			Key:      fmt.Sprintf("bloom_filter.%d", pkFieldID),
+			Files:    []string{fullPath},
+			Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", int64(len(statsBlob.Value)))},
+		})
+	}
+
+	bm25Blobs, err := pw.bm25Collector.SerializeBlobs()
+	if err != nil {
+		return err
+	}
+	for fieldID, blob := range bm25Blobs {
+		id, err := pw.allocator.AllocOne()
+		if err != nil {
+			return err
+		}
+		fullPath := path.Join(pw.basePath, fmt.Sprintf("_stats/bm25.%d/%d", fieldID, id))
+		if err := packed.WriteFile(pw.storageConfig, fullPath, blob.Value); err != nil {
+			return merr.Wrap(err, "appendV3Stats: failed to write bm25 stats")
+		}
+		updates.Stats = append(updates.Stats, packed.StatEntry{
+			Key:      fmt.Sprintf("bm25.%d", fieldID),
+			Files:    []string{fullPath},
+			Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", blob.MemorySize)},
+		})
 	}
 	return nil
 }
@@ -481,7 +560,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 ) (*PackedManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedManifestRecordWriter{
@@ -507,6 +586,182 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 	}
 
 	// Create stats collectors
+	writer.pkCollector, err = NewPkStatsCollector(
+		collectionID,
+		schema,
+		maxRowNum,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	writer.bm25Collector = NewBm25StatsCollector(schema)
+
+	return writer, nil
+}
+
+var _ BinlogRecordWriter = (*PackedTextManifestRecordWriter)(nil)
+
+// PackedTextManifestRecordWriter wraps packedTextBatchWriter for TEXT column compaction.
+// this writer is used during compaction when TEXT columns need REWRITE_ALL strategy.
+type PackedTextManifestRecordWriter struct {
+	packedBinlogRecordWriterBase
+	writer            *packedTextBatchWriter
+	textColumnConfigs []packed.TextColumnConfig
+}
+
+func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
+	if err := pw.initWriters(r); err != nil {
+		return err
+	}
+
+	// track timestamps
+	tsArray := r.Column(common.TimeStampField).(*array.Int64)
+	rows := r.Len()
+	for i := 0; i < rows; i++ {
+		ts := typeutil.Timestamp(tsArray.Value(i))
+		if ts < pw.tsFrom {
+			pw.tsFrom = ts
+		}
+		if ts > pw.tsTo {
+			pw.tsTo = ts
+		}
+	}
+
+	// collect statistics
+	if err := pw.pkCollector.Collect(r); err != nil {
+		return err
+	}
+	if err := pw.bm25Collector.Collect(r); err != nil {
+		return err
+	}
+
+	pw.collectNullCounts(r)
+
+	err := pw.writer.Write(r)
+	if err != nil {
+		return merr.WrapErrStorage(err, "write record batch error")
+	}
+	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
+	return nil
+}
+
+func (pw *PackedTextManifestRecordWriter) initWriters(r Record) error {
+	if pw.writer == nil {
+		if len(pw.columnGroups) == 0 {
+			allFields := typeutil.GetAllFieldSchemas(pw.schema)
+			pw.columnGroups = storagecommon.SplitColumns(allFields, pw.getColumnStatsFromRecord(r, allFields), storagecommon.DefaultPolicies()...)
+		}
+		writerFormat, schemaBasedFormats := pw.fillV3ColumnGroupFormats()
+
+		var err error
+		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
+		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, writerFormat, schemaBasedFormats)
+		if err != nil {
+			return merr.WrapErrStorage(err, "can not new packed text writer")
+		}
+	}
+	return nil
+}
+
+func (pw *PackedTextManifestRecordWriter) finalizeBinlogs() {
+	if pw.writer == nil {
+		return
+	}
+	pw.rowNum = pw.writer.GetWrittenRowNum()
+	if pw.fieldBinlogs == nil {
+		pw.fieldBinlogs = make(map[FieldID]*datapb.FieldBinlog, len(pw.columnGroups))
+	}
+	for _, columnGroup := range pw.columnGroups {
+		columnGroupID := columnGroup.GroupID
+		if _, exists := pw.fieldBinlogs[columnGroupID]; !exists {
+			pw.fieldBinlogs[columnGroupID] = &datapb.FieldBinlog{
+				FieldID:     columnGroupID,
+				ChildFields: columnGroup.Fields,
+				Format:      columnGroup.Format,
+			}
+		}
+		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
+			LogSize:         int64(pw.writer.GetColumnGroupWrittenCompressed(columnGroupID)),
+			MemorySize:      int64(pw.writer.GetColumnGroupWrittenUncompressed(columnGroupID)),
+			LogPath:         pw.writer.GetWrittenPaths(columnGroupID),
+			EntriesNum:      pw.writer.GetWrittenRowNum(),
+			TimestampFrom:   pw.tsFrom,
+			TimestampTo:     pw.tsTo,
+			FieldNullCounts: pw.getFieldNullCountsForColumnGroup(columnGroup),
+		})
+	}
+}
+
+// Close finalizes the text-column segment using the same do-then-commit
+// pattern as PackedManifestRecordWriter.Close.
+func (pw *PackedTextManifestRecordWriter) Close() error {
+	if pw.writer == nil {
+		return pw.writeStats()
+	}
+	out, err := pw.writer.Close()
+	if err != nil {
+		return err
+	}
+	if out != nil {
+		defer out.Destroy()
+	}
+	pw.finalizeBinlogs()
+	if out == nil {
+		return pw.writeStats()
+	}
+
+	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig,
+		&packed.ManifestUpdates{NewFiles: out})
+	if err != nil {
+		return merr.Wrap(err, "PackedTextManifestRecordWriter.Close commit")
+	}
+	pw.manifest = newManifest
+	return pw.writeStats()
+}
+
+// NewPackedTextManifestRecordWriter creates a new BinlogRecordWriter for TEXT column compaction.
+// textColumnConfigs: TEXT column configurations for REWRITE_ALL fields
+func NewPackedTextManifestRecordWriter(
+	collectionID, partitionID, segmentID UniqueID,
+	schema *schemapb.CollectionSchema,
+	blobsWriter ChunkedBlobsWriter,
+	allocator allocator.Interface,
+	maxRowNum int64,
+	bufferSize, multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	textColumnConfigs []packed.TextColumnConfig,
+) (*PackedTextManifestRecordWriter, error) {
+	arrowSchema, err := ConvertToArrowSchema(schema, true)
+	if err != nil {
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
+	}
+
+	writer := &PackedTextManifestRecordWriter{
+		packedBinlogRecordWriterBase: packedBinlogRecordWriterBase{
+			collectionID:        collectionID,
+			partitionID:         partitionID,
+			segmentID:           segmentID,
+			schema:              schema,
+			arrowSchema:         arrowSchema,
+			BlobsWriter:         blobsWriter,
+			allocator:           allocator,
+			maxRowNum:           maxRowNum,
+			bufferSize:          bufferSize,
+			multiPartUploadSize: multiPartUploadSize,
+			columnGroups:        columnGroups,
+			storageConfig:       storageConfig,
+			tsFrom:              typeutil.MaxTimestamp,
+			tsTo:                0,
+			ttlFieldID:          getTTLFieldID(schema),
+			ttlFieldValues:      make([]int64, 0),
+		},
+		textColumnConfigs: textColumnConfigs,
+	}
+
+	// create stats collectors
 	writer.pkCollector, err = NewPkStatsCollector(
 		collectionID,
 		schema,

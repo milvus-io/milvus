@@ -13,7 +13,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"strconv"
 	"sync"
@@ -22,10 +21,11 @@ import (
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 
-	rocksdbkv "github.com/milvus-io/milvus/pkg/v2/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	rocksdbkv "github.com/milvus-io/milvus/pkg/v3/kv/rocksdb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Const value that used to convert unit
@@ -316,11 +316,11 @@ func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 
 	ll, ok := topicMu.Load(topic)
 	if !ok {
-		return fmt.Errorf("topic name = %s not exist", topic)
+		return merr.WrapErrMqTopicNotFound(topic)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topic)
+		return merr.WrapErrMqInternalMsg("get mutex failed, topic name = %s", topic)
 	}
 	lock.Lock()
 	defer lock.Unlock()

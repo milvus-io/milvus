@@ -7,29 +7,30 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type rankParams struct {
-	limit           int64
-	offset          int64
-	roundDecimal    int64
-	groupByFieldId  int64
-	groupSize       int64
-	strictGroupSize bool
+	limit             int64
+	offset            int64
+	roundDecimal      int64
+	groupByFieldIds   []int64
+	groupByFieldNames []string
+	groupSize         int64
+	strictGroupSize   bool
 }
 
 func (r *rankParams) GetLimit() int64 {
@@ -53,11 +54,36 @@ func (r *rankParams) GetRoundDecimal() int64 {
 	return 0
 }
 
+// GetGroupByFieldId returns the first group-by field id, or -1 when none is set.
+// Kept as a single-field convenience for call sites that have not yet migrated
+// to the multi-field plural accessor.
 func (r *rankParams) GetGroupByFieldId() int64 {
-	if r != nil {
-		return r.groupByFieldId
+	if r != nil && len(r.groupByFieldIds) > 0 {
+		return r.groupByFieldIds[0]
 	}
 	return -1
+}
+
+// GetGroupByFieldName returns the first group-by field name, or "" when none is set.
+func (r *rankParams) GetGroupByFieldName() string {
+	if r != nil && len(r.groupByFieldNames) > 0 {
+		return r.groupByFieldNames[0]
+	}
+	return ""
+}
+
+func (r *rankParams) GetGroupByFieldIds() []int64 {
+	if r != nil {
+		return r.groupByFieldIds
+	}
+	return nil
+}
+
+func (r *rankParams) GetGroupByFieldNames() []string {
+	if r != nil {
+		return r.groupByFieldNames
+	}
+	return nil
 }
 
 func (r *rankParams) GetGroupSize() int64 {
@@ -95,20 +121,42 @@ type OrderByField struct {
 	FieldID         int64  // Field ID for validation
 	JSONPath        string // JSON Pointer format: "/price" or "/user/age" (empty for non-JSON fields)
 	Ascending       bool   // true for ASC, false for DESC
+	NullsFirst      bool   // true for NULLS FIRST, false for NULLS LAST
 	OutputFieldName string // Field name to request in requery (e.g., "age" for dynamic fields, "metadata" for JSON fields)
 	IsDynamicField  bool   // true if this is a dynamic field (uses $meta extraction at QueryNode)
 }
 
 type SearchInfo struct {
-	planInfo      *planpb.QueryInfo
-	offset        int64
-	isIterator    bool
-	collectionID  int64
-	orderByFields []OrderByField
+	planInfo        *planpb.QueryInfo
+	offset          int64
+	isIterator      bool
+	collectionID    int64
+	orderByFields   []OrderByField
+	iterativeFilter bool
+}
+
+const (
+	orderByNullsFirst = "nulls_first"
+	orderByNullsLast  = "nulls_last"
+)
+
+// DetermineSearchType classifies the search based on the parsed search info
+// and whether a filter expression is present. The caller supplies hasFilter
+// because the DSL/expression is not available inside parseSearchInfo.
+func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
+	isRangeSearch := gjson.Get(s.planInfo.GetSearchParams(), radiusKey).Exists()
+	hasGroupBy := s.planInfo.GetGroupByFieldId() > 0 || len(s.planInfo.GetGroupByFieldIds()) > 0
+	if isRangeSearch || hasGroupBy || s.isIterator || s.iterativeFilter {
+		return internalpb.SearchType_DEFAULT
+	}
+	if hasFilter {
+		return internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
+	}
+	return internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
 }
 
 // parseOrderByFields parses the order_by_fields parameter from search params.
-// Format: "field1:asc,field2:desc" or "field1,field2" (default is asc)
+// Format: "field1:asc,field2:desc:nulls_last" or "field1,field2" (default is asc)
 // Supports JSON subfield paths: metadata["price"]:asc, metadata["user"]["score"]:desc
 // Supports dynamic fields: age:desc (maps to $meta["age"])
 // Validates that fields exist in schema and are sortable types.
@@ -136,15 +184,15 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 			continue
 		}
 
-		// Split field spec and direction, handling brackets in field spec
-		// e.g., "metadata[\"price\"]:asc" -> fieldSpec="metadata[\"price\"]", direction="asc"
-		fieldSpec, direction := splitOrderByFieldAndDirection(pair)
+		fieldSpec, direction, nullOrdering, err := splitOrderByFieldOptions(pair)
+		if err != nil {
+			return nil, err
+		}
 		if fieldSpec == "" {
-			return nil, fmt.Errorf("empty field name in order_by_fields")
+			return nil, merr.WrapErrParameterInvalidMsg("empty field name in order_by_fields")
 		}
 
-		// Parse direction
-		ascending := true // default is ascending
+		ascending := true
 		if direction != "" {
 			switch strings.ToLower(direction) {
 			case "asc", "ascending":
@@ -152,7 +200,19 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 			case "desc", "descending":
 				ascending = false
 			default:
-				return nil, fmt.Errorf("invalid order direction '%s' for field '%s', expected 'asc' or 'desc'", direction, fieldSpec)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid order direction '%s' for field '%s', expected 'asc' or 'desc'", direction, fieldSpec)
+			}
+		}
+
+		nullsFirst := !ascending
+		if nullOrdering != "" {
+			switch strings.ToLower(nullOrdering) {
+			case orderByNullsFirst:
+				nullsFirst = true
+			case orderByNullsLast:
+				nullsFirst = false
+			default:
+				return nil, merr.WrapErrParameterInvalidMsg("invalid null ordering '%s', expected '%s' or '%s'", nullOrdering, orderByNullsFirst, orderByNullsLast)
 			}
 		}
 
@@ -167,6 +227,7 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 			FieldID:         fieldID,
 			JSONPath:        jsonPath,
 			Ascending:       ascending,
+			NullsFirst:      nullsFirst,
 			OutputFieldName: outputFieldName,
 			IsDynamicField:  isDynamic,
 		})
@@ -175,21 +236,10 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 	return orderByFields, nil
 }
 
-// splitOrderByFieldAndDirection splits "fieldSpec:direction" handling brackets in fieldSpec
-// e.g., "metadata[\"price\"]:asc" -> ("metadata[\"price\"]", "asc")
-// e.g., "name:desc" -> ("name", "desc")
-// e.g., "name" -> ("name", "")
-//
-// Limitation: This simple bracket-depth tracking does not handle:
-//   - Brackets inside quoted strings: metadata["key]value"] would incorrectly parse
-//   - Escaped quotes inside strings: metadata["key\"with\"quotes"] may misbehave
-//
-// These edge cases are rare in practice. Field names containing unbalanced brackets
-// or complex escape sequences are not supported.
-func splitOrderByFieldAndDirection(pair string) (fieldSpec, direction string) {
-	// Find the last colon that's not inside brackets
+// splitOrderByFieldOptions splits "fieldSpec[:direction[:nullOrdering]]" handling brackets in fieldSpec.
+func splitOrderByFieldOptions(pair string) (fieldSpec, direction, nullOrdering string, err error) {
 	bracketDepth := 0
-	lastColonIdx := -1
+	colonIdxs := make([]int, 0, 2)
 	for i, ch := range pair {
 		switch ch {
 		case '[':
@@ -198,15 +248,22 @@ func splitOrderByFieldAndDirection(pair string) (fieldSpec, direction string) {
 			bracketDepth--
 		case ':':
 			if bracketDepth == 0 {
-				lastColonIdx = i
+				colonIdxs = append(colonIdxs, i)
+				if len(colonIdxs) > 2 {
+					return "", "", "", merr.WrapErrParameterInvalidMsg("too many order_by field options in '%s'", pair)
+				}
 			}
 		}
 	}
 
-	if lastColonIdx == -1 {
-		return strings.TrimSpace(pair), ""
+	switch len(colonIdxs) {
+	case 0:
+		return strings.TrimSpace(pair), "", "", nil
+	case 1:
+		return strings.TrimSpace(pair[:colonIdxs[0]]), strings.TrimSpace(pair[colonIdxs[0]+1:]), "", nil
+	default:
+		return strings.TrimSpace(pair[:colonIdxs[0]]), strings.TrimSpace(pair[colonIdxs[0]+1 : colonIdxs[1]]), strings.TrimSpace(pair[colonIdxs[1]+1:]), nil
 	}
-	return strings.TrimSpace(pair[:lastColonIdx]), strings.TrimSpace(pair[lastColonIdx+1:])
 }
 
 // parseOrderByFieldSpec parses a field specification and returns field name, ID, JSON path, and requery info
@@ -235,9 +292,9 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 				fieldID = field.GetFieldID()
 				jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
 				if err != nil {
-					return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
+					return "", 0, "", "", false, merr.WrapErrParameterInvalidMsg("invalid JSON path in order_by field '%s': %v", fieldSpec, err)
 				}
-				outputFieldName = fieldSpec // Pass full spec for dynamic field extraction
+				outputFieldName = fieldSpec // Explicit $meta["key"] path; single-level, parser accepts it
 				isDynamicField = true
 			} else if typeutil.IsJSONType(field.GetDataType()) {
 				// Regular JSON field with path: metadata["price"]
@@ -246,13 +303,13 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 				fieldID = field.GetFieldID()
 				jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
 				if err != nil {
-					return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
+					return "", 0, "", "", false, merr.WrapErrParameterInvalidMsg("invalid JSON path in order_by field '%s': %v", fieldSpec, err)
 				}
 				outputFieldName = baseName // Request the whole JSON field
 				isDynamicField = false
 			} else {
 				// Non-JSON field with brackets - not supported
-				return "", 0, "", "", false, fmt.Errorf("order_by field '%s' has brackets but is not a JSON type", fieldSpec)
+				return "", 0, "", "", false, merr.WrapErrParameterInvalidMsg("order_by field '%s' has brackets but is not a JSON type", fieldSpec)
 			}
 		} else if dynamicField != nil {
 			// Unknown field name with brackets, treat as dynamic field path
@@ -261,13 +318,13 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 			fieldID = dynamicField.GetFieldID()
 			jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
 			if err != nil {
-				return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
+				return "", 0, "", "", false, merr.WrapErrParameterInvalidMsg("invalid JSON path in order_by field '%s': %v", fieldSpec, err)
 			}
-			// For dynamic fields, pass the original spec so translateOutputFields can extract subfields
-			outputFieldName = fieldSpec
+			// Request the base dynamic field; full path is in jsonPath
+			outputFieldName = baseName
 			isDynamicField = true
 		} else {
-			return "", 0, "", "", false, fmt.Errorf("order_by field '%s' not found in schema and no dynamic field available", baseName)
+			return "", 0, "", "", false, merr.WrapErrParameterInvalidMsg("order_by field '%s' not found in schema and no dynamic field available", baseName)
 		}
 	} else {
 		// No brackets - regular field name or dynamic field key
@@ -280,7 +337,7 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 			isDynamicField = false
 			// Validate sortable type
 			if !isSortableFieldType(field.GetDataType()) {
-				return "", 0, "", "", false, fmt.Errorf("order_by field '%s' has unsortable type %s; supported types: bool, int8/16/32/64, float, double, string, varchar; for JSON fields use path syntax like field[\"key\"]",
+				return "", 0, "", "", false, merr.WrapErrParameterInvalidMsg("order_by field '%s' has unsortable type %s; supported types: bool, int8/16/32/64, float, double, string, varchar; for JSON fields use path syntax like field[\"key\"]",
 					fieldSpec, field.GetDataType().String())
 			}
 		} else if dynamicField != nil {
@@ -289,13 +346,13 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 			fieldID = dynamicField.GetFieldID()
 			jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
 			if err != nil {
-				return "", 0, "", "", false, fmt.Errorf("invalid dynamic field key '%s': %w", fieldSpec, err)
+				return "", 0, "", "", false, merr.WrapErrParameterInvalidMsg("invalid dynamic field key '%s': %v", fieldSpec, err)
 			}
 			// For dynamic fields, pass the original key so translateOutputFields can extract it
 			outputFieldName = fieldSpec
 			isDynamicField = true
 		} else {
-			return "", 0, "", "", false, fmt.Errorf("order_by field '%s' does not exist in collection schema", fieldSpec)
+			return "", 0, "", "", false, merr.WrapErrParameterInvalidMsg("order_by field '%s' does not exist in collection schema", fieldSpec)
 		}
 	}
 
@@ -323,7 +380,7 @@ func isSortableFieldType(dataType schemapb.DataType) bool {
 	}
 }
 
-func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64) (*planpb.SearchIteratorV2Info, error) {
+func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64, largeTopKEnabled bool) (*planpb.SearchIteratorV2Info, error) {
 	isIteratorV2Str, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterV2Key, searchParamsPair)
 	isIteratorV2, _ := strconv.ParseBool(isIteratorV2Str)
 	if !isIteratorV2 {
@@ -332,7 +389,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 
 	// iteratorV1 and iteratorV2 should be set together for compatibility
 	if !isIterator {
-		return nil, fmt.Errorf("both %s and %s must be set in the SDK", IteratorField, SearchIterV2Key)
+		return nil, merr.WrapErrParameterMissingMsg("both %s and %s must be set in the SDK", IteratorField, SearchIterV2Key)
 	}
 
 	// disable groupBy when doing iteratorV2
@@ -359,22 +416,22 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	} else {
 		// Validate existing token is a valid UUID
 		if _, err := uuid.Parse(token); err != nil {
-			return nil, errors.New("invalid token format")
+			return nil, merr.WrapErrParameterInvalidMsg("invalid token format")
 		}
 	}
 
 	// parse batch size, required non-zero value
 	batchSizeStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterBatchSizeKey, searchParamsPair)
 	if batchSizeStr == "" {
-		return nil, errors.New("batch size is required")
+		return nil, merr.WrapErrParameterMissingMsg("batch size is required")
 	}
 	batchSize, err := strconv.ParseInt(batchSizeStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("batch size is invalid, %w", err)
+		return nil, merr.WrapErrParameterInvalidMsg("batch size is invalid, %v", err)
 	}
 	// use the same validation logic as topk
-	if err := validateLimit(batchSize); err != nil {
-		return nil, fmt.Errorf("batch size is invalid, %w", err)
+	if err := validateLimit(batchSize, largeTopKEnabled); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("batch size is invalid, %v", err)
 	}
 	*queryTopK = batchSize // for compatibility
 
@@ -389,7 +446,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	if lastBoundStr != "" {
 		lastBound, err := strconv.ParseFloat(lastBoundStr, 32)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse input last bound, %w", err)
+			return nil, merr.WrapErrParameterInvalidMsg("failed to parse input last bound, %v", err)
 		}
 		lastBoundFloat32 := float32(lastBound)
 		planIteratorV2Info.LastBound = &lastBoundFloat32 // escape pointer
@@ -399,21 +456,21 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 }
 
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams) (*SearchInfo, error) {
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams, largeTopKEnabled bool) (*SearchInfo, error) {
 	var topK int64
 	isAdvanced := rankParams != nil
 	externalLimit := rankParams.GetLimit() + rankParams.GetOffset()
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
 		if externalLimit <= 0 {
-			return nil, fmt.Errorf("%s is required", TopKKey)
+			return nil, merr.WrapErrParameterMissingMsg("%s is required", TopKKey)
 		}
 		topK = externalLimit
 	} else {
 		topKInParam, err := strconv.ParseInt(topKStr, 0, 64)
 		if err != nil {
 			if externalLimit <= 0 {
-				return nil, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
+				return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", TopKKey, topKStr)
 			}
 			topK = externalLimit
 		} else {
@@ -427,13 +484,17 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	collectionIDStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, searchParamsPair)
 	collectionId, _ := strconv.ParseInt(collectionIDStr, 0, 64)
 
-	if err := validateLimit(topK); err != nil {
+	if err := validateLimit(topK, largeTopKEnabled); err != nil {
 		if isIterator {
 			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
 			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
-			topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
+			if largeTopKEnabled {
+				topK = Params.QuotaConfig.LargeTopKLimit.GetAsInt64()
+			} else {
+				topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
+			}
 		} else {
-			return nil, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+			return nil, merr.WrapErrParameterInvalidMsg("%s [%d] is invalid, %v", TopKKey, topK, err)
 		}
 	}
 
@@ -444,20 +505,20 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
 			if err != nil {
-				return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+				return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", OffsetKey, offsetStr)
 			}
 
 			if offset != 0 {
-				if err := validateLimit(offset); err != nil {
-					return nil, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
+				if err := validateLimit(offset, largeTopKEnabled); err != nil {
+					return nil, merr.WrapErrParameterInvalidMsg("%s [%d] is invalid, %v", OffsetKey, offset, err)
 				}
 			}
 		}
 	}
 
 	queryTopK := topK + offset
-	if err := validateLimit(queryTopK); err != nil {
-		return nil, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
+	if err := validateLimit(queryTopK, largeTopKEnabled); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("%s+%s [%d] is invalid, %v", OffsetKey, TopKKey, queryTopK, err)
 	}
 
 	// 2. parse metrics type
@@ -479,11 +540,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	roundDecimal, err := strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
-		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	// 4. parse search param str
@@ -494,18 +555,21 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
+	var groupByFieldIds []int64
 	var strictGroupSize bool
 	var jsonPath string
 	var jsonType schemapb.DataType
 	var strictCast bool
+	var isRangeSearch bool
+	var isIterativeFilter bool
 	if isAdvanced {
-		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
+		groupByFieldId, groupByFieldIds, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupByFieldIds(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
 		groupByInfo, err := parseGroupByInfo(searchParamsPair, schema)
 		if err != nil {
 			return nil, err
 		}
-		groupByFieldId, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
+		groupByFieldId, groupByFieldIds, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupByFieldIds(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
 		jsonPath, jsonType, strictCast = groupByInfo.GetJSONPath(), groupByInfo.GetJSONType(), groupByInfo.GetStrictCast()
 		if jsonPath != "" {
 			jsonPath, err = typeutil2.ParseAndVerifyNestedPath(jsonPath, schema, groupByFieldId)
@@ -520,45 +584,30 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")
 	}
-	if strings.Contains(searchParamStr, radiusKey) && groupByFieldId > 0 {
+
+	isRangeSearch = gjson.Get(searchParamStr, radiusKey).Exists()
+	isIterativeFilter = (hints == iterativeFilterKey) || strings.Contains(searchParamStr, iterativeFilterKey)
+	if !isRangeSearch && gjson.Get(searchParamStr, rangeFilterKey).Exists() {
+		return nil, merr.WrapErrParameterInvalid("range_filter", "",
+			"range_filter requires radius to be set; range_filter alone is not a valid range search parameter")
+	}
+	if isRangeSearch && groupByFieldId > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do range-search when doing search-group-by")
 	}
 
-	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK)
+	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK, largeTopKEnabled)
 	if err != nil {
-		return nil, fmt.Errorf("parse iterator v2 info failed: %w", err)
+		return nil, merr.WrapErrParameterInvalidMsg("parse iterator v2 info failed: %v", err)
 	}
 
-	// 7. check search for embedding list
-	annsFieldName, _ := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, searchParamsPair)
-	if annsFieldName != "" {
-		annField := typeutil.GetFieldByName(schema, annsFieldName)
-		if annField != nil && annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if strings.Contains(searchParamStr, radiusKey) {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"range search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-
-			if groupByFieldId > 0 {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"group by search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-
-			if isIterator {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"search iterator is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-		}
-	}
-
-	// 8. parse order_by_fields
+	// 7. parse order_by_fields
 	orderByFields, err := parseOrderByFields(searchParamsPair, schema)
 	if err != nil {
 		return nil, err
 	}
 
-	// 9. validate iterator + order_by combination is not allowed
+	// 8. validate iterator + order_by combination is not allowed
 	if isIterator && len(orderByFields) > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"order_by is not supported when using search iterator")
@@ -571,6 +620,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			SearchParams:         searchParamStr,
 			RoundDecimal:         roundDecimal,
 			GroupByFieldId:       groupByFieldId,
+			GroupByFieldIds:      groupByFieldIds,
 			GroupSize:            groupSize,
 			StrictGroupSize:      strictGroupSize,
 			Hints:                hints,
@@ -579,10 +629,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			JsonType:             jsonType,
 			StrictCast:           strictCast,
 		},
-		offset:        offset,
-		isIterator:    isIterator,
-		collectionID:  collectionId,
-		orderByFields: orderByFields,
+		offset:          offset,
+		isIterator:      isIterator,
+		collectionID:    collectionId,
+		orderByFields:   orderByFields,
+		iterativeFilter: isIterativeFilter,
 	}, nil
 }
 
@@ -591,7 +642,7 @@ func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldID
 	for _, name := range outputFields {
 		id, ok := schema.MapFieldID(name)
 		if !ok {
-			return nil, fmt.Errorf("Field %s not exist", name)
+			return nil, merr.WrapErrParameterInvalidMsg("Field %s not exist", name)
 		}
 		outputFieldIDs = append(outputFieldIDs, id)
 	}
@@ -653,7 +704,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 			pattern := fmt.Sprintf("^%s$", partitionName)
 			re, err := regexp.Compile(pattern)
 			if err != nil {
-				return nil, fmt.Errorf("invalid partition: %s", partitionName)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid partition: %s", partitionName)
 			}
 			var found bool
 			for name, pID := range partitionsMap {
@@ -663,13 +714,13 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 				}
 			}
 			if !found {
-				return nil, fmt.Errorf("partition name %s not found", partitionName)
+				return nil, merr.WrapErrParameterInvalidMsg("partition name %s not found", partitionName)
 			}
 		} else {
 			partitionID, found := partitionsMap[partitionName]
 			if !found {
 				// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
-				return nil, fmt.Errorf("partition name %s not found", partitionName)
+				return nil, merr.WrapErrParameterInvalidMsg("partition name %s not found", partitionName)
 			}
 			partitionsSet.Insert(partitionID)
 		}
@@ -678,19 +729,45 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 }
 
 type groupByInfo struct {
-	groupByFieldId  int64
-	groupSize       int64
-	strictGroupSize bool
-	jsonPath        string
-	jsonType        schemapb.DataType
-	strictCast      bool
+	groupByFieldIds   []int64
+	groupByFieldNames []string
+	groupSize         int64
+	strictGroupSize   bool
+	jsonPath          string
+	jsonType          schemapb.DataType
+	strictCast        bool
 }
 
+// GetGroupByFieldId returns the first group-by field id, or -1 when none is set.
+// The -1 sentinel is required by plan_parser_v2 (segment-scorer vs group_by
+// mutex check). Kept aligned with rankParams.GetGroupByFieldId().
 func (g *groupByInfo) GetGroupByFieldId() int64 {
-	if g != nil {
-		return g.groupByFieldId
+	if g != nil && len(g.groupByFieldIds) > 0 {
+		return g.groupByFieldIds[0]
 	}
-	return 0
+	return -1
+}
+
+// GetGroupByFieldName returns the first group-by field name, or "" when none is set.
+func (g *groupByInfo) GetGroupByFieldName() string {
+	if g != nil && len(g.groupByFieldNames) > 0 {
+		return g.groupByFieldNames[0]
+	}
+	return ""
+}
+
+func (g *groupByInfo) GetGroupByFieldIds() []int64 {
+	if g != nil {
+		return g.groupByFieldIds
+	}
+	return nil
+}
+
+func (g *groupByInfo) GetGroupByFieldNames() []string {
+	if g != nil {
+		return g.groupByFieldNames
+	}
+	return nil
 }
 
 func (g *groupByInfo) GetGroupSize() int64 {
@@ -774,7 +851,7 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 				jsonPath = groupByFieldName
 			} else {
 				// Case 2.3: Field not found and no dynamic field
-				return -1, "", merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+				return -1, "", merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema"))
 			}
 		}
 	} else {
@@ -789,7 +866,7 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 				jsonPath = groupByFieldName
 			} else {
 				// Case 2.3: Field not found and no dynamic field
-				return -1, "", merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+				return -1, "", merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema"))
 			}
 		}
 	}
@@ -800,18 +877,41 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*groupByInfo, error) {
 	ret := &groupByInfo{}
 
-	// 1. parse group_by_field
-	groupByFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, searchParamsPair)
-	if err != nil {
-		groupByFieldName = ""
+	// 1. parse group-by field name(s).
+	// `group_by_field` (singular, legacy SDK) wins over `group_by_fields` (plural, new SDK).
+	// When both are set the plural list is silently ignored to preserve old-client behavior.
+	var groupByFieldNames []string
+	if legacy, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, searchParamsPair); err == nil {
+		if trimmed := strings.TrimSpace(legacy); trimmed != "" {
+			groupByFieldNames = []string{trimmed}
+		}
 	}
-	groupByFieldId, jsonPath, err := parseGroupByField(groupByFieldName, schema)
-	if err != nil {
-		return nil, err
+	if len(groupByFieldNames) == 0 {
+		if plural, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, searchParamsPair); err == nil {
+			for _, f := range strings.Split(plural, ",") {
+				if trimmed := strings.TrimSpace(f); trimmed != "" {
+					groupByFieldNames = append(groupByFieldNames, trimmed)
+				}
+			}
+		}
 	}
-	ret.groupByFieldId = groupByFieldId
-	if jsonPath != "" {
-		ret.jsonPath = jsonPath
+
+	// Resolve each name to fieldId (and optional jsonPath).
+	// Multi-field + jsonPath is rejected because this layer carries a single jsonPath.
+	for _, name := range groupByFieldNames {
+		fieldId, jsonPath, err := parseGroupByField(name, schema)
+		if err != nil {
+			return nil, err
+		}
+		ret.groupByFieldIds = append(ret.groupByFieldIds, fieldId)
+		ret.groupByFieldNames = append(ret.groupByFieldNames, name)
+		if jsonPath != "" {
+			if len(groupByFieldNames) > 1 {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					fmt.Sprintf("group_by with json path is not supported for multi-field group_by, field:%s", name))
+			}
+			ret.jsonPath = jsonPath
+		}
 	}
 
 	// 2. parse group size
@@ -879,7 +979,7 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 }
 
 // parseRankParams get limit and offset from rankParams, both are optional.
-func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*rankParams, error) {
+func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, largeTopKEnabled bool) (*rankParams, error) {
 	var (
 		limit        int64
 		offset       int64
@@ -889,24 +989,24 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 
 	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, rankParamsPair)
 	if err != nil {
-		return nil, errors.New(LimitKey + " not found in rank_params")
+		return nil, merr.WrapErrParameterInvalidMsg(LimitKey + " not found in rank_params")
 	}
 	limit, err = strconv.ParseInt(limitStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+		return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", LimitKey, limitStr)
 	}
 
 	offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, rankParamsPair)
 	if err == nil {
 		offset, err = strconv.ParseInt(offsetStr, 0, 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+			return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", OffsetKey, offsetStr)
 		}
 	}
 
 	// validate max result window.
-	if err = validateMaxQueryResultWindow(offset, limit); err != nil {
-		return nil, fmt.Errorf("invalid max query result window, %w", err)
+	if err = validateMaxQueryResultWindow(offset, limit, largeTopKEnabled); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid max query result window, %v", err)
 	}
 
 	roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, rankParamsPair)
@@ -916,11 +1016,11 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 
 	roundDecimal, err = strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
-		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	// parse group_by parameters from main request body for hybrid search
@@ -930,12 +1030,13 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}
 
 	return &rankParams{
-		limit:           limit,
-		offset:          offset,
-		roundDecimal:    roundDecimal,
-		groupByFieldId:  groupByInfo.GetGroupByFieldId(),
-		groupSize:       groupByInfo.GetGroupSize(),
-		strictGroupSize: groupByInfo.GetStrictGroupSize(),
+		limit:             limit,
+		offset:            offset,
+		roundDecimal:      roundDecimal,
+		groupByFieldIds:   groupByInfo.GetGroupByFieldIds(),
+		groupByFieldNames: groupByInfo.GetGroupByFieldNames(),
+		groupSize:         groupByInfo.GetGroupSize(),
+		strictGroupSize:   groupByInfo.GetStrictGroupSize(),
 	}, nil
 }
 

@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -35,13 +35,13 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type CollectionObserverSuite struct {
@@ -494,7 +494,7 @@ func (suite *CollectionObserverSuite) isCollectionLoaded(collection int64) bool 
 	exist := suite.meta.Exist(ctx, collection)
 	percentage := suite.meta.CalculateLoadPercentage(ctx, collection)
 	status := suite.meta.CalculateLoadStatus(ctx, collection)
-	replicas := suite.meta.ReplicaManager.GetByCollection(ctx, collection)
+	replicas := suite.meta.GetByCollection(ctx, collection)
 	channels := suite.targetMgr.GetDmChannelsByCollection(ctx, collection, meta.CurrentTarget)
 	segments := suite.targetMgr.GetSealedSegmentsByCollection(ctx, collection, meta.CurrentTarget)
 
@@ -529,13 +529,13 @@ func (suite *CollectionObserverSuite) isPartitionLoaded(partitionID int64) bool 
 func (suite *CollectionObserverSuite) isCollectionTimeout(collection int64) bool {
 	ctx := suite.ctx
 	exist := suite.meta.Exist(ctx, collection)
-	replicas := suite.meta.ReplicaManager.GetByCollection(ctx, collection)
+	replicas := suite.meta.GetByCollection(ctx, collection)
 	channels := suite.targetMgr.GetDmChannelsByCollection(ctx, collection, meta.CurrentTarget)
 	segments := suite.targetMgr.GetSealedSegmentsByCollection(ctx, collection, meta.CurrentTarget)
-	return !(exist ||
-		len(replicas) > 0 ||
-		len(channels) > 0 ||
-		len(segments) > 0)
+	return !exist &&
+		len(replicas) <= 0 &&
+		len(channels) <= 0 &&
+		len(segments) <= 0
 }
 
 func (suite *CollectionObserverSuite) isPartitionTimeout(collection int64, partitionID int64) bool {
@@ -563,13 +563,13 @@ func (suite *CollectionObserverSuite) loadAll() {
 func (suite *CollectionObserverSuite) load(collection int64) {
 	ctx := suite.ctx
 	// Mock meta data
-	replicas, err := suite.meta.ReplicaManager.Spawn(ctx, collection, map[string]int{meta.DefaultResourceGroupName: int(suite.replicaNumber[collection])},
+	replicas, err := suite.meta.Spawn(ctx, collection, map[string]int{meta.DefaultResourceGroupName: int(suite.replicaNumber[collection])},
 		nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	for _, replica := range replicas {
 		replica.AddRWNode(suite.nodes...)
 	}
-	err = suite.meta.ReplicaManager.Put(ctx, replicas...)
+	err = suite.meta.Put(ctx, replicas...)
 	suite.NoError(err)
 
 	suite.meta.PutCollection(ctx, &meta.Collection{

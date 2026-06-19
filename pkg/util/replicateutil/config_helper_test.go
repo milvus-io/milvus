@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 // createValidConfig creates a valid ReplicateConfiguration for testing
@@ -350,6 +350,25 @@ func TestConfigHelper_GetTargetChannel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfigHelper_IsJoinReplication(t *testing.T) {
+	// Single cluster, no topology → not in replication
+	singleCfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1"}},
+		},
+	}
+	h := MustNewConfigHelper("by-dev", singleCfg)
+	assert.False(t, h.IsJoinReplication())
+
+	// Multi-cluster with topology → primary is in replication
+	h = MustNewConfigHelper("source-cluster", createValidConfig())
+	assert.True(t, h.IsJoinReplication())
+
+	// Secondary is also in replication
+	h = MustNewConfigHelper("target-cluster-a", createValidConfig())
+	assert.True(t, h.IsJoinReplication())
 }
 
 func TestConfigHelper_EdgeCases(t *testing.T) {

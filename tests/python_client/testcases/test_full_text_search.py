@@ -1,3 +1,5 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
 import json
 
 from pymilvus import (
@@ -417,6 +419,54 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
             check_items=check_items,
         )
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_collection_for_full_text_search_with_nullable_function_output(self):
+        """
+        target: test create collection with nullable BM25 function output
+        method: create collection with BM25 output sparse vector field set nullable
+        expected: create collection failed
+        """
+        analyzer_params = {
+            "tokenizer": "standard",
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                nullable=True,
+                enable_analyzer=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(
+                name="text_sparse_emb",
+                dtype=DataType.SPARSE_FLOAT_VECTOR,
+                nullable=True,
+            ),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        check_items = {
+            ct.err_code: 65535,
+            ct.err_msg: "function output field cannot be nullable",
+        }
+        self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix),
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items=check_items,
+        )
+
 
 # @pytest.mark.skip("skip")
 class TestInsertWithFullTextSearch(TestcaseBase):
@@ -471,6 +521,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -507,7 +558,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
                     "paragraph": fake.paragraph().lower()
                     if random.random() < 0.5
                     else None,
-                    "text": fake.text().lower(),  # function input should not be None
+                    "text": fake.text().lower() if random.random() < 0.3 else None,  # function input supports None now
                     "emb": [random.random() for _ in range(dim)],
                 }
                 for i in range(data_size)
@@ -543,9 +594,9 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         batch_size = 5000
         for i in range(0, len(df), batch_size):
             collection_w.insert(
-                data[i : i + batch_size]
+                data[i: i + batch_size]
                 if i + batch_size < len(df)
-                else data[i : len(df)]
+                else data[i: len(df)]
             )
         collection_w.create_index(
             "emb",
@@ -2221,6 +2272,83 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     ******************************************************************
     """
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_full_text_search_with_nullable_text_input(self):
+        """
+        target: test full text search with nullable function input
+        method: insert data with None text and search on BM25 sparse field
+        expected: nullable input rows are accepted and not matched by BM25 search
+        """
+        analyzer_params = {
+            "tokenizer": "standard",
+        }
+        dim = 8
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                nullable=True,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        bm25_function = Function(
+            name="text_bm25_emb",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        data = [
+            {"id": 0, "text": "milvus vector database", "emb": [0.1] * dim},
+            {"id": 1, "text": None, "emb": [0.2] * dim},
+            {"id": 2, "text": "", "emb": [0.3] * dim},
+            {"id": 3, "text": "vector search", "emb": [0.4] * dim},
+        ]
+        collection_w.insert(data)
+        collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {
+                "index_type": "FLAT",
+                "metric_type": "L2",
+            },
+        )
+        collection_w.create_index(
+            "text_sparse_emb",
+            {
+                "index_type": "SPARSE_INVERTED_INDEX",
+                "metric_type": "BM25",
+            },
+        )
+        collection_w.create_index("text", {"index_type": "INVERTED"})
+        collection_w.load()
+
+        query_res, _ = collection_w.query(
+            expr="id in [1]", output_fields=["id", "text"]
+        )
+        assert query_res == [{"id": 1, "text": None}]
+        search_res, _ = collection_w.search(
+            data=["vector"],
+            anns_field="text_sparse_emb",
+            param={},
+            limit=4,
+            output_fields=["id", "text"],
+        )
+        search_ids = [hit.id for hit in search_res[0]]
+        assert len(search_ids) > 0
+        assert 1 not in search_ids
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nq", [2])
     @pytest.mark.parametrize("empty_percent", [0.5])
@@ -2230,8 +2358,10 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("expr", ["text_match", "id_range"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.parametrize("offset", [10, 0])
+    @pytest.mark.parametrize("nullable", [False, True])
     def test_full_text_search_default(
         self,
+        nullable,
         offset,
         tokenizer,
         expr,
@@ -2239,7 +2369,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         enable_partition_key,
         empty_percent,
         index_type,
-        nq,
+        nq
     ):
         """
         target: test full text search
@@ -2266,6 +2396,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2273,6 +2404,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2280,6 +2412,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,      # function input supports None now
                 enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
@@ -2307,17 +2440,20 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         else:
             language = "en"
 
+        empty_value = ""
+        if nullable is True:
+            empty_value = None
         data = [
             {
                 "id": i,
-                "word": fake.word().lower() if random.random() >= empty_percent else "",
+                "word": fake.word().lower() if random.random() >= empty_percent else "",   # partition key not support none
                 "sentence": fake.sentence().lower()
                 if random.random() >= empty_percent
-                else "",
+                else empty_value,
                 "paragraph": fake.paragraph().lower()
                 if random.random() >= empty_percent
-                else "",
-                "text": fake.text().lower() if random.random() >= empty_percent else "",
+                else empty_value,
+                "text": fake.text().lower() if random.random() >= empty_percent else empty_value,
                 "emb": [random.random() for _ in range(dim)],
             }
             for i in range(data_size)
@@ -2890,8 +3026,9 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 )
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [False, True])
     @pytest.mark.parametrize("nq", [2])
-    @pytest.mark.parametrize("empty_percent", [0])
+    @pytest.mark.parametrize("empty_percent", [0.2])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
@@ -2906,6 +3043,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         empty_percent,
         index_type,
         nq,
+        nullable
     ):
         """
         target: test full text search
@@ -2932,6 +3070,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2939,6 +3078,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2946,11 +3086,12 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
+                nullable=nullable,
                 enable_analyzer=True,
                 enable_match=True,
                 analyzer_params=analyzer_params,
             ),
-            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim, nullable=nullable),
             FieldSchema(name="text_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
@@ -2973,18 +3114,23 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         else:
             language = "en"
 
+        empty_value = ""
+        if nullable is True:
+            empty_value = None
         data = [
             {
                 "id": i,
-                "word": fake.word().lower() if random.random() >= empty_percent else "",
+                "word": fake.word().lower()
+                if random.random() >= empty_percent else "",   # partition key not support none
                 "sentence": fake.sentence().lower()
                 if random.random() >= empty_percent
-                else "",
+                else empty_value,
                 "paragraph": fake.paragraph().lower()
                 if random.random() >= empty_percent
-                else "",
-                "text": fake.text().lower() if random.random() >= empty_percent else "",
-                "emb": [random.random() for _ in range(dim)],
+                else empty_value,
+                "text": fake.text().lower() if random.random() >= empty_percent else empty_value,
+                "emb": None if nullable is True and random.random() < empty_percent
+                else [random.random() for _ in range(dim)],  # null vector supported
             }
             for i in range(data_size)
         ]
@@ -2999,9 +3145,9 @@ class TestSearchWithFullTextSearch(TestcaseBase):
         batch_size = 5000
         for i in range(0, len(df), batch_size):
             collection_w.insert(
-                data[i : i + batch_size]
+                data[i: i + batch_size]
                 if i + batch_size < len(df)
-                else data[i : len(df)]
+                else data[i: len(df)]
             )
         collection_w.create_index(
             "emb",

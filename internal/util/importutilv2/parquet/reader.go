@@ -18,7 +18,6 @@ package parquet
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -28,12 +27,12 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const totalReadBufferSize = int64(64 * 1024 * 1024)
@@ -72,13 +71,15 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
+		retryableReader.Close()
+		return nil, merr.WrapErrImportSysFailedMsg("new parquet reader failed, err=%v", err)
 	}
 	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
 		zap.Int64("num rows", r.NumRows()))
 
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
+		r.Close()
 		return nil, err
 	}
 
@@ -87,11 +88,13 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	}
 	fileReader, err := pqarrow.NewFileReader(r, readProps, memory.DefaultAllocator)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
+		r.Close()
+		return nil, merr.WrapErrImportSysFailedMsg("new parquet file reader failed, err=%v", err)
 	}
 
 	crs, err := CreateFieldReaders(ctx, fileReader, schema)
 	if err != nil {
+		r.Close()
 		return nil, err
 	}
 	return &reader{
@@ -109,7 +112,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertData(r.schema)
+	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +140,7 @@ OUTER:
 			return nil, io.EOF
 		}
 	}
+	common.RemoveUnpopulatedFunctionOutputFields(r.schema, insertData)
 	return insertData, nil
 }
 

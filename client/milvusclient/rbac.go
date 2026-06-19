@@ -23,9 +23,9 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (c *Client) ListUsers(ctx context.Context, opt ListUserOption, callOpts ...grpc.CallOption) ([]string, error) {
@@ -53,8 +53,9 @@ func (c *Client) DescribeUser(ctx context.Context, opt DescribeUserOption, callO
 		}
 		result := resp.GetResults()[0]
 		user = &entity.User{
-			UserName: result.GetUser().GetName(),
-			Roles:    lo.Map(result.GetRoles(), func(r *milvuspb.RoleEntity, _ int) string { return r.GetName() }),
+			UserName:    result.GetUser().GetName(),
+			Roles:       lo.Map(result.GetRoles(), func(r *milvuspb.RoleEntity, _ int) string { return r.GetName() }),
+			Description: result.GetDescription(),
 		}
 
 		return nil
@@ -106,6 +107,13 @@ func (c *Client) CreateRole(ctx context.Context, opt CreateRoleOption, callOpts 
 	})
 }
 
+func (c *Client) AlterRole(ctx context.Context, opt AlterRoleOption, callOpts ...grpc.CallOption) error {
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterRole(ctx, opt.Request(), callOpts...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
 func (c *Client) GrantRole(ctx context.Context, opt GrantRoleOption, callOpts ...grpc.CallOption) error {
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.OperateUserRole(ctx, opt.Request(), callOpts...)
@@ -140,7 +148,8 @@ func (c *Client) DescribeRole(ctx context.Context, option DescribeRoleOption, ca
 		}
 
 		role = &entity.Role{
-			RoleName: roleResp.GetResults()[0].GetRole().GetName(),
+			RoleName:    roleResp.GetResults()[0].GetRole().GetName(),
+			Description: roleResp.GetResults()[0].GetRole().GetDescription(),
 		}
 
 		resp, err := milvusService.SelectGrant(ctx, option.Request(), callOptions...)

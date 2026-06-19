@@ -27,6 +27,13 @@
 #include "fmt/format.h"
 #include "index/Meta.h"
 
+namespace milvus::storage {
+class IndexEntryWriter;
+class IndexEntryReader;
+class MemFileManagerImpl;
+using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;
+}  // namespace milvus::storage
+
 namespace milvus::index {
 
 enum class ScalarIndexType {
@@ -114,6 +121,8 @@ class ScalarIndex : public IndexBase {
     };
 
  public:
+    using IndexBase::Build;
+
     virtual ScalarIndexType
     GetIndexType() const = 0;
 
@@ -147,12 +156,12 @@ class ScalarIndex : public IndexBase {
     NotIn(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
-    Range(T value, OpType op) = 0;
+    Range(const T& value, OpType op) = 0;
 
     virtual const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) = 0;
 
     virtual std::optional<T>
@@ -166,6 +175,10 @@ class ScalarIndex : public IndexBase {
         return false;
     }
 
+    // Execute a pattern match operation on the index.
+    // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),
+    //   NOT a regex. Implementations must convert internally if needed.
+    // @param op: Match (LIKE), PrefixMatch, PostfixMatch, or InnerMatch.
     virtual const TargetBitmap
     PatternMatch(const std::string& pattern, proto::plan::OpType op) {
         ThrowInfo(Unsupported, "pattern match is not supported");
@@ -189,19 +202,23 @@ class ScalarIndex : public IndexBase {
     virtual int64_t
     Size() = 0;
 
+    // Planner policy for scalar-index execution. Most scalar ops can use the
+    // index directly. Pattern ops need extra capability checks:
+    // - PatternMatch is the public index capability for all pattern ops.
+    // - PatternQuery is an implementation detail used inside PatternMatch.
     virtual bool
-    SupportRegexQuery() const {
-        return false;
-    }
-
-    virtual bool
-    TryUseRegexQuery() const {
-        return true;
-    }
-
-    virtual const TargetBitmap
-    RegexQuery(const std::string& pattern) {
-        ThrowInfo(Unsupported, "regex query is not supported");
+    ShouldUseOp(proto::plan::OpType op) const {
+        switch (op) {
+            case proto::plan::OpType::Match:
+            case proto::plan::OpType::PrefixMatch:
+            case proto::plan::OpType::PostfixMatch:
+            case proto::plan::OpType::InnerMatch:
+            case proto::plan::OpType::RegexMatch:
+                return std::is_same_v<T, std::string> &&
+                       (SupportPatternMatch() || HasRawData());
+            default:
+                return true;
+        }
     }
 
     virtual void
@@ -213,6 +230,49 @@ class ScalarIndex : public IndexBase {
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config) {
         ThrowInfo(Unsupported, "LoadWithoutAssemble is not supported");
     }
+
+    // Packed single-file streaming upload — subclasses must implement
+    // WriteEntries() instead. The current on-disk file format is V3
+    // (see MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h, and the ".v3"
+    // filename suffix produced by the implementation); the method name is
+    // kept format-agnostic so future format versions can reuse this entry
+    // point and dispatch by reading the file header.
+    IndexStatsPtr
+    UploadUnified(const Config& config) override;
+
+    // Packed single-file streaming load — opens the file and calls
+    // LoadEntries() for subclass-specific loading. Currently handles the V3
+    // file format (see UploadUnified above for naming rationale).
+    void
+    LoadUnified(const Config& config) override;
+
+    virtual void
+    WriteEntries(storage::IndexEntryWriter* writer) {
+        ThrowInfo(Unsupported, "WriteEntries is not implemented");
+    }
+
+    virtual void
+    LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
+        ThrowInfo(Unsupported, "LoadEntries is not implemented");
+    }
+
+ protected:
+    // Execute a LIKE-pattern query inside PatternMatch implementations.
+    // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),
+    //   NOT a regex. Implementations must convert internally if needed
+    //   (e.g., tantivy converts to regex via PatternMatchTranslator).
+    virtual const TargetBitmap
+    PatternQuery(const std::string& pattern) {
+        ThrowInfo(Unsupported, "pattern query is not supported");
+    }
+
+    // File manager for V3 upload/load operations
+    storage::MemFileManagerImplPtr file_manager_;
+
+    // Controls the remote path prefix for V3 upload/load.
+    // true  → index_files/...  (default, for normal scalar indexes)
+    // false → text_log/...     (for TextMatchIndex)
+    bool is_index_file_ = true;
 };
 
 template <typename T>

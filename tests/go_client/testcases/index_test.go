@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -28,6 +28,8 @@ ScalarAutoIndex: {"int_*": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float
 */
 
 func TestIndexVectorDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -60,6 +62,8 @@ func TestIndexVectorDefault(t *testing.T) {
 }
 
 func TestIndexVectorIP(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -93,6 +97,8 @@ func TestIndexVectorIP(t *testing.T) {
 }
 
 func TestIndexVectorCosine(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -126,6 +132,8 @@ func TestIndexVectorCosine(t *testing.T) {
 }
 
 func TestIndexAutoFloatVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -162,6 +170,8 @@ func TestIndexAutoFloatVector(t *testing.T) {
 }
 
 func TestIndexAutoBinaryVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -202,6 +212,8 @@ func TestIndexAutoBinaryVector(t *testing.T) {
 }
 
 func TestIndexAutoSparseVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -239,6 +251,8 @@ func TestIndexAutoSparseVector(t *testing.T) {
 
 // test create auto index on all vector and scalar index
 func TestCreateAutoIndexAllFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -288,6 +302,8 @@ func TestCreateAutoIndexAllFields(t *testing.T) {
 }
 
 func TestIndexBinaryFlat(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -319,6 +335,8 @@ func TestIndexBinaryFlat(t *testing.T) {
 }
 
 func TestIndexBinaryIvfFlat(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -351,6 +369,8 @@ func TestIndexBinaryIvfFlat(t *testing.T) {
 
 // test create binary index with unsupported metrics type
 func TestCreateBinaryIndexNotSupportedMetricType(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -395,6 +415,8 @@ func TestCreateBinaryIndexNotSupportedMetricType(t *testing.T) {
 }
 
 func TestIndexInvalidMetricType(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -416,6 +438,8 @@ func TestIndexInvalidMetricType(t *testing.T) {
 
 // Trie scalar Trie index only supported on varchar
 func TestCreateTrieScalarIndex(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -452,6 +476,8 @@ func TestCreateTrieScalarIndex(t *testing.T) {
 
 // Sort scalar index only supported on numeric field
 func TestCreateSortedScalarIndex(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -471,7 +497,14 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 			if field.DataType == entity.FieldTypeBool ||
 				field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeArray {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-				require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar or timestamptz field")
+				// STL_SORT on JSON is supported with a json_cast_type; without
+				// it the server rejects with a missing-cast-type error instead
+				// of the old "not supported on field" error.
+				if field.DataType == entity.FieldTypeJSON {
+					require.ErrorContains(t, err, "json index must specify cast type")
+				} else {
+					require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar or timestamptz field")
+				}
 			} else {
 				idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 				common.CheckErr(t, err, true)
@@ -502,6 +535,8 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 
 // create Inverted index for all scalar fields
 func TestCreateInvertedScalarIndex(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -545,6 +580,8 @@ func TestCreateInvertedScalarIndex(t *testing.T) {
 
 // test create index on vector field -> error
 func TestCreateScalarIndexVectorField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -569,6 +606,8 @@ func TestCreateScalarIndexVectorField(t *testing.T) {
 
 // test create scalar index with vector field name
 func TestCreateIndexWithOtherFieldName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -596,11 +635,13 @@ func TestCreateIndexWithOtherFieldName(t *testing.T) {
 	// create index in binary field with default name
 	idxBinary := index.NewBinFlatIndex(entity.JACCARD)
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultBinaryVecFieldName, idxBinary))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 }
 
 // create all scalar index on json field -> error
 func TestCreateIndexJsonField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -623,7 +664,10 @@ func TestCreateIndexJsonField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
+		// STL_SORT on JSON is supported with a json_cast_type; without it the
+		// server now rejects with a missing-cast-type error instead of the
+		// old "not supported on field" error.
+		{index.NewSortedIndex(), "json index must specify cast type"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 	for _, idxErr := range inxError {
@@ -634,6 +678,8 @@ func TestCreateIndexJsonField(t *testing.T) {
 
 // array field on supported array field
 func TestCreateUnsupportedIndexArrayField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -672,6 +718,8 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 
 // create inverted index on array field
 func TestCreateInvertedIndexArrayField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -710,6 +758,8 @@ func TestCreateInvertedIndexArrayField(t *testing.T) {
 
 // test create index without specify index name: default index name is field name
 func TestCreateIndexWithoutName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -737,6 +787,8 @@ func TestCreateIndexWithoutName(t *testing.T) {
 
 // test create index on same field twice
 func TestCreateIndexDup(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -761,10 +813,12 @@ func TestCreateIndexDup(t *testing.T) {
 	common.CheckIndex(t, _index, expIndex, common.TNewCheckIndexOpt(common.DefaultNb))
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfSq8))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 }
 
 func TestCreateIndexSparseVectorGeneric(t *testing.T) {
+	t.Parallel()
+
 	idxInverted := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.2", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_INVERTED_INDEX"})
 	idxWand := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.3", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_WAND"})
 
@@ -793,6 +847,8 @@ func TestCreateIndexSparseVectorGeneric(t *testing.T) {
 }
 
 func TestCreateIndexSparseVector(t *testing.T) {
+	t.Parallel()
+
 	idxInverted1 := index.NewSparseInvertedIndex(entity.IP, 0.2)
 	idxWand1 := index.NewSparseWANDIndex(entity.IP, 0.3)
 	for _, idx := range []index.Index{idxInverted1, idxWand1} {
@@ -819,6 +875,8 @@ func TestCreateIndexSparseVector(t *testing.T) {
 }
 
 func TestCreateSparseIndexInvalidParams(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -855,6 +913,8 @@ func TestCreateSparseIndexInvalidParams(t *testing.T) {
 
 // create sparse unsupported index: other vector index and scalar index and auto index
 func TestCreateSparseUnsupportedIndex(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -885,6 +945,8 @@ func TestCreateSparseUnsupportedIndex(t *testing.T) {
 
 // test new index by Generic index
 func TestCreateIndexGeneric(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -910,8 +972,52 @@ func TestCreateIndexGeneric(t *testing.T) {
 	}
 }
 
+func TestCreateIndexVanillaFaissGeneric(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
+
+	// insert
+	ip := hp.NewInsertParams(schema)
+	prepare.InsertData(ctx, t, mc, ip, hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+
+	idx := index.NewGenericIndex(common.DefaultFloatVecFieldName, map[string]string{
+		index.IndexTypeKey:  "FAISS",
+		index.MetricTypeKey: "L2",
+		"faiss_index_name":  "IVF64,Flat",
+	})
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idx))
+	common.CheckErr(t, err, true)
+	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	descIdx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
+	common.CheckErr(t, err, true)
+	common.CheckIndex(t, descIdx, index.NewGenericIndex(common.DefaultFloatVecFieldName, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))
+	require.Equal(t, "FAISS", descIdx.Index.Params()[index.IndexTypeKey])
+	require.Equal(t, "IVF64,Flat", descIdx.Index.Params()["faiss_index_name"])
+
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
+		WithANNSField(common.DefaultFloatVecFieldName).
+		// nprobe=nlist (IVF64) scans all lists so topK results are returned deterministically (#50392)
+		WithSearchParam("nprobe", "64").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+}
+
 // test create index with not exist index name and not exist field name
 func TestIndexNotExistName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -937,6 +1043,8 @@ func TestIndexNotExistName(t *testing.T) {
 
 // test create float / binary / sparse vector index on non-vector field
 func TestCreateVectorIndexScalarField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -972,6 +1080,8 @@ func TestCreateVectorIndexScalarField(t *testing.T) {
 
 // test create index with invalid params
 func TestCreateIndexInvalidParams(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1028,6 +1138,8 @@ func TestCreateIndexInvalidParams(t *testing.T) {
 
 // test create index with nil index
 func TestCreateIndexNil(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("Issue: https://github.com/milvus-io/milvus-sdk-go/issues/358")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1041,6 +1153,8 @@ func TestCreateIndexNil(t *testing.T) {
 
 // test create index async true
 func TestCreateIndexAsync(t *testing.T) {
+	t.Parallel()
+
 	t.Log("wait GetIndexState")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1064,6 +1178,8 @@ func TestCreateIndexAsync(t *testing.T) {
 
 // create same index name on different vector field
 func TestIndexMultiVectorDupName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1083,7 +1199,7 @@ func TestIndexMultiVectorDupName(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloat16VecFieldName, idx).WithIndexName("index_1"))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 
 	// create different index on same field
 	idxRe := index.NewIvfSQ8Index(entity.COSINE, 32)
@@ -1092,6 +1208,8 @@ func TestIndexMultiVectorDupName(t *testing.T) {
 }
 
 func TestDropIndex(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1136,6 +1254,8 @@ func TestDropIndex(t *testing.T) {
 }
 
 func TestDropIndexCreateIndexWithIndexName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

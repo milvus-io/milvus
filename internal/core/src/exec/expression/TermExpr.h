@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <any>
+#include <functional>
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -61,7 +63,8 @@ class PhyTermFilterExpr : public SegmentExpr {
         int64_t active_count,
         milvus::Timestamp timestamp,
         int64_t batch_size,
-        int32_t consistency_level)
+        int32_t consistency_level,
+        const query::PlanOptions& plan_options = {})
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -73,13 +76,19 @@ class PhyTermFilterExpr : public SegmentExpr {
                           : FromValCase(expr->vals_[0].val_case()),
                       active_count,
                       batch_size,
-                      consistency_level),
-          expr_(expr),
-          query_timestamp_(timestamp) {
+                      consistency_level,
+                      false,
+                      false,
+                      plan_options),
+          expr_(expr) {
+        DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineExecPath() override;
 
     bool
     IsSource() const override {
@@ -87,7 +96,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -149,15 +158,26 @@ class PhyTermFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::TermFilterExpr> expr_;
-    milvus::Timestamp query_timestamp_;
     bool cached_bits_inited_{false};
     TargetBitmap cached_bits_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
     std::shared_ptr<MultiElement> arg_set_double_;
     SingleElement arg_val_;
-    int32_t consistency_level_ = 0;
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
+
+    // Type-safe cached FilterChunk dispatch (avoids per-call dynamic_cast).
+    // Set once during arg_inited_; empty when arg_set_ is not SimdBatch.
+    // Captures a typed SimdBatchElement<T>* inside the lambda at init time.
+    using FilterChunkFn =
+        std::function<void(const void* data, int size, TargetBitmapView res)>;
+    FilterChunkFn cached_filter_chunk_;
+    // Cached SetElement<string> pointer for per-row string lookup without
+    // variant construction. Set once during init; nullptr when arg_set_ is not
+    // SetElement<string> (e.g. FlatVectorElement for small IN).
+    SetElement<std::string>* cached_str_set_elem_{nullptr};
+    // Cached element values for skip_index (avoids per-chunk vector copy).
+    std::any cached_skip_elements_;
 };
 }  //namespace exec
 }  // namespace milvus

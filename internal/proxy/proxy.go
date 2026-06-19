@@ -18,19 +18,17 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -38,16 +36,17 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/resource"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // UniqueID is alias of typeutil.UniqueID
@@ -137,6 +136,7 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("proxy", node)
+	hookutil.SetHook(connection.GetManager())
 	hookutil.InitOnceHook()
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
@@ -154,7 +154,7 @@ func (node *Proxy) GetStateCode() commonpb.StateCode {
 // Register registers proxy at etcd
 func (node *Proxy) Register() error {
 	node.session.Register()
-	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.ProxyRole).Inc()
+	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
 	log.Info("Proxy Register Finished")
 	// TODO Reset the logger
 	// Params.initLogCfg()
@@ -165,9 +165,9 @@ func (node *Proxy) Register() error {
 func (node *Proxy) initSession() error {
 	node.session = sessionutil.NewSession(node.ctx)
 	if node.session == nil {
-		return errors.New("new session failed, maybe etcd cannot be connected")
+		return merr.WrapErrServiceNotReadyMsg("new session failed, maybe etcd cannot be connected")
 	}
-	node.session.Init(typeutil.ProxyRole, node.address, false, true)
+	node.session.Init(typeutil.ProxyRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.ProxyRole, node.session.ServerID)
 	return nil
 }
@@ -334,6 +334,10 @@ func (node *Proxy) Stop() error {
 		node.resourceManager.Close()
 	}
 
+	if globalMetaCache != nil {
+		globalMetaCache.Close()
+	}
+
 	node.cancel()
 	node.wg.Wait()
 
@@ -374,7 +378,7 @@ func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, 
 // GetRateLimiter returns the rateLimiter in Proxy.
 func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
 	if node.simpleLimiter == nil {
-		return nil, errors.New("nil rate limiter in Proxy")
+		return nil, merr.WrapErrParameterInvalidMsg("nil rate limiter in Proxy")
 	}
 	return node.simpleLimiter, nil
 }

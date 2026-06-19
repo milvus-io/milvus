@@ -5,15 +5,13 @@ import (
 
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) error {
@@ -23,7 +21,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 	defer broadcaster.Close()
 
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -54,17 +52,8 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 
 	// build new collection schema.
-	schema := &schemapb.CollectionSchema{
-		Name:               coll.Name,
-		Description:        coll.Description,
-		AutoID:             coll.AutoID,
-		Fields:             model.MarshalFieldModels(coll.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(coll.Functions),
-		EnableDynamicField: coll.EnableDynamicField,
-		Properties:         coll.Properties,
-		Version:            coll.SchemaVersion + 1,
-	}
+	schema := coll.ToCollectionSchemaPB()
+	schema.Version = coll.SchemaVersion + 1
 	for _, field := range schema.Fields {
 		if field.Name == req.GetFieldName() {
 			field.TypeParams = newFieldProperties

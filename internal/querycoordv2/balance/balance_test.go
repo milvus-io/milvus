@@ -27,11 +27,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type BalanceTestSuite struct {
@@ -59,7 +59,7 @@ func (suite *BalanceTestSuite) SetupTest() {
 	// Initialize global assign policy factory before creating balancer
 	assign.InitGlobalAssignPolicyFactory(suite.mockScheduler, suite.nodeManager, suite.dist, nil, suite.targetMgr)
 
-	suite.roundRobinBalancer = NewRoundRobinBalancer(suite.mockScheduler, suite.nodeManager, suite.dist, nil, suite.targetMgr)
+	suite.roundRobinBalancer = NewRoundRobinBalancer(suite.mockScheduler, suite.nodeManager, suite.dist, suite.targetMgr)
 
 	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()

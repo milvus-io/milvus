@@ -31,10 +31,12 @@
 #include "common/Tracer.h"
 #include "common/bson_view.h"
 #include "common/type_c.h"
+#include "common/ScopedTimer.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Utils.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
+#include "monitor/Monitor.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
 #include "log/Log.h"
@@ -45,6 +47,7 @@
 #include "segcore/SegmentSealed.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
+#include "query/Utils.h"
 
 namespace milvus {
 class SkipIndex;
@@ -60,7 +63,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    if (is_pk_field_ && !has_offset_input_) {
+    if (exec_path_ == ExprExecPath::PkIndex && !has_offset_input_) {
         result = ExecPkTermImpl();
         return;
     }
@@ -85,7 +88,8 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<int32_t>(context);
             break;
         }
-        case DataType::INT64: {
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ: {
             result = ExecVisitorImpl<int64_t>(context);
             break;
         }
@@ -97,7 +101,8 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<double>(context);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
@@ -109,6 +114,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
+            span.GetSpan()->SetAttribute("json_filter_expr_type", "term");
             if (expr_->vals_.size() == 0) {
                 result = ExecVisitorImplTemplateJson<bool>(context);
                 break;
@@ -134,26 +140,21 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::ARRAY: {
             if (expr_->vals_.size() == 0) {
-                SetNotUseIndex();
                 result = ExecVisitorImplTemplateArray<bool>(context);
                 break;
             }
             auto type = expr_->vals_[0].val_case();
             switch (type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<double>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<std::string>(context);
                     break;
                 default:
@@ -182,7 +183,7 @@ PhyTermFilterExpr::CanSkipSegment() {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
             if (!skip_index.CanSkipBinaryRange<T>(
-                    field_id_, i, min, max, true, true)) {
+                    op_ctx_, field_id_, i, min, max, true, true)) {
                 return false;
             } else {
                 res = true;
@@ -245,11 +246,10 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         return nullptr;
     }
 
-    TargetBitmap result;
-    result.append(cached_bits_, current_data_global_pos_, real_batch_size);
+    auto res = MoveOrSliceBitmap(
+        cached_bits_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename ValueType>
@@ -258,7 +258,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
-        if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+        if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
             // we create double index for json int64 field for now
             using GetType =
                 std::conditional_t<std::is_same_v<ValueType, int64_t>,
@@ -517,7 +517,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::string pointer,
+            const std::string& pointer,
             const ValueType& target_val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
@@ -612,11 +612,13 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             TargetBitmap(real_batch_size, true));
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto vals = expr_->vals_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index.get() != nullptr);
 
@@ -663,60 +665,64 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             }
         };
 
-        if constexpr (std::is_same_v<GetType, bool>) {
-            try_execute(milvus::index::JSONType::BOOL,
-                        res_view,
-                        valid_res_view,
-                        bool{});
-        } else if constexpr (std::is_same_v<GetType, int64_t>) {
-            try_execute(milvus::index::JSONType::INT64,
-                        res_view,
-                        valid_res_view,
-                        int64_t{});
-            // and double compare
-            TargetBitmap res_double(active_count_, false);
-            TargetBitmapView res_double_view(res_double);
-            TargetBitmap res_double_valid(active_count_, true);
-            TargetBitmapView valid_res_double_view(res_double_valid);
-            try_execute(milvus::index::JSONType::DOUBLE,
-                        res_double_view,
-                        valid_res_double_view,
-                        double{});
-            res_view.inplace_or_with_count(res_double_view, active_count_);
-            valid_res_view.inplace_or_with_count(valid_res_double_view,
-                                                 active_count_);
+        {
+            milvus::ScopedTimer timer(
+                "term_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
 
-        } else if constexpr (std::is_same_v<GetType, double>) {
-            try_execute(milvus::index::JSONType::DOUBLE,
-                        res_view,
-                        valid_res_view,
-                        double{});
-            // and int64 compare
-            TargetBitmap res_int64(active_count_, false);
-            TargetBitmapView res_int64_view(res_int64);
-            TargetBitmap res_int64_valid(active_count_, true);
-            TargetBitmapView valid_res_int64_view(res_int64_valid);
-            try_execute(milvus::index::JSONType::INT64,
-                        res_int64_view,
-                        valid_res_int64_view,
-                        int64_t{});
-            res_view.inplace_or_with_count(res_int64_view, active_count_);
-            valid_res_view.inplace_or_with_count(valid_res_int64_view,
-                                                 active_count_);
-        } else if constexpr (std::is_same_v<GetType, std::string_view> ||
-                             std::is_same_v<GetType, std::string>) {
-            try_execute(milvus::index::JSONType::STRING,
-                        res_view,
-                        valid_res_view,
-                        std::string_view{});
+            if constexpr (std::is_same_v<GetType, bool>) {
+                try_execute(milvus::index::JSONType::BOOL,
+                            res_view,
+                            valid_res_view,
+                            bool{});
+            } else if constexpr (std::is_same_v<GetType, int64_t>) {
+                try_execute(milvus::index::JSONType::INT64,
+                            res_view,
+                            valid_res_view,
+                            int64_t{});
+                // and double compare
+                TargetBitmap res_double(active_count_, false);
+                TargetBitmapView res_double_view(res_double);
+                TargetBitmap res_double_valid(active_count_, true);
+                TargetBitmapView valid_res_double_view(res_double_valid);
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_double_view,
+                            valid_res_double_view,
+                            double{});
+                res_view.inplace_or_with_count(res_double_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_double_view,
+                                                     active_count_);
+
+            } else if constexpr (std::is_same_v<GetType, double>) {
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_view,
+                            valid_res_view,
+                            double{});
+                // and int64 compare
+                TargetBitmap res_int64(active_count_, false);
+                TargetBitmapView res_int64_view(res_int64);
+                TargetBitmap res_int64_valid(active_count_, true);
+                TargetBitmapView valid_res_int64_view(res_int64_valid);
+                try_execute(milvus::index::JSONType::INT64,
+                            res_int64_view,
+                            valid_res_int64_view,
+                            int64_t{});
+                res_view.inplace_or_with_count(res_int64_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_int64_view,
+                                                     active_count_);
+            } else if constexpr (std::is_same_v<GetType, std::string_view> ||
+                                 std::is_same_v<GetType, std::string>) {
+                try_execute(milvus::index::JSONType::STRING,
+                            res_view,
+                            valid_res_view,
+                            std::string_view{});
+            }
         }
 
         // process shared data
         auto shared_executor = [this, &res_view](milvus::BsonView bson,
                                                  uint32_t row_offset,
                                                  uint32_t value_offset) {
-            auto get_value = bson.ParseAsValueAtOffset<GetType>(value_offset);
-
             if constexpr (std::is_same_v<GetType, int64_t> ||
                           std::is_same_v<GetType, double>) {
                 auto get_value =
@@ -737,17 +743,22 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             }
         };
 
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "term_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename ValueType>
@@ -759,10 +770,16 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer("term_json_by_stats", [this](double us) {
+            json_filter_stats_latency_us_ += us;
+        });
         return ExecJsonInVariableByStats<ValueType>();
     }
+
+    milvus::ScopedTimer timer("term_json_bruteforce", [this](double us) {
+        json_filter_bruteforce_latency_us_ += us;
+    });
 
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
@@ -798,7 +815,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::string pointer,
+            const std::string& pointer,
             const std::shared_ptr<MultiElement>& terms) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
@@ -807,22 +824,29 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            auto x = data[i].template at<GetType>(pointer);
-            if (x.error()) {
-                if constexpr (std::is_same_v<GetType, std::int64_t>) {
-                    auto x = data[i].template at<double>(pointer);
-                    if (x.error()) {
-                        return false;
-                    }
-
-                    auto value = x.value();
-                    // if the term set is {1}, and the value is 1.1, we should not return true.
-                    return std::floor(value) == value &&
-                           terms->In(ValueType(x.value()));
+            if constexpr (std::is_same_v<GetType, std::int64_t>) {
+                auto x_num = data[i].at_numeric(pointer);
+                if (x_num.error()) {
+                    return false;
                 }
-                return false;
+                auto n = x_num.value();
+                if (n.is_int64()) {
+                    return terms->In(ValueType(n.get_int64()));
+                }
+                // uint64 or double → compare as double, consistent with
+                // index/stats paths.
+                auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
+                                          : n.get_double();
+                // if the term set is {1}, and the value is 1.1, we should
+                // not return true.
+                return std::floor(dval) == dval && terms->In(ValueType(dval));
+            } else {
+                auto x = data[i].template at<GetType>(pointer);
+                if (x.error()) {
+                    return false;
+                }
+                return terms->In(ValueType(x.value()));
             }
-            return terms->In(ValueType(x.value()));
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
@@ -874,7 +898,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
 template <typename T>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImpl(EvalCtx& context) {
-    if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+    if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
         return ExecVisitorImplForIndex<T>();
     } else {
         return ExecVisitorImplForData<T>(context);
@@ -953,7 +977,7 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<uint8_t>& vals) {
         TermIndexFunc<bool> func;
-        return std::move(func(index_ptr, vals.size(), (bool*)vals.data()));
+        return func(index_ptr, vals.size(), (bool*)vals.data());
     };
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
     auto res = ProcessIndexChunks<bool>(execute_sub_batch, args->values_);
@@ -989,14 +1013,78 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                 vals.emplace_back(converted_val);
             }
         }
-        arg_set_ = std::make_shared<SetElement<T>>(vals);
+
+        // Select optimal element type based on data type and IN list size.
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            // Convert to owned strings (T may be string_view into proto data)
+            std::vector<std::string> str_vals;
+            str_vals.reserve(vals.size());
+            for (const auto& v : vals) {
+                str_vals.emplace_back(v);
+            }
+            constexpr size_t kLinearScanThreshold = 4;
+            if (str_vals.size() <= kLinearScanThreshold) {
+                // Small IN: linear scan with length check + memcmp
+                arg_set_ =
+                    std::make_shared<FlatVectorElement<std::string>>(str_vals);
+            } else {
+                arg_set_ = std::make_shared<SetElement<std::string>>(str_vals);
+            }
+        } else if constexpr (std::is_same_v<T, bool>) {
+            // Bool: use specialized SetElement<bool> (two flags, O(1)).
+            arg_set_ = std::make_shared<SetElement<T>>(vals);
+        } else {
+            // All numeric types: SIMD for small IN, hash for large IN.
+            // Crossover benchmarked with ankerl hash at load_factor=0.5.
+            // Automatically adapts to all architectures:
+            //   AVX512 int32 (kLanes=16): threshold=128
+            //   AVX2   int32 (kLanes=8):  threshold=64
+            //   AVX2   int64 (kLanes=4):  threshold=32
+            //   NEON   int32 (kLanes=4):  threshold=32
+            //   NEON   int64 (kLanes=2):  threshold=16
+            const size_t kSimdThreshold =
+                static_cast<size_t>(simdLaneCount<T>()) * 8;
+            if (vals.size() <= kSimdThreshold) {
+                arg_set_ = std::make_shared<SimdBatchElement<T>>(vals);
+            } else {
+                arg_set_ = std::make_shared<SetElement<T>>(vals);
+            }
+        }
+        // Cache SIMD FilterChunk dispatch (numeric types only).
+        // SIMD path runs batch filter first, then applies validity/bitmap
+        // masks — avoids per-row variant construction entirely.
+        if constexpr (!std::is_same_v<T, bool> &&
+                      !std::is_same_v<T, std::string> &&
+                      !std::is_same_v<T, std::string_view>) {
+            if (auto simd_elem =
+                    std::dynamic_pointer_cast<SimdBatchElement<T>>(arg_set_)) {
+                cached_filter_chunk_ = [simd_elem](const void* data,
+                                                   int size,
+                                                   TargetBitmapView res) {
+                    simd_elem->FilterChunk(
+                        static_cast<const T*>(data), size, res);
+                };
+            }
+        }
+        // Cache string SetElement pointer for per-row direct lookup.
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            cached_str_set_elem_ =
+                dynamic_cast<SetElement<std::string>*>(arg_set_.get());
+        }
+        // Cache element values for skip_index (avoids per-chunk copy)
+        cached_skip_elements_ = GetElementValues<T>(arg_set_);
         arg_inited_ = true;
     }
 
+    const auto& simd_filter_fn = cached_filter_chunk_;
+    const auto str_set_elem = cached_str_set_elem_;
+
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &simd_filter_fn,
+         str_set_elem ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -1004,14 +1092,40 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::shared_ptr<MultiElement>& vals) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
             processed_cursor += size;
             return;
         }
         bool has_bitmap_input = !bitmap_input.empty();
-        for (size_t i = 0; i < size; ++i) {
+
+        // ── Path 1: SIMD batch (numeric, sequential, within threshold) ──
+        if constexpr (filter_type == FilterType::sequential) {
+            if (simd_filter_fn) {
+                simd_filter_fn(data, size, res);
+                // Apply validity mask
+                if (valid_data != nullptr) {
+                    for (int i = 0; i < size; ++i) {
+                        if (!valid_data[i]) {
+                            res[i] = valid_res[i] = false;
+                        }
+                    }
+                }
+                // Apply bitmap mask
+                if (has_bitmap_input) {
+                    for (int i = 0; i < size; ++i) {
+                        if (!bitmap_input[i + processed_cursor]) {
+                            res[i] = false;
+                        }
+                    }
+                }
+                processed_cursor += size;
+                return;
+            }
+        }
+
+        // ── Path 2: Per-row (string, bool, large numeric, random access) ──
+        // Check validity and bitmap first, then direct lookup without variant.
+        for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
@@ -1023,16 +1137,35 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
                 continue;
             }
-            res[i] = vals->In(data[offset]);
+            // Direct lookup: skip variant construction
+            if constexpr (std::is_same_v<T, std::string> ||
+                          std::is_same_v<T, std::string_view>) {
+                if (str_set_elem) {
+                    // Hash lookup via string_view (zero copy)
+                    res[i] = str_set_elem->values_.find(std::string_view(
+                                 data[offset])) != str_set_elem->values_.end();
+                } else {
+                    // FlatVectorElement path (small IN ≤4)
+                    res[i] = vals->In(MultiElement::ValueType(
+                        std::string_view(data[offset])));
+                }
+            } else {
+                res[i] = vals->In(MultiElement::ValueType(std::in_place_type<T>,
+                                                          data[offset]));
+            }
         }
         processed_cursor += size;
     };
 
-    auto set = std::static_pointer_cast<SetElement<T>>(arg_set_);
     auto skip_index_func =
-        [set](const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
+        [op_ctx = op_ctx_, &cached_elements = cached_skip_elements_](
+            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
+            auto* elements = std::any_cast<std::vector<T>>(&cached_elements);
+            if (elements == nullptr) {
+                return false;
+            }
             return skip_index.CanSkipInQuery<T>(
-                field_id, chunk_id, set->GetElements());
+                op_ctx, field_id, chunk_id, *elements);
         };
 
     int64_t processed_size;
@@ -1069,6 +1202,36 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+void
+PhyTermFilterExpr::DetermineExecPath() {
+    // PkIndex
+    if (is_pk_field_) {
+        exec_path_ = ExprExecPath::PkIndex;
+        return;
+    }
+
+    // JsonStats
+    if (CanUseJsonStatsAtInit()) {
+        exec_path_ = ExprExecPath::JsonStats;
+        return;
+    }
+
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    // ARRAY type cannot use scalar index
+    if (data_type == DataType::ARRAY) {
+        exec_path_ = ExprExecPath::RawData;
+    }
 }
 
 }  //namespace exec

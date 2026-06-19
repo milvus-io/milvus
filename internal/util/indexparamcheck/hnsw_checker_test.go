@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
 func Test_hnswChecker_CheckTrain(t *testing.T) {
@@ -89,8 +89,8 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 		{p3, true},
 		{p4, true},
 		{p5, true},
-		{p6, true},
-		{p7, true},
+		{p6, false},
+		{p7, false},
 	}
 
 	c, _ := GetIndexCheckerMgrInstance().GetChecker("HNSW")

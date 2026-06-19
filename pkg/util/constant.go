@@ -21,9 +21,9 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Meta Prefix consts
@@ -111,8 +111,17 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetImportProgress.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListImport.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAlterCollectionSchema.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListSnapshots.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegePinSnapshotData.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUnpinSnapshotData.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateCollection.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropCollection.String()),
@@ -162,12 +171,6 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()),
-
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListSnapshots.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -240,6 +243,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String(),
 		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
 		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
+		commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
 	}
 	AdminPrivilegeGroup = []string{
 		commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
@@ -302,6 +306,9 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
 		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
 		commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegePinSnapshotData.String(),
+		commonpb.ObjectPrivilege_PrivilegeUnpinSnapshotData.String(),
+		commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
 	}
 )
 
@@ -322,6 +329,8 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeListAliases.String(),
 		commonpb.ObjectPrivilege_PrivilegeGetImportProgress.String(),
 		commonpb.ObjectPrivilege_PrivilegeListImport.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
 	})
 
 	CollectionReadWritePrivileges = append(CollectionReadOnlyPrivileges,
@@ -340,6 +349,10 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeCreatePartition.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropPartition.String(),
 			commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String(),
+			commonpb.ObjectPrivilege_PrivilegeAlterCollectionSchema.String(),
+			commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String(),
 		})...,
 	)
 
@@ -347,6 +360,7 @@ var (
 		ConvertPrivileges([]string{
 			commonpb.ObjectPrivilege_PrivilegeCreateAlias.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
+			commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(),
 		})...,
 	)
 
@@ -376,6 +390,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String(),
 		commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String(),
 		commonpb.ObjectPrivilege_PrivilegeGetReplicateConfiguration.String(),
+		commonpb.ObjectPrivilege_PrivilegeListFileResources.String(),
 	})
 
 	ClusterReadWritePrivileges = append(ClusterReadOnlyPrivileges,
@@ -384,6 +399,10 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeTransferNode.String(),
 			commonpb.ObjectPrivilege_PrivilegeTransferReplica.String(),
 			commonpb.ObjectPrivilege_PrivilegeUpdateResourceGroups.String(),
+			commonpb.ObjectPrivilege_PrivilegeAddFileResource.String(),
+			commonpb.ObjectPrivilege_PrivilegeRemoveFileResource.String(),
+			commonpb.ObjectPrivilege_PrivilegePinSnapshotData.String(),
+			commonpb.ObjectPrivilege_PrivilegeUnpinSnapshotData.String(),
 		})...,
 	)
 

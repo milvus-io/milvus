@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
 type replicateAckerImpl func(err error)
@@ -21,11 +21,11 @@ type ReplicateAcker interface {
 	Ack(err error)
 }
 
-// ReplicateManager manages the replicate operation on one wal.
+// ReplicatesManager manages the replicate operation on one wal.
 // There are two states:
 // 1. primary: wal will only receive the non-replicate message.
 // 2. secondary: wal will only receive the replicate message.
-type ReplicateManager interface {
+type ReplicatesManager interface {
 	// Role returns the role of the replicate manager.
 	Role() replicateutil.Role
 
@@ -45,4 +45,8 @@ type ReplicateManager interface {
 	// GetReplicateCheckpoint gets current replicate checkpoint.
 	// return ReplicateViolationError if the replicate mode is not replicating.
 	GetReplicateCheckpoint() (*utility.ReplicateCheckpoint, error)
+
+	// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
+	// Returns an empty slice if no force promote has occurred.
+	GetSalvageCheckpoint() []*utility.ReplicateCheckpoint
 }

@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestGrpcServerParams(t *testing.T) {
@@ -176,6 +176,31 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, clientConfig.ServerPemPath.GetValue(), "/pem")
 	assert.Equal(t, clientConfig.ServerKeyPath.GetValue(), "/key")
 	assert.Equal(t, clientConfig.CaPemPath.GetValue(), "/ca")
+
+	// Per-cluster TLS config lookup
+	base.Save("tls.clusters.cluster-b.caPemPath", "/certs/cluster-b/ca.pem")
+	base.Save("tls.clusters.cluster-b.clientPemPath", "/certs/cluster-b/client.pem")
+	base.Save("tls.clusters.cluster-b.clientKeyPath", "/certs/cluster-b/client.key")
+
+	caPem, clientPem, clientKey := clientConfig.GetClusterTLSConfig("cluster-b")
+	assert.Equal(t, "/certs/cluster-b/ca.pem", caPem)
+	assert.Equal(t, "/certs/cluster-b/client.pem", clientPem)
+	assert.Equal(t, "/certs/cluster-b/client.key", clientKey)
+
+	// Unknown cluster returns empty strings
+	caPem, clientPem, clientKey = clientConfig.GetClusterTLSConfig("unknown-cluster")
+	assert.Equal(t, "", caPem)
+	assert.Equal(t, "", clientPem)
+	assert.Equal(t, "", clientKey)
+
+	// Per-cluster gRPC authority config lookup
+	base.Save("grpc.clusters.cluster-b.authority", "proxy.example.com")
+	authority := clientConfig.GetClusterAuthority("cluster-b")
+	assert.Equal(t, "proxy.example.com", authority)
+
+	// Unknown cluster returns empty string
+	authority = clientConfig.GetClusterAuthority("unknown-cluster")
+	assert.Equal(t, "", authority)
 }
 
 func TestInternalTLSParams(t *testing.T) {

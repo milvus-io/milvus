@@ -2,11 +2,12 @@ package meta
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type ReplicaSuite struct {
@@ -451,9 +452,10 @@ func (suite *ReplicaSuite) TestTryBalanceNodeForChannelUnbalancedToBalanced() {
 	countOfChannelsWith2Nodes := 0
 	countOfChannelsWith1Node := 0
 	for _, count := range nodeCountPerChannel {
-		if count == 2 {
+		switch count {
+		case 2:
 			countOfChannelsWith2Nodes++
-		} else if count == 1 {
+		case 1:
 			countOfChannelsWith1Node++
 		}
 	}
@@ -717,15 +719,163 @@ func (suite *ReplicaSuite) TestCalculateOptimalAssignments() {
 	countsOfThree := 0
 	for _, count := range assignments {
 		totalAssigned += count
-		if count == 2 {
+		switch count {
+		case 2:
 			countsOfTwo++
-		} else if count == 3 {
+		case 3:
 			countsOfThree++
 		}
 	}
 	suite.Equal(7, totalAssigned)
 	suite.Equal(2, countsOfTwo)   // 2 channels get 2 nodes
 	suite.Equal(1, countsOfThree) // 1 channel gets 3 nodes
+}
+
+// TestTryEnableChannelExclusiveModeTriggersBalance tests that TryEnableChannelExclusiveMode
+// calls tryBalanceNodeForChannel to balance nodes across channels.
+func (suite *ReplicaSuite) TestTryEnableChannelExclusiveModeTriggersBalance() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "1")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
+	}()
+
+	// Create a replica with nodes but no ChannelNodeInfos (nil) to trigger initialization path
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		Nodes:         []int64{1, 2, 3, 4, 5, 6},
+	})
+
+	mutableReplica := r.CopyForWrite()
+	// Verify ChannelNodeInfos is nil before calling TryEnableChannelExclusiveMode
+	suite.Nil(mutableReplica.replicaPB.ChannelNodeInfos)
+
+	// Call TryEnableChannelExclusiveMode with channel names
+	mutableReplica.TryEnableChannelExclusiveMode("channel1", "channel2", "channel3")
+
+	newR := mutableReplica.IntoReplica()
+
+	// Verify that ChannelNodeInfos was created
+	suite.NotNil(newR.replicaPB.GetChannelNodeInfos())
+	suite.Equal(3, len(newR.replicaPB.GetChannelNodeInfos()))
+
+	// Verify that tryBalanceNodeForChannel was called and nodes were balanced
+	// 6 nodes / 3 channels = 2 nodes per channel
+	totalAssignedNodes := 0
+	for _, channelNodeInfo := range newR.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(2, len(channelNodeInfo.GetRwNodes()))
+		totalAssignedNodes += len(channelNodeInfo.GetRwNodes())
+	}
+	suite.Equal(6, totalAssignedNodes)
+}
+
+// TestTryEnableChannelExclusiveModeExistingChannelNodeInfos tests that TryEnableChannelExclusiveMode
+// does not overwrite existing ChannelNodeInfos but still triggers balance.
+func (suite *ReplicaSuite) TestTryEnableChannelExclusiveModeExistingChannelNodeInfos() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "1")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
+	}()
+
+	// Create a replica with existing ChannelNodeInfos but no balanced nodes
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		Nodes:         []int64{1, 2, 3, 4},
+		ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+			"channel1": {},
+			"channel2": {},
+		},
+	})
+
+	mutableReplica := r.CopyForWrite()
+	// ChannelNodeInfos is not nil, so TryEnableChannelExclusiveMode should not overwrite
+	mutableReplica.TryEnableChannelExclusiveMode("channel1", "channel2")
+
+	newR := mutableReplica.IntoReplica()
+
+	// Verify existing channels are preserved (not overwritten with new ones)
+	suite.Equal(2, len(newR.replicaPB.GetChannelNodeInfos()))
+
+	// Verify that tryBalanceNodeForChannel was still called and nodes were balanced
+	// 4 nodes / 2 channels = 2 nodes per channel
+	totalAssignedNodes := 0
+	for _, channelNodeInfo := range newR.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(2, len(channelNodeInfo.GetRwNodes()))
+		totalAssignedNodes += len(channelNodeInfo.GetRwNodes())
+	}
+	suite.Equal(4, totalAssignedNodes)
+}
+
+// TestTryEnableChannelExclusiveModeInsufficientNodes tests that TryEnableChannelExclusiveMode
+// properly handles the case where there are not enough nodes for exclusive mode.
+func (suite *ReplicaSuite) TestTryEnableChannelExclusiveModeInsufficientNodes() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "3")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
+	}()
+
+	// 2 nodes for 2 channels with factor 3: need 6 nodes, only have 2
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		Nodes:         []int64{1, 2},
+	})
+
+	mutableReplica := r.CopyForWrite()
+	mutableReplica.TryEnableChannelExclusiveMode("channel1", "channel2")
+
+	newR := mutableReplica.IntoReplica()
+
+	// With insufficient nodes, tryBalanceNodeForChannel should disable exclusive mode
+	for _, channelNodeInfo := range newR.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(0, len(channelNodeInfo.GetRwNodes()))
+	}
+}
+
+func (suite *ReplicaSuite) TestWaitRGReady() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadWaitRGReadyTimeout.Key, "1m")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadWaitRGReadyTimeout.Key)
+
+	// Default replica should not have the flag set
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+	})
+	suite.False(r.NeedWaitRGReady(), "default replica should not need to wait for RG ready")
+
+	// Set the timestamp via mutableReplica
+	mutable := r.CopyForWrite()
+	mutable.SetWaitRGReadyAt(time.Now())
+	r2 := mutable.IntoReplica()
+	suite.True(r2.NeedWaitRGReady(), "should need to wait when timestamp is recent")
+
+	// CopyForWrite should carry the timestamp
+	mutable2 := r2.CopyForWrite()
+	r3 := mutable2.IntoReplica()
+	suite.True(r3.NeedWaitRGReady(), "CopyForWrite should carry waitRGReadyAt")
+
+	// Explicitly clear the timestamp
+	mutable3 := r3.CopyForWrite()
+	mutable3.SetWaitRGReadyAt(time.Time{})
+	r4 := mutable3.IntoReplica()
+	suite.False(r4.NeedWaitRGReady(), "should not wait after clearing timestamp")
+
+	// Expired timestamp should return false
+	mutable4 := r.CopyForWrite()
+	mutable4.SetWaitRGReadyAt(time.Now().Add(-120 * time.Second))
+	r5 := mutable4.IntoReplica()
+	suite.False(r5.NeedWaitRGReady(), "should not wait when timestamp has expired")
 }
 
 func TestReplica(t *testing.T) {

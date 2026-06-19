@@ -14,7 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
+#ifdef __SSE2__
 #include <emmintrin.h>
+#include "common/FastMem.h"
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -30,6 +35,7 @@
 #include "common/Vector.h"
 #include "exec/operator/query-agg/RowContainer.h"
 #include "folly/CPortability.h"
+#include "segcore/SegcoreConfig.h"
 #include "xsimd/xsimd.hpp"
 
 namespace milvus {
@@ -122,7 +128,7 @@ class BaseHashTable {
 #else
         // Generic fallback: load bytes into std::array<uint8_t, 16>
         TagVector result;
-        std::memcpy(result.data(), src, result.size());
+        milvus::fastmem::FastMemcpy(result.data(), src, result.size());
         return result;
 #endif
     }
@@ -170,9 +176,11 @@ class ProbeState;
 
 class HashTable : public BaseHashTable {
  public:
-    HashTable(std::vector<std::unique_ptr<VectorHasher>>&& hashers,
-              const std::vector<Accumulator>& accumulators)
-        : BaseHashTable(std::move(hashers)) {
+    HashTable(
+        std::vector<std::unique_ptr<VectorHasher>>&& hashers,
+        const std::vector<Accumulator>& accumulators,
+        int64_t maxNumGroups = segcore::SegcoreConfig::kDefaultMaxGroupByGroups)
+        : BaseHashTable(std::move(hashers)), maxNumGroups_(maxNumGroups) {
         std::vector<DataType> keyTypes;
         for (auto& hasher : hashers_) {
             keyTypes.push_back(hasher->ChannelDataType());
@@ -232,7 +240,7 @@ class HashTable : public BaseHashTable {
 
         TagVector tags_;
         char pointers_[sizeof(TagVector) * kPointerSize];
-        char padding_[16];
+        [[maybe_unused]] char padding_[16];
     };
     static_assert(sizeof(Bucket) == 128);
     static constexpr uint64_t kBucketSize = sizeof(Bucket);
@@ -301,6 +309,12 @@ class HashTable : public BaseHashTable {
     void
     checkSizeAndAllocateTable(int32_t numNew);
 
+    void
+    rehash();
+
+    void
+    insertForRehash(char* row, uint64_t hash);
+
     // Returns the number of entries after which the table gets rehashed.
     static uint64_t
     rehashSize(int64_t size) {
@@ -338,8 +352,10 @@ class HashTable : public BaseHashTable {
     int64_t sizeMask_{0};
     int8_t sizeBits_;
 
-    int64_t numRehashes_{0};
+    [[maybe_unused]] int64_t numRehashes_{0};
     char* table_ = nullptr;
+    std::vector<uint64_t> rowHashes_;
+    int64_t maxNumGroups_;
 
     HashMode
     hashMode() const override {

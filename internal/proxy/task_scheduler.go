@@ -19,22 +19,24 @@ package proxy
 import (
 	"container/list"
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type taskQueue interface {
@@ -93,7 +95,13 @@ func (queue *baseTaskQueue) addUnissuedTask(t task) error {
 		return merr.WrapErrTooManyRequests(int32(queue.getMaxTaskNum()))
 	}
 	queue.unissuedTasks.PushBack(t)
-	queue.utBufChan <- 1
+	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
+	// means "the unissued list is non-empty, wake the scheduler". Concurrent
+	// sends coalesce; the scheduler drains the list on each wake.
+	select {
+	case queue.utBufChan <- 1:
+	default:
+	}
 	return nil
 }
 
@@ -120,6 +128,23 @@ func (queue *baseTaskQueue) PopUnissuedTask() task {
 	queue.unissuedTasks.Remove(ft)
 
 	return ft.Value.(task)
+}
+
+func (queue *baseTaskQueue) popUnissuedTasks(filter func(task) bool) []task {
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+
+	removed := make([]task, 0)
+	for e := queue.unissuedTasks.Front(); e != nil; {
+		next := e.Next()
+		t := e.Value.(task)
+		if filter == nil || filter(t) {
+			queue.unissuedTasks.Remove(e)
+			removed = append(removed, t)
+		}
+		e = next
+	}
+	return removed
 }
 
 func (queue *baseTaskQueue) AddActiveTask(t task) {
@@ -159,13 +184,11 @@ func (queue *baseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	queue.utLock.RUnlock()
 
 	queue.atLock.RLock()
-	for tID, t := range queue.activeTasks {
-		if tID == reqID {
-			queue.atLock.RUnlock()
-			return t
-		}
-	}
+	t, ok := queue.activeTasks[reqID]
 	queue.atLock.RUnlock()
+	if ok {
+		return t
+	}
 	return nil
 }
 
@@ -173,6 +196,17 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	err := t.OnEnqueue()
 	if err != nil {
 		return err
+	}
+
+	// Fast-fail when the queue is already full, before any potentially-blocking
+	// allocation. The authoritative check remains in addUnissuedTask; this
+	// snapshot only prevents a rejected request from queuing behind a slow
+	// TSO/ID allocator (#49223).
+	queue.utLock.RLock()
+	full := queue.utFull()
+	queue.utLock.RUnlock()
+	if full {
+		return merr.WrapErrTooManyRequests(int32(queue.getMaxTaskNum()))
 	}
 
 	var ts Timestamp
@@ -219,7 +253,7 @@ func newBaseTaskQueue(tsoAllocatorIns tsoAllocator) *baseTaskQueue {
 		utLock:          sync.RWMutex{},
 		atLock:          sync.RWMutex{},
 		maxTaskNum:      Params.ProxyCfg.MaxTaskNum.GetAsInt64(),
-		utBufChan:       make(chan int, Params.ProxyCfg.MaxTaskNum.GetAsInt()),
+		utBufChan:       make(chan int, 1),
 		tsoAllocatorIns: tsoAllocatorIns,
 	}
 }
@@ -387,6 +421,47 @@ type dqTaskQueue struct {
 	*baseTaskQueue
 }
 
+type clearTaskQueueResult struct {
+	queuedCleared int64
+}
+
+func isDQLTaskMatched(t task, taskType string) bool {
+	switch taskType {
+	case "", "all":
+		return true
+	case "search":
+		return t.Name() == SearchTaskName
+	case "query":
+		return t.Name() == QueryTaskName
+	default:
+		return false
+	}
+}
+
+func clearTaskQueueError(reason string) error {
+	if reason == "" {
+		return errors.Wrap(context.Canceled, "read task queue cleared by admin")
+	}
+	return errors.Wrap(context.Canceled, fmt.Sprintf("read task queue cleared by admin: %s", reason))
+}
+
+func (queue *dqTaskQueue) clearQueuedTasks(taskType string, reason string) clearTaskQueueResult {
+	removed := queue.popUnissuedTasks(func(t task) bool {
+		return isDQLTaskMatched(t, taskType)
+	})
+	if len(removed) == 0 {
+		queue.updateMetrics()
+		return clearTaskQueueResult{}
+	}
+
+	clearErr := clearTaskQueueError(reason)
+	for _, task := range removed {
+		task.Notify(clearErr)
+	}
+	queue.updateMetrics()
+	return clearTaskQueueResult{queuedCleared: int64(len(removed))}
+}
+
 func (queue *dqTaskQueue) updateMetrics() {
 	queue.utLock.RLock()
 	unissuedTasksNum := queue.unissuedTasks.Len()
@@ -478,6 +553,10 @@ func (sched *taskScheduler) scheduleDqTask() task {
 	return sched.dqQueue.PopUnissuedTask()
 }
 
+func (sched *taskScheduler) clearDQLQueue(taskType string, reason string) clearTaskQueueResult {
+	return sched.dqQueue.clearQueuedTasks(taskType, reason)
+}
+
 func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(t.TraceCtx(), t.Name())
 	defer span.End()
@@ -494,7 +573,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	waitDuration := t.GetDurationInQueue()
 	metrics.ProxyReqInQueueLatency.
 		WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.Type().String()).
-		Observe(float64(waitDuration.Milliseconds()))
+		Observe(float64(waitDuration.Microseconds()) / 1000.0)
 
 	err := t.PreExecute(ctx)
 
@@ -535,10 +614,10 @@ func (sched *taskScheduler) definitionLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.ddQueue.utChan():
-			if !sched.ddQueue.utEmpty() {
-				t := sched.scheduleDdTask()
+			for t := sched.scheduleDdTask(); t != nil; t = sched.scheduleDdTask() {
+				task := t
 				pool.Submit(func() (struct{}, error) {
-					sched.processTask(t, sched.ddQueue)
+					sched.processTask(task, sched.ddQueue)
 					return struct{}{}, nil
 				})
 			}
@@ -558,10 +637,10 @@ func (sched *taskScheduler) controlLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.dcQueue.utChan():
-			if !sched.dcQueue.utEmpty() {
-				t := sched.scheduleDcTask()
+			for t := sched.scheduleDcTask(); t != nil; t = sched.scheduleDcTask() {
+				task := t
 				pool.Submit(func() (struct{}, error) {
-					sched.processTask(t, sched.dcQueue)
+					sched.processTask(task, sched.dcQueue)
 					return struct{}{}, nil
 				})
 			}
@@ -579,10 +658,10 @@ func (sched *taskScheduler) manipulationLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.dmQueue.utChan():
-			if !sched.dmQueue.utEmpty() {
-				t := sched.scheduleDmTask()
+			for t := sched.scheduleDmTask(); t != nil; t = sched.scheduleDmTask() {
+				task := t
 				pool.Submit(func() (struct{}, error) {
-					sched.processTask(t, sched.dmQueue)
+					sched.processTask(task, sched.dmQueue)
 					return struct{}{}, nil
 				})
 			}
@@ -605,19 +684,17 @@ func (sched *taskScheduler) queryLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.dqQueue.utChan():
-			if !sched.dqQueue.utEmpty() {
-				t := sched.scheduleDqTask()
+			for t := sched.scheduleDqTask(); t != nil; t = sched.scheduleDqTask() {
+				task := t
 				p := pool
 				// if task is sub task spawned by another, use sub task pool in case of deadlock
-				if t.IsSubTask() {
+				if task.IsSubTask() {
 					p = subTaskPool
 				}
 				p.Submit(func() (struct{}, error) {
-					sched.processTask(t, sched.dqQueue)
+					sched.processTask(task, sched.dqQueue)
 					return struct{}{}, nil
 				})
-			} else {
-				log.Ctx(context.TODO()).Debug("query queue is empty ...")
 			}
 			sched.dqQueue.updateMetrics()
 		}

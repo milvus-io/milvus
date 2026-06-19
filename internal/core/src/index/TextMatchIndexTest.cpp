@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <stdint.h>
+#include <boost/filesystem.hpp>
 #include <chrono>
 #include <initializer_list>
 #include <iostream>
@@ -42,21 +43,29 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/Meta.h"
 #include "index/TextMatchIndex.h"
 #include "index/Utils.h"
 #include "knowhere/comp/index_param.h"
+#include "milvus-storage/lob_column/lob_column_manager.h"
+#include "milvus-storage/lob_column/lob_column_writer.h"
+#include "milvus-storage/lob_column/lob_reference.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
+#include "storage/FileManager.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
@@ -103,6 +112,51 @@ GenTestSchema(std::map<std::string, std::string> params = {},
     }
     return schema;
 }
+
+storage::FileManagerContext
+CreateTextMatchTestFileManagerContext(
+    int64_t build_id,
+    proto::schema::DataType data_type = proto::schema::DataType::VarChar) {
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(data_type);
+    storage::IndexMeta index_meta{3, 101, build_id, 10000};
+    return storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
+}
+
+std::unique_ptr<index::TextMatchIndex>
+BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
+    auto index = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {
+        "football basketball", "swimming football", "table tennis"};
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+    field_data->FillFieldData(texts.data(), texts.size());
+
+    index->BuildIndexFromFieldData({field_data}, false);
+    return index;
+}
+
+void
+AssertTextMatchUploadReturnsRelativePaths(
+    const std::vector<index::SerializedIndexFileInfo>& files) {
+    ASSERT_FALSE(files.empty());
+    for (const auto& file : files) {
+        ASSERT_FALSE(file.file_name.empty());
+        ASSERT_EQ(file.file_name.find(TestRemotePath), std::string::npos)
+            << file.file_name;
+        ASSERT_EQ(file.file_name.find(TEXT_LOG_ROOT_PATH), std::string::npos)
+            << file.file_name;
+        ASSERT_GT(file.file_size, 0);
+    }
+}
+
 std::shared_ptr<milvus::plan::FilterBitsNode>
 GetMatchExpr(SchemaPtr schema,
              const std::string& query,
@@ -258,6 +312,433 @@ TEST(TextMatch, Index) {
     }
 }
 
+TEST(TextMatch, UploadReturnsRelativeTextLogPaths) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1000);
+    auto index = BuildTextMatchIndexForUpload(ctx);
+
+    auto stats = index->Upload({});
+
+    AssertTextMatchUploadReturnsRelativePaths(
+        stats->GetSerializedIndexFileInfo());
+}
+
+TEST(TextMatch, UploadUnifiedReturnsRelativeTextLogPaths) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1001);
+    auto index = BuildTextMatchIndexForUpload(ctx);
+
+    auto stats = index->UploadUnified({});
+
+    AssertTextMatchUploadReturnsRelativePaths(
+        stats->GetSerializedIndexFileInfo());
+    ASSERT_EQ(stats->GetSerializedIndexFileInfo().size(), 1);
+    ASSERT_NE(stats->GetSerializedIndexFileInfo()[0].file_name.find(".v3"),
+              std::string::npos);
+}
+
+// Regression test: BuildIndexFromFieldData with multiple FieldData batches
+// and nullable fields must record correct global offsets in null_offset_.
+// Previously, null_offset_.push_back(i) used the batch-local index instead
+// of the global accumulated offset, causing wrong null tracking for all
+// batches after the first.
+TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
+    using Index = index::TextMatchIndex;
+
+    // Helper to create a nullable FieldData<std::string> batch.
+    auto make_batch =
+        [](const std::vector<std::string>& texts,
+           const std::vector<bool>& valids) -> milvus::FieldDataPtr {
+        auto fd = storage::CreateFieldData(
+            DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+        // Pack valid bits into uint8_t array (LSB first).
+        size_t byte_count = (texts.size() + 7) / 8;
+        std::vector<uint8_t> valid_bytes(byte_count, 0);
+        for (size_t i = 0; i < valids.size(); i++) {
+            if (valids[i]) {
+                valid_bytes[i >> 3] |= (1u << (i & 7));
+            }
+        }
+        fd->FillFieldData(texts.data(), valid_bytes.data(), texts.size(), 0);
+        return fd;
+    };
+
+    // Three batches, nulls scattered across all batches.
+    // Batch 0 (3 rows): "hello", NULL,  "world"
+    // Batch 1 (3 rows): NULL,   "foo",  NULL
+    // Batch 2 (2 rows): "bar",  NULL
+    //
+    // Global layout (8 rows total):
+    //   offset 0: "hello" (valid)
+    //   offset 1: ""      (null)
+    //   offset 2: "world" (valid)
+    //   offset 3: ""      (null)
+    //   offset 4: "foo"   (valid)
+    //   offset 5: ""      (null)
+    //   offset 6: "bar"   (valid)
+    //   offset 7: ""      (null)
+    auto batch0 = make_batch({"hello", "", "world"}, {true, false, true});
+    auto batch1 = make_batch({"", "foo", ""}, {false, true, false});
+    auto batch2 = make_batch({"bar", ""}, {true, false});
+
+    std::vector<milvus::FieldDataPtr> field_datas = {batch0, batch1, batch2};
+
+    auto index = std::make_unique<Index>(
+        200, "test_multi_batch", "milvus_tokenizer", "{}");
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    index->BuildIndexFromFieldData(field_datas, true /* nullable */);
+    index->Commit();
+    index->Reload();
+
+    // Verify null tracking: offsets 1, 3, 5, 7 should be null.
+    {
+        auto null_bits = index->IsNull();
+        ASSERT_EQ(null_bits.size(), 8);
+        ASSERT_FALSE(null_bits[0]);  // "hello"
+        ASSERT_TRUE(null_bits[1]);   // null
+        ASSERT_FALSE(null_bits[2]);  // "world"
+        ASSERT_TRUE(null_bits[3]);   // null (batch 1, row 0)
+        ASSERT_FALSE(null_bits[4]);  // "foo"
+        ASSERT_TRUE(null_bits[5]);   // null (batch 1, row 2)
+        ASSERT_FALSE(null_bits[6]);  // "bar"
+        ASSERT_TRUE(null_bits[7]);   // null (batch 2, row 1)
+    }
+
+    // Verify not-null tracking.
+    {
+        auto not_null_bits = index->IsNotNull();
+        ASSERT_EQ(not_null_bits.size(), 8);
+        ASSERT_TRUE(not_null_bits[0]);
+        ASSERT_FALSE(not_null_bits[1]);
+        ASSERT_TRUE(not_null_bits[2]);
+        ASSERT_FALSE(not_null_bits[3]);
+        ASSERT_TRUE(not_null_bits[4]);
+        ASSERT_FALSE(not_null_bits[5]);
+        ASSERT_TRUE(not_null_bits[6]);
+        ASSERT_FALSE(not_null_bits[7]);
+    }
+
+    // Verify text search still works on valid rows.
+    {
+        auto res = index->MatchQuery("hello", 1);
+        ASSERT_EQ(res.size(), 8);
+        ASSERT_TRUE(res[0]);
+        for (int i = 1; i < 8; i++) {
+            ASSERT_FALSE(res[i]) << "unexpected match at offset " << i;
+        }
+    }
+    {
+        auto res = index->MatchQuery("foo", 1);
+        ASSERT_EQ(res.size(), 8);
+        ASSERT_TRUE(res[4]);
+        for (int i = 0; i < 8; i++) {
+            if (i != 4) {
+                ASSERT_FALSE(res[i]) << "unexpected match at offset " << i;
+            }
+        }
+    }
+    {
+        auto res = index->MatchQuery("bar", 1);
+        ASSERT_EQ(res.size(), 8);
+        ASSERT_TRUE(res[6]);
+        for (int i = 0; i < 8; i++) {
+            if (i != 6) {
+                ASSERT_FALSE(res[i]) << "unexpected match at offset " << i;
+            }
+        }
+    }
+}
+
+TEST(TextMatch, BuildIndexFromTextFieldData) {
+    auto ctx = CreateTextMatchTestFileManagerContext(
+        1002, proto::schema::DataType::Text);
+    auto index = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {
+        "football basketball", "swimming football", "table tennis"};
+    auto field_data =
+        storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
+    field_data->FillFieldData(texts.data(), texts.size());
+
+    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false));
+}
+
+TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
+    constexpr int64_t collection_id = 10001;
+    constexpr int64_t partition_id = 10002;
+    constexpr int64_t segment_id = 10003;
+    const FieldId text_field_id(101);
+    const std::string unique_token = "zzlobuniqueterm";
+
+    auto test_dir =
+        "sealed_text_lob_index_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+    boost::filesystem::remove_all(TestLocalPath + test_dir);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(
+        FieldName("pk"), FieldId(100), DataType::INT64, false, std::nullopt));
+    schema->set_primary_field_id(FieldId(100));
+    std::map<std::string, std::string> text_params = {
+        {"enable_match", "true"},
+        {"enable_analyzer", "true"},
+        {"analyzer_params", R"({"tokenizer": "standard"})"},
+    };
+    schema->AddField(FieldMeta(FieldName("str"),
+                               text_field_id,
+                               DataType::TEXT,
+                               65536,
+                               false,
+                               true,
+                               true,
+                               text_params,
+                               std::nullopt));
+
+    auto lob_base_path =
+        test_dir + "/lobs/" + std::to_string(text_field_id.get());
+    milvus_storage::lob_column::LobColumnConfig lob_config;
+    lob_config.lob_base_path = lob_base_path;
+    lob_config.field_id = text_field_id.get();
+    lob_config.inline_threshold = 1;
+    lob_config.max_lob_file_bytes = 256 * 1024;
+    lob_config.flush_threshold_bytes = 64 * 1024;
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    ASSERT_NE(properties, nullptr);
+    lob_config.properties = *properties;
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto manager_result =
+        milvus_storage::lob_column::LobColumnManager::Create(fs, lob_config);
+    ASSERT_TRUE(manager_result.ok()) << manager_result.status().ToString();
+    auto manager = std::move(manager_result).ValueOrDie();
+    auto writer_result = manager->CreateWriter();
+    ASSERT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    auto writer = std::move(writer_result).ValueOrDie();
+
+    std::string large_text(72 * 1024, 'x');
+    large_text += " " + unique_token;
+    std::vector<std::string> texts = {
+        "plain text without target token",
+        large_text,
+        "another row without target token",
+    };
+
+    std::vector<std::string> encoded_refs;
+    encoded_refs.reserve(texts.size());
+    for (const auto& text : texts) {
+        auto ref_result = writer->WriteText(text);
+        ASSERT_TRUE(ref_result.ok()) << ref_result.status().ToString();
+        auto ref = std::move(ref_result).ValueOrDie();
+        ASSERT_EQ(ref.size(), milvus_storage::lob_column::LOB_REFERENCE_SIZE);
+        ASSERT_TRUE(milvus_storage::lob_column::IsLOBReference(ref.data()));
+        encoded_refs.emplace_back(reinterpret_cast<const char*>(ref.data()),
+                                  ref.size());
+    }
+    auto close_result = writer->Close();
+    ASSERT_TRUE(close_result.ok()) << close_result.status().ToString();
+    auto lob_files = std::move(close_result).ValueOrDie();
+    ASSERT_FALSE(lob_files.empty());
+
+    auto field_data =
+        storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
+    field_data->FillFieldData(encoded_refs.data(), encoded_refs.size());
+
+    auto cm = storage::CreateChunkManager(get_default_local_storage_config());
+    auto load_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                    partition_id,
+                                                    segment_id,
+                                                    text_field_id.get(),
+                                                    {field_data},
+                                                    cm);
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, segment_id);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetTextLobPathForTesting(text_field_id, lob_base_path);
+
+    auto status = LoadFieldData(segment.get(), &load_info);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+
+    sealed->CreateTextIndex(text_field_id);
+    auto index_pin = sealed->GetTextIndex(nullptr, text_field_id);
+    auto hits = index_pin.get()->MatchQuery(unique_token, 1);
+    ASSERT_EQ(hits.size(), texts.size());
+    EXPECT_FALSE(hits[0]);
+    EXPECT_TRUE(hits[1]);
+    EXPECT_FALSE(hits[2]);
+
+    boost::filesystem::remove_all(TestLocalPath + test_dir);
+}
+
+TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
+    const FieldId text_field_id(101);
+    const std::string large_token = "zzgrowingloblarge";
+    const std::string second_batch_token = "zzgrowinglobbatch";
+    const std::string null_token = "zzgrowinglobnull";
+    constexpr int64_t row_count = 1030;
+
+    auto test_dir =
+        "growing_text_lob_index_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+    boost::filesystem::remove_all(TestLocalPath + test_dir);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(
+        FieldName("pk"), FieldId(100), DataType::INT64, false, std::nullopt));
+    schema->set_primary_field_id(FieldId(100));
+    std::map<std::string, std::string> text_params = {
+        {"enable_match", "true"},
+        {"enable_analyzer", "true"},
+        {"analyzer_params", R"({"tokenizer": "standard"})"},
+    };
+    schema->AddField(FieldMeta(FieldName("str"),
+                               text_field_id,
+                               DataType::TEXT,
+                               65536,
+                               true,
+                               true,
+                               true,
+                               text_params,
+                               std::nullopt));
+
+    auto lob_base_path =
+        test_dir + "/lobs/" + std::to_string(text_field_id.get());
+    milvus_storage::lob_column::LobColumnConfig lob_config;
+    lob_config.lob_base_path = lob_base_path;
+    lob_config.field_id = text_field_id.get();
+    lob_config.inline_threshold = 1;
+    lob_config.max_lob_file_bytes = 256 * 1024;
+    lob_config.flush_threshold_bytes = 64 * 1024;
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    ASSERT_NE(properties, nullptr);
+    lob_config.properties = *properties;
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto manager_result =
+        milvus_storage::lob_column::LobColumnManager::Create(fs, lob_config);
+    ASSERT_TRUE(manager_result.ok()) << manager_result.status().ToString();
+    auto manager = std::move(manager_result).ValueOrDie();
+    auto writer_result = manager->CreateWriter();
+    ASSERT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    auto writer = std::move(writer_result).ValueOrDie();
+
+    std::vector<std::string> encoded_refs;
+    encoded_refs.reserve(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        std::string text = "plain growing text row " + std::to_string(i);
+        if (i == 3) {
+            text = std::string(72 * 1024, 'x') + " " + large_token;
+        } else if (i == 1025) {
+            text = "second batch decoded text " + second_batch_token;
+        } else if (i == 7) {
+            text = "invalid nullable row " + null_token;
+        }
+
+        auto ref_result = writer->WriteText(text);
+        ASSERT_TRUE(ref_result.ok()) << ref_result.status().ToString();
+        auto ref = std::move(ref_result).ValueOrDie();
+        ASSERT_EQ(ref.size(), milvus_storage::lob_column::LOB_REFERENCE_SIZE);
+        ASSERT_TRUE(milvus_storage::lob_column::IsLOBReference(ref.data()));
+        encoded_refs.emplace_back(reinterpret_cast<const char*>(ref.data()),
+                                  ref.size());
+    }
+    auto close_result = writer->Close();
+    ASSERT_TRUE(close_result.ok()) << close_result.status().ToString();
+    auto lob_files = std::move(close_result).ValueOrDie();
+    ASSERT_FALSE(lob_files.empty());
+
+    auto field_data =
+        storage::CreateFieldData(DataType::TEXT, DataType::NONE, true);
+    std::vector<bool> valids(row_count, true);
+    valids[7] = false;
+    std::vector<uint8_t> valid_bytes((row_count + 7) / 8, 0);
+    for (int64_t i = 0; i < row_count; ++i) {
+        if (valids[i]) {
+            valid_bytes[i >> 3] |= (1u << (i & 7));
+        }
+    }
+    field_data->FillFieldData(
+        encoded_refs.data(), valid_bytes.data(), row_count, 0);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    growing->SetTextLobPathForTesting(text_field_id, lob_base_path);
+    growing->BuildTextIndexFromTextLobRefs(
+        text_field_id, {field_data}, 0, (*schema)[text_field_id]);
+
+    auto index_pin = growing->GetTextIndex(nullptr, text_field_id);
+    auto large_hits = index_pin.get()->MatchQuery(large_token, 1);
+    ASSERT_EQ(large_hits.size(), row_count);
+    EXPECT_TRUE(large_hits[3]);
+
+    auto second_batch_hits = index_pin.get()->MatchQuery(second_batch_token, 1);
+    ASSERT_EQ(second_batch_hits.size(), row_count);
+    EXPECT_TRUE(second_batch_hits[1025]);
+
+    auto null_hits = index_pin.get()->MatchQuery(null_token, 1);
+    ASSERT_EQ(null_hits.size(), row_count);
+    EXPECT_FALSE(null_hits[7]);
+
+    boost::filesystem::remove_all(TestLocalPath + test_dir);
+}
+
+// Regression test: BuildIndexFromFieldData with a single batch should still
+// work correctly (i == offset in this case, so the old bug was hidden).
+TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
+    using Index = index::TextMatchIndex;
+
+    auto fd =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true, 1, 4);
+    std::vector<std::string> texts = {"alpha", "", "beta", ""};
+    std::vector<bool> valids = {true, false, true, false};
+    size_t byte_count = (texts.size() + 7) / 8;
+    std::vector<uint8_t> valid_bytes(byte_count, 0);
+    for (size_t i = 0; i < valids.size(); i++) {
+        if (valids[i]) {
+            valid_bytes[i >> 3] |= (1u << (i & 7));
+        }
+    }
+    fd->FillFieldData(texts.data(), valid_bytes.data(), texts.size(), 0);
+
+    std::vector<milvus::FieldDataPtr> field_datas = {fd};
+
+    auto index = std::make_unique<Index>(
+        200, "test_single_batch", "milvus_tokenizer", "{}");
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    index->BuildIndexFromFieldData(field_datas, true);
+    index->Commit();
+    index->Reload();
+
+    auto null_bits = index->IsNull();
+    ASSERT_EQ(null_bits.size(), 4);
+    ASSERT_FALSE(null_bits[0]);
+    ASSERT_TRUE(null_bits[1]);
+    ASSERT_FALSE(null_bits[2]);
+    ASSERT_TRUE(null_bits[3]);
+
+    auto res = index->MatchQuery("alpha", 1);
+    ASSERT_EQ(res.size(), 4);
+    ASSERT_TRUE(res[0]);
+    ASSERT_FALSE(res[1]);
+    ASSERT_FALSE(res[2]);
+    ASSERT_FALSE(res[3]);
+
+    auto res2 = index->MatchQuery("beta", 1);
+    ASSERT_EQ(res2.size(), 4);
+    ASSERT_FALSE(res2[0]);
+    ASSERT_FALSE(res2[1]);
+    ASSERT_TRUE(res2[2]);
+    ASSERT_FALSE(res2[3]);
+}
+
 TEST(TextMatch, GrowingNaive) {
     auto schema = GenTestSchema();
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
@@ -344,6 +825,82 @@ TEST(TextMatch, GrowingNaive) {
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
+    }
+}
+
+// Regression test for https://github.com/milvus-io/milvus/issues/48388
+// On growing segments, the TextIndex may index rows beyond the query timestamp.
+// ExecTextMatch must truncate the result bitmap to active_count to avoid
+// FilterBitsNode assertion failure: col_vec_size != need_process_rows_.
+TEST(TextMatch, GrowingIndexAheadOfActiveCount) {
+    auto schema = GenTestSchema();
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+
+    // Batch 1: 3 rows with timestamps 0,1,2
+    int64_t N1 = 3;
+    uint64_t seed = 19190504;
+    auto data1 = DataGen(schema, N1, seed);
+    auto str_col1 = data1.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    str_col1->at(0) = "football, basketball";
+    str_col1->at(1) = "swimming, tennis";
+    str_col1->at(2) = "football, swimming";
+    seg->PreInsert(N1);
+    seg->Insert(
+        0, N1, data1.row_ids_.data(), data1.timestamps_.data(), data1.raw_);
+
+    // Batch 2: 2 rows with timestamps 3,4 (later than batch 1)
+    int64_t N2 = 2;
+    auto data2 = DataGen(schema, N2, seed, N1);  // ts_offset=N1 → ts 3,4
+    // Fix row_ids to continue from batch 1
+    for (int i = 0; i < N2; i++) {
+        data2.row_ids_[i] = N1 + i;
+    }
+    auto str_col2 = data2.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    str_col2->at(0) = "football, rugby";
+    str_col2->at(1) = "football, cricket";
+    seg->PreInsert(N2);
+    seg->Insert(
+        N1, N2, data2.row_ids_.data(), data2.timestamps_.data(), data2.raw_);
+
+    // Wait for TextIndex to index all 5 rows
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
+
+    // Query with timestamp=2 so only batch 1 (3 rows) is visible,
+    // but TextIndex has indexed all 5 rows.
+    // Before fix: assertion failure (bitset size 5 != need_process_rows 3)
+    // After fix: result is correctly truncated to 3 rows
+    int64_t query_ts = N1 - 1;  // timestamp=2, active_count should be N1
+    for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+        auto expr = GetMatchExpr(schema, "football", op);
+        BitsetType result = ExecuteQueryExpr(expr, seg.get(), N1, query_ts);
+        ASSERT_EQ(result.size(), N1)
+            << "result bitmap size should equal active_count (N1=" << N1
+            << "), not total indexed rows (" << N1 + N2 << ")";
+        // Row 0 ("football, basketball") and row 2 ("football, swimming") match
+        ASSERT_TRUE(result[0]);
+        ASSERT_FALSE(result[1]);
+        ASSERT_TRUE(result[2]);
+    }
+
+    // Also verify full-range query still works correctly
+    for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+        auto expr = GetMatchExpr(schema, "football", op);
+        BitsetType result =
+            ExecuteQueryExpr(expr, seg.get(), N1 + N2, MAX_TIMESTAMP);
+        ASSERT_EQ(result.size(), N1 + N2);
+        ASSERT_TRUE(result[0]);   // "football, basketball"
+        ASSERT_FALSE(result[1]);  // "swimming, tennis"
+        ASSERT_TRUE(result[2]);   // "football, swimming"
+        ASSERT_TRUE(result[3]);   // "football, rugby"
+        ASSERT_TRUE(result[4]);   // "football, cricket"
     }
 }
 
@@ -1161,6 +1718,185 @@ TEST(TextMatch, ExprResCacheSealed) {
     ASSERT_EQ(mgr.GetEntryCount(), 1);
 
     // Cleanup
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(TextMatch, ExprResCacheFilterBitsDoesNotDuplicateTextMatchEntry) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+    mgr.SetCapacityBytes(1ULL << 20);
+
+    auto schema = GenTestSchema();
+    std::vector<std::string> raw_str = {"football, basketball, pingpang",
+                                        "swimming, football"};
+
+    int64_t N = 2;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+
+    auto seg = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    seg->CreateTextIndex(FieldId(101));
+
+    auto expr = GetMatchExpr(schema, "football", OpType::TextMatch);
+    auto plan_fragment = plan::PlanFragment(expr);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+    query_context->set_enable_expr_cache(true);
+    query_context->set_enable_sub_expr_cache_write(false);
+
+    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    ASSERT_NE(row, nullptr);
+    ASSERT_EQ(mgr.GetEntryCount(), 1);
+
+    ExprResCacheManager::Key filter_key{seg->get_segment_id(),
+                                        expr->ToString()};
+    ExprResCacheManager::Value filter_value;
+    filter_value.active_count = N;
+    ASSERT_TRUE(mgr.Get(filter_key, filter_value));
+
+    ExprResCacheManager::Key text_match_key{seg->get_segment_id(),
+                                            expr->filter()->ToString()};
+    ExprResCacheManager::Value text_match_value;
+    text_match_value.active_count = N;
+    ASSERT_FALSE(mgr.Get(text_match_key, text_match_value));
+
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+namespace {
+
+BitsetType
+ExecuteFilterBitsWithFullCache(
+    const std::shared_ptr<plan::FilterBitsNode>& filter_plan,
+    const segcore::SegmentInternalInterface* segment,
+    int64_t active_count,
+    Timestamp timestamp,
+    int64_t entity_ttl_physical_time_us) {
+    auto plan_fragment = plan::PlanFragment(filter_plan);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID,
+        segment,
+        active_count,
+        timestamp,
+        0,
+        0,
+        milvus::query::PlanOptions(),
+        std::make_shared<milvus::exec::QueryConfig>(),
+        nullptr,
+        std::unordered_map<std::string,
+                           std::shared_ptr<milvus::exec::BaseConfig>>(),
+        entity_ttl_physical_time_us);
+    query_context->set_enable_expr_cache(true);
+    query_context->set_enable_sub_expr_cache_write(false);
+
+    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    AssertInfo(row != nullptr,
+               "ExecuteTask returned null row vector for query expression");
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    BitsetType query_view(view);
+    query_view.flip();
+    return query_view;
+}
+
+}  // namespace
+
+TEST(TextMatch, ExprResCacheFilterBitsUsesCurrentFilterNodeKey) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+    mgr.SetCapacityBytes(1ULL << 20);
+
+    auto schema = GenTestSchema();
+    std::vector<std::string> raw_str = {"football, basketball, pingpang",
+                                        "swimming, football"};
+
+    int64_t N = 2;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+
+    auto seg = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    seg->CreateTextIndex(FieldId(101));
+
+    auto football = GetMatchExpr(schema, "football", OpType::TextMatch);
+    auto swimming = GetMatchExpr(schema, "swimming", OpType::TextMatch);
+
+    auto football_result = ExecuteFilterBitsWithFullCache(
+        football, seg.get(), N, MAX_TIMESTAMP, 0);
+    ASSERT_TRUE(football_result[0]);
+    ASSERT_TRUE(football_result[1]);
+
+    auto swimming_result = ExecuteFilterBitsWithFullCache(
+        swimming, seg.get(), N, MAX_TIMESTAMP, 0);
+    ASSERT_FALSE(swimming_result[0]);
+    ASSERT_TRUE(swimming_result[1]);
+
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(false);
+}
+
+TEST(TextMatch, ExprResCacheFilterBitsIncludesEntityTTLPhysicalTime) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    ExprResCacheManager::SetEnabled(true);
+    mgr.Clear();
+    mgr.SetCapacityBytes(1ULL << 20);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto ttl_fid = schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
+
+    int64_t N = 2;
+    auto raw_data = DataGen(schema, N, 19190504);
+    for (auto& field_data : *raw_data.raw_->mutable_fields_data()) {
+        if (field_data.field_id() == ttl_fid.get()) {
+            auto* data =
+                field_data.mutable_scalars()->mutable_timestamptz_data();
+            data->set_data(0, 150);
+            data->set_data(1, 250);
+        }
+    }
+
+    auto seg = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       always_true_expr);
+
+    auto before_expire =
+        ExecuteFilterBitsWithFullCache(plan, seg.get(), N, MAX_TIMESTAMP, 100);
+    ASSERT_TRUE(before_expire[0]);
+    ASSERT_TRUE(before_expire[1]);
+
+    auto after_expire =
+        ExecuteFilterBitsWithFullCache(plan, seg.get(), N, MAX_TIMESTAMP, 200);
+    ASSERT_FALSE(after_expire[0]);
+    ASSERT_TRUE(after_expire[1]);
+
     mgr.Clear();
     ExprResCacheManager::SetEnabled(false);
 }

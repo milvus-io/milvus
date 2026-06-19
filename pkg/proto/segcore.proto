@@ -1,9 +1,10 @@
 syntax = "proto3";
 package milvus.proto.segcore;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/segcorepb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/segcorepb";
 import "schema.proto";
 import "common.proto";
+import "index_coord.proto";
 
 message Binlog {
   int64 entries_num = 1;
@@ -29,6 +30,7 @@ message TextIndexStats {
   int64 memory_size = 5;
   int64 buildID = 6;
   int32 current_scalar_index_version = 7;
+  string base_path = 8;  // remote base path; files are relative to this path
 }
 
 message JsonKeyStats {
@@ -39,6 +41,12 @@ message JsonKeyStats {
   int64 memory_size = 5;
   int64 buildID = 6;
   int64 json_key_stats_data_format = 7;
+  string base_path = 8;  // remote base path; files are relative to this path
+}
+
+// Element indices for a single document in element-level query
+message ElementIndices {
+  repeated int32 indices = 1;
 }
 
 message RetrieveResults {
@@ -49,6 +57,11 @@ message RetrieveResults {
   bool has_more_result = 5;
   int64 scanned_remote_bytes = 6;
   int64 scanned_total_bytes = 7;
+  // Element-level query support
+  bool element_level = 8;
+  // Element indices per document (aligned with offset array)
+  // element_indices[i] contains all matching element indices for offset[i]
+  repeated ElementIndices element_indices = 9;
 }
 
 message LoadFieldMeta {
@@ -76,6 +89,7 @@ message FieldIndexMeta {
   repeated common.KeyValuePair index_params = 5;
   bool is_auto_index = 6;
   repeated common.KeyValuePair user_index_params = 7;
+  int64 index_id = 8;
 }
 
 message CollectionIndexMeta {
@@ -97,6 +111,7 @@ message FieldIndexInfo {
   int32 current_index_version = 11;
   int64 index_store_version = 12 [deprecated = true];
   int32 current_scalar_index_version = 13;
+  index.IndexStorePathVersion index_store_path_version = 14;
 }
 
 message SegmentLoadInfo {
@@ -121,4 +136,10 @@ message SegmentLoadInfo {
   map<int64, JsonKeyStats> jsonKeyStatsLogs = 19;
   common.LoadPriority priority = 20;
   string manifest_path = 21;
+  bool use_take_for_output = 22;  // when true, use take() API for output field retrieval instead of bulk_subscript
+  int64 estimated_bytes_per_row = 23;  // sampled avg memory bytes per row (from Take API); used as fallback when format metadata lacks size stats
+  // commit_timestamp is the transaction timestamp for import/CDC segments.
+  // When non-zero, segcore overwrites the in-memory timestamp column so all
+  // MVCC/TTL/delete logic uses the commit time instead of raw row timestamps.
+  uint64 commit_timestamp = 24;
 }

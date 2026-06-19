@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -59,6 +60,9 @@ func TestFunctionConfig(t *testing.T) {
 		"vertexai.url",
 		"vertexai.credential",
 		"vertexai.enable",
+		"yc.credential",
+		"yc.url",
+		"yc.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
@@ -86,4 +90,11 @@ func TestFunctionConfig(t *testing.T) {
 	assert.True(t, cfg.RerankModelProviders.GetDoc("Unknow") == "")
 
 	assert.Equal(t, 5, cfg.GetBatchFactor())
+	assert.Equal(t, 8, cfg.GetAnalyzerRunnerConcurrency())
+
+	old := cfg.AnalyzerRunnerConcurrency.SwapTempValue("-1")
+	defer cfg.AnalyzerRunnerConcurrency.SwapTempValue(old)
+	assert.Equal(t, 1, cfg.GetAnalyzerRunnerConcurrency())
+
+	assert.Equal(t, 30*time.Second, cfg.ModelRequestTimeout.GetAsDurationByParse())
 }

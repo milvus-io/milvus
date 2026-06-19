@@ -17,14 +17,15 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -43,6 +44,9 @@ type (
 type ProducerOptions struct {
 	// PChannel is the pchannel of the producer.
 	PChannel string
+
+	// RateLimitObserver is the observer of the rate limit.
+	RateLimitObserver ratelimit.RateLimitObserver
 }
 
 // ConsumerOptions is the options for creating a consumer.
@@ -76,6 +80,15 @@ type HandlerClient interface {
 
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner.
 	GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error)
+
+	// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
+	// Returns an empty slice if no force promote has occurred.
+	GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error)
+
+	// PrepareReleaseManualFlush prepares process-local release handoff.
+	// Returns false when the current process is not the local flush owner or
+	// the channel does not need growing-source retention.
+	PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
 
 	// GetWALMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.

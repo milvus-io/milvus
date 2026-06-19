@@ -28,8 +28,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -37,12 +37,12 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 func TestClusteringCompactionTaskSuite(t *testing.T) {
@@ -74,7 +74,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockAlloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(x int64) (int64, int64, error) {
 		start := s.mockID.Load()
-		end := s.mockID.Add(int64(x))
+		end := s.mockID.Add(x)
 		return start, end, nil
 	}).Maybe()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
@@ -114,7 +114,7 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	task := s.generateBasicTask(false)
 
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	task.CreateTaskOnWorker(1, cluster)
 
 	seg11 := s.meta.GetSegment(context.TODO(), 101)
@@ -397,7 +397,7 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		})
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		task.CreateTaskOnWorker(1, cluster)
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 	})
@@ -549,6 +549,18 @@ func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_statistic, task.GetTaskProto().GetState())
+	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorkerSkipAnalyzing() {
+	s.Run("QueryTaskOnWorker skips when state is analyzing", func() {
+		task := s.generateBasicTask(true) // vector clustering key
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_analyzing))
+		cluster := session.NewMockCluster(s.T())
+		// No QueryCompaction mock — if QueryTaskOnWorker calls it, the mock will panic.
+		task.QueryTaskOnWorker(cluster)
+		// State should remain analyzing, not be reset to pipelining.
+		s.Equal(datapb.CompactionTaskState_analyzing, task.GetTaskProto().GetState())
 	})
 }
 

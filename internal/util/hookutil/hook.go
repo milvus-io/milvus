@@ -20,17 +20,16 @@ package hookutil
 
 import (
 	"fmt"
-	"plugin"
 	"sync"
 	"sync/atomic"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var (
@@ -44,6 +43,11 @@ var (
 // since different type stored in it will cause panicking.
 type hookContainer struct {
 	hook hook.Hook
+}
+
+type hookSetter interface {
+	SetZapLogger(*zap.Logger)
+	SetClientInfoProvider(any)
 }
 
 // extensionContainer is Container to wrap hook.Extension interface
@@ -72,28 +76,13 @@ func initHook() error {
 		return nil
 	}
 
-	log.Info("start to load plugin", zap.String("path", path))
-	LockHookInit()
-	defer UnlockHookInit()
-	p, err := plugin.Open(path)
+	hookVal, err := LoadPlugin[hook.Hook](path, "MilvusHook")
 	if err != nil {
-		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
-	}
-	log.Info("plugin open")
-
-	h, err := p.Lookup("MilvusHook")
-	if err != nil {
-		return fmt.Errorf("fail to the 'MilvusHook' object in the plugin, error: %s", err.Error())
+		return err
 	}
 
-	var hookVal hook.Hook
-	var ok bool
-	hookVal, ok = h.(hook.Hook)
-	if !ok {
-		return errors.New("fail to convert the `Hook` interface")
-	}
 	if err = hookVal.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
-		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
+		return merr.Wrap(err, "fail to init configs for the hook")
 	}
 	storeHook((hookVal))
 	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
@@ -109,31 +98,33 @@ func initHook() error {
 		}()
 	})
 
-	e, err := p.Lookup("MilvusExtension")
+	extVal, err := LoadPlugin[hook.Extension](path, "MilvusExtension")
 	if err != nil {
-		return fmt.Errorf("fail to the 'MilvusExtension' object in the plugin, error: %s", err.Error())
-	}
-	var extVal hook.Extension
-	extVal, ok = e.(hook.Extension)
-	if !ok {
-		return errors.New("fail to convert the `Extension` interface")
+		return err
 	}
 	storeExtension(extVal)
 
 	return nil
 }
 
+func SetHook(connectionManager any) {
+	hookVal := GetHook()
+	if setter, ok := hookVal.(hookSetter); ok {
+		setter.SetZapLogger(log.L())
+		setter.SetClientInfoProvider(connectionManager)
+		log.Info("hook setter injected")
+	}
+}
+
 func InitOnceHook() {
 	initOnce.Do(func() {
 		err := initHook()
 		if err != nil {
-			logFunc := log.Warn
+			soPath := paramtable.Get().ProxyCfg.SoPath.GetValue()
 			if paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
-				logFunc = log.Panic
+				log.Panic(fmt.Sprintf("fail to init hook, so_path=%s, error=%v", soPath, err))
 			}
-			logFunc("fail to init hook",
-				zap.String("so_path", paramtable.Get().ProxyCfg.SoPath.GetValue()),
-				zap.Error(err))
+			log.Warn("fail to init hook", zap.String("so_path", soPath), zap.Error(err))
 		}
 	})
 }

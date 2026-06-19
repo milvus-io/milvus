@@ -17,21 +17,21 @@
 package storage
 
 import (
-	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
-	"github.com/valyala/fastjson"
+	"github.com/tidwall/gjson"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
-
-// parserPool use object pooling to reduce fastjson.Parser allocation.
-var parserPool = &fastjson.ParserPool{}
 
 // DeltaData stores delta data
 // currently only delete tuples are stored
@@ -124,7 +124,7 @@ func NewDeltaDataWithPkType(cap int64, pkType schemapb.DataType) (*DeltaData, er
 
 func NewDeltaDataWithData(pks PrimaryKeys, tss []uint64) (*DeltaData, error) {
 	if pks.Len() != len(tss) {
-		return nil, merr.WrapErrParameterInvalidMsg("length of pks and tss not equal")
+		return nil, merr.WrapErrStorageMsg("length of pks and tss not equal: pks=%d tss=%d", pks.Len(), len(tss))
 	}
 	dd := &DeltaData{
 		deletePks:        pks,
@@ -158,39 +158,51 @@ func NewDeleteLog(pk PrimaryKey, ts Timestamp) *DeleteLog {
 // Parse tries to parse string format delete log
 // it try json first then use "," split int,ts format
 func (dl *DeleteLog) Parse(val string) error {
-	p := parserPool.Get()
-	defer parserPool.Put(p)
-	v, err := p.Parse(val)
-	if err != nil {
-		// compatible with versions that only support int64 type primary keys
-		// compatible with fmt.Sprintf("%d,%d", pk, ts)
-		// compatible error info (unmarshal err invalid character ',' after top-level value)
-		splits := strings.Split(val, ",")
-		if len(splits) != 2 {
-			return fmt.Errorf("the format of delta log is incorrect, %v can not be split", val)
+	// Try JSON parse first (single parse, no double validation)
+	result := gjson.Parse(val)
+	if result.Type == gjson.JSON {
+		tsRes := result.Get("ts")
+		pkRes := result.Get("pk")
+		pkTypeRes := result.Get("pkType")
+		if !tsRes.Exists() || !pkRes.Exists() || !pkTypeRes.Exists() {
+			return merr.WrapErrDataIntegrityMsg("invalid delete log json: missing required fields in %s", val)
 		}
-		pk, err := strconv.ParseInt(splits[0], 10, 64)
-		if err != nil {
-			return err
-		}
-		dl.Pk = &Int64PrimaryKey{
-			Value: pk,
-		}
-		dl.PkType = int64(schemapb.DataType_Int64)
-		dl.Ts, err = strconv.ParseUint(splits[1], 10, 64)
-		if err != nil {
-			return err
+		dl.Ts = tsRes.Uint()
+		dl.PkType = pkTypeRes.Int()
+		switch dl.PkType {
+		case int64(schemapb.DataType_Int64):
+			if pkRes.Type != gjson.Number {
+				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is Int64 but pk is not a number in %s", val)
+			}
+			dl.Pk = &Int64PrimaryKey{Value: pkRes.Int()}
+		case int64(schemapb.DataType_VarChar):
+			if pkRes.Type != gjson.String {
+				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is VarChar but pk is not a string in %s", val)
+			}
+			dl.Pk = &VarCharPrimaryKey{Value: pkRes.String()}
+		default:
+			return merr.WrapErrDataIntegrityMsg("invalid delete log: unsupported pkType %d in %s", dl.PkType, val)
 		}
 		return nil
 	}
 
-	dl.Ts = v.GetUint64("ts")
-	dl.PkType = v.GetInt64("pkType")
-	switch dl.PkType {
-	case int64(schemapb.DataType_Int64):
-		dl.Pk = &Int64PrimaryKey{Value: v.GetInt64("pk")}
-	case int64(schemapb.DataType_VarChar):
-		dl.Pk = &VarCharPrimaryKey{Value: string(v.GetStringBytes("pk"))}
+	// compatible with versions that only support int64 type primary keys
+	// compatible with fmt.Sprintf("%d,%d", pk, ts)
+	splits := strings.Split(val, ",")
+	if len(splits) != 2 {
+		return merr.WrapErrDataIntegrityMsg("the format of delta log is incorrect, %v can not be split", val)
+	}
+	pk, err := strconv.ParseInt(splits[0], 10, 64)
+	if err != nil {
+		return err
+	}
+	dl.Pk = &Int64PrimaryKey{
+		Value: pk,
+	}
+	dl.PkType = int64(schemapb.DataType_Int64)
+	dl.Ts, err = strconv.ParseUint(splits[1], 10, 64)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -211,6 +223,8 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 		dl.Pk = &Int64PrimaryKey{}
 	case schemapb.DataType_VarChar:
 		dl.Pk = &VarCharPrimaryKey{}
+	default:
+		return merr.WrapErrDataIntegrityMsg("unsupported primary key type: %v", schemapb.DataType(dl.PkType))
 	}
 
 	if err = json.Unmarshal(*messageMap["pk"], dl.Pk); err != nil {
@@ -272,4 +286,74 @@ func (data *DeleteData) Merge(other *DeleteData) {
 
 func (data *DeleteData) Size() int64 {
 	return data.memSize
+}
+
+// BuildDeleteRecord builds an Arrow Record from primary keys and timestamps
+func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint64, tsTo uint64, err error) {
+	tsFrom = math.MaxUint64
+	tsTo = 0
+
+	if len(pks) == 0 {
+		return nil, 0, 0, merr.WrapErrServiceInternalMsg("empty primary keys")
+	}
+	if len(pks) != len(tss) {
+		return nil, 0, 0, merr.WrapErrServiceInternalMsg("length of pks and tss must be equal")
+	}
+
+	allocator := memory.DefaultAllocator
+	var pkArray arrow.Array
+
+	// Determine pk type from first element
+	switch pks[0].(type) {
+	case *Int64PrimaryKey:
+		builder := array.NewInt64Builder(allocator)
+		defer builder.Release()
+		for _, pk := range pks {
+			builder.Append(pk.(*Int64PrimaryKey).Value)
+		}
+		pkArray = builder.NewArray()
+	case *VarCharPrimaryKey:
+		builder := array.NewStringBuilder(allocator)
+		defer builder.Release()
+		for _, pk := range pks {
+			builder.Append(pk.(*VarCharPrimaryKey).Value)
+		}
+		pkArray = builder.NewArray()
+	default:
+		return nil, 0, 0, merr.WrapErrStorageMsg("unsupported primary key type %T", pks[0])
+	}
+
+	// Build timestamp array
+	tsBuilder := array.NewInt64Builder(allocator)
+	defer tsBuilder.Release()
+	for _, ts := range tss {
+		if ts < tsFrom {
+			tsFrom = ts
+		}
+		if ts > tsTo {
+			tsTo = ts
+		}
+		tsBuilder.Append(int64(ts))
+	}
+	tsArray := tsBuilder.NewArray()
+
+	// Create schema
+	pkArrowType := pkArray.DataType()
+	fields := []arrow.Field{
+		{Name: "pk", Type: pkArrowType, Nullable: false},
+		{Name: "ts", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+	}
+	schema := arrow.NewSchema(fields, nil)
+
+	// Create record
+	columns := []arrow.Array{pkArray, tsArray}
+	record := array.NewRecord(schema, columns, int64(len(pks)))
+
+	// Create field to column mapping
+	field2Col := map[FieldID]int{
+		0: 0, // pk column
+		1: 1, // ts column
+	}
+
+	return NewSimpleArrowRecord(record, field2Col), tsFrom, tsTo, nil
 }

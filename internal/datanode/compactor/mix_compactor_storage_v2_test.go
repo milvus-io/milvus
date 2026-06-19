@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
@@ -36,15 +36,16 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMixCompactionTaskStorageV2Suite(t *testing.T) {
@@ -56,17 +57,22 @@ type MixCompactionTaskStorageV2Suite struct {
 }
 
 func (s *MixCompactionTaskStorageV2Suite) SetupTest() {
-	s.setupTest()
-	paramtable.Get().Save("common.storageType", "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
 	initcore.InitStorageV2FileSystem(paramtable.Get())
+	s.setupTest()
 	s.task.compactionParams = compaction.GenParams()
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TearDownTest() {
-	paramtable.Get().Reset("common.storageType")
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK() {
@@ -79,6 +85,26 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK() {
 	s.Equal(1, len(result.GetSegments()))
 	s.Equal(7, len(result.GetSegments()[0].GetInsertLogs()))
 	s.Equal(1, len(result.GetSegments()[0].GetField2StatslogPaths()))
+}
+
+func (s *MixCompactionTaskStorageV2Suite) TestCompactMetrics() {
+	s.prepareCompactDupPKSegments()
+
+	storageConfig := s.task.GetStorageConfig()
+	beforeMetrics, err := storagev2.GetFilesystemMetricsWithConfig(storageConfig)
+	s.NoError(err)
+	s.NotNil(beforeMetrics)
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	afterMetrics, err := storagev2.GetFilesystemMetricsWithConfig(storageConfig)
+	s.NoError(err)
+	s.NotNil(afterMetrics)
+
+	s.Greater(afterMetrics.WriteBytes, beforeMetrics.WriteBytes,
+		"write bytes should increase after compaction")
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_MixToV2Format() {

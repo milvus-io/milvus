@@ -24,7 +24,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 // ExtractCtx extracts trace span from msg.properties.
@@ -76,8 +76,8 @@ func allowTrace(in interface{}) bool {
 	}
 	switch res := in.(type) {
 	case TsMsg:
-		return !(res.Type() == commonpb.MsgType_TimeTick ||
-			res.Type() == commonpb.MsgType_LoadIndex)
+		return res.Type() != commonpb.MsgType_TimeTick &&
+			res.Type() != commonpb.MsgType_LoadIndex
 	default:
 		return false
 	}

@@ -3,7 +3,7 @@ package ratelimitutil
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 func TestGetQuotaErrorString(t *testing.T) {

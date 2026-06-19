@@ -21,12 +21,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func Test_EncodeMsgPositions(t *testing.T) {
@@ -455,9 +456,9 @@ func TestIsSubsetOfProperties(t *testing.T) {
 	}
 }
 
-func Test_nextFieldID(t *testing.T) {
+func Test_maxAssignedFieldIDFromSchema(t *testing.T) {
 	type args struct {
-		coll *model.Collection
+		schema *schemapb.CollectionSchema
 	}
 	tests := []struct {
 		name string
@@ -467,14 +468,14 @@ func Test_nextFieldID(t *testing.T) {
 		{
 			name: "collection with max field ID in struct array sub-field",
 			args: args{
-				coll: &model.Collection{
-					Fields: []*model.Field{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
 						{FieldID: common.StartOfUserFieldID},
 					},
-					StructArrayFields: []*model.StructArrayField{
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{
 						{
 							FieldID: common.StartOfUserFieldID + 1,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 2},
 								{FieldID: common.StartOfUserFieldID + 10},
 							},
@@ -482,25 +483,25 @@ func Test_nextFieldID(t *testing.T) {
 					},
 				},
 			},
-			want: common.StartOfUserFieldID + 11,
+			want: common.StartOfUserFieldID + 10,
 		},
 		{
 			name: "collection with multiple struct array fields",
 			args: args{
-				coll: &model.Collection{
-					Fields: []*model.Field{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
 						{FieldID: common.StartOfUserFieldID},
 					},
-					StructArrayFields: []*model.StructArrayField{
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{
 						{
 							FieldID: common.StartOfUserFieldID + 1,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 2},
 							},
 						},
 						{
 							FieldID: common.StartOfUserFieldID + 5,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 6},
 								{FieldID: common.StartOfUserFieldID + 7},
 							},
@@ -508,13 +509,254 @@ func Test_nextFieldID(t *testing.T) {
 					},
 				},
 			},
-			want: common.StartOfUserFieldID + 8,
+			want: common.StartOfUserFieldID + 7,
+		},
+		{
+			name: "collection with max_field_id property after field drop",
+			args: args{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: common.StartOfUserFieldID},     // 100
+						{FieldID: common.StartOfUserFieldID + 1}, // 101
+					},
+					Properties: []*commonpb.KeyValuePair{
+						{Key: common.MaxFieldIDKey, Value: "102"},
+					},
+				},
+			},
+			want: common.StartOfUserFieldID + 2, // 102, not 101
+		},
+		{
+			name: "max_field_id property smaller than current fields",
+			args: args{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: common.StartOfUserFieldID},     // 100
+						{FieldID: common.StartOfUserFieldID + 5}, // 105
+					},
+					Properties: []*commonpb.KeyValuePair{
+						{Key: common.MaxFieldIDKey, Value: "102"},
+					},
+				},
+			},
+			want: common.StartOfUserFieldID + 5, // 105, current fields dominate
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := nextFieldID(tt.args.coll)
+			got := maxAssignedFieldIDFromSchema(tt.args.schema)
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func Test_nextFunctionID(t *testing.T) {
+	type args struct {
+		coll *model.Collection
+	}
+	tests := []struct {
+		name string
+		args args
+		want int64
+	}{
+		{
+			name: "empty functions list returns StartOfUserFunctionID+1",
+			args: args{
+				coll: &model.Collection{
+					Functions: nil,
+				},
+			},
+			want: common.StartOfUserFunctionID + 1,
+		},
+		{
+			name: "single function returns its ID+1",
+			args: args{
+				coll: &model.Collection{
+					Functions: []*model.Function{
+						{ID: common.StartOfUserFunctionID + 5},
+					},
+				},
+			},
+			want: common.StartOfUserFunctionID + 6,
+		},
+		{
+			name: "multiple functions returns max ID+1",
+			args: args{
+				coll: &model.Collection{
+					Functions: []*model.Function{
+						{ID: common.StartOfUserFunctionID + 3},
+						{ID: common.StartOfUserFunctionID + 10},
+						{ID: common.StartOfUserFunctionID + 7},
+					},
+				},
+			},
+			want: common.StartOfUserFunctionID + 11,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nextFunctionID(tt.args.coll)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCheckStructArrayFieldSchema_NullableValidation(t *testing.T) {
+	t.Run("nullable struct with nullable sub-field passes", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "my_struct",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "sub_a",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						Nullable:    true,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
+					},
+				},
+			},
+		}
+		err := checkStructArrayFieldSchema(schemas)
+		assert.NoError(t, err)
+	})
+
+	t.Run("non-nullable struct rejects nullable sub-field", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "my_struct",
+				Nullable: false,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "sub_a",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						Nullable:    true,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
+					},
+				},
+			},
+		}
+		err := checkStructArrayFieldSchema(schemas)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be nullable individually")
+		assert.Contains(t, err.Error(), "my_struct")
+		assert.Contains(t, err.Error(), "sub_a")
+	})
+
+	t.Run("non-nullable struct with non-nullable sub-field passes", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "my_struct",
+				Nullable: false,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "sub_a",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
+					},
+				},
+			},
+		}
+		err := checkStructArrayFieldSchema(schemas)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {
+	t.Run("missing max_capacity is rejected", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "my_struct",
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "sub_a",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+					},
+				},
+			},
+		}
+
+		err := checkStructArrayFieldSchema(schemas)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "type param(max_capacity) should be specified")
+		assert.Contains(t, err.Error(), "my_struct")
+		assert.Contains(t, err.Error(), "sub_a")
+	})
+
+	t.Run("different max_capacity values in same struct are rejected", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "my_struct",
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "sub_a",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+					},
+					{
+						Name:        "sub_b",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+							{Key: common.MaxCapacityKey, Value: "200"},
+						},
+					},
+				},
+			},
+		}
+
+		err := checkStructArrayFieldSchema(schemas)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "same max_capacity")
+		assert.Contains(t, err.Error(), "my_struct")
+		assert.Contains(t, err.Error(), "sub_b")
+	})
+}
+
+func Test_updateMaxFieldIDProperty(t *testing.T) {
+	t.Run("add to empty properties", func(t *testing.T) {
+		props := updateMaxFieldIDProperty(nil, 105)
+		assert.Len(t, props, 1)
+		assert.Equal(t, common.MaxFieldIDKey, props[0].Key)
+		assert.Equal(t, "105", props[0].Value)
+	})
+
+	t.Run("update existing property", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+			{Key: common.MaxFieldIDKey, Value: "100"},
+		}
+		result := updateMaxFieldIDProperty(props, 105)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "105", result[1].Value)
+	})
+
+	t.Run("update existing property does not mutate original", func(t *testing.T) {
+		original := &commonpb.KeyValuePair{Key: common.MaxFieldIDKey, Value: "100"}
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+			original,
+		}
+		result := updateMaxFieldIDProperty(props, 105)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "105", result[1].Value)
+		// verify original is NOT modified
+		assert.Equal(t, "100", original.Value)
+	})
+
+	t.Run("append to non-empty properties", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+		}
+		result := updateMaxFieldIDProperty(props, 103)
+		assert.Len(t, result, 2)
+		assert.Equal(t, common.MaxFieldIDKey, result[1].Key)
+		assert.Equal(t, "103", result[1].Value)
+	})
 }

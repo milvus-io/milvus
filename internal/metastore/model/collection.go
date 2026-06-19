@@ -21,11 +21,11 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
@@ -51,6 +51,7 @@ type Collection struct {
 	Properties           []*commonpb.KeyValuePair
 	State                pb.CollectionState
 	EnableDynamicField   bool
+	EnableNamespace      bool
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
@@ -91,6 +92,7 @@ func (c *Collection) ShallowClone() *Collection {
 		Properties:           c.Properties,
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
+		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
@@ -131,6 +133,7 @@ func (c *Collection) Clone() *Collection {
 		Properties:           common.CloneKeyValuePairs(c.Properties),
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
+		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
@@ -138,6 +141,32 @@ func (c *Collection) Clone() *Collection {
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
+	}
+}
+
+// ToCollectionSchemaPB returns a schemapb.CollectionSchema populated from the
+// current Collection. All schema-level fields are copied verbatim — callers
+// override Version, Properties, EnableDynamicField, etc. after the call when
+// the operation requires a different value.
+//
+// Centralizing the conversion here ensures that newly added schema fields are
+// propagated consistently across every rootcoord broadcast/response path.
+func (c *Collection) ToCollectionSchemaPB() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:               c.Name,
+		Description:        c.Description,
+		AutoID:             c.AutoID,
+		Fields:             MarshalFieldModels(c.Fields),
+		StructArrayFields:  MarshalStructArrayFieldModels(c.StructArrayFields),
+		Functions:          MarshalFunctionModels(c.Functions),
+		EnableDynamicField: c.EnableDynamicField,
+		EnableNamespace:    c.EnableNamespace,
+		Properties:         c.Properties,
+		DbName:             c.DBName,
+		Version:            c.SchemaVersion,
+		FileResourceIds:    c.FileResourceIds,
+		ExternalSource:     c.ExternalSource,
+		ExternalSpec:       c.ExternalSpec,
 	}
 }
 
@@ -160,7 +189,8 @@ func (c *Collection) Equal(other Collection) bool {
 		c.ShardsNum == other.ShardsNum &&
 		c.ConsistencyLevel == other.ConsistencyLevel &&
 		checkParamsEqual(c.Properties, other.Properties) &&
-		c.EnableDynamicField == other.EnableDynamicField
+		c.EnableDynamicField == other.EnableDynamicField &&
+		c.EnableNamespace == other.EnableNamespace
 }
 
 func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, body *message.AlterCollectionMessageBody) {
@@ -183,11 +213,24 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.AutoID = updates.Schema.AutoID
 			c.Fields = UnmarshalFieldModels(updates.Schema.Fields)
 			c.EnableDynamicField = updates.Schema.EnableDynamicField
+			c.EnableNamespace = updates.Schema.EnableNamespace
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
 			c.ExternalSource = updates.Schema.ExternalSource
 			c.ExternalSpec = updates.Schema.ExternalSpec
+		case message.FieldMaskCollectionExternalSpec:
+			// Defensive: only overwrite when the update carries a value.
+			// Legacy WAL messages from before the atomic-tuple invariant may
+			// arrive with one half empty; preserving the existing field in
+			// that case avoids silently clearing a previously persisted
+			// source or spec on replay.
+			if v := updates.Schema.GetExternalSource(); v != "" {
+				c.ExternalSource = v
+			}
+			if v := updates.Schema.GetExternalSpec(); v != "" {
+				c.ExternalSpec = v
+			}
 		}
 	}
 }
@@ -242,6 +285,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		State:                coll.State,
 		Properties:           coll.Properties,
 		EnableDynamicField:   coll.Schema.EnableDynamicField,
+		EnableNamespace:      coll.Schema.EnableNamespace,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
@@ -297,6 +341,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		Description:        coll.Description,
 		AutoID:             coll.AutoID,
 		EnableDynamicField: coll.EnableDynamicField,
+		EnableNamespace:    coll.EnableNamespace,
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
 		FileResourceIds:    coll.FileResourceIds,

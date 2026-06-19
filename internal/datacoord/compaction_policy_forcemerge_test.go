@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestForceMergeCompactionPolicySuite(t *testing.T) {
@@ -40,6 +40,9 @@ func (s *ForceMergeCompactionPolicySuite) SetupTest() {
 	meta, err := newMemoryMeta(s.T())
 	s.Require().NoError(err)
 	for id, segment := range segments {
+		if segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetState() == commonpb.SegmentState_Flushed {
+			segment.IsSorted = true
+		}
 		meta.segments.SetSegment(id, segment)
 	}
 
@@ -371,4 +374,69 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_FilterSegment
 			s.Equal(commonpb.SegmentState_Flushed, seg.State)
 		}
 	}
+}
+
+func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AlignsTargetSizeWithManualCompactionSelection() {
+	ctx := context.Background()
+	collectionID := int64(1)
+	targetSize := int64(1024 * 2) // 2GB in MB
+	triggerID := int64(100)
+
+	meta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	policy := newForceMergeCompactionPolicy(meta, s.mockAlloc, s.mockHandler)
+	policy.SetTopologyQuerier(s.mockQuerier)
+
+	newSegment := func(id int64, level datapb.SegmentLevel, sorted bool, sortedByNamespace bool, compacting bool) *SegmentInfo {
+		return &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:                  id,
+				CollectionID:        collectionID,
+				PartitionID:         s.testLabel.PartitionID,
+				InsertChannel:       s.testLabel.Channel,
+				State:               commonpb.SegmentState_Flushed,
+				Level:               level,
+				IsSorted:            sorted,
+				IsSortedByNamespace: sortedByNamespace,
+				Binlogs:             genTestBinlogs(1, 10*MB),
+			},
+			isCompacting: compacting,
+		}
+	}
+
+	for _, segment := range []*SegmentInfo{
+		newSegment(10, datapb.SegmentLevel_L1, true, false, false),
+		newSegment(11, datapb.SegmentLevel_L1, false, true, false),
+		newSegment(12, datapb.SegmentLevel_L1, false, false, false),
+		newSegment(13, datapb.SegmentLevel_L2, true, false, false),
+		newSegment(14, datapb.SegmentLevel_L1, true, false, true),
+	} {
+		meta.segments.SetSegment(segment.GetID(), segment)
+	}
+
+	coll := &collectionInfo{
+		ID:         collectionID,
+		Schema:     newTestSchema(),
+		Properties: nil,
+	}
+	topology := &CollectionTopology{
+		CollectionID: collectionID,
+		NumReplicas:  1,
+	}
+
+	s.mockHandler.EXPECT().GetCollection(mock.Anything, collectionID).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(triggerID, nil)
+	s.mockQuerier.EXPECT().GetCollectionTopology(mock.Anything, collectionID).Return(topology, nil)
+
+	views, gotTriggerID, err := policy.triggerOneCollection(ctx, collectionID, targetSize)
+
+	s.NoError(err)
+	s.Equal(triggerID, gotTriggerID)
+	s.Require().Len(views, 1)
+
+	gotSegmentIDs := make([]int64, 0, len(views[0].GetSegmentsView()))
+	for _, segment := range views[0].GetSegmentsView() {
+		gotSegmentIDs = append(gotSegmentIDs, segment.ID)
+	}
+	s.ElementsMatch([]int64{10, 11}, gotSegmentIDs)
 }

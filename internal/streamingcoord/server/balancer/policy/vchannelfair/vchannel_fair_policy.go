@@ -3,13 +3,13 @@ package vchannelfair
 import (
 	"math"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 var _ balancer.Policy = &policy{}
@@ -30,7 +30,7 @@ func (p *policy) Name() string {
 // Balance will balance the load of streaming node by vchannel count.
 func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.ExpectedLayout, err error) {
 	if currentLayout.TotalNodes() == 0 {
-		return balancer.ExpectedLayout{}, errors.New("no available streaming node")
+		return balancer.ExpectedLayout{}, status.NewInner("no available streaming node")
 	}
 	// update policy configuration before balancing.
 	p.updatePolicyConfiguration()
@@ -129,7 +129,7 @@ func (p *policy) updatePolicyConfiguration() {
 	// try to fetch latest configuration.
 	newCfg := newVChannelFairPolicyConfig()
 	if err := newCfg.Validate(); err != nil {
-		p.Logger().Warn("invalid new incoming vchannel fair policy config", zap.Any("new", newCfg))
+		p.Logger().Warn("invalid new incoming vchannel fair policy config", zap.Any("new", newCfg), zap.Error(err))
 	} else if p.cfg != newCfg {
 		p.Logger().Info("vchannel fair policy config updated", zap.Any("old", p.cfg), zap.Any("new", newCfg))
 		p.cfg = newCfg

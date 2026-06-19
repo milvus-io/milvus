@@ -6,7 +6,7 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func TestMessageID(t *testing.T) {
@@ -26,6 +26,10 @@ func TestMessageID(t *testing.T) {
 	msgID, err := UnmarshalMessageID(kafkaID(1).Marshal())
 	assert.NoError(t, err)
 	assert.Equal(t, kafkaID(1), msgID)
+
+	msgID, err = UnmarshalMessageID(kafkaID(kafka.OffsetBeginning).Marshal())
+	assert.NoError(t, err)
+	assert.Equal(t, kafkaID(kafka.OffsetBeginning), msgID)
 
 	_, err = UnmarshalMessageID(string([]byte{0x01, 0x02, 0x03, 0x04}))
 	assert.Error(t, err)

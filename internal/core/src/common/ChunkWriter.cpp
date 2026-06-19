@@ -12,6 +12,7 @@
 #include "common/ChunkWriter.h"
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -38,164 +39,178 @@ namespace milvus {
 
 std::pair<size_t, size_t>
 StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    // Single pass over Arrow: compute row count, absolute offsets, total
+    // size. write_to_target reuses offsets_ and walks Arrow just once more
+    // to emit the string bytes (2 arrow passes total instead of 4).
     row_nums_ = 0;
-    size_t size = 0;
-    // tuple <data, size, offset>
-    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
-        // for bson, we use binary array to store the string
+        row_nums_ += data->length();
+    }
+
+    const int offset_num = row_nums_ + 1;
+    const size_t null_bitmap_bytes = nullable_ ? (row_nums_ + 7) / 8 : 0;
+    size_t cursor = null_bitmap_bytes + sizeof(uint32_t) * offset_num;
+
+    offsets_.clear();
+    offsets_.reserve(offset_num);
+    for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        AssertInfo(array != nullptr,
+                   "StringChunkWriter expects arrow::BinaryArray, got "
+                   "type id {}; upstream normalizer must coerce to BINARY",
+                   data ? static_cast<int>(data->type_id()) : -1);
         for (int i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            size += str.size();
+            offsets_.push_back(static_cast<uint32_t>(cursor));
+            cursor += array->GetView(i).size();
         }
-        row_nums_ += array->length();
     }
-    if (nullable_) {
-        size += (row_nums_ + 7) / 8;
-    }
-    size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_STRING_PADDING;
+    // String chunk uses uint32 offsets on disk; reject oversize chunks loudly
+    // rather than silently wrapping.
+    AssertInfo(cursor <= std::numeric_limits<uint32_t>::max(),
+               "string chunk size {} exceeds uint32 offset limit",
+               cursor);
+    offsets_.push_back(static_cast<uint32_t>(cursor));
+
+    size_t size = cursor + MMAP_STRING_PADDING;
     return {size, row_nums_};
 }
 
 void
 StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
                                    const std::shared_ptr<ChunkTarget>& target) {
-    strs_.clear();
-    strs_.reserve(row_nums_);
-    // tuple <data, size, offset>
-    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
-    for (const auto& data : array_vec) {
-        // for bson, we use binary array to store the string
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        for (int i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            strs_.emplace_back(str);
-        }
-        if (nullable_) {
+    // chunk layout: null bitmap, offsets[row_nums_+1], str1..strN, padding
+    if (nullable_) {
+        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+        null_bitmaps.reserve(array_vec.size());
+        for (const auto& data : array_vec) {
             null_bitmaps.emplace_back(
                 data->null_bitmap_data(), data->length(), data->offset());
         }
+        write_null_bit_maps(null_bitmaps, target);
     }
 
-    // chunk layout: null bitmap, offset1, offset2, ..., offsetn, str1, str2, ..., strn, padding
-    // write null bitmaps
-    write_null_bit_maps(null_bitmaps, target);
+    target->write(offsets_.data(), offsets_.size() * sizeof(uint32_t));
 
-    // write data
-    const int offset_num = row_nums_ + 1;
-    const uint32_t null_bitmap_bytes =
-        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
-    uint32_t offset_start_pos =
-        null_bitmap_bytes + sizeof(uint32_t) * offset_num;
-    std::vector<uint32_t> offsets;
-    offsets.reserve(offset_num);
-    for (const auto& str : strs_) {
-        offsets.push_back(offset_start_pos);
-        offset_start_pos += str.size();
-    }
-    offsets.push_back(offset_start_pos);
-
-    target->write(offsets.data(), offsets.size() * sizeof(uint32_t));
-    for (const auto& str : strs_) {
-        target->write(str.data(), str.size());
+    for (const auto& data : array_vec) {
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        AssertInfo(array != nullptr,
+                   "StringChunkWriter expects arrow::BinaryArray, got "
+                   "type id {}; upstream normalizer must coerce to BINARY",
+                   data ? static_cast<int>(data->type_id()) : -1);
+        for (int i = 0; i < array->length(); i++) {
+            auto str = array->GetView(i);
+            target->write(str.data(), str.size());
+        }
     }
 
-    // write padding, maybe not needed anymore
-    // FIXME
-    char padding[MMAP_STRING_PADDING];
+    char padding[MMAP_STRING_PADDING] = {};
     target->write(padding, MMAP_STRING_PADDING);
+
+    offsets_.clear();
+    offsets_.shrink_to_fit();
 }
 
 std::pair<size_t, size_t>
 JSONChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    // Single pass over Arrow: compute row count, absolute offsets, total
+    // size. No per-row simdjson::padded_string allocation — write_to_target
+    // copies bytes directly from the Arrow buffer and emits a single
+    // SIMDJSON_PADDING region at the tail.
     row_nums_ = 0;
-    size_t size = 0;
-    cached_jsons_.clear();
-
-    // First pass: count total rows for reserve
     for (const auto& data : array_vec) {
         row_nums_ += data->length();
     }
-    cached_jsons_.reserve(row_nums_);
 
-    // Second pass: parse and cache Json objects
+    const int offset_num = row_nums_ + 1;
+    const size_t null_bitmap_bytes = nullable_ ? (row_nums_ + 7) / 8 : 0;
+    size_t cursor = null_bitmap_bytes + sizeof(uint32_t) * offset_num;
+
+    offsets_.clear();
+    offsets_.reserve(offset_num);
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        AssertInfo(array != nullptr,
+                   "JSONChunkWriter expects arrow::BinaryArray, got "
+                   "type id {}; upstream normalizer must coerce to BINARY",
+                   data ? static_cast<int>(data->type_id()) : -1);
         for (int i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            cached_jsons_.emplace_back(simdjson::padded_string(str));
-            size += cached_jsons_.back().data().size();
+            offsets_.push_back(static_cast<uint32_t>(cursor));
+            cursor += array->GetView(i).size();
         }
     }
-    if (nullable_) {
-        size += (row_nums_ + 7) / 8;
-    }
-    size += sizeof(uint32_t) * (row_nums_ + 1) + simdjson::SIMDJSON_PADDING;
+    AssertInfo(cursor <= std::numeric_limits<uint32_t>::max(),
+               "json chunk size {} exceeds uint32 offset limit",
+               cursor);
+    offsets_.push_back(static_cast<uint32_t>(cursor));
 
+    size_t size = cursor + simdjson::SIMDJSON_PADDING;
     return {size, row_nums_};
 }
 
 void
 JSONChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
                                  const std::shared_ptr<ChunkTarget>& target) {
-    // Collect null bitmaps
-    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+    // chunk layout: null bitmap, offsets[row_nums_+1], json1..jsonN, padding
     if (nullable_) {
+        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+        null_bitmaps.reserve(array_vec.size());
         for (const auto& data : array_vec) {
             null_bitmaps.emplace_back(
                 data->null_bitmap_data(), data->length(), data->offset());
         }
+        write_null_bit_maps(null_bitmaps, target);
     }
 
-    // chunk layout: null bitmaps, offset1, offset2, ... ,json1, json2, ..., jsonn
-    // write null bitmaps
-    write_null_bit_maps(null_bitmaps, target);
+    target->write(offsets_.data(), offsets_.size() * sizeof(uint32_t));
 
-    const int offset_num = row_nums_ + 1;
-    const uint32_t null_bitmap_bytes =
-        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
-    uint32_t offset_start_pos =
-        null_bitmap_bytes + sizeof(uint32_t) * offset_num;
-    std::vector<uint32_t> offsets;
-    offsets.reserve(offset_num);
-    for (const auto& json : cached_jsons_) {
-        offsets.push_back(offset_start_pos);
-        offset_start_pos += json.data().size();
-    }
-    offsets.push_back(offset_start_pos);
-
-    target->write(offsets.data(), offset_num * sizeof(uint32_t));
-
-    // write data
-    for (const auto& json : cached_jsons_) {
-        target->write(json.data().data(), json.data().size());
+    for (const auto& data : array_vec) {
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        for (int i = 0; i < array->length(); i++) {
+            auto str = array->GetView(i);
+            target->write(str.data(), str.size());
+        }
     }
 
-    char padding[simdjson::SIMDJSON_PADDING];
+    char padding[simdjson::SIMDJSON_PADDING] = {};
     target->write(padding, simdjson::SIMDJSON_PADDING);
 
-    // Release cached data
-    cached_jsons_.clear();
-    cached_jsons_.shrink_to_fit();
+    offsets_.clear();
+    offsets_.shrink_to_fit();
 }
 
 std::pair<size_t, size_t>
 GeometryChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    // Same pattern as String/JSON: single Arrow pass produces offsets_ and
+    // total size; write_to_target reuses offsets_ + walks Arrow once for
+    // the WKB bytes.
     row_nums_ = 0;
-    size_t size = 0;
+    for (const auto& data : array_vec) {
+        row_nums_ += data->length();
+    }
+
+    const int offset_num = row_nums_ + 1;
+    const size_t null_bitmap_bytes = nullable_ ? (row_nums_ + 7) / 8 : 0;
+    size_t cursor = null_bitmap_bytes + sizeof(uint32_t) * offset_num;
+
+    offsets_.clear();
+    offsets_.reserve(offset_num);
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        AssertInfo(array != nullptr,
+                   "GeometryChunkWriter expects arrow::BinaryArray, got "
+                   "type id {}; upstream normalizer must coerce to BINARY",
+                   data ? static_cast<int>(data->type_id()) : -1);
         for (int64_t i = 0; i < array->length(); ++i) {
-            auto str = array->GetView(i);
-            size += str.size();
+            offsets_.push_back(static_cast<uint32_t>(cursor));
+            cursor += array->GetView(i).size();
         }
-        row_nums_ += array->length();
     }
-    if (nullable_) {
-        size += (row_nums_ + 7) / 8;
-    }
-    size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_GEOMETRY_PADDING;
+    AssertInfo(cursor <= std::numeric_limits<uint32_t>::max(),
+               "geometry chunk size {} exceeds uint32 offset limit",
+               cursor);
+    offsets_.push_back(static_cast<uint32_t>(cursor));
+
+    size_t size = cursor + MMAP_GEOMETRY_PADDING;
     return {size, row_nums_};
 }
 
@@ -203,74 +218,83 @@ void
 GeometryChunkWriter::write_to_target(
     const arrow::ArrayVector& array_vec,
     const std::shared_ptr<ChunkTarget>& target) {
-    std::vector<std::string_view> wkb_strs;
-    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
-    wkb_strs.reserve(row_nums_);
-
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        for (int64_t i = 0; i < array->length(); ++i) {
-            auto str = array->GetView(i);
-            wkb_strs.emplace_back(str);
-        }
-        if (nullable_) {
+    // chunk layout: null bitmap, offsets, wkb strings, padding
+    if (nullable_) {
+        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+        null_bitmaps.reserve(array_vec.size());
+        for (const auto& data : array_vec) {
             null_bitmaps.emplace_back(
                 data->null_bitmap_data(), data->length(), data->offset());
         }
+        write_null_bit_maps(null_bitmaps, target);
     }
 
-    // chunk layout: null bitmap, offsets, wkb strings, padding
-    write_null_bit_maps(null_bitmaps, target);
+    target->write(offsets_.data(), offsets_.size() * sizeof(uint32_t));
 
-    const int offset_num = row_nums_ + 1;
-    const uint32_t null_bitmap_bytes =
-        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
-    uint32_t offset_start_pos =
-        null_bitmap_bytes +
-        static_cast<uint32_t>(sizeof(uint32_t) * offset_num);
-    std::vector<uint32_t> offsets;
-    offsets.reserve(offset_num);
-    for (const auto& str : wkb_strs) {
-        offsets.push_back(offset_start_pos);
-        offset_start_pos += str.size();
-    }
-    offsets.push_back(offset_start_pos);
-
-    target->write(offsets.data(), offsets.size() * sizeof(uint32_t));
-
-    for (const auto& str : wkb_strs) {
-        target->write(str.data(), str.size());
+    for (const auto& data : array_vec) {
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        AssertInfo(array != nullptr,
+                   "GeometryChunkWriter expects arrow::BinaryArray, got "
+                   "type id {}; upstream normalizer must coerce to BINARY",
+                   data ? static_cast<int>(data->type_id()) : -1);
+        for (int64_t i = 0; i < array->length(); ++i) {
+            auto str = array->GetView(i);
+            target->write(str.data(), str.size());
+        }
     }
 
-    char padding[MMAP_GEOMETRY_PADDING];
+    char padding[MMAP_GEOMETRY_PADDING] = {};
     target->write(padding, MMAP_GEOMETRY_PADDING);
+
+    offsets_.clear();
+    offsets_.shrink_to_fit();
 }
 
 std::pair<size_t, size_t>
 ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
-    row_nums_ = 0;
-    size_t size = 0;
+    // Parse ScalarFieldProto once per row here and cache the resulting
+    // Array objects so write_to_target does not re-parse. Also produce the
+    // interleaved [off0, len0, off1, len1, ..., offN-1, lenN-1, offN] header
+    // so write_to_target can emit it in a single target->write call.
     const bool is_string = IsStringDataType(element_type_);
+
+    row_nums_ = 0;
+    for (const auto& data : array_vec) {
+        row_nums_ += data->length();
+    }
+
+    cached_arrays_.clear();
+    cached_arrays_.reserve(row_nums_);
+    header_.clear();
+    header_.reserve(row_nums_ * 2 + 1);
+
+    const int header_entries = row_nums_ * 2 + 1;
+    const size_t null_bitmap_bytes = nullable_ ? (row_nums_ + 7) / 8 : 0;
+    size_t cursor = null_bitmap_bytes + sizeof(uint32_t) * header_entries;
 
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        AssertInfo(array != nullptr,
+                   "ArrayChunkWriter expects arrow::BinaryArray, got "
+                   "type id {}; upstream normalizer must coerce to BINARY",
+                   data ? static_cast<int>(data->type_id()) : -1);
         for (int64_t i = 0; i < array->length(); ++i) {
             auto str = array->GetView(i);
             ScalarFieldProto scalar_array;
             scalar_array.ParseFromArray(str.data(), str.size());
-            Array arr(scalar_array);
-            size += arr.byte_size();
+            cached_arrays_.emplace_back(scalar_array);
+            const auto& arr = cached_arrays_.back();
+            header_.push_back(static_cast<uint32_t>(cursor));        // off_i
+            header_.push_back(static_cast<uint32_t>(arr.length()));  // len_i
             if (is_string) {
-                size += sizeof(uint32_t) * arr.length();
+                cursor += sizeof(uint32_t) * arr.length();
             }
+            cursor += arr.byte_size();
         }
+    }
+    header_.push_back(static_cast<uint32_t>(cursor));  // off_N (sentinel)
 
-        row_nums_ += array->length();
-    }
-    if (nullable_) {
-        size += (row_nums_ + 7) / 8;
-    }
-    size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
+    size_t size = cursor + MMAP_ARRAY_PADDING;
     return {size, row_nums_};
 }
 
@@ -278,57 +302,21 @@ void
 ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
                                   const std::shared_ptr<ChunkTarget>& target) {
     const bool is_string = IsStringDataType(element_type_);
-    std::vector<Array> arrays;
-    arrays.reserve(row_nums_);
-    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
 
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        for (int64_t i = 0; i < array->length(); ++i) {
-            auto str = array->GetView(i);
-            ScalarFieldProto scalar_array;
-            scalar_array.ParseFromArray(str.data(), str.size());
-            arrays.emplace_back(Array(scalar_array));
-        }
-        if (nullable_) {
+    if (nullable_) {
+        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+        null_bitmaps.reserve(array_vec.size());
+        for (const auto& data : array_vec) {
             null_bitmaps.emplace_back(
                 data->null_bitmap_data(), data->length(), data->offset());
         }
+        write_null_bit_maps(null_bitmaps, target);
     }
 
-    write_null_bit_maps(null_bitmaps, target);
+    // Header: interleaved [off0, len0, off1, len1, ..., offN-1, lenN-1, offN]
+    target->write(header_.data(), header_.size() * sizeof(uint32_t));
 
-    const int offsets_num = row_nums_ + 1;
-    const int len_num = row_nums_;
-    const uint32_t null_bitmap_bytes =
-        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
-    uint32_t offset_start_pos =
-        null_bitmap_bytes + sizeof(uint32_t) * (offsets_num + len_num);
-
-    std::vector<uint32_t> offsets(offsets_num);
-    std::vector<uint32_t> lens(len_num);
-
-    for (size_t i = 0; i < arrays.size(); ++i) {
-        auto& arr = arrays[i];
-        offsets[i] = offset_start_pos;
-        lens[i] = arr.length();
-        if (is_string) {
-            offset_start_pos += sizeof(uint32_t) * lens[i];
-        }
-        offset_start_pos += arr.byte_size();
-    }
-
-    if (!offsets.empty()) {
-        offsets.back() = offset_start_pos;
-    }
-
-    for (int i = 0; i < row_nums_; ++i) {
-        target->write(&offsets[i], sizeof(uint32_t));
-        target->write(&lens[i], sizeof(uint32_t));
-    }
-    target->write(&offsets.back(), sizeof(uint32_t));
-
-    for (auto& arr : arrays) {
+    for (auto& arr : cached_arrays_) {
         if (is_string) {
             target->write(arr.get_offsets_data(),
                           arr.length() * sizeof(uint32_t));
@@ -336,8 +324,13 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
         target->write(arr.data(), arr.byte_size());
     }
 
-    char padding[MMAP_ARRAY_PADDING];
+    char padding[MMAP_ARRAY_PADDING] = {};
     target->write(padding, MMAP_ARRAY_PADDING);
+
+    cached_arrays_.clear();
+    cached_arrays_.shrink_to_fit();
+    header_.clear();
+    header_.shrink_to_fit();
 }
 
 std::pair<size_t, size_t>
@@ -349,6 +342,8 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
         total_rows += array_data->length();
         auto list_array =
             std::static_pointer_cast<arrow::ListArray>(array_data);
+        AssertInfo(nullable_ || list_array->null_count() == 0,
+                   "VECTOR_ARRAY does not support null rows");
 
         switch (element_type_) {
             case milvus::DataType::VECTOR_FLOAT:
@@ -360,13 +355,15 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
                     std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
                         list_array->values());
                 int byte_width = binary_values->byte_width();
-                // Calculate actual values count using list offsets
-                // This handles sliced ListArrays correctly, as values() returns
-                // the entire underlying array, but we only need the values
-                // referenced by this slice
                 const int32_t* list_offsets = list_array->raw_value_offsets();
-                int64_t actual_values_count =
-                    list_offsets[list_array->length()] - list_offsets[0];
+                int64_t actual_values_count = 0;
+                for (int64_t i = 0; i < list_array->length(); ++i) {
+                    if (nullable_ && list_array->IsNull(i)) {
+                        continue;
+                    }
+                    actual_values_count +=
+                        list_offsets[i + 1] - list_offsets[i];
+                }
                 total_size += actual_values_count * byte_width;
                 break;
             }
@@ -379,8 +376,11 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
 
     row_nums_ = total_rows;
 
-    // Add space for offset and length arrays
-    total_size += sizeof(uint32_t) * (total_rows * 2 + 1) + MMAP_ARRAY_PADDING;
+    if (nullable_) {
+        total_size += (total_rows + 7) / 8;
+    }
+    // Add space for logical-row offset and length arrays.
+    total_size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
     return {total_size, total_rows};
 }
 
@@ -393,7 +393,19 @@ VectorArrayChunkWriter::write_to_target(
     std::vector<const uint8_t*> vector_data_ptrs;
     std::vector<size_t> data_sizes;
 
-    uint32_t current_offset = sizeof(uint32_t) * (row_nums_ * 2 + 1);
+    if (nullable_) {
+        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+        null_bitmaps.reserve(array_vec.size());
+        for (const auto& data : array_vec) {
+            null_bitmaps.emplace_back(
+                data->null_bitmap_data(), data->length(), data->offset());
+        }
+        write_null_bit_maps(null_bitmaps, target);
+    }
+
+    uint32_t current_offset =
+        (nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0) +
+        sizeof(uint32_t) * (row_nums_ * 2 + 1);
 
     for (const auto& array_data : array_vec) {
         auto list_array =
@@ -407,6 +419,11 @@ VectorArrayChunkWriter::write_to_target(
         // Generate offsets and lengths for each row
         // Each list contains multiple vectors, each stored as a fixed-size binary chunk
         for (int64_t i = 0; i < list_array->length(); i++) {
+            if (nullable_ && list_array->IsNull(i)) {
+                offsets_lens.push_back(current_offset);
+                offsets_lens.push_back(0);
+                continue;
+            }
             auto start_idx = list_offsets[i];
             auto end_idx = list_offsets[i + 1];
             auto vector_count = end_idx - start_idx;
@@ -469,7 +486,7 @@ void
 SparseFloatVectorChunkWriter::write_to_target(
     const arrow::ArrayVector& array_vec,
     const std::shared_ptr<ChunkTarget>& target) {
-    std::vector<std::string> strs;
+    std::vector<std::string_view> strs;
     strs.reserve(row_nums_);
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
 
@@ -613,7 +630,7 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<SparseFloatVectorChunkWriter>(nullable);
         case milvus::DataType::VECTOR_ARRAY:
             return std::make_shared<VectorArrayChunkWriter>(
-                dim, field_meta.get_element_type());
+                dim, field_meta.get_element_type(), nullable);
         default:
             ThrowInfo(Unsupported, "Unsupported data type");
     }
@@ -764,7 +781,8 @@ make_chunk(const FieldMeta& field_meta,
                 data,
                 size,
                 field_meta.get_element_type(),
-                chunk_mmap_guard);
+                chunk_mmap_guard,
+                nullable);
         default:
             ThrowInfo(DataTypeInvalid, "Unsupported data type");
     }
@@ -892,8 +910,11 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                             ~(ChunkTarget::ALIGNED_SIZE - 1);
         auto padding_size = aligned_size - written;
         if (padding_size > 0) {
-            std::string padding(padding_size, 0);
-            target->write(padding.data(), padding_size);
+            // Use a stack buffer to avoid heap allocation for padding zeros.
+            // ChunkTarget::ALIGNED_SIZE is typically small (e.g. 64/512),
+            // so padding_size is always < ALIGNED_SIZE.
+            char padding[ChunkTarget::ALIGNED_SIZE] = {};
+            target->write(padding, padding_size);
         }
     }
 
@@ -911,11 +932,11 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     for (size_t i = 0; i < field_ids.size(); i++) {
-        chunks[field_ids[i]] = std::move(make_chunk(field_metas[i],
-                                                    final_row_nums,
-                                                    data + chunk_offsets[i],
-                                                    chunk_sizes[i],
-                                                    chunk_mmap_guard));
+        chunks[field_ids[i]] = make_chunk(field_metas[i],
+                                          final_row_nums,
+                                          data + chunk_offsets[i],
+                                          chunk_sizes[i],
+                                          chunk_mmap_guard);
         LOG_INFO(
             "created chunk for field {} with chunk offset: {}, chunk "
             "size: {}, file path: {}",
@@ -931,9 +952,9 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader) {
     arrow::ArrayVector array_vec;
-    for (auto batch : *reader) {
+    for (const auto& batch : *reader) {
         auto batch_data = batch.ValueOrDie();
-        array_vec.push_back(std::move(batch_data->column(0)));
+        array_vec.push_back(batch_data->column(0));
     }
     return array_vec;
 }

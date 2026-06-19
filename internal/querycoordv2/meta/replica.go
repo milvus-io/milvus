@@ -2,15 +2,16 @@ package meta
 
 import (
 	"sort"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ReplicaInterface defines read operations for replica metadata
@@ -77,6 +78,20 @@ type Replica struct {
 	// node used by replica but cannot add more channel on it.
 	// include the rebalance node.
 	loadPriority commonpb.LoadPriority
+
+	// waitRGReadyAt is an in-memory only timestamp (not persisted).
+	// When non-zero, the first node assignment for this replica should wait until
+	// its resource group has all requested nodes ready (MissingNumOfNodes == 0),
+	// or until the configured timeout has elapsed since this timestamp.
+	// This prevents unbalanced segment loading during replica scale-up.
+	// The field is explicitly cleared after the first successful node assignment.
+	waitRGReadyAt time.Time
+
+	// queryInvisible is an in-memory only state. The zero value means visible to
+	// keep existing and recovered replicas queryable unless explicitly hidden.
+	// Newly spawned replicas during cluster-level load-config changes can be hidden
+	// from Proxy shard leader discovery until the whole change is ready to serve.
+	queryInvisible bool
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -115,6 +130,21 @@ func NewReplicaWithPriority(replica *querypb.Replica, priority commonpb.LoadPrio
 
 func (replica *Replica) LoadPriority() commonpb.LoadPriority {
 	return replica.loadPriority // TODO: the load priority doesn't persisted into the replica recovery info.
+}
+
+// NeedWaitRGReady returns whether this replica should wait for its resource group
+// to have all requested nodes before the first node assignment.
+// Returns false if the wait has expired.
+func (replica *Replica) NeedWaitRGReady() bool {
+	if replica.waitRGReadyAt.IsZero() {
+		return false
+	}
+	timeout := paramtable.Get().QueryCoordCfg.ClusterLevelLoadWaitRGReadyTimeout.GetAsDurationByParse()
+	return time.Since(replica.waitRGReadyAt) < timeout
+}
+
+func (replica *Replica) IsQueryVisible() bool {
+	return !replica.queryInvisible
 }
 
 // GetID returns the id of the replica.
@@ -270,12 +300,14 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 
 	return &mutableReplica{
 		Replica: &Replica{
-			replicaPB:    proto.Clone(replica.replicaPB).(*querypb.Replica),
-			rwNodes:      typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			roNodes:      typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
-			rwSQNodes:    typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
-			roSQNodes:    typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
-			loadPriority: replica.LoadPriority(),
+			replicaPB:      proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:        typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:        typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
+			rwSQNodes:      typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
+			roSQNodes:      typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
+			loadPriority:   replica.LoadPriority(),
+			waitRGReadyAt:  replica.waitRGReadyAt,
+			queryInvisible: replica.queryInvisible,
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}
@@ -295,6 +327,17 @@ type mutableReplica struct {
 // SetResourceGroup sets the resource group name of the replica.
 func (replica *mutableReplica) SetResourceGroup(resourceGroup string) {
 	replica.replicaPB.ResourceGroup = resourceGroup
+}
+
+// SetWaitRGReadyAt sets the timestamp from which this replica should wait for
+// its resource group to be fully ready before the first node assignment.
+// Pass zero time to clear the wait.
+func (replica *mutableReplica) SetWaitRGReadyAt(t time.Time) {
+	replica.waitRGReadyAt = t
+}
+
+func (replica *mutableReplica) SetQueryInvisible(invisible bool) {
+	replica.queryInvisible = invisible
 }
 
 // AddRWNode adds the node to rw nodes of the replica.
@@ -393,6 +436,7 @@ func (replica *mutableReplica) TryEnableChannelExclusiveMode(channelNames ...str
 	if replica.exclusiveRWNodeToChannel == nil {
 		replica.exclusiveRWNodeToChannel = make(map[int64]string)
 	}
+	replica.tryBalanceNodeForChannel()
 }
 
 func (replica *mutableReplica) DisableChannelExclusiveMode() {

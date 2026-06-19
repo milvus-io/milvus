@@ -22,9 +22,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 type statsTaskInfoSuite struct {
@@ -50,7 +51,8 @@ func (s *statsTaskInfoSuite) SetupSuite() {
 
 func (s *statsTaskInfoSuite) Test_Methods() {
 	s.Run("loadOrStoreStatsTask", func() {
-		_, cancel := context.WithCancel(s.manager.ctx)
+		_, cancel := context.WithCancel(s.manager.ctx) //nolint:gosec // cancel is deferred below
+		defer cancel()
 		info := &StatsTaskInfo{
 			Cancel: cancel,
 			State:  indexpb.JobState_JobStateInProgress,
@@ -78,6 +80,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 			[]*datapb.FieldBinlog{},
+			"test_manifest_path",
 		)
 	})
 
@@ -91,7 +94,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 					LogSize:    1024,
 					MemorySize: 1024,
 				},
-			})
+			}, "test_manifest_path")
 	})
 
 	s.Run("storeStatsJsonIndexResult", func() {
@@ -105,7 +108,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 					MemorySize:             1024,
 					JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
 				},
-			})
+			}, "test_manifest_path")
 	})
 
 	s.Run("getStatsTaskInfo", func() {
@@ -124,4 +127,19 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 
 		s.Nil(s.manager.GetStatsTaskInfo(s.cluster, s.taskID))
 	})
+}
+
+func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
+	info := &IndexTaskInfo{
+		State:                 commonpb.IndexState_Finished,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	}
+
+	s.Equal(
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		info.ToIndexTaskInfo(100).GetIndexStorePathVersion(),
+	)
+
+	cloned := info.Clone()
+	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
 }

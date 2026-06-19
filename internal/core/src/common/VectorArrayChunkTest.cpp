@@ -38,6 +38,7 @@
 #include "common/VectorArray.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
+#include "test_utils/Constants.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/schema.pb.h"
 
@@ -266,7 +267,8 @@ TEST_F(VectorArrayChunkTest, TestWriteMultipleBatches) {
                          DataType::VECTOR_ARRAY,
                          DataType::VECTOR_FLOAT,
                          dim,
-                         std::nullopt);
+                         std::nullopt,
+                         false);
     auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 
@@ -300,7 +302,7 @@ TEST_F(VectorArrayChunkTest, TestWriteWithMmap) {
 
     // Create temp file path
     std::string temp_file =
-        "/tmp/test_vector_array_chunk_" +
+        TestLocalPath + "test_vector_array_chunk_" +
         std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count());
 
@@ -323,7 +325,8 @@ TEST_F(VectorArrayChunkTest, TestWriteWithMmap) {
                          DataType::VECTOR_ARRAY,
                          DataType::VECTOR_FLOAT,
                          dim,
-                         std::nullopt);
+                         std::nullopt,
+                         false);
     auto chunk = create_chunk(field_meta, array_vec, true, temp_file);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 
@@ -358,7 +361,8 @@ TEST_F(VectorArrayChunkTest, TestEmptyVectorArray) {
                          DataType::VECTOR_ARRAY,
                          DataType::VECTOR_FLOAT,
                          dim,
-                         std::nullopt);
+                         std::nullopt,
+                         false);
     auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 
@@ -501,7 +505,8 @@ TEST_P(VectorArrayChunkParameterizedTest, TestWriteVectorArray) {
                          DataType::VECTOR_ARRAY,
                          param.data_type,
                          param.dim,
-                         std::nullopt);
+                         std::nullopt,
+                         false);
     auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 

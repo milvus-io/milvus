@@ -37,6 +37,11 @@
 
 #include <stddef.h>
 
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -504,6 +509,10 @@ jsmn_init(jsmn_parser* parser) {
 
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef __clang__
+#pragma clang diagnostic pop
 #endif
 
 #endif /* JSMN_H */

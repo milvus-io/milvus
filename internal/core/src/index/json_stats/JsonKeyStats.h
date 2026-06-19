@@ -84,6 +84,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
     ~JsonKeyStats() override;
 
+    using ScalarIndex<std::string>::BuildWithFieldData;
+
  public:
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas, bool nullable);
@@ -178,15 +180,15 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     const TargetBitmap
-    Range(std::string value, OpType op) override {
+    Range(const std::string& value, OpType op) override {
         ThrowInfo(ErrorCode::NotImplemented,
                   "Range not supported for JsonKeyStats");
     }
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive) override {
         ThrowInfo(ErrorCode::NotImplemented,
                   "Range not supported for JsonKeyStats");
@@ -206,7 +208,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         }
         auto ca = SemiInlineGet(bson_index_cache_slot_->PinCells(op_ctx, {0}));
         auto index = ca->get_cell_of(0);
-        return PinWrapper<BsonInvertedIndex*>(ca, index);
+        return PinWrapper<BsonInvertedIndex*>(std::move(ca), index);
     }
 
     void
@@ -558,7 +560,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     bool
     IsFloat(const std::string& str) {
         try {
-            float d = std::stof(str);
+            std::stof(str);
             return true;
         } catch (...) {
             return false;
@@ -568,7 +570,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     bool
     IsDouble(const std::string& str) {
         try {
-            double d = std::stod(str);
+            std::stod(str);
             return true;
         } catch (...) {
             return false;
@@ -646,11 +648,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     void
     LoadColumnGroup(int64_t column_group_id,
                     const std::vector<int64_t>& file_ids,
-                    const std::string& warmup_policy = "");
+                    const std::string& warmup_policy = "",
+                    const std::string& override_prefix = "");
 
     void
     LoadShreddingMeta(
-        std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files);
+        std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files,
+        const std::string& override_prefix = "");
 
     std::string
     AddBucketName(const std::string& remote_prefix);

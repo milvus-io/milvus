@@ -22,18 +22,18 @@ import (
 	"io"
 	"maps"
 	"math"
+	"path"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // PrimaryKeyStats contains rowsWithToken data for pk column
@@ -101,7 +101,7 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		stats.MaxPk = &VarCharPrimaryKey{}
 		stats.MinPk = &VarCharPrimaryKey{}
 	default:
-		return errors.New("Invalid PK Data Type")
+		return merr.WrapErrServiceInternalMsg("Invalid PK Data Type")
 	}
 
 	if maxPkMessage, ok := messageMap["maxPk"]; ok && maxPkMessage != nil {
@@ -282,10 +282,7 @@ func (sr *StatsReader) GetPrimaryKeyStats() (*PrimaryKeyStats, error) {
 	stats := &PrimaryKeyStats{}
 	err := json.Unmarshal(sr.buffer, &stats)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid(
-			"valid JSON",
-			string(sr.buffer),
-			err.Error())
+		return nil, merr.WrapErrDataIntegrity(err, "PrimaryKeyStats unmarshal failed")
 	}
 
 	return stats, nil
@@ -296,10 +293,7 @@ func (sr *StatsReader) GetPrimaryKeyStatsList() ([]*PrimaryKeyStats, error) {
 	stats := []*PrimaryKeyStats{}
 	err := json.Unmarshal(sr.buffer, &stats)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid(
-			"valid JSON",
-			string(sr.buffer),
-			err.Error())
+		return nil, merr.WrapErrDataIntegrity(err, "PrimaryKeyStats list unmarshal failed")
 	}
 
 	return stats, nil
@@ -463,24 +457,21 @@ func (m *BM25Stats) Deserialize(bs []byte) error {
 		return err
 	}
 
-	var keys []uint32 = make([]uint32, dim)
-	var values []int32 = make([]int32, dim)
+	var key uint32
+	var value int32
 	for i := 0; i < dim; i++ {
-		if err := binary.Read(buffer, common.Endian, &keys[i]); err != nil {
+		if err := binary.Read(buffer, common.Endian, &key); err != nil {
 			return err
 		}
 
-		if err := binary.Read(buffer, common.Endian, &values[i]); err != nil {
+		if err := binary.Read(buffer, common.Endian, &value); err != nil {
 			return err
 		}
+		m.rowsWithToken[key] += value
 	}
 
 	m.numRow += numRow
 	m.numToken += tokenNum
-	for i := 0; i < dim; i++ {
-		m.rowsWithToken[keys[i]] += values[i]
-	}
-
 	return nil
 }
 
@@ -503,7 +494,65 @@ func (m *BM25Stats) GetAvgdl() float64 {
 	return float64(m.numToken) / float64(m.numRow)
 }
 
-// DeserializeStats deserialize @blobs as []*PrimaryKeyStats
+// DeserializeBloomFilterStats auto-detects compound vs default stats format
+// from the paths and deserializes accordingly. Compound format is detected
+// when any path has a basename matching CompoundStatsType.LogIdx().
+func DeserializeBloomFilterStats(paths []string, blobs []*Blob) ([]*PrimaryKeyStats, error) {
+	for i, p := range paths {
+		_, logidx := path.Split(p)
+		if logidx == CompoundStatsType.LogIdx() {
+			return DeserializeStatsList(blobs[i])
+		}
+	}
+	return DeserializeStats(blobs)
+}
+
+// MemSize estimates the in-memory size of this BM25Stats in bytes.
+// len(map) is O(1) in Go (reads hmap.count directly). Per-entry cost is configurable
+// via queryNode.idfOracle.bm25StatsBytesPerEntry.
+func (m *BM25Stats) MemSize() int64 {
+	// Fixed overhead: numRow(8) + numToken(8) + map header (~100B)
+	return 120 + int64(len(m.rowsWithToken))*paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
+}
+
+// DeserializeFromReader reads BM25 stats from an io.Reader and accumulates into self.
+// Unlike Deserialize([]byte), this does not require knowing the total size upfront.
+func (m *BM25Stats) DeserializeFromReader(r io.Reader) error {
+	var version int32
+	if err := binary.Read(r, common.Endian, &version); err != nil {
+		return err
+	}
+
+	var numRow, tokenNum int64
+	if err := binary.Read(r, common.Endian, &numRow); err != nil {
+		return err
+	}
+	if err := binary.Read(r, common.Endian, &tokenNum); err != nil {
+		return err
+	}
+
+	m.numRow += numRow
+	m.numToken += tokenNum
+
+	var key uint32
+	var value int32
+	for {
+		if err := binary.Read(r, common.Endian, &key); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		if err := binary.Read(r, common.Endian, &value); err != nil {
+			return err
+		}
+		m.rowsWithToken[key] += value
+	}
+
+	return nil
+}
+
+// DeserializeStats deserializes @blobs as []*PrimaryKeyStats
 func DeserializeStats(blobs []*Blob) ([]*PrimaryKeyStats, error) {
 	results := make([]*PrimaryKeyStats, 0, len(blobs))
 	for _, blob := range blobs {

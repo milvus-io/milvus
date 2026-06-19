@@ -6,22 +6,22 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SyncManagerOption struct {
@@ -98,22 +98,30 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 			log.Warn("failed to parse new datanode syncmgr pool size", zap.Error(err))
 			return
 		}
-		err = mgr.keyLockDispatcher.workerPool.Resize(cpuNum * int(size))
+		newPoolSize := cpuNum * int(size)
+		err = mgr.workerPool.Resize(newPoolSize)
 		if err != nil {
 			log.Warn("failed to resize datanode syncmgr pool size", zap.String("key", evt.Key), zap.String("value", evt.Value), zap.Error(err))
 			return
 		}
-		log.Info("sync mgr pool size updated", zap.Int64("newSize", size))
+		semCap := newPoolSize * 2
+		if semCap < 4 {
+			semCap = 4
+		}
+		mgr.SetSemaphoreCapacity(semCap)
+		log.Info("sync mgr pool size updated", zap.Int64("newSize", size), zap.Int("semaphoreCapacity", semCap))
 	}
 }
 
 func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 	if mgr.workerPool.IsClosed() {
-		return nil, errors.New("sync manager is closed")
+		return nil, merr.WrapErrServiceInternalMsg("sync manager is closed")
 	}
 
 	switch t := task.(type) {
 	case *SyncTask:
+		t.WithChunkManager(mgr.chunkManager)
+	case *GrowingSourceSyncTask:
 		t.WithChunkManager(mgr.chunkManager)
 	}
 
@@ -122,11 +130,13 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 
 func (mgr *syncManager) SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 	if mgr.workerPool.IsClosed() {
-		return nil, errors.New("sync manager is closed")
+		return nil, merr.WrapErrServiceInternalMsg("sync manager is closed")
 	}
 
 	switch t := task.(type) {
 	case *SyncTask:
+		t.WithChunkManager(chunkManager)
+	case *GrowingSourceSyncTask:
 		t.WithChunkManager(chunkManager)
 	}
 
@@ -178,5 +188,8 @@ func (mgr *syncManager) TaskStatsJSON() string {
 func (mgr *syncManager) Close() error {
 	paramtable.Get().Unwatch(paramtable.Get().DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key, mgr.handler)
 	timeout := paramtable.Get().CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second)
-	return mgr.workerPool.ReleaseTimeout(timeout)
+	err := mgr.workerPool.ReleaseTimeout(timeout)
+	// Drain all remaining queued tasks that were never dispatched.
+	mgr.keyLockDispatcher.Close()
+	return err
 }

@@ -33,18 +33,19 @@ import (
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var (
@@ -263,6 +264,53 @@ func Test_ListSegments(t *testing.T) {
 	})
 }
 
+func TestCatalogListSegments_ExtractsJsonStatsRelativePaths(t *testing.T) {
+	segment := &datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+		JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+			100: {
+				FieldID:                100,
+				BuildID:                10,
+				Version:                2,
+				JsonKeyStatsDataFormat: 3,
+				Files: []string{
+					"files/json_stats/3/10/2/2/1/1/100/meta.json",
+					"files/json_stats/3/10/2/2/1/1/100/shared_key_index/.managed.json_0",
+				},
+			},
+			101: {
+				FieldID: 101,
+				Files: []string{
+					"files/insert_log/2/1/1/_stats/json_stats.101/shredding_data/data.parquet",
+				},
+			},
+		},
+	}
+	segBytes, err := proto.Marshal(segment)
+	assert.NoError(t, err)
+
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, paginationSize int, f func([]byte, []byte) error) error {
+			return f([]byte(k5), segBytes)
+		})
+
+	catalog := NewCatalog(metakv, rootPath, "")
+	segments, err := catalog.listSegments(context.Background(), collectionID)
+	assert.NoError(t, err)
+	assert.Len(t, segments, 1)
+
+	assert.Equal(t, []string{
+		"meta.json",
+		"shared_key_index/.managed.json_0",
+	}, segments[0].GetJsonKeyStats()[100].GetFiles())
+	assert.Equal(t, []string{
+		"shredding_data/data.parquet",
+	}, segments[0].GetJsonKeyStats()[101].GetFiles())
+}
+
 func Test_AddSegments(t *testing.T) {
 	t.Run("generate binlog kvs failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
@@ -447,7 +495,7 @@ func Test_AlterSegments(t *testing.T) {
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
 		assert.NoError(t, err)
 
-		var binlogXL []*datapb.FieldBinlog
+		binlogXL := make([]*datapb.FieldBinlog, 0, 255)
 		for i := 0; i < 255; i++ {
 			binlogXL = append(binlogXL, &datapb.FieldBinlog{
 				FieldID: int64(i),
@@ -550,12 +598,13 @@ func Test_DropSegment(t *testing.T) {
 		assert.NoError(t, err)
 
 		segKey := buildSegmentPath(segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
-		binlogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentBinlogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
-		deltalogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentDeltalogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
-		statelogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentStatslogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		binlogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBinlogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		deltalogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentDeltalogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		statelogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentStatslogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		bm25logPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBM25logPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
 
 		assert.Equal(t, 5, len(removedKvs))
-		for _, k := range []string{segKey, binlogPreix, deltalogPreix, statelogPreix} {
+		for _, k := range []string{segKey, binlogPrefix, deltalogPrefix, statelogPrefix, bm25logPrefix} {
 			_, ok := removedKvs[k]
 			assert.True(t, ok)
 		}
@@ -1074,7 +1123,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			MetaKv: metakv,
 		}
 
-		segIdxes, err := catalog.ListSegmentIndexes(context.Background())
+		segIdxes, err := catalog.ListSegmentIndexes(context.Background(), 0)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(segIdxes))
 	})
@@ -1086,7 +1135,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			MetaKv: metakv,
 		}
 
-		_, err := catalog.ListSegmentIndexes(context.Background())
+		_, err := catalog.ListSegmentIndexes(context.Background(), 0)
 		assert.Error(t, err)
 	})
 
@@ -1099,7 +1148,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			MetaKv: metakv,
 		}
 
-		_, err := catalog.ListSegmentIndexes(context.Background())
+		_, err := catalog.ListSegmentIndexes(context.Background(), 0)
 		assert.Error(t, err)
 	})
 }
@@ -2011,5 +2060,139 @@ func TestCatalog_CopySegmentTask(t *testing.T) {
 
 		err = kc.DropCopySegmentTask(context.Background(), task.GetTaskId())
 		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
+	kc := &Catalog{}
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:          12345,
+		CollectionName: "test_collection",
+		State:          indexpb.JobState_JobStateInProgress,
+		Progress:       50,
+	}
+
+	task := &datapb.ExternalCollectionRefreshTask{
+		TaskId: 54321,
+		JobId:  12345,
+		State:  indexpb.JobState_JobStateInProgress,
+	}
+
+	resource := &internalpb.FileResourceInfo{
+		Id:   int64(12345),
+		Name: "test_resource",
+	}
+
+	t.Run("SaveExternalCollectionRefreshJob", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(1)
+		kc.MetaKv = txn
+
+		err := kc.SaveExternalCollectionRefreshJob(context.Background(), job)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ListExternalCollectionRefreshJobs", func(t *testing.T) {
+		value, err := proto.Marshal(job)
+		assert.NoError(t, err)
+
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				return f([]byte("key1"), value)
+			}).Times(1)
+		kc.MetaKv = txn
+
+		jobs, err := kc.ListExternalCollectionRefreshJobs(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(jobs))
+		assert.Equal(t, int64(12345), jobs[0].JobId)
+	})
+
+	t.Run("DropExternalCollectionRefreshJob", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Times(1)
+		kc.MetaKv = txn
+
+		err := kc.DropExternalCollectionRefreshJob(context.Background(), job.GetJobId())
+		assert.NoError(t, err)
+	})
+
+	t.Run("SaveExternalCollectionRefreshTask", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(1)
+		kc.MetaKv = txn
+
+		err := kc.SaveExternalCollectionRefreshTask(context.Background(), task)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ListExternalCollectionRefreshTasks", func(t *testing.T) {
+		value, err := proto.Marshal(task)
+		assert.NoError(t, err)
+
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				return f([]byte("key1"), value)
+			}).Times(1)
+		kc.MetaKv = txn
+
+		tasks, err := kc.ListExternalCollectionRefreshTasks(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(tasks))
+		assert.Equal(t, int64(54321), tasks[0].TaskId)
+	})
+
+	t.Run("DropExternalCollectionRefreshTask", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Times(1)
+		kc.MetaKv = txn
+
+		err := kc.DropExternalCollectionRefreshTask(context.Background(), task.GetTaskId())
+		assert.NoError(t, err)
+	})
+
+	t.Run("SaveFileResource", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Times(1)
+		kc.MetaKv = txn
+
+		err := kc.SaveFileResource(context.Background(), resource, uint64(1))
+		assert.NoError(t, err)
+	})
+
+	t.Run("RemoveFileResource", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(1)
+		kc.MetaKv = txn
+
+		err := kc.RemoveFileResource(context.Background(), resource.GetId(), uint64(1))
+		assert.NoError(t, err)
+	})
+
+	t.Run("ListFileResource", func(t *testing.T) {
+		value, err := proto.Marshal(resource)
+		assert.NoError(t, err)
+
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
+			[]string{"key1"}, []string{string(value)}, nil).Times(1)
+		txn.EXPECT().Has(mock.Anything, mock.Anything).Return(true, nil).Times(1)
+		txn.EXPECT().Load(mock.Anything, mock.Anything).Return("100", nil).Times(1)
+		kc.MetaKv = txn
+
+		resources, version, err := kc.ListFileResource(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(resources))
+		assert.Equal(t, int64(12345), resources[0].GetId())
+		assert.Equal(t, uint64(100), version)
+	})
+
+	t.Run("BuildFileResourceKey", func(t *testing.T) {
+		key := BuildFileResourceKey(int64(12345))
+		assert.NotEmpty(t, key)
+		assert.Contains(t, key, "12345")
 	})
 }

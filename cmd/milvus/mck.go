@@ -16,17 +16,17 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -301,8 +301,8 @@ func (c *mck) collectInvalidTaskForPartition() []int64 {
 	for id, tasks := range c.partitionIDToTasks {
 		if _, ok := c.partitionIDMap[id]; !ok {
 			invalidTasksOfPartition = append(invalidTasksOfPartition, tasks...)
-			buffer.WriteString(fmt.Sprintf("Partition ID: %d\n", id))
-			buffer.WriteString(fmt.Sprintf("Tasks: %v\n", tasks))
+			fmt.Fprintf(&buffer, "Partition ID: %d\n", id)
+			fmt.Fprintf(&buffer, "Tasks: %v\n", tasks)
 		}
 	}
 	invalidTasksOfPartition = removeRepeatElement(invalidTasksOfPartition)
@@ -322,8 +322,8 @@ func (c *mck) collectInvalidTaskForSegment() []int64 {
 		for id, tasks := range c.segmentIDToTasks {
 			if _, ok := c.segmentIDMap[id]; !ok {
 				invalidTasksOfSegment = append(invalidTasksOfSegment, tasks...)
-				buffer.WriteString(fmt.Sprintf("Segment ID: %d\n", id))
-				buffer.WriteString(fmt.Sprintf("Tasks: %v\n", tasks))
+				fmt.Fprintf(&buffer, "Segment ID: %d\n", id)
+				fmt.Fprintf(&buffer, "Tasks: %v\n", tasks)
 			}
 		}
 		invalidTasksOfSegment = removeRepeatElement(invalidTasksOfSegment)

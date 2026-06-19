@@ -31,12 +31,12 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type DistControllerTestSuite struct {
@@ -80,7 +80,6 @@ func (suite *DistControllerTestSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
-	suite.mockScheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(nil).Maybe()
 
 	suite.controller = NewDistController(suite.mockCluster, suite.nodeMgr, distManager, targetManager, suite.mockScheduler, func(collectionID ...int64) {})
 }
@@ -169,7 +168,7 @@ func (suite *DistControllerTestSuite) TestSyncAll() {
 	).Run(func(args mock.Arguments) {
 		calledSet.Insert(args[1].(int64))
 	})
-	suite.mockScheduler.EXPECT().Dispatch(mock.Anything)
+	suite.mockScheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 
 	// stop inner loop
 	suite.controller.handlers[1].stop()

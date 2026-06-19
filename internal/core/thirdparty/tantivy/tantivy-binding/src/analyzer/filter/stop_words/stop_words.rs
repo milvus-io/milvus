@@ -54,6 +54,7 @@ fn fetch_words_from_file(data: &[u8]) -> &'static [&'static str] {
 
 pub fn fetch_language_stop_words(lang: &str) -> Option<&[&str]> {
     match lang {
+        "_arabic_" => Some(&*ARABIC),
         "_english_" => Some(ENGLISH),
         "_danish_" => Some(DANISH),
         "_dutch_" => Some(DUTCH),
@@ -67,6 +68,7 @@ pub fn fetch_language_stop_words(lang: &str) -> Option<&[&str]> {
         "_russian_" => Some(RUSSIAN),
         "_spanish_" => Some(SPANISH),
         "_swedish_" => Some(SWEDISH),
+        "_thai_" => Some(&*THAI),
         "_chinese_" => Some(&*CHINESE),
         _ => None,
     }
@@ -1943,6 +1945,23 @@ pub const SWEDISH: &[&str] = &[
 pub static CHINESE_DATA: &[u8] = include_bytes!("chinese.txt");
 
 pub static CHINESE: Lazy<&[&str]> = Lazy::new(|| fetch_words_from_file(CHINESE_DATA));
+
+/*
+Arabic stop words from the Apache Lucene project.
+Licensed under the Apache License, Version 2.0.
+Created by Jacques Savoy and distributed under the BSD license.
+*/
+pub static ARABIC_DATA: &[u8] = include_bytes!("arabic.txt");
+
+pub static ARABIC: Lazy<&[&str]> = Lazy::new(|| fetch_words_from_file(ARABIC_DATA));
+
+/*
+Thai stop words from the Apache Lucene project.
+Licensed under the Apache License, Version 2.0.
+*/
+pub static THAI_DATA: &[u8] = include_bytes!("thai.txt");
+
+pub static THAI: Lazy<&[&str]> = Lazy::new(|| fetch_words_from_file(THAI_DATA));
 
 #[cfg(test)]
 mod tests {

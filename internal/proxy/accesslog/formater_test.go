@@ -30,13 +30,13 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
-	"github.com/milvus-io/milvus/pkg/v2/tracer"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type LogFormatterSuite struct {
@@ -154,6 +154,15 @@ func (s *LogFormatterSuite) TestFormatMethodInfo() {
 		i := info.NewGrpcAccessInfo(metaContext, s.serverinfo, req)
 		fs := formatter.Format(i)
 		s.True(strings.Contains(fs, s.traceID))
+	}
+
+	missingIDContext := metadata.AppendToOutgoingContext(s.ctx, "other", "value")
+	for _, req := range s.reqs {
+		i := info.NewGrpcAccessInfo(missingIDContext, s.serverinfo, req)
+		s.NotPanics(func() {
+			fs := formatter.Format(i)
+			s.True(strings.Contains(fs, info.Unknown))
+		})
 	}
 
 	tracer.Init()

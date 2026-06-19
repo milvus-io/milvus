@@ -23,15 +23,15 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type indexInspector struct {
@@ -107,8 +107,9 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			}
 		case collectionID := <-i.notifyIndexChan:
 			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
+			isExternal := i.isExternalCollection(collectionID)
 			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted())
+				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
 			}))
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
@@ -132,9 +133,7 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 }
 
 func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
-	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg)
-	}))
+	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(isFlush))
 
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {
@@ -146,7 +145,7 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if enableSortCompaction() && !segment.GetIsSorted() {
+	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
 		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
@@ -157,16 +156,67 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 
 	indexes := i.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
 	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+	var segmentBinlogFields map[int64]struct{}
+
 	for _, index := range indexes {
-		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
-			if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
-				log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
-					zap.Int64("indexID", index.IndexID))
-				return err
-			}
+		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
+			continue
+		}
+		if segmentBinlogFields == nil {
+			segmentBinlogFields = getSegmentBinlogFields(segment)
+		}
+		if !i.canCreateIndexForSegment(ctx, segment, index, segmentBinlogFields) {
+			continue
+		}
+		if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
+			log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
+				zap.Int64("indexID", index.IndexID))
+			return err
 		}
 	}
 	return nil
+}
+
+// getSegmentBinlogFields returns the set of field IDs that have binlog data in the segment.
+// StorageV2/V3 column groups report real field IDs through ChildFields; legacy entries may use FieldID directly.
+func getSegmentBinlogFields(segment *SegmentInfo) map[int64]struct{} {
+	result := make(map[int64]struct{})
+	for _, binlog := range segment.GetBinlogs() {
+		if len(binlog.GetChildFields()) == 0 {
+			if segment.GetStorageVersion() == storage.StorageV1 {
+				result[binlog.GetFieldID()] = struct{}{}
+			}
+			continue
+		}
+		for _, childFieldID := range binlog.GetChildFields() {
+			result[childFieldID] = struct{}{}
+		}
+	}
+	return result
+}
+
+func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index, segmentBinlogFields map[int64]struct{}) bool {
+	_, hasField := segmentBinlogFields[index.FieldID]
+	if !i.isFunctionOutputField(segment.CollectionID, index.FieldID) || hasField {
+		return true
+	}
+	log.Ctx(ctx).Debug("function output field has no binlog, skip create index", zap.Int64("segmentID", segment.ID), zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID))
+	return false
+}
+
+func (i *indexInspector) isFunctionOutputField(collectionID, fieldID int64) bool {
+	collection := i.meta.GetCollection(collectionID)
+	if collection == nil || collection.Schema == nil {
+		return false
+	}
+	for _, functionSchema := range collection.Schema.GetFunctions() {
+		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
+			if outputFieldID == fieldID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
@@ -198,15 +248,16 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	}
 
 	segIndex := &model.SegmentIndex{
-		SegmentID:      segment.ID,
-		CollectionID:   segment.CollectionID,
-		PartitionID:    segment.PartitionID,
-		NumRows:        segment.NumOfRows,
-		IndexID:        indexID,
-		BuildID:        buildID,
-		CreatedUTCTime: uint64(time.Now().Unix()),
-		WriteHandoff:   false,
-		IndexType:      indexType,
+		SegmentID:             segment.ID,
+		CollectionID:          segment.CollectionID,
+		PartitionID:           segment.PartitionID,
+		NumRows:               segment.NumOfRows,
+		IndexID:               indexID,
+		BuildID:               buildID,
+		CreatedUTCTime:        uint64(time.Now().Unix()),
+		WriteHandoff:          false,
+		IndexType:             indexType,
+		IndexStorePathVersion: i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion(),
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err
@@ -225,6 +276,11 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		zap.Int64("field size", fieldSize),
 		zap.Int64("task slot", taskSlot))
 	return nil
+}
+
+func (i *indexInspector) isExternalCollection(collectionID int64) bool {
+	coll := i.meta.GetCollection(collectionID)
+	return coll != nil && coll.IsExternal()
 }
 
 func (i *indexInspector) reloadFromMeta() {

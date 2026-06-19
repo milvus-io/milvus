@@ -10,8 +10,8 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 )
 
 func TestDatabaseInterceptor(t *testing.T) {
@@ -101,7 +101,12 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.ManualCompactionRequest{},
+			&milvuspb.AddCollectionFieldRequest{},
+			&milvuspb.AddCollectionStructFieldRequest{},
+			&milvuspb.AlterCollectionSchemaRequest{},
 			&milvuspb.RunAnalyzerRequest{},
+			&milvuspb.RefreshExternalCollectionRequest{},
+			&milvuspb.ListRefreshExternalCollectionJobsRequest{},
 		}
 
 		md := metadata.Pairs(util.HeaderDBName, "db")

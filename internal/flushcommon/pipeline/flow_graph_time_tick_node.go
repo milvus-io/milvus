@@ -26,14 +26,15 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // make sure ttNode implements flowgraph.Node
@@ -154,7 +155,7 @@ func (ttn *ttNode) waitForCheckpointUpdate(fgMsg *FlowGraphMsg, curTs time.Time)
 		}
 		if !needUpdate {
 			// Return a temporary error to trigger retry with backoff
-			return fmt.Errorf("checkpoint not ready yet")
+			return merr.Wrap(merr.ErrServiceUnavailable, "checkpoint not ready yet")
 		}
 		// needUpdate is true, operation succeeded
 		return nil

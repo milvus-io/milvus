@@ -5,13 +5,15 @@ package mock_streaming
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 )
@@ -205,17 +207,76 @@ func (_c *MockReplicateService_GetReplicateConfiguration_Call) RunAndReturn(run 
 	return _c
 }
 
-// UpdateReplicateConfiguration provides a mock function with given fields: ctx, config
-func (_m *MockReplicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
-	ret := _m.Called(ctx, config)
+// GetSalvageCheckpoint provides a mock function with given fields: ctx, channelName
+func (_m *MockReplicateService) GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error) {
+	ret := _m.Called(ctx, channelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSalvageCheckpoint")
+	}
+
+	var r0 []*wal.ReplicateCheckpoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*wal.ReplicateCheckpoint, error)); ok {
+		return rf(ctx, channelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*wal.ReplicateCheckpoint); ok {
+		r0 = rf(ctx, channelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*wal.ReplicateCheckpoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, channelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockReplicateService_GetSalvageCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSalvageCheckpoint'
+type MockReplicateService_GetSalvageCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetSalvageCheckpoint is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channelName string
+func (_e *MockReplicateService_Expecter) GetSalvageCheckpoint(ctx interface{}, channelName interface{}) *MockReplicateService_GetSalvageCheckpoint_Call {
+	return &MockReplicateService_GetSalvageCheckpoint_Call{Call: _e.mock.On("GetSalvageCheckpoint", ctx, channelName)}
+}
+
+func (_c *MockReplicateService_GetSalvageCheckpoint_Call) Run(run func(ctx context.Context, channelName string)) *MockReplicateService_GetSalvageCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockReplicateService_GetSalvageCheckpoint_Call) Return(_a0 []*wal.ReplicateCheckpoint, _a1 error) *MockReplicateService_GetSalvageCheckpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockReplicateService_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) ([]*wal.ReplicateCheckpoint, error)) *MockReplicateService_GetSalvageCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateReplicateConfiguration provides a mock function with given fields: ctx, req
+func (_m *MockReplicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
+	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateReplicateConfiguration")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.ReplicateConfiguration) error); ok {
-		r0 = rf(ctx, config)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) error); ok {
+		r0 = rf(ctx, req)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -230,14 +291,14 @@ type MockReplicateService_UpdateReplicateConfiguration_Call struct {
 
 // UpdateReplicateConfiguration is a helper method to define mock.On call
 //   - ctx context.Context
-//   - config *commonpb.ReplicateConfiguration
-func (_e *MockReplicateService_Expecter) UpdateReplicateConfiguration(ctx interface{}, config interface{}) *MockReplicateService_UpdateReplicateConfiguration_Call {
-	return &MockReplicateService_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, config)}
+//   - req *milvuspb.UpdateReplicateConfigurationRequest
+func (_e *MockReplicateService_Expecter) UpdateReplicateConfiguration(ctx interface{}, req interface{}) *MockReplicateService_UpdateReplicateConfiguration_Call {
+	return &MockReplicateService_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, req)}
 }
 
-func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *commonpb.ReplicateConfiguration)) *MockReplicateService_UpdateReplicateConfiguration_Call {
+func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest)) *MockReplicateService_UpdateReplicateConfiguration_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*commonpb.ReplicateConfiguration))
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateReplicateConfigurationRequest))
 	})
 	return _c
 }
@@ -247,7 +308,7 @@ func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) Return(_a0 err
 	return _c
 }
 
-func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *commonpb.ReplicateConfiguration) error) *MockReplicateService_UpdateReplicateConfiguration_Call {
+func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) error) *MockReplicateService_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }

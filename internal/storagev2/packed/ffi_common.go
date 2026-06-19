@@ -4,6 +4,7 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "storage/loon_ffi/external_spec_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 */
@@ -15,39 +16,65 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
+
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// Property keys - matching milvus-storage/properties.h
-const (
-	PropertyFSAddress             = "fs.address"
-	PropertyFSBucketName          = "fs.bucket_name"
-	PropertyFSAccessKeyID         = "fs.access_key_id"
-	PropertyFSAccessKeyValue      = "fs.access_key_value"
-	PropertyFSRootPath            = "fs.root_path"
-	PropertyFSStorageType         = "fs.storage_type"
-	PropertyFSCloudProvider       = "fs.cloud_provider"
-	PropertyFSIAMEndpoint         = "fs.iam_endpoint"
-	PropertyFSLogLevel            = "fs.log_level"
-	PropertyFSRegion              = "fs.region"
-	PropertyFSUseSSL              = "fs.use_ssl"
-	PropertyFSSSLCACert           = "fs.ssl_ca_cert"
-	PropertyFSUseIAM              = "fs.use_iam"
-	PropertyFSUseVirtualHost      = "fs.use_virtual_host"
-	PropertyFSRequestTimeoutMS    = "fs.request_timeout_ms"
-	PropertyFSGCPCredentialJSON   = "fs.gcp_credential_json"
-	PropertyFSUseCustomPartUpload = "fs.use_custom_part_upload"
+// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
+// milvus-storage does not expose structured error codes, so callers cannot
+// distinguish a recoverable concurrent-transaction conflict from a hard IO
+// error. We treat all loon failures as retryable for now and rely on a
+// bounded retry budget plus outer error handling to keep the worst case
+// finite.
+//
+// TODO(storage v3): once milvus-storage exposes explicit error codes, narrow
+// this sentinel to only the concurrent-transaction case (FailResolver) and
+// let other errors propagate immediately as retry.Unrecoverable.
+var ErrLoonTransient = errors.New("loon FFI transient error")
 
-	PropertyWriterPolicy             = "writer.policy"
-	PropertyWriterSchemaBasedPattern = "writer.split.schema_based.patterns"
+// Property keys exported by milvus-storage/ffi_c.h.
+var (
+	PropertyFSAddress             = C.GoString(C.loon_properties_fs_address)
+	PropertyFSBucketName          = C.GoString(C.loon_properties_fs_bucket_name)
+	PropertyFSAccessKeyID         = C.GoString(C.loon_properties_fs_access_key_id)
+	PropertyFSAccessKeyValue      = C.GoString(C.loon_properties_fs_access_key_value)
+	PropertyFSRootPath            = C.GoString(C.loon_properties_fs_root_path)
+	PropertyFSStorageType         = C.GoString(C.loon_properties_fs_storage_type)
+	PropertyFSCloudProvider       = C.GoString(C.loon_properties_fs_cloud_provider)
+	PropertyFSIAMEndpoint         = C.GoString(C.loon_properties_fs_iam_endpoint)
+	PropertyFSLogLevel            = C.GoString(C.loon_properties_fs_log_level)
+	PropertyFSRegion              = C.GoString(C.loon_properties_fs_region)
+	PropertyFSUseSSL              = C.GoString(C.loon_properties_fs_use_ssl)
+	PropertyFSSSLCACert           = C.GoString(C.loon_properties_fs_ssl_ca_cert)
+	PropertyFSUseIAM              = C.GoString(C.loon_properties_fs_use_iam)
+	PropertyFSUseVirtualHost      = C.GoString(C.loon_properties_fs_use_virtual_host)
+	PropertyFSRequestTimeoutMS    = C.GoString(C.loon_properties_fs_request_timeout_ms)
+	PropertyFSGCPCredentialJSON   = C.GoString(C.loon_properties_fs_gcp_credential_json)
+	PropertyFSUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
+	PropertyFSMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
+	PropertyFSTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
+	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
+
+	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
+	PropertyWriterFormat             = "writer.format"
+	PropertyWriterSchemaBasedPattern = C.GoString(C.loon_properties_writer_schema_base_patterns)
+	PropertyWriterSchemaBasedFormats = "writer.split.schema_based.formats"
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
-	PropertyWriterEncEnable = "writer.enc.enable"    // Enable encryption for written data
-	PropertyWriterEncKey    = "writer.enc.key"       // Encryption key for data encryption
-	PropertyWriterEncMeta   = "writer.enc.meta"      // Encoded metadata containing zone ID, collection ID, and key version
-	PropertyWriterEncAlgo   = "writer.enc.algorithm" // Encryption algorithm (e.g., "AES_GCM_V1")
+	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data
+	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Encryption key for data encryption
+	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
+	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
+
+// ExtfsPrefixForCollection returns the per-collection extfs property prefix.
+func ExtfsPrefixForCollection(collectionID int64) string {
+	return fmt.Sprintf("extfs.%d.", collectionID)
+}
 
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
 // This function converts a StorageConfig structure into a Properties object by
@@ -55,7 +82,7 @@ const (
 // StorageConfig are mapped to corresponding key-value pairs in Properties.
 func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
 	if storageConfig == nil {
-		return nil, fmt.Errorf("storageConfig is required")
+		return nil, merr.WrapErrStorageMsg("storageConfig is required")
 	}
 
 	// Prepare key-value pairs from StorageConfig
@@ -95,9 +122,8 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, PropertyFSIAMEndpoint)
 		values = append(values, storageConfig.GetIAMEndpoint())
 	}
-	// Always add log level if any string field is set (matching C++ behavior)
 	keys = append(keys, PropertyFSLogLevel)
-	values = append(values, "Warn")
+	values = append(values, "warn")
 
 	if storageConfig.GetRegion() != "" {
 		keys = append(keys, PropertyFSRegion)
@@ -141,10 +167,41 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
 
-	// Add extra kvs
-	for k, v := range extraKVs {
-		keys = append(keys, k)
+	// Add TLS min version (skip "default" — consistent with C++ layer filtering)
+	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {
+		keys = append(keys, PropertyFSTLSMinVersion)
 		values = append(values, v)
+	}
+
+	// Add CRC32C checksum
+	keys = append(keys, PropertyFSUseCRC32CChecksum)
+	if storageConfig.GetUseCrc32CChecksum() {
+		values = append(values, "true")
+	} else {
+		values = append(values, "false")
+	}
+
+	keys = append(keys, PropertyWriterFormat)
+	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
+
+	// No extfs.default.* properties here. Per-collection extfs properties
+	// (extfs.{collectionID}.*) are injected downstream via
+	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
+
+	// Add extra kvs (override existing keys if present)
+	for k, v := range extraKVs {
+		found := false
+		for i, existingKey := range keys {
+			if existingKey == k {
+				values[i] = v
+				found = true
+				break
+			}
+		}
+		if !found {
+			keys = append(keys, k)
+			values = append(values, v)
+		}
 	}
 
 	// Convert to C arrays
@@ -180,9 +237,56 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 
 	err := HandleLoonFFIResult(result)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrStorage(err, "loon properties_create failed")
 	}
 	return properties, nil
+}
+
+// FreeProperties releases a C-allocated LoonProperties object.
+func FreeProperties(props *C.LoonProperties) {
+	if props != nil {
+		C.loon_properties_free(props)
+	}
+}
+
+// ExternalSpecContext carries the raw external-table inputs that C++
+// InjectExternalSpecProperties needs to derive both extfs.{collectionID}.*
+// (storage layer) and format-layer properties (e.g. iceberg.snapshot_id)
+// from a single external_spec JSON. Zero value (CollectionID=0, Source="")
+// signals an internal (non-external) collection — injectExternalSpecProperties
+// treats it as a no-op.
+type ExternalSpecContext struct {
+	CollectionID int64
+	Source       string
+	Spec         string // raw JSON; C++ InjectExternalSpecProperties parses
+}
+
+// injectExternalSpecProperties appends every external_spec-derived property
+// (extfs.<collectionID>.* and format-layer keys) onto an existing
+// LoonProperties via the C++ InjectExternalSpecProperties pipeline. No-op
+// when externalSource is empty.
+func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int64,
+	externalSource, externalSpec string,
+) error {
+	if properties == nil {
+		return merr.WrapErrStorageMsg("injectExternalSpecProperties: properties is nil")
+	}
+	if externalSource == "" {
+		return nil
+	}
+	cSource := C.CString(externalSource)
+	defer C.free(unsafe.Pointer(cSource))
+	var cSpec *C.char
+	if externalSpec != "" {
+		cSpec = C.CString(externalSpec)
+		defer C.free(unsafe.Pointer(cSpec))
+	}
+	result := C.loon_properties_inject_external_spec(
+		properties, C.int64_t(collectionID), cSource, cSpec)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return merr.WrapErrStorage(err, "loon inject_external_spec failed")
+	}
+	return nil
 }
 
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
@@ -194,7 +298,7 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 			errStr = C.GoString(errMsg)
 		}
 
-		return fmt.Errorf("failed to create properties: %s", errStr)
+		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
 	}
 	return nil
 }
@@ -205,18 +309,171 @@ type ManifestJSON struct {
 }
 
 func MarshalManifestPath(basePath string, version int64) string {
-	bs, _ := json.Marshal(ManifestJSON{
+	bs, err := json.Marshal(ManifestJSON{
 		ManifestVersion: version,
 		BasePath:        basePath,
 	})
+	if err != nil {
+		// json.Marshal on string+int64 struct should never fail, but log if it does
+		return fmt.Sprintf(`{"ver":%d,"base_path":"%s"}`, version, basePath)
+	}
 	return string(bs)
 }
 
-func UnmarshalManfestPath(manifestPath string) (string, int64, error) {
+func UnmarshalManifestPath(manifestPath string) (string, int64, error) {
 	var manifestJSON ManifestJSON
 	err := json.Unmarshal([]byte(manifestPath), &manifestJSON)
 	if err != nil {
 		return "", 0, err
 	}
 	return manifestJSON.BasePath, manifestJSON.ManifestVersion, nil
+}
+
+// CompareManifestPath compares two manifest paths by their version.
+func CompareManifestPath(a, b string) (int, error) {
+	if a == b {
+		return 0, nil
+	}
+
+	aBase, aVer, aErr := UnmarshalManifestPath(a)
+	bBase, bVer, bErr := UnmarshalManifestPath(b)
+
+	if aErr != nil {
+		return 0, merr.WrapErrStorage(aErr, "failed to parse manifest path %q", a)
+	}
+	if bErr != nil {
+		return 0, merr.WrapErrStorage(bErr, "failed to parse manifest path %q", b)
+	}
+
+	if aBase != bBase {
+		return 0, merr.WrapErrServiceInternalMsg("manifest paths have different base paths: %q vs %q", aBase, bBase)
+	}
+
+	switch {
+	case aVer < bVer:
+		return -1, nil
+	case aVer > bVer:
+		return 1, nil
+	default:
+		return 0, nil
+	}
+}
+
+// LobFileInfo represents metadata for a LOB (Large Object) file.
+// used for TEXT column compaction strategy decision (hole ratio calculation)
+type LobFileInfo struct {
+	Path          string // relative path to the LOB file
+	FieldID       int64  // field ID this LOB file belongs to
+	TotalRows     int64  // total number of rows in the LOB file
+	ValidRows     int64  // number of valid (non-deleted) rows
+	FileSizeBytes int64  // size of the LOB file in bytes
+}
+
+// AddLobFilesToTransaction adds multiple LOB files to a transaction in a single commit.
+// this is used during compaction REUSE_ALL mode to merge LOB file references.
+// returns the new committed version after the transaction.
+func AddLobFilesToTransaction(basePath string, version int64, storageConfig *indexpb.StorageConfig, lobFiles []LobFileInfo) (int64, error) {
+	if len(lobFiles) == 0 {
+		return version, nil
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return 0, merr.Wrap(err, "failed to make properties")
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	// open transaction
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	// add all LOB files
+	for _, lobFile := range lobFiles {
+		cPath := C.CString(lobFile.Path)
+
+		cLobFile := C.LoonLobFileInfo{
+			path:            cPath,
+			field_id:        C.int64_t(lobFile.FieldID),
+			total_rows:      C.int64_t(lobFile.TotalRows),
+			valid_rows:      C.int64_t(lobFile.ValidRows),
+			file_size_bytes: C.int64_t(lobFile.FileSizeBytes),
+		}
+
+		result = C.loon_transaction_add_lob_file(cTransactionHandle, &cLobFile)
+		C.free(unsafe.Pointer(cPath))
+
+		if err := HandleLoonFFIResult(result); err != nil {
+			return 0, merr.WrapErrStorage(err, "failed to add LOB file %s", lobFile.Path)
+		}
+	}
+
+	// commit transaction
+	var committedVersion C.int64_t
+	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return 0, merr.WrapErrStorage(err, "failed to commit transaction")
+	}
+
+	return int64(committedVersion), nil
+}
+
+// GetManifestLobFiles retrieves LOB file information from a manifest.
+// this is used by compaction to calculate hole ratios for TEXT columns.
+func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConfig) ([]LobFileInfo, error) {
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return nil, merr.WrapErrStorage(err, "failed to unmarshal manifest path")
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to make properties")
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	// open transaction to get manifest
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	// get manifest
+	var cManifest *C.LoonManifest
+	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, merr.WrapErrStorage(err, "failed to get manifest")
+	}
+	defer C.loon_manifest_destroy(cManifest)
+
+	// extract LOB files from manifest
+	numFiles := int(cManifest.lob_files.num_files)
+	lobFiles := make([]LobFileInfo, 0, numFiles)
+
+	if numFiles > 0 && cManifest.lob_files.files != nil {
+		// convert C array to Go slice
+		cFiles := unsafe.Slice(cManifest.lob_files.files, numFiles)
+		for _, cFile := range cFiles {
+			lobFiles = append(lobFiles, LobFileInfo{
+				Path:          C.GoString(cFile.path),
+				FieldID:       int64(cFile.field_id),
+				TotalRows:     int64(cFile.total_rows),
+				ValidRows:     int64(cFile.valid_rows),
+				FileSizeBytes: int64(cFile.file_size_bytes),
+			})
+		}
+	}
+
+	return lobFiles, nil
 }

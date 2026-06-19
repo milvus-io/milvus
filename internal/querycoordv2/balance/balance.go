@@ -30,10 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Balance is the interface that all balancers must implement.
@@ -55,10 +53,9 @@ type Balance interface {
 // This balancer is useful for scenarios where uniform distribution is more important than
 // weighted distribution based on actual load.
 type RoundRobinBalancer struct {
+	BalanceReplicaHelper
 	scheduler    task.Scheduler
-	nodeManager  *session.NodeManager
 	dist         *meta.DistributionManager
-	meta         *meta.Meta
 	targetMgr    meta.TargetManagerInterface
 	assignPolicy assign.AssignPolicy
 }
@@ -101,13 +98,7 @@ func (b *RoundRobinBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 // balanceChannels generates channel balance plans for a replica.
 // It requires at least 2 RW nodes to perform balancing.
 func (b *RoundRobinBalancer) balanceChannels(ctx context.Context, replica *meta.Replica) []assign.ChannelAssignPlan {
-	var rwNodes []int64
-	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, _ = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
-	} else {
-		rwNodes = replica.GetRWNodes()
-	}
-
+	rwNodes := b.GetRWNodesForChannels(replica)
 	if len(rwNodes) < 2 {
 		return nil
 	}
@@ -195,7 +186,7 @@ func (b *RoundRobinBalancer) genChannelPlan(ctx context.Context, replica *meta.R
 	channelsToMove := make([]*meta.DmChannel, 0)
 
 	for _, node := range rwNodes {
-		channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
 		channels = sortIfChannelAtWALLocated(channels)
 
 		if len(channels) <= average {
@@ -226,16 +217,14 @@ func NewRoundRobinBalancer(
 	scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
-	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 ) *RoundRobinBalancer {
 	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRoundRobin)
 	return &RoundRobinBalancer{
-		scheduler:    scheduler,
-		nodeManager:  nodeManager,
-		dist:         dist,
-		meta:         meta,
-		targetMgr:    targetMgr,
-		assignPolicy: policy,
+		BalanceReplicaHelper: BalanceReplicaHelper{nodeManager: nodeManager},
+		scheduler:            scheduler,
+		dist:                 dist,
+		targetMgr:            targetMgr,
+		assignPolicy:         policy,
 	}
 }

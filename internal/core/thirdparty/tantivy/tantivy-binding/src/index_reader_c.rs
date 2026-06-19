@@ -4,11 +4,13 @@ use crate::{
     array::RustResult,
     convert_to_rust_slice, cstr_to_str,
     index_reader::IndexReaderWrapper,
+    ptr_to_str,
     util::{create_binding, free_binding},
     util_c::tantivy_index_exist,
 };
 
 pub(crate) type SetBitsetFn = extern "C" fn(*mut c_void, *const u32, usize);
+pub(crate) type RegexMatchFn = extern "C" fn(*mut c_void, *const u8, usize) -> bool;
 
 #[no_mangle]
 pub extern "C" fn tantivy_load_index(
@@ -301,23 +303,40 @@ pub extern "C" fn tantivy_range_query_keyword(
 #[no_mangle]
 pub extern "C" fn tantivy_prefix_query_keyword(
     ptr: *mut c_void,
-    prefix: *const c_char,
+    prefix: *const u8,
+    prefix_len: usize,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    let prefix = cstr_to_str!(prefix);
+    let prefix = ptr_to_str!(prefix, prefix_len);
     unsafe { (*real).prefix_query_keyword(prefix, bitset).into() }
 }
 
 #[no_mangle]
 pub extern "C" fn tantivy_regex_query(
     ptr: *mut c_void,
-    pattern: *const c_char,
+    pattern: *const u8,
+    pattern_len: usize,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    let pattern = cstr_to_str!(pattern);
+    let pattern = ptr_to_str!(pattern, pattern_len);
     unsafe { (*real).regex_query(pattern, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_regex_match_query(
+    ptr: *mut c_void,
+    matcher_ctx: *mut c_void,
+    matcher: RegexMatchFn,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        (*real)
+            .regex_match_query(matcher_ctx, matcher, bitset)
+            .into()
+    }
 }
 
 // -------------------------json query--------------------
@@ -370,6 +389,79 @@ pub extern "C" fn tantivy_json_term_query_keyword(
     unsafe {
         (*real)
             .json_term_query_keyword(json_path, term, bitset)
+            .into()
+    }
+}
+
+// Batch JSON terms queries
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_i64(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const i64,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_i64(json_path, terms, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_f64(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const f64,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_f64(json_path, terms, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_bool(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const bool,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_bool(json_path, terms, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_json_terms_query_keyword(
+    ptr: *mut c_void,
+    json_path: *const c_char,
+    terms: *const *const c_char,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let json_path = cstr_to_str!(json_path);
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe {
+        (*real)
+            .json_terms_query_keyword(json_path, terms, bitset)
             .into()
     }
 }
@@ -511,12 +603,13 @@ pub extern "C" fn tantivy_json_range_query_keyword(
 pub extern "C" fn tantivy_json_regex_query(
     ptr: *mut c_void,
     json_path: *const c_char,
-    pattern: *const c_char,
+    pattern: *const u8,
+    pattern_len: usize,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let json_path = cstr_to_str!(json_path);
-    let pattern = cstr_to_str!(pattern);
+    let pattern = ptr_to_str!(pattern, pattern_len);
     unsafe { (*real).json_regex_query(json_path, pattern, bitset).into() }
 }
 
@@ -524,12 +617,13 @@ pub extern "C" fn tantivy_json_regex_query(
 pub extern "C" fn tantivy_json_prefix_query(
     ptr: *mut c_void,
     json_path: *const c_char,
-    prefix: *const c_char,
+    prefix: *const u8,
+    prefix_len: usize,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let json_path = cstr_to_str!(json_path);
-    let prefix = cstr_to_str!(prefix);
+    let prefix = ptr_to_str!(prefix, prefix_len);
     unsafe { (*real).json_prefix_query(json_path, prefix, bitset).into() }
 }
 

@@ -1,6 +1,6 @@
 package types
 
-import "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+import "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 
 const (
 	UpdateMaskPathWALBalancePolicyAllowRebalance = "config.allow_rebalance"

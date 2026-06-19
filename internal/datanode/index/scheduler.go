@@ -26,9 +26,10 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/internal/storagev2"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -79,7 +80,7 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return errors.New("index task queue is full")
+		return merr.Wrap(merr.ErrServiceResourceInsufficient, "index task queue is full")
 	}
 	queue.unissuedTasks.PushBack(t)
 	select {
@@ -252,6 +253,13 @@ func (sched *TaskScheduler) processTask(t Task) {
 		}
 	}
 	t.SetState(indexpb.JobState_JobStateFinished, "")
+
+	// Publish filesystem metrics after index task completion
+	if indexTask, ok := t.(*indexBuildTask); ok {
+		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
+			storagev2.PublishFilesystemMetricsWithConfig(indexTask.req.GetStorageConfig())
+		}
+	}
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {

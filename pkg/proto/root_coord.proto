@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.rootcoord;
 
-option go_package="github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb";
+option go_package="github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb";
 
 import "common.proto";
 import "milvus.proto";
@@ -48,6 +48,26 @@ service RootCoord {
      * @return Status
      */
     rpc AddCollectionField(milvus.AddCollectionFieldRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to add collection struct field.
+     *
+     * @param AddCollectionStructFieldRequest, struct field schema is going to be added.
+     *
+     * @return Status
+     */
+    rpc AddCollectionStructField(milvus.AddCollectionStructFieldRequest) returns (common.Status) {}
+
+
+     /**
+     * @brief This method is used to add/drop collection field/function.
+     *
+     * @param AlterCollectionSchemaRequest, field schema is going to be added.
+     *
+     * @return AlterCollectionSchemaResponse
+     */
+    rpc AlterCollectionSchema(milvus.AlterCollectionSchemaRequest) returns (milvus.AlterCollectionSchemaResponse){}
+
 
     /**
      * @brief This method is used to test collection existence.
@@ -98,6 +118,7 @@ service RootCoord {
    * @return Status
    */
     rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
+    rpc CreatePartitionV2(milvus.CreatePartitionRequest) returns (CreatePartitionResponse) {}
 
     /**
      * @brief This method is used to drop partition
@@ -144,6 +165,7 @@ service RootCoord {
 
     // https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
     rpc CreateRole(milvus.CreateRoleRequest) returns (common.Status) {}
+    rpc AlterRole(milvus.AlterRoleRequest) returns (common.Status) {}
     rpc DropRole(milvus.DropRoleRequest) returns (common.Status) {}
     rpc OperateUserRole(milvus.OperateUserRoleRequest) returns (common.Status) {}
     rpc SelectRole(milvus.SelectRoleRequest) returns (milvus.SelectRoleResponse) {}
@@ -169,6 +191,7 @@ service RootCoord {
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
 
     rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
+    rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
     rpc BackupEzk(internal.BackupEzkRequest) returns (internal.BackupEzkResponse) {}
     // File Resource Management
     rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
@@ -303,4 +326,9 @@ message DBCollections {
 message ShowCollectionIDsResponse {
   common.Status status = 1;
   repeated DBCollections db_collections = 2;
+}
+
+message CreatePartitionResponse {
+  common.Status status = 1;
+  int64 partitionID = 2;
 }

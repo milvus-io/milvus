@@ -18,20 +18,30 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+const externalCollectionFunctionMutationUnsupportedMsg = "external collection does not support altering or dropping functions"
+
+func rejectExternalCollectionFunctionMutation(schema *schemapb.CollectionSchema) error {
+	if typeutil.IsExternalCollection(schema) {
+		return merr.WrapErrParameterInvalidMsg(externalCollectionFunctionMutationUnsupportedMsg)
+	}
+	return nil
+}
 
 type addCollectionFunctionTask struct {
 	baseTask
@@ -85,11 +95,11 @@ func (t *addCollectionFunctionTask) Name() string {
 
 func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema == nil {
-		return fmt.Errorf("Function Schema is empty")
+		return merr.WrapErrParameterInvalidMsg("function schema is empty")
 	}
 
 	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support adding BM25 function")
+		return merr.WrapErrParameterInvalidMsg("currently does not support adding BM25 function")
 	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
@@ -100,8 +110,8 @@ func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
-	newColl.Functions = append(coll.schema.CollectionSchema.Functions, t.FunctionSchema)
-	if err := validateFunction(newColl, t.FunctionSchema.Name, false); err != nil {
+	newColl.Functions = append(coll.schema.Functions, t.FunctionSchema)
+	if err := validator.ValidateFunction(newColl, t.FunctionSchema.Name, false); err != nil {
 		return err
 	}
 	return nil
@@ -172,13 +182,13 @@ func (t *alterCollectionFunctionTask) Name() string {
 
 func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema == nil {
-		return fmt.Errorf("Function Schema is empty")
+		return merr.WrapErrParameterInvalidMsg("function schema is empty")
 	}
 	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support alter BM25 function")
+		return merr.WrapErrParameterInvalidMsg("currently does not support alter BM25 function")
 	}
 	if t.FunctionName != t.FunctionSchema.Name {
-		return fmt.Errorf("Invalid function config, name not match")
+		return merr.WrapErrParameterInvalidMsg("invalid function config, name not match")
 	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
@@ -188,12 +198,15 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 			zap.Error(err))
 		return err
 	}
+	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
+		return err
+	}
 	funcExist := false
 	newFunctions := []*schemapb.FunctionSchema{}
 	for _, fSchema := range coll.schema.Functions {
 		if t.FunctionName == fSchema.Name {
 			if fSchema.Type == schemapb.FunctionType_BM25 {
-				return fmt.Errorf("Currently does not support alter BM25 function")
+				return merr.WrapErrParameterInvalidMsg("currently does not support alter BM25 function")
 			}
 			newFunctions = append(newFunctions, t.FunctionSchema)
 			funcExist = true
@@ -202,12 +215,12 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	if !funcExist {
-		return fmt.Errorf("Function %s not found", t.FunctionName)
+		return merr.WrapErrParameterInvalidMsg("function %s not found", t.FunctionName)
 	}
 
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
 	newColl.Functions = newFunctions
-	if err := validateFunction(newColl, t.FunctionName, false); err != nil {
+	if err := validator.ValidateFunction(newColl, t.FunctionName, false); err != nil {
 		return err
 	}
 	return nil
@@ -287,6 +300,9 @@ func (t *dropCollectionFunctionTask) PreExecute(ctx context.Context) error {
 			zap.Error(err))
 		return err
 	}
+	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
+		return err
+	}
 
 	for _, f := range coll.schema.Functions {
 		if f.Name == t.FunctionName {
@@ -303,7 +319,7 @@ func (t *dropCollectionFunctionTask) Execute(ctx context.Context) error {
 	}
 
 	if t.fSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support droping BM25 function")
+		return merr.WrapErrParameterInvalidMsg("currently does not support droping BM25 function")
 	}
 
 	var err error

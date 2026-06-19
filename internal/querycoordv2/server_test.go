@@ -33,9 +33,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/client-go/v2/txnkv"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -48,18 +48,19 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -142,7 +143,7 @@ func (suite *ServerSuite) SetupTest() {
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
 		suite.Require().True(ok)
-		suite.server.meta.ResourceManager.HandleNodeUp(suite.ctx, suite.nodes[i].ID)
+		suite.server.meta.HandleNodeUp(suite.ctx, suite.nodes[i].ID)
 		suite.expectLoadAndReleasePartitions(suite.nodes[i])
 	}
 
@@ -198,7 +199,7 @@ func (suite *ServerSuite) TestNodeUp() {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, node1.ID)
+			replica := suite.server.meta.GetByCollectionAndNode(suite.ctx, collection, node1.ID)
 			if replica == nil {
 				return false
 			}
@@ -228,7 +229,7 @@ func (suite *ServerSuite) TestNodeDown() {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, downNode.ID)
+			replica := suite.server.meta.GetByCollectionAndNode(suite.ctx, collection, downNode.ID)
 			if replica != nil {
 				return false
 			}
@@ -412,9 +413,10 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 
 		// Mock meta.CollectionManager.GetCollection to return different collections
 		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
-			if collectionID == 1001 {
+			switch collectionID {
+			case 1001:
 				return mockCollection1
-			} else if collectionID == 1002 {
+			case 1002:
 				return mockCollection2
 			}
 			return nil
@@ -431,7 +433,7 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		var capturedCollectionIDs []int64
 		var capturedReplicaNum int32
 		var capturedRGs []string
-		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
 			updateLoadConfigCalled = true
 			capturedCollectionIDs = collectionIDs
 			capturedReplicaNum = newReplicaNum
@@ -573,7 +575,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 		if status == querypb.LoadStatus_Loaded {
 			collection.LoadPercentage = 100
 		}
-		collection.CollectionLoadInfo.Status = status
+		collection.Status = status
 		suite.server.meta.PutCollection(suite.ctx, collection)
 
 		partitions := suite.server.meta.GetPartitionsByCollection(suite.ctx, collectionID)
@@ -583,7 +585,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 			if status == querypb.LoadStatus_Loaded {
 				partition.LoadPercentage = 100
 			}
-			partition.PartitionLoadInfo.Status = status
+			partition.Status = status
 			suite.server.meta.PutPartition(suite.ctx, partition)
 		}
 	}
@@ -936,4 +938,208 @@ func createTestSession(nodeID int64, address string, stopping bool) *sessionutil
 
 func TestServer(t *testing.T) {
 	suite.Run(t, new(ServerSuite))
+}
+
+func TestGetLeakedResourcesByCollection(t *testing.T) {
+	const collectionID int64 = 100
+
+	// Replica in meta holds nodes {10, 11}. Any segment/channel on a different node is leaked.
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:           1,
+		CollectionID: collectionID,
+		Nodes:        []int64{10, 11},
+	}, typeutil.NewUniqueSet(10, 11))
+
+	idAllocator := func() func() (int64, error) {
+		var id int64
+		return func() (int64, error) {
+			id++
+			return id, nil
+		}
+	}
+	newServer := func() *Server {
+		return &Server{
+			meta: meta.NewMeta(idAllocator(), nil, session.NewNodeManager()),
+			dist: meta.NewDistributionManager(session.NewNodeManager()),
+		}
+	}
+
+	t.Run("no segments or channels returns 0", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+
+		leakedSeg, leakedCh := s.GetLeakedResourcesByCollection(context.Background(), collectionID)
+		assert.Equal(t, 0, leakedSeg)
+		assert.Equal(t, 0, leakedCh)
+	})
+
+	t.Run("segments only on replica nodes are not leaked", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+
+		s.dist.SegmentDistManager.Update(10, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 1, CollectionID: collectionID}))
+		s.dist.SegmentDistManager.Update(11, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 2, CollectionID: collectionID}))
+
+		leakedSeg, leakedCh := s.GetLeakedResourcesByCollection(context.Background(), collectionID)
+		assert.Equal(t, 0, leakedSeg)
+		assert.Equal(t, 0, leakedCh)
+	})
+
+	t.Run("segments on non-replica nodes are leaked", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+
+		// Node 10 is in replica → not leaked
+		s.dist.SegmentDistManager.Update(10, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 1, CollectionID: collectionID}))
+		// Nodes 99, 98 are NOT in replica → leaked (these are querynodes pending release during scale-down)
+		s.dist.SegmentDistManager.Update(99, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 2, CollectionID: collectionID}),
+			meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 3, CollectionID: collectionID}))
+		s.dist.SegmentDistManager.Update(98, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 4, CollectionID: collectionID}))
+
+		leakedSeg, leakedCh := s.GetLeakedResourcesByCollection(context.Background(), collectionID)
+		assert.Equal(t, 3, leakedSeg)
+		assert.Equal(t, 0, leakedCh)
+	})
+
+	t.Run("channels on non-replica nodes are leaked", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+
+		s.dist.ChannelDistManager.Update(10, meta.DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "c1"}))
+		s.dist.ChannelDistManager.Update(99, meta.DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "c2"}))
+
+		leakedSeg, leakedCh := s.GetLeakedResourcesByCollection(context.Background(), collectionID)
+		assert.Equal(t, 0, leakedSeg)
+		assert.Equal(t, 1, leakedCh)
+	})
+
+	t.Run("segments for other collections are ignored", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+
+		// Segment on non-replica node 99 but belongs to different collection
+		s.dist.SegmentDistManager.Update(99, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 200}))
+
+		leakedSeg, leakedCh := s.GetLeakedResourcesByCollection(context.Background(), collectionID)
+		assert.Equal(t, 0, leakedSeg)
+		assert.Equal(t, 0, leakedCh)
+	})
+}
+
+func TestCheckAllReplicasServiceable(t *testing.T) {
+	const collectionID int64 = 100
+	const channelName = "test-channel-1"
+
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:           1,
+		CollectionID: collectionID,
+		Nodes:        []int64{10, 11},
+	}, typeutil.NewUniqueSet(10, 11))
+
+	idAllocator := func() func() (int64, error) {
+		var id int64
+		return func() (int64, error) {
+			id++
+			return id, nil
+		}
+	}
+	newServer := func() *Server {
+		nodeMgr := session.NewNodeManager()
+		targetMgr := meta.NewMockTargetManager(t)
+		return &Server{
+			meta:      meta.NewMeta(idAllocator(), nil, nodeMgr),
+			dist:      meta.NewDistributionManager(nodeMgr),
+			nodeMgr:   nodeMgr,
+			targetMgr: targetMgr,
+		}
+	}
+
+	t.Run("no replicas returns error", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{}).Build()
+		defer mocker.UnPatch()
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "no replica")
+	})
+
+	t.Run("no channels in target returns error", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "no channels")
+	})
+
+	t.Run("missing shard leader returns error", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "no leader for channel")
+	})
+
+	t.Run("leader not serviceable returns error", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		// Segment exists in target but not in leader's view -> CheckDelegatorDataReady fails
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
+			42: {ID: 42, CollectionID: collectionID},
+		})
+
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Status:   &querypb.LeaderViewStatus{Serviceable: true},
+				Segments: map[int64]*querypb.SegmentDist{}, // empty → lacks segment 42
+			},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.ErrorContains(t, err, "not serviceable")
+	})
+
+	t.Run("all serviceable returns nil", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{})
+
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Status:   &querypb.LeaderViewStatus{Serviceable: true},
+				Segments: map[int64]*querypb.SegmentDist{},
+			},
+		})
+
+		err := s.CheckAllReplicasServiceable(context.Background(), collectionID)
+		assert.NoError(t, err)
+	})
 }

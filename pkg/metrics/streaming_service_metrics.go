@@ -5,7 +5,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -21,27 +21,29 @@ const (
 	WALStatusCancel                         = "cancel"
 	WALStatusError                          = "error"
 
-	BroadcasterTaskStateLabelName     = "state"
-	ResourceKeyLockLabelName          = "rk_lock"
-	WALAccessModelLabelName           = "access_model"
-	WALScannerModelLabelName          = "scanner_model"
-	TimeTickSyncTypeLabelName         = "type"
-	TimeTickAckTypeLabelName          = "type"
-	WALInterceptorLabelName           = "interceptor_name"
-	WALTxnStateLabelName              = "state"
-	WALFlusherStateLabelName          = "state"
-	WALRecoveryStorageStateLabelName  = "state"
-	WALStateLabelName                 = "state"
-	WALChannelLabelName               = channelNameLabelName
-	WALSegmentLevelLabelName          = "lv"
-	WALSegmentSealPolicyNameLabelName = "policy"
-	WALMessageTypeLabelName           = "message_type"
-	WALChannelTermLabelName           = "term"
-	WALNameLabelName                  = "wal_name"
-	WALTxnTypeLabelName               = "txn_type"
-	StatusLabelName                   = statusLabelName
-	StreamingNodeLabelName            = "streaming_node"
-	NodeIDLabelName                   = nodeIDLabelName
+	BroadcasterTaskStateLabelName         = "state"
+	ResourceKeyLockLabelName              = "rk_lock"
+	WALAccessModelLabelName               = "access_model"
+	WALScannerModelLabelName              = "scanner_model"
+	TimeTickSyncTypeLabelName             = "type"
+	TimeTickAckTypeLabelName              = "type"
+	WALInterceptorLabelName               = "interceptor_name"
+	WALTxnStateLabelName                  = "state"
+	WALFlusherStateLabelName              = "state"
+	WALRecoveryStorageStateLabelName      = "state"
+	WALStateLabelName                     = "state"
+	WALRateLimitControllerSourceLabelName = "source"
+	WALRateLimitStateLabelName            = "state"
+	WALChannelLabelName                   = channelNameLabelName
+	WALSegmentLevelLabelName              = "lv"
+	WALSegmentSealPolicyNameLabelName     = "policy"
+	WALMessageTypeLabelName               = "message_type"
+	WALChannelTermLabelName               = "term"
+	WALNameLabelName                      = "wal_name"
+	WALTxnTypeLabelName                   = "txn_type"
+	StatusLabelName                       = statusLabelName
+	StreamingNodeLabelName                = "streaming_node"
+	NodeIDLabelName                       = nodeIDLabelName
 )
 
 var (
@@ -85,6 +87,12 @@ var (
 		Buckets: secondsBuckets,
 	}, WALChannelLabelName, WALAccessModelLabelName)
 
+	StreamingServiceClientProduceRateLimitDelaySeconds = newStreamingServiceClientHistogramVec(prometheus.HistogramOpts{
+		Name:    "produce_rate_limit_delay_seconds",
+		Help:    "Rate limit delay duration when beginning produce operation",
+		Buckets: secondsBuckets,
+	}, WALChannelLabelName)
+
 	// Streaming Service Client Consumer Metrics.
 	StreamingServiceClientResumingConsumerTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
 		Name: "resuming_consumer_total",
@@ -101,6 +109,11 @@ var (
 		Help:    "Bytes of consumed message",
 		Buckets: messageBytesBuckets,
 	}, WALChannelLabelName)
+
+	StreamingServiceClientRateLimitState = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_state",
+		Help: "Current rate limit state of streaming service client",
+	}, WALChannelLabelName, WALRateLimitStateLabelName)
 
 	// StreamingCoord metrics
 	StreamingCoordPChannelInfo = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
@@ -481,6 +494,89 @@ var (
 		Name: "flusher_empty_time_tick_filtered_total",
 		Help: "Total of empty time tick filtered",
 	}, WALChannelLabelName)
+
+	// Flusher sync dispatcher metrics.
+
+	WALFlusherSyncDispatcherPendingTasks = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "flusher_sync_dispatcher_pending_tasks",
+		Help: "Number of pending sync tasks (queued + in-flight) in the dispatcher",
+	})
+
+	WALFlusherSyncDispatcherTaskTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "flusher_sync_dispatcher_task_total",
+		Help: "Total number of sync tasks submitted to the dispatcher",
+	})
+
+	WALFlusherSyncDispatcherQueueDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_queue_duration_seconds",
+		Help:    "Time a sync task spends waiting in the per-key queue before execution starts",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
+	WALFlusherSyncDispatcherExecuteDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_execute_duration_seconds",
+		Help:    "Time a sync task spends executing (including S3 upload and callbacks)",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
+	WALRateLimitControllerState = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_controller_state",
+		Help: "Current state of adaptive rate limit controller",
+	}, WALChannelLabelName, WALRateLimitControllerSourceLabelName, WALRateLimitStateLabelName)
+
+	WALRateLimitState = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_state",
+		Help: "Current rate limit state of wal",
+	}, WALChannelLabelName, WALRateLimitStateLabelName)
+
+	// Rate Limit Controller Config Metrics - Recovery
+	WALRateLimitConfigRecoveryHWM = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_config_recovery_hwm_bytes",
+		Help: "High watermark bytes for rate limit recovery config",
+	}, WALChannelLabelName, WALRateLimitControllerSourceLabelName)
+
+	WALRateLimitConfigRecoveryLWM = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_config_recovery_lwm_bytes",
+		Help: "Low watermark bytes for rate limit recovery config",
+	}, WALChannelLabelName, WALRateLimitControllerSourceLabelName)
+
+	// Rate Limit Controller Config Metrics - Slowdown
+	WALRateLimitConfigSlowdownHWM = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_config_slowdown_hwm_bytes",
+		Help: "High watermark bytes for rate limit slowdown config",
+	}, WALChannelLabelName, WALRateLimitControllerSourceLabelName)
+
+	WALRateLimitConfigSlowdownLWM = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_config_slowdown_lwm_bytes",
+		Help: "Low watermark bytes for rate limit slowdown config",
+	}, WALChannelLabelName, WALRateLimitControllerSourceLabelName)
+
+	// Rate Limit Threshold Config Metrics - Node Memory
+	WALRateLimitNodeMemorySlowdownThreshold = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_node_memory_slowdown_threshold",
+		Help: "Memory usage ratio threshold to trigger slowdown",
+	}, WALChannelLabelName)
+
+	WALRateLimitNodeMemoryRejectThreshold = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_node_memory_reject_threshold",
+		Help: "Memory usage ratio threshold to trigger reject",
+	}, WALChannelLabelName)
+
+	WALRateLimitNodeMemoryRecoverThreshold = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_node_memory_recover_threshold",
+		Help: "Memory usage ratio threshold to trigger recovery",
+	}, WALChannelLabelName)
+
+	// Rate Limit Threshold Config Metrics - Append Rate
+	WALRateLimitAppendRateSlowdownThreshold = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_append_rate_slowdown_threshold_bytes",
+		Help: "Append rate bytes threshold to trigger slowdown",
+	}, WALChannelLabelName)
+
+	WALRateLimitAppendRateRecoverThreshold = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "rate_limit_append_rate_recover_threshold_bytes",
+		Help: "Append rate bytes threshold to trigger recovery",
+	}, WALChannelLabelName)
 )
 
 // RegisterStreamingServiceClient registers streaming service client metrics
@@ -492,9 +588,11 @@ func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 		registry.MustRegister(StreamingServiceClientProduceBytes)
 		registry.MustRegister(StreamingServiceClientSuccessProduceBytes)
 		registry.MustRegister(StreamingServiceClientSuccessProduceDurationSeconds)
+		registry.MustRegister(StreamingServiceClientProduceRateLimitDelaySeconds)
 		registry.MustRegister(StreamingServiceClientResumingConsumerTotal)
 		registry.MustRegister(StreamingServiceClientConsumerTotal)
 		registry.MustRegister(StreamingServiceClientConsumeBytes)
+		registry.MustRegister(StreamingServiceClientRateLimitState)
 	})
 }
 
@@ -586,6 +684,22 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
 	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)
+	registry.MustRegister(WALFlusherSyncDispatcherPendingTasks)
+	registry.MustRegister(WALFlusherSyncDispatcherTaskTotal)
+	registry.MustRegister(WALFlusherSyncDispatcherQueueDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherExecuteDuration)
+
+	registry.MustRegister(WALRateLimitControllerState)
+	registry.MustRegister(WALRateLimitState)
+	registry.MustRegister(WALRateLimitConfigRecoveryHWM)
+	registry.MustRegister(WALRateLimitConfigRecoveryLWM)
+	registry.MustRegister(WALRateLimitConfigSlowdownHWM)
+	registry.MustRegister(WALRateLimitConfigSlowdownLWM)
+	registry.MustRegister(WALRateLimitNodeMemorySlowdownThreshold)
+	registry.MustRegister(WALRateLimitNodeMemoryRejectThreshold)
+	registry.MustRegister(WALRateLimitNodeMemoryRecoverThreshold)
+	registry.MustRegister(WALRateLimitAppendRateSlowdownThreshold)
+	registry.MustRegister(WALRateLimitAppendRateRecoverThreshold)
 }
 
 func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {

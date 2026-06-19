@@ -140,10 +140,10 @@ ChunkTranslator::estimated_byte_size_of_cell(
     int64_t memory_size = file_infos_[cid].memory_size;
     if (use_mmap_) {
         // For mmap, the memory is counted as disk usage
-        return {{0, memory_size}, {memory_size * 2, memory_size * 2}};
+        return {{0, memory_size}, {memory_size * 2, memory_size}};
     } else {
         // For non-mmap, the memory is counted as memory usage
-        return {{memory_size, 0}, {memory_size * 2, 0}};
+        return {{memory_size, 0}, {memory_size, 0}};
     }
 }
 
@@ -174,8 +174,6 @@ ChunkTranslator::get_cells(
              field_id_,
              fmt::format("{}", fmt::join(cids, " ")));
     LoadArrowReaderFromRemote(remote_files, channel, load_priority_);
-
-    auto data_type = field_meta_.get_data_type();
 
     for (auto cid : cids) {
         // Check for cancellation before processing each chunk

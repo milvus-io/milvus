@@ -76,6 +76,10 @@ class PhyFilterBitsNode : public Operator {
     QueryContext* query_context_;
     int64_t num_processed_rows_;
     int64_t need_process_rows_;
+    // Expression filter cache for two-stage search.
+    // Cache backend is the process-level ExprResCacheManager.
+    bool enable_expr_cache_ = false;
+    std::string expr_cache_key_;
 };
 }  // namespace exec
 }  // namespace milvus

@@ -5,10 +5,12 @@ package mock_wal
 import (
 	context "context"
 
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
-	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	ratelimit "github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
+
+	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 )
@@ -358,6 +360,53 @@ func (_c *MockWAL_GetReplicateCheckpoint_Call) RunAndReturn(run func() (*wal.Rep
 	return _c
 }
 
+// GetSalvageCheckpoint provides a mock function with no fields
+func (_m *MockWAL) GetSalvageCheckpoint() []*wal.ReplicateCheckpoint {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSalvageCheckpoint")
+	}
+
+	var r0 []*wal.ReplicateCheckpoint
+	if rf, ok := ret.Get(0).(func() []*wal.ReplicateCheckpoint); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*wal.ReplicateCheckpoint)
+		}
+	}
+
+	return r0
+}
+
+// MockWAL_GetSalvageCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSalvageCheckpoint'
+type MockWAL_GetSalvageCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetSalvageCheckpoint is a helper method to define mock.On call
+func (_e *MockWAL_Expecter) GetSalvageCheckpoint() *MockWAL_GetSalvageCheckpoint_Call {
+	return &MockWAL_GetSalvageCheckpoint_Call{Call: _e.mock.On("GetSalvageCheckpoint")}
+}
+
+func (_c *MockWAL_GetSalvageCheckpoint_Call) Run(run func()) *MockWAL_GetSalvageCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWAL_GetSalvageCheckpoint_Call) Return(_a0 []*wal.ReplicateCheckpoint) *MockWAL_GetSalvageCheckpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWAL_GetSalvageCheckpoint_Call) RunAndReturn(run func() []*wal.ReplicateCheckpoint) *MockWAL_GetSalvageCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsAvailable provides a mock function with no fields
 func (_m *MockWAL) IsAvailable() bool {
 	ret := _m.Called()
@@ -506,6 +555,72 @@ func (_c *MockWAL_Read_Call) Return(_a0 wal.Scanner, _a1 error) *MockWAL_Read_Ca
 
 func (_c *MockWAL_Read_Call) RunAndReturn(run func(context.Context, wal.ReadOption) (wal.Scanner, error)) *MockWAL_Read_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// Register provides a mock function with given fields: observer
+func (_m *MockWAL) Register(observer ratelimit.RateLimitObserver) {
+	_m.Called(observer)
+}
+
+// MockWAL_Register_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Register'
+type MockWAL_Register_Call struct {
+	*mock.Call
+}
+
+// Register is a helper method to define mock.On call
+//   - observer ratelimit.RateLimitObserver
+func (_e *MockWAL_Expecter) Register(observer interface{}) *MockWAL_Register_Call {
+	return &MockWAL_Register_Call{Call: _e.mock.On("Register", observer)}
+}
+
+func (_c *MockWAL_Register_Call) Run(run func(observer ratelimit.RateLimitObserver)) *MockWAL_Register_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(ratelimit.RateLimitObserver))
+	})
+	return _c
+}
+
+func (_c *MockWAL_Register_Call) Return() *MockWAL_Register_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockWAL_Register_Call) RunAndReturn(run func(ratelimit.RateLimitObserver)) *MockWAL_Register_Call {
+	_c.Run(run)
+	return _c
+}
+
+// Unregister provides a mock function with given fields: observer
+func (_m *MockWAL) Unregister(observer ratelimit.RateLimitObserver) {
+	_m.Called(observer)
+}
+
+// MockWAL_Unregister_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Unregister'
+type MockWAL_Unregister_Call struct {
+	*mock.Call
+}
+
+// Unregister is a helper method to define mock.On call
+//   - observer ratelimit.RateLimitObserver
+func (_e *MockWAL_Expecter) Unregister(observer interface{}) *MockWAL_Unregister_Call {
+	return &MockWAL_Unregister_Call{Call: _e.mock.On("Unregister", observer)}
+}
+
+func (_c *MockWAL_Unregister_Call) Run(run func(observer ratelimit.RateLimitObserver)) *MockWAL_Unregister_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(ratelimit.RateLimitObserver))
+	})
+	return _c
+}
+
+func (_c *MockWAL_Unregister_Call) Return() *MockWAL_Unregister_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockWAL_Unregister_Call) RunAndReturn(run func(ratelimit.RateLimitObserver)) *MockWAL_Unregister_Call {
+	_c.Run(run)
 	return _c
 }
 

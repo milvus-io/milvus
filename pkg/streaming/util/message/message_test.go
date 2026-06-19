@@ -6,9 +6,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/mocks/github.com/milvus-io/milvus-proto/go-api/v2/mock_hook"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/github.com/milvus-io/milvus-proto/go-api/v3/mock_hook"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
 func TestMessageType(t *testing.T) {
@@ -57,6 +57,13 @@ func TestMessageType(t *testing.T) {
 	assert.False(t, MessageTypeDropCollection.IsSelfControlled())
 	assert.False(t, MessageTypeCreatePartition.IsSelfControlled())
 	assert.False(t, MessageTypeDropPartition.IsSelfControlled())
+
+	assert.True(t, MessageTypeInsert.IsDMLMessageType())
+	assert.True(t, MessageTypeDelete.IsDMLMessageType())
+	assert.False(t, MessageTypeBeginTxn.IsDMLMessageType())
+	assert.False(t, MessageTypeCommitTxn.IsDMLMessageType())
+	assert.False(t, MessageTypeRollbackTxn.IsDMLMessageType())
+	assert.False(t, MessageTypeTimeTick.IsDMLMessageType())
 }
 
 func TestVersion(t *testing.T) {
@@ -134,6 +141,13 @@ func TestCiper(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, body.ShardName, "123123")
 	assert.Equal(t, msg2.EstimateSize(), 36)
+
+	msg2.OverwriteBody(&msgpb.InsertRequest{
+		ShardName: "overwritten",
+	})
+	body, err = msg2.Body()
+	assert.NoError(t, err)
+	assert.Equal(t, body.ShardName, "overwritten")
 }
 
 // TestCheckIfMessageFromStreaming tests CheckIfMessageFromStreaming function.
@@ -146,4 +160,13 @@ func TestCheckIfMessageFromStreaming(t *testing.T) {
 }
 
 func TestReplicateHeader(t *testing.T) {
+}
+
+func TestWithWALTermIdempotent(t *testing.T) {
+	msg := NewMutableMessageBeforeAppend([]byte("payload"), map[string]string{})
+	// Setting WAL term twice should not panic (was a panic before the fix).
+	msg.WithWALTerm(1)
+	assert.NotPanics(t, func() {
+		msg.WithWALTerm(2)
+	})
 }

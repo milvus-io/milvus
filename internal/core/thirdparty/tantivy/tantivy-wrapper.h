@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <cmath>
 #include <sstream>
 #include <fmt/format.h>
 #include <set>
@@ -318,9 +319,11 @@ struct TantivyIndexWrapper {
         if constexpr (std::is_same_v<T, std::string>) {
             // TODO: not very efficient, a lot of overhead due to rust-ffi call.
             for (uintptr_t i = 0; i < len; i++) {
+                const auto& s = static_cast<const std::string*>(array)[i];
                 auto res = RustResultWrapper(tantivy_index_add_string(
                     writer_,
-                    static_cast<const std::string*>(array)[i].c_str(),
+                    reinterpret_cast<const uint8_t*>(s.data()),
+                    s.size(),
                     offset_begin + i));
                 AssertInfo(res.result_->success,
                            "failed to add string: {}",
@@ -350,11 +353,19 @@ struct TantivyIndexWrapper {
     void
     add_json_data(const Json* array, uintptr_t len, int64_t offset_begin) {
         assert(!finished_);
-        for (uintptr_t i = 0; i < len; i++) {
-            auto res = RustResultWrapper(tantivy_index_add_json(
-                writer_, array[i].data().data(), offset_begin + i));
+        // Batch add: collect c_str pointers and send in one FFI call
+        constexpr uintptr_t BATCH_SIZE = 1024;
+        for (uintptr_t start = 0; start < len; start += BATCH_SIZE) {
+            uintptr_t end = std::min(start + BATCH_SIZE, len);
+            uintptr_t batch_len = end - start;
+            std::vector<const char*> ptrs(batch_len);
+            for (uintptr_t i = 0; i < batch_len; ++i) {
+                ptrs[i] = array[start + i].data().data();
+            }
+            auto res = RustResultWrapper(tantivy_index_add_json_batch(
+                writer_, ptrs.data(), batch_len, offset_begin + start));
             AssertInfo(res.result_->success,
-                       "failed to add json: {}",
+                       "failed to add json batch: {}",
                        res.result_->error);
         }
     }
@@ -445,13 +456,17 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            std::vector<const char*> views;
-            views.reserve(len);
+            std::vector<const uint8_t*> ptrs;
+            std::vector<uintptr_t> str_lens;
+            ptrs.reserve(len);
+            str_lens.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                views.push_back(array[i].c_str());
+                ptrs.push_back(
+                    reinterpret_cast<const uint8_t*>(array[i].data()));
+                str_lens.push_back(array[i].size());
             }
             auto res = RustResultWrapper(tantivy_index_add_array_keywords(
-                writer_, views.data(), len, offset));
+                writer_, ptrs.data(), str_lens.data(), len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi keywords: {}",
                        res.result_->error);
@@ -541,10 +556,12 @@ struct TantivyIndexWrapper {
         if constexpr (std::is_same_v<T, std::string>) {
             // TODO: not very efficient, a lot of overhead due to rust-ffi call.
             for (uintptr_t i = 0; i < len; i++) {
+                const auto& s = static_cast<const std::string*>(array)[i];
                 auto res = RustResultWrapper(
                     tantivy_index_add_string_by_single_segment_writer(
                         writer_,
-                        static_cast<const std::string*>(array)[i].c_str()));
+                        reinterpret_cast<const uint8_t*>(s.data()),
+                        s.size()));
                 AssertInfo(res.result_->success,
                            "failed to add string: {}",
                            res.result_->error);
@@ -632,14 +649,18 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            std::vector<const char*> views;
-            views.reserve(len);
+            std::vector<const uint8_t*> ptrs;
+            std::vector<uintptr_t> str_lens;
+            ptrs.reserve(len);
+            str_lens.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                views.push_back(array[i].c_str());
+                ptrs.push_back(
+                    reinterpret_cast<const uint8_t*>(array[i].data()));
+                str_lens.push_back(array[i].size());
             }
             auto res = RustResultWrapper(
                 tantivy_index_add_array_keywords_by_single_segment_writer(
-                    writer_, views.data(), len));
+                    writer_, ptrs.data(), str_lens.data(), len));
             AssertInfo(res.result_->success,
                        "failed to add multi keywords: {}",
                        res.result_->error);
@@ -657,11 +678,18 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        auto res = RustResultWrapper(tantivy_finish_index(writer_));
+        // Null writer_ before the FFI call because tantivy_finish_index
+        // always consumes (frees) the Rust-side IndexWriterWrapper via
+        // Box::from_raw, regardless of success or failure.  If we leave
+        // writer_ pointing at the now-freed memory and the AssertInfo
+        // below throws, the destructor path will call free() on a
+        // dangling pointer (use-after-free / SEGFAULT).
+        auto w = writer_;
+        writer_ = nullptr;
+        auto res = RustResultWrapper(tantivy_finish_index(w));
         AssertInfo(res.result_->success,
                    "failed to finish index: {}",
                    res.result_->error);
-        writer_ = nullptr;
         finished_ = true;
     }
 
@@ -944,8 +972,11 @@ struct TantivyIndexWrapper {
 
     void
     prefix_query(const std::string& prefix, void* bitset) {
-        auto array =
-            tantivy_prefix_query_keyword(reader_, prefix.c_str(), bitset);
+        auto array = tantivy_prefix_query_keyword(
+            reader_,
+            reinterpret_cast<const uint8_t*>(prefix.data()),
+            prefix.size(),
+            bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.prefix_query: {}",
@@ -956,13 +987,32 @@ struct TantivyIndexWrapper {
 
     void
     regex_query(const std::string& pattern, void* bitset) {
-        auto array = tantivy_regex_query(reader_, pattern.c_str(), bitset);
+        auto array = tantivy_regex_query(
+            reader_,
+            reinterpret_cast<const uint8_t*>(pattern.data()),
+            pattern.size(),
+            bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.regex_query: {}",
                    res.result_->error);
         AssertInfo(res.result_->value.tag == Value::Tag::None,
                    "TantivyIndexWrapper.regex_query: invalid result type");
+    }
+
+    void
+    regex_match_query(void* matcher_ctx,
+                      bool (*matcher)(void*, const uint8_t*, uintptr_t),
+                      void* bitset) {
+        auto array =
+            tantivy_regex_match_query(reader_, matcher_ctx, matcher, bitset);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.regex_match_query: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::None,
+            "TantivyIndexWrapper.regex_match_query: invalid result type");
     }
 
     void
@@ -1105,6 +1155,90 @@ struct TantivyIndexWrapper {
                    "TantivyIndexWrapper.json_term_query: invalid result type");
     }
 
+    // Batch json terms query - all values in a single call
+    template <typename T>
+    void
+    json_terms_query(const std::string& json_path,
+                     const T* values,
+                     size_t n,
+                     void* bitset) {
+        auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_json_terms_query_bool(
+                    reader_, json_path.c_str(), values, n, bitset);
+            }
+
+            if constexpr (std::is_integral_v<T>) {
+                // For JSON integer fields, we need to query both i64 and f64
+                // because JSON numbers can be stored as either type.
+                // First batch-query i64, then batch-query f64.
+                std::vector<int64_t> i64_values(n);
+                for (size_t i = 0; i < n; ++i)
+                    i64_values[i] = static_cast<int64_t>(values[i]);
+                auto res_i64 = tantivy_json_terms_query_i64(
+                    reader_, json_path.c_str(), i64_values.data(), n, bitset);
+                AssertInfo(res_i64.success,
+                           "TantivyIndexWrapper.json_terms_query i64: {}",
+                           res_i64.error);
+                free_rust_result(res_i64);
+
+                // Also query as f64 since JSON doesn't distinguish int/float
+                std::vector<double> f64_values(n);
+                for (size_t i = 0; i < n; ++i)
+                    f64_values[i] = static_cast<double>(values[i]);
+                return tantivy_json_terms_query_f64(
+                    reader_, json_path.c_str(), f64_values.data(), n, bitset);
+            }
+
+            if constexpr (std::is_floating_point_v<T>) {
+                // Query matching integers first (for values without fractional part)
+                std::vector<int64_t> int_values;
+                int_values.reserve(n);
+                for (size_t i = 0; i < n; ++i) {
+                    if (std::floor(values[i]) == values[i]) {
+                        int_values.push_back(static_cast<int64_t>(values[i]));
+                    }
+                }
+                if (!int_values.empty()) {
+                    auto res_i64 =
+                        tantivy_json_terms_query_i64(reader_,
+                                                     json_path.c_str(),
+                                                     int_values.data(),
+                                                     int_values.size(),
+                                                     bitset);
+                    AssertInfo(res_i64.success,
+                               "TantivyIndexWrapper.json_terms_query i64: {}",
+                               res_i64.error);
+                    free_rust_result(res_i64);
+                }
+                return tantivy_json_terms_query_f64(
+                    reader_,
+                    json_path.c_str(),
+                    reinterpret_cast<const double*>(values),
+                    n,
+                    bitset);
+            }
+
+            if constexpr (std::is_same_v<T, std::string>) {
+                std::vector<const char*> c_strs(n);
+                for (size_t i = 0; i < n; ++i) c_strs[i] = values[i].c_str();
+                return tantivy_json_terms_query_keyword(
+                    reader_, json_path.c_str(), c_strs.data(), n, bitset);
+            }
+
+            throw fmt::format(
+                "InvertedIndex.json_terms_query: unsupported data type: {}",
+                typeid(T).name());
+            return RustResult();
+        }();
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.json_terms_query: {}",
+                   res.result_->error);
+        AssertInfo(res.result_->value.tag == Value::Tag::None,
+                   "TantivyIndexWrapper.json_terms_query: invalid result type");
+    }
+
     void
     json_exist_query(const std::string& json_path, void* bitset) {
         auto array =
@@ -1194,7 +1328,11 @@ struct TantivyIndexWrapper {
                      const std::string& pattern,
                      void* bitset) {
         auto array = tantivy_json_regex_query(
-            reader_, json_path.c_str(), pattern.c_str(), bitset);
+            reader_,
+            json_path.c_str(),
+            reinterpret_cast<const uint8_t*>(pattern.data()),
+            pattern.size(),
+            bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.json_regex_query: {}",
@@ -1208,7 +1346,11 @@ struct TantivyIndexWrapper {
                       const std::string& prefix,
                       void* bitset) {
         auto array = tantivy_json_prefix_query(
-            reader_, json_path.c_str(), prefix.c_str(), bitset);
+            reader_,
+            json_path.c_str(),
+            reinterpret_cast<const uint8_t*>(prefix.data()),
+            prefix.size(),
+            bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.json_prefix_query: {}",

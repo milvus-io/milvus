@@ -22,7 +22,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -141,6 +141,18 @@ var (
 			segmentLevelLabelName,
 		})
 
+	DataNodeGrowingSourceSyncFailureCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "growing_source_sync_failure_count",
+			Help:      "consecutive failure count of growing-source source sync",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			channelNameLabelName,
+		})
+
 	DataNodeAutoFlushBufferCount = prometheus.NewCounterVec( // TODO: arguably
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -243,6 +255,19 @@ var (
 			Name:      "compaction_missing_delete_count",
 			Help:      "Number of missing deletes in compaction",
 		}, []string{collectionIDLabelName})
+
+	DataNodeCompactionStageLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "compaction_stage_latency",
+			Help:      "latency of each compaction stage",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			nodeIDLabelName,
+			compactionTypeLabelName,
+			stageLabelName,
+		})
 
 	// index service metrics
 	// unit second, from 1ms to 2hrs
@@ -361,6 +386,7 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeAutoFlushBufferCount)
 	registry.MustRegister(DataNodeSave2StorageLatency)
 	registry.MustRegister(DataNodeFlushBufferCount)
+	registry.MustRegister(DataNodeGrowingSourceSyncFailureCount)
 	registry.MustRegister(DataNodeFlushReqCounter)
 	registry.MustRegister(DataNodeFlushedSize)
 	registry.MustRegister(DataNodeFlushedRows)
@@ -370,6 +396,7 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeCompactionLatencyInQueue)
 	registry.MustRegister(DataNodeCompactionDeleteCount)
 	registry.MustRegister(DataNodeCompactionMissingDeleteCount)
+	registry.MustRegister(DataNodeCompactionStageLatency)
 	// deprecated metrics
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
@@ -422,5 +449,18 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 
 	DataNodeWriteDataCount.Delete(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+}
+
+func CleanupDataNodeCompactionMetrics(nodeID int64) {
+	nodeIDLabel := fmt.Sprint(nodeID)
+	DataNodeCompactionLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
+	})
+	DataNodeCompactionLatencyInQueue.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
+	})
+	DataNodeCompactionStageLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
 	})
 }

@@ -20,15 +20,14 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (c *Core) broadcastDropDatabase(ctx context.Context, req *milvuspb.DropDatabaseRequest) error {
@@ -45,12 +44,12 @@ func (c *Core) broadcastDropDatabase(ctx context.Context, req *milvuspb.DropData
 
 	db, err := c.meta.GetDatabaseByName(ctx, req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
-		return errors.Wrap(err, "failed to get database name")
+		return merr.Wrap(err, "failed to get database name")
 	}
 
 	// Call back cipher plugin when dropping database succeeded
 	if err := hookutil.RemoveEZByDBProperties(db.Properties); err != nil {
-		return errors.Wrap(err, "failed to remove ez by db properties")
+		return merr.Wrap(err, "failed to remove ez by db properties")
 	}
 
 	msg := message.NewDropDatabaseMessageBuilderV2().
@@ -68,7 +67,7 @@ func (c *Core) broadcastDropDatabase(ctx context.Context, req *milvuspb.DropData
 func (c *DDLCallback) dropDatabaseV1AckCallback(ctx context.Context, result message.BroadcastResultDropDatabaseMessageV2) error {
 	header := result.Message.Header()
 	if err := c.meta.DropDatabase(ctx, header.DbName, result.GetControlChannelResult().TimeTick); err != nil {
-		return errors.Wrap(err, "failed to drop database")
+		return merr.Wrap(err, "failed to drop database")
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(

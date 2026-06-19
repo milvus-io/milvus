@@ -33,7 +33,7 @@ type MLogger struct {
 // With encapsulates zap.Logger With method to return MLogger instance.
 func (l *MLogger) With(fields ...zap.Field) *MLogger {
 	nl := &MLogger{
-		Logger: l.Logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+		Logger: l.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
 			return NewLazyWith(core, fields)
 		})),
 	}
@@ -42,10 +42,16 @@ func (l *MLogger) With(fields ...zap.Field) *MLogger {
 
 // WithRateGroup uses named RateLimiter for this logger.
 func (l *MLogger) WithRateGroup(groupName string, creditPerSecond, maxBalance float64) *MLogger {
+	// check if rate limiter already exists
+	if actual, loaded := _namedRateLimiters.Load(groupName); loaded {
+		l.rl.Store(actual.(*utils.ReconfigurableRateLimiter))
+		return l
+	}
+
+	// create new rate limiter and store
 	rl := utils.NewRateLimiter(creditPerSecond, maxBalance)
 	actual, loaded := _namedRateLimiters.LoadOrStore(groupName, rl)
 	if loaded {
-		rl.Update(creditPerSecond, maxBalance)
 		rl = actual.(*utils.ReconfigurableRateLimiter)
 	}
 	l.rl.Store(rl)

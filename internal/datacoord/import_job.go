@@ -22,14 +22,13 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type ImportJobFilter func(job ImportJob) bool
@@ -62,25 +61,19 @@ func WithoutJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 	}
 }
 
-func WithoutL0Job() ImportJobFilter {
-	return func(job ImportJob) bool {
-		return !importutilv2.IsL0Import(job.GetOptions())
-	}
-}
-
 type UpdateJobAction func(job ImportJob)
 
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).ImportJob.State = state
+		job.(*importJob).State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
 			// releases requested disk resource
-			job.(*importJob).ImportJob.RequestedDiskSize = 0
+			job.(*importJob).RequestedDiskSize = 0
 			// set cleanup ts
 			dur := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 			cleanupTime := time.Now().Add(dur)
 			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
-			job.(*importJob).ImportJob.CleanupTs = cleanupTs
+			job.(*importJob).CleanupTs = cleanupTs
 			log.Info("set import job cleanup ts", zap.Int64("jobID", job.GetJobID()),
 				zap.Time("cleanupTime", cleanupTime), zap.Uint64("cleanupTs", cleanupTs))
 		}
@@ -89,19 +82,19 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 
 func UpdateJobReason(reason string) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).ImportJob.Reason = reason
+		job.(*importJob).Reason = reason
 	}
 }
 
 func UpdateRequestedDiskSize(requestSize int64) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).ImportJob.RequestedDiskSize = requestSize
+		job.(*importJob).RequestedDiskSize = requestSize
 	}
 }
 
 func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).ImportJob.CompleteTime = completeTime
+		job.(*importJob).CompleteTime = completeTime
 	}
 }
 
@@ -112,6 +105,7 @@ type ImportJob interface {
 	GetPartitionIDs() []int64
 	GetVchannels() []string
 	GetReadyVchannels() []string
+	GetCommittedVchannels() []string
 	GetSchema() *schemapb.CollectionSchema
 	GetTimeoutTs() uint64
 	GetCleanupTs() uint64
@@ -122,6 +116,7 @@ type ImportJob interface {
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
+	GetAutoCommit() bool
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
 	Clone() ImportJob

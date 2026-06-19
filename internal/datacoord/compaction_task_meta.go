@@ -30,11 +30,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.CompactionTask {
@@ -91,8 +91,8 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 		// here we just mark the task as failed and wait for the compaction trigger to generate a new one.
 		//
 		// NOTE:
-		// - Only compaction tasks that require pre-allocated segment IDs (clustering/mix/sort, etc.)
-		//   should be marked as failed when PreAllocatedSegmentIDs is nil.
+		// - Only compaction tasks that require pre-allocated segment IDs should be marked
+		//   as failed when PreAllocatedSegmentIDs is nil.
 		// - Level0DeleteCompaction tasks never use PreAllocatedSegmentIDs and must be ignored here,
 		//   otherwise unfinished L0 delete compaction tasks created before upgrade will be
 		//   incorrectly marked as failed on reload.

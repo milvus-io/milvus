@@ -3,7 +3,7 @@
 package function
 
 import (
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -265,8 +265,7 @@ func (_c *MockFunctionRunner_GetSchema_Call) RunAndReturn(run func() *schemapb.F
 func NewMockFunctionRunner(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockFunctionRunner {
+}) *MockFunctionRunner {
 	mock := &MockFunctionRunner{}
 	mock.Mock.Test(t)
 

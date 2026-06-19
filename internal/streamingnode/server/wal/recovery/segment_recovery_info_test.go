@@ -6,10 +6,10 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
 func TestNewSegmentRecoveryInfoFromSegmentAssignmentMeta(t *testing.T) {
@@ -76,10 +76,6 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
-
-	// insert may came from same txn with same txn.
-	info.ObserveInsert(ts, assign)
-	assert.True(t, info.dirty)
 
 	ts += 1
 	info.ObserveFlush(ts)

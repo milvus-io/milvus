@@ -7,15 +7,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestProxyRpcLimit(t *testing.T) {
@@ -44,11 +44,11 @@ func TestProxyRpcLimit(t *testing.T) {
 	assert.NotNil(t, proxy)
 
 	testServer := newProxyTestServer(proxy)
-	testServer.Proxy.SetAddress(p.GetAddress())
 	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
+	testServer.SetAddress(testServer.lisAddr)
 	defer testServer.grpcServer.Stop()
-	client, err := grpcproxyclient.NewClient(ctx, "localhost:"+p.Port.GetValue(), 1)
+	client, err := grpcproxyclient.NewClient(ctx, testServer.lisAddr, 1)
 	assert.NoError(t, err)
 	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 

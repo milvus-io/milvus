@@ -17,10 +17,11 @@
 package compaction
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type Params struct {
@@ -32,6 +33,10 @@ type Params struct {
 	BloomFilterApplyBatchSize int                    `json:"bloom_filter_apply_batch_size,omitempty"`
 	StorageConfig             *indexpb.StorageConfig `json:"storage_config,omitempty"`
 	UseLoonFFI                bool                   `json:"use_loon_ffi,omitempty"`
+	LOBHoleRatioThreshold     float64                `json:"lob_hole_ratio_threshold,omitempty"`
+	TextInlineThreshold       int64                  `json:"text_inline_threshold,omitempty"`
+	TextMaxLobFileBytes       int64                  `json:"text_max_lob_file_bytes,omitempty"`
+	TextFlushThresholdBytes   int64                  `json:"text_flush_threshold_bytes,omitempty"`
 }
 
 func GenParams() Params {
@@ -48,11 +53,26 @@ func GenParams() Params {
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 		StorageConfig:             CreateStorageConfig(),
 		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		LOBHoleRatioThreshold:     GetLOBHoleRatioThreshold(),
+		TextInlineThreshold:       getTextInlineThreshold(),
+		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
+		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}
 }
 
-func GenerateJSONParams() (string, error) {
+func GenerateJSONParams(schema *schemapb.CollectionSchema) (string, error) {
 	compactionParams := GenParams()
+	// TEXT fields require at least V3 manifest storage for LOB support.
+	// This is a safety net: even if UseLoonFFI is toggled off, collections
+	// with TEXT fields must stay on V3 to avoid data loss.
+	if compactionParams.StorageVersion < storage.StorageV3 {
+		for _, field := range schema.GetFields() {
+			if field.GetDataType() == schemapb.DataType_Text {
+				compactionParams.StorageVersion = storage.StorageV3
+				break
+			}
+		}
+	}
 	params, err := json.Marshal(compactionParams)
 	if err != nil {
 		return "", err
@@ -63,10 +83,6 @@ func GenerateJSONParams() (string, error) {
 func ParseParamsFromJSON(jsonStr string) (Params, error) {
 	var compactionParams Params
 	err := json.Unmarshal([]byte(jsonStr), &compactionParams)
-	if err != nil && jsonStr == "" {
-		// Ensure the compatibility with the legacy requests sent by the old datacoord.
-		return GenParams(), nil
-	}
 	return compactionParams, err
 }
 
@@ -95,6 +111,8 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
 			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
+			SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
+			UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
 		}
 	}
 

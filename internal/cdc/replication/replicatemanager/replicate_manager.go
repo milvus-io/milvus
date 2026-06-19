@@ -25,8 +25,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/cdc/meta"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // replicateManager is the implementation of ReplicateManagerClient.

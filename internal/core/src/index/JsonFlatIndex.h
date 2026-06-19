@@ -39,14 +39,12 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::In",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
         return bitset;
     }
 
     TargetBitmap
-    Exists() {
+    Exists() override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Exists",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
@@ -62,10 +60,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyFilter",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-            apply_hits_with_filter(bitset, filter);
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
+        apply_hits_with_filter(bitset, filter);
         return bitset;
     }
 
@@ -77,10 +73,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::InApplyCallback",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-            apply_hits_with_callback(bitset, callback);
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
+        apply_hits_with_callback(bitset, callback);
     }
 
     const TargetBitmap
@@ -88,9 +82,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::NotIn",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        for (size_t i = 0; i < n; ++i) {
-            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
 
         bitset.flip();
 
@@ -102,7 +94,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     }
 
     const TargetBitmap
-    Range(T value, OpType op) override {
+    Range(const T& value, OpType op) override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Range",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
@@ -136,9 +128,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     }
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::RangeWithBounds",
                               tracer::GetRootSpan());
@@ -164,12 +156,15 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         return bitset;
     }
 
+ protected:
     const TargetBitmap
-    RegexQuery(const std::string& pattern) override {
-        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::RegexQuery",
+    PatternQuery(const std::string& pattern) override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::PatternQuery",
                               tracer::GetRootSpan());
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
         TargetBitmap bitset(this->Count());
-        this->wrapper_->json_regex_query(json_path_, pattern, &bitset);
+        this->wrapper_->json_regex_query(json_path_, regex_pattern, &bitset);
         return bitset;
     }
 

@@ -18,13 +18,13 @@ package typeutil
 import (
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func ParseAndVerifyNestedPath(identifier string, schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
@@ -42,7 +42,7 @@ func ParseAndVerifyNestedPath(identifier string, schema *schemapb.CollectionSche
 		return "", err
 	}
 	if identifierExpr.GetColumnExpr().GetInfo().GetFieldId() != fieldID {
-		return "", errors.New("fieldID not match with field name")
+		return "", merr.WrapErrParameterInvalidMsg("fieldID not match with field name")
 	}
 
 	nestedPath := identifierExpr.GetColumnExpr().GetInfo().GetNestedPath()

@@ -26,8 +26,6 @@
 #include "mmap/Types.h"
 #include "common/Types.h"
 #include "common/GroupChunk.h"
-#include "parquet/metadata.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
@@ -42,6 +40,8 @@ class GroupChunkTranslator
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         FieldDataInfo column_group_info,
         std::vector<std::string> insert_files,
+        std::vector<milvus_storage::RowGroupMetadataVector>&&
+            row_group_meta_list,
         bool use_mmap,
         bool mmap_populate,
         int64_t num_fields,
@@ -91,16 +91,6 @@ class GroupChunkTranslator
         return total_size;
     }
 
-    std::vector<std::shared_ptr<parquet::FileMetaData>>
-    parquet_file_metas() const {
-        return parquet_file_metadata_;
-    }
-
-    std::map<int64_t, milvus_storage::ColumnOffset>
-    field_id_mapping() const {
-        return field_id_mapping_;
-    }
-
  private:
     // Load a single cell which may contain multiple row groups
     std::unique_ptr<milvus::GroupChunk>
@@ -116,17 +106,12 @@ class GroupChunkTranslator
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list_;
     std::vector<size_t> file_row_group_prefix_sum_;
     SchemaPtr schema_;
-    bool is_sorted_by_pk_;
-    ChunkedSegmentSealedImpl* chunked_segment_;
     std::unique_ptr<milvus::segcore::InsertRecord<true>> ir_;
     GroupCTMeta meta_;
-    int64_t timestamp_offet_;
     bool use_mmap_;
     bool mmap_populate_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
-    std::vector<std::shared_ptr<parquet::FileMetaData>> parquet_file_metadata_;
-    std::map<int64_t, milvus_storage::ColumnOffset> field_id_mapping_;
 };
 
 }  // namespace milvus::segcore::storagev2translator

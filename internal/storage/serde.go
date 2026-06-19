@@ -32,10 +32,10 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type Record interface {
@@ -55,6 +55,16 @@ type (
 	Serializer[T any]   func([]T) (Record, error)
 	Deserializer[T any] func(Record, []T) error
 )
+
+func validateVectorArrayElementCount(payloadLength int, elementsPerVector int) (int, error) {
+	if elementsPerVector <= 0 {
+		return 0, merr.WrapErrStorageMsg("invalid vector width %d for ArrayOfVector", elementsPerVector)
+	}
+	if payloadLength%elementsPerVector != 0 {
+		return 0, merr.WrapErrStorageMsg("ArrayOfVector payload length %d is not divisible by vector width %d", payloadLength, elementsPerVector)
+	}
+	return payloadLength / elementsPerVector, nil
+}
 
 // compositeRecord is a record being composed of multiple records, in which each only have 1 column
 type compositeRecord struct {
@@ -115,7 +125,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if arr, ok := a.(*array.Boolean); ok && i < arr.Len() {
 				return arr.Value(i), nil
 			}
-			return nil, fmt.Errorf("expected *array.Boolean, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Boolean, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -127,9 +137,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected bool value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected bool value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.BooleanBuilder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.BooleanBuilder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Int8] = serdeEntry{
@@ -143,7 +153,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if arr, ok := a.(*array.Int8); ok && i < arr.Len() {
 				return arr.Value(i), nil
 			}
-			return nil, fmt.Errorf("expected *array.Int8, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Int8, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -155,9 +165,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected int8 value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected int8 value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.Int8Builder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.Int8Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Int16] = serdeEntry{
@@ -171,7 +181,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if arr, ok := a.(*array.Int16); ok && i < arr.Len() {
 				return arr.Value(i), nil
 			}
-			return nil, fmt.Errorf("expected *array.Int16, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Int16, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -183,9 +193,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected int16 value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected int16 value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.Int16Builder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.Int16Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Int32] = serdeEntry{
@@ -199,7 +209,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if arr, ok := a.(*array.Int32); ok && i < arr.Len() {
 				return arr.Value(i), nil
 			}
-			return nil, fmt.Errorf("expected *array.Int32, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Int32, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -211,9 +221,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected int32 value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected int32 value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.Int32Builder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.Int32Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Int64] = serdeEntry{
@@ -227,7 +237,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if arr, ok := a.(*array.Int64); ok && i < arr.Len() {
 				return arr.Value(i), nil
 			}
-			return nil, fmt.Errorf("expected *array.Int64, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Int64, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -239,9 +249,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected int64 value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected int64 value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.Int64Builder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.Int64Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Float] = serdeEntry{
@@ -255,7 +265,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if arr, ok := a.(*array.Float32); ok && i < arr.Len() {
 				return arr.Value(i), nil
 			}
-			return nil, fmt.Errorf("expected *array.Float32, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Float32, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -267,9 +277,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected float32 value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected float32 value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.Float32Builder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.Float32Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Double] = serdeEntry{
@@ -283,7 +293,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if arr, ok := a.(*array.Float64); ok && i < arr.Len() {
 				return arr.Value(i), nil
 			}
-			return nil, fmt.Errorf("expected *array.Float64, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Float64, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -295,9 +305,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected float64 value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected float64 value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.Float64Builder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.Float64Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Timestamptz] = serdeEntry{
@@ -311,7 +321,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if arr, ok := a.(*array.Int64); ok && i < arr.Len() {
 				return arr.Value(i), nil
 			}
-			return nil, fmt.Errorf("expected *array.Int64, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Int64, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -323,9 +333,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected int64 value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected int64 value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.Int64Builder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.Int64Builder, got %T", b)
 		},
 	}
 	stringEntry := serdeEntry{
@@ -343,7 +353,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 				return value, nil
 			}
-			return nil, fmt.Errorf("expected *array.String, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.String, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -355,9 +365,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(v)
 					return nil
 				}
-				return fmt.Errorf("expected string value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected string value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.StringBuilder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.StringBuilder, got %T", b)
 		},
 	}
 
@@ -380,10 +390,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				if err := proto.Unmarshal(arr.Value(i), v); err == nil {
 					return v, nil
 				} else {
-					return nil, fmt.Errorf("failed to unmarshal ScalarField: %w", err)
+					return nil, merr.WrapErrSerializationFailed(err, "failed to unmarshal ScalarField")
 				}
 			}
-			return nil, fmt.Errorf("expected *array.Binary, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Binary, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -396,12 +406,12 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 						builder.Append(bytes)
 						return nil
 					} else {
-						return fmt.Errorf("failed to marshal ScalarField: %w", err)
+						return merr.WrapErrSerializationFailed(err, "failed to marshal ScalarField")
 					}
 				}
-				return fmt.Errorf("expected *schemapb.ScalarField value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected *schemapb.ScalarField value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.BinaryBuilder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.BinaryBuilder, got %T", b)
 		},
 	}
 	_ = eagerArrayEntry
@@ -423,7 +433,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 				return value, nil
 			}
-			return nil, fmt.Errorf("expected *array.Binary, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Binary, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -440,7 +450,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 						builder.Append(bytes)
 						return nil
 					} else {
-						return fmt.Errorf("failed to marshal ScalarField: %w", err)
+						return merr.WrapErrSerializationFailed(err, "failed to marshal ScalarField")
 					}
 				}
 				if vv, ok := v.(*schemapb.VectorField); ok {
@@ -448,12 +458,12 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 						builder.Append(bytes)
 						return nil
 					} else {
-						return fmt.Errorf("failed to marshal VectorField: %w", err)
+						return merr.WrapErrStorage(err, "failed to marshal VectorField")
 					}
 				}
-				return fmt.Errorf("expected []byte, *schemapb.ScalarField or *schemapb.VectorField value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected []byte, *schemapb.ScalarField or *schemapb.VectorField value, got %T", v)
 			}
-			return fmt.Errorf("expected *array.BinaryBuilder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.BinaryBuilder, got %T", b)
 		},
 	}
 
@@ -470,11 +480,15 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return deserializeArrayOfVector(a, i, elementType, int64(dim), shouldCopy)
 		},
 		serialize: func(b array.Builder, v any, elementType schemapb.DataType) error {
-			vf, ok := v.(*schemapb.VectorField)
-			if !ok {
-				return fmt.Errorf("expected *schemapb.VectorField, got %T", v)
+			if v == nil {
+				b.AppendNull()
+				return nil
 			}
 
+			vf, ok := v.(*schemapb.VectorField)
+			if !ok {
+				return merr.WrapErrServiceInternalMsg("expected *schemapb.VectorField, got %T", v)
+			}
 			if vf == nil {
 				b.AppendNull()
 				return nil
@@ -482,15 +496,18 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 			builder, ok := b.(*array.ListBuilder)
 			if !ok {
-				return fmt.Errorf("expected *array.ListBuilder, got %T", b)
+				return merr.WrapErrServiceInternalMsg("expected *array.ListBuilder, got %T", b)
 			}
 
-			builder.Append(true)
 			valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
-			dim := vf.GetDim()
+			bytesPerVector := valueBuilder.Type().(*arrow.FixedSizeBinaryType).ByteWidth
 
-			appendVectorChunks := func(data []byte, bytesPerVector int) error {
-				numVectors := len(data) / bytesPerVector
+			appendVectorChunks := func(data []byte) error {
+				numVectors, err := validateVectorArrayElementCount(len(data), bytesPerVector)
+				if err != nil {
+					return err
+				}
+				builder.Append(true)
 				for i := 0; i < numVectors; i++ {
 					start := i * bytesPerVector
 					end := start + bytesPerVector
@@ -502,17 +519,22 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			switch elementType {
 			case schemapb.DataType_FloatVector:
 				if vf.GetFloatVector() == nil {
-					return fmt.Errorf("FloatVector data is nil for elementType FloatVector")
+					return merr.WrapErrServiceInternalMsg("FloatVector data is nil for elementType FloatVector")
 				}
 				floatData := vf.GetFloatVector().GetData()
-				numVectors := len(floatData) / int(dim)
+				floatsPerVector := bytesPerVector / 4
+				numVectors, err := validateVectorArrayElementCount(len(floatData), floatsPerVector)
+				if err != nil {
+					return err
+				}
+				builder.Append(true)
 				// Convert float data to binary
 				for i := 0; i < numVectors; i++ {
-					start := i * int(dim)
-					end := start + int(dim)
+					start := i * floatsPerVector
+					end := start + floatsPerVector
 					vectorSlice := floatData[start:end]
 
-					bytes := make([]byte, dim*4)
+					bytes := make([]byte, bytesPerVector)
 					for j, f := range vectorSlice {
 						binary.LittleEndian.PutUint32(bytes[j*4:], math.Float32bits(f))
 					}
@@ -522,32 +544,32 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 			case schemapb.DataType_BinaryVector:
 				if vf.GetBinaryVector() == nil {
-					return fmt.Errorf("BinaryVector data is nil for elementType BinaryVector")
+					return merr.WrapErrServiceInternalMsg("BinaryVector data is nil for elementType BinaryVector")
 				}
-				return appendVectorChunks(vf.GetBinaryVector(), int((dim+7)/8))
+				return appendVectorChunks(vf.GetBinaryVector())
 
 			case schemapb.DataType_Float16Vector:
 				if vf.GetFloat16Vector() == nil {
-					return fmt.Errorf("Float16Vector data is nil for elementType Float16Vector")
+					return merr.WrapErrServiceInternalMsg("Float16Vector data is nil for elementType Float16Vector")
 				}
-				return appendVectorChunks(vf.GetFloat16Vector(), int(dim)*2)
+				return appendVectorChunks(vf.GetFloat16Vector())
 
 			case schemapb.DataType_BFloat16Vector:
 				if vf.GetBfloat16Vector() == nil {
-					return fmt.Errorf("BFloat16Vector data is nil for elementType BFloat16Vector")
+					return merr.WrapErrServiceInternalMsg("BFloat16Vector data is nil for elementType BFloat16Vector")
 				}
-				return appendVectorChunks(vf.GetBfloat16Vector(), int(dim)*2)
+				return appendVectorChunks(vf.GetBfloat16Vector())
 
 			case schemapb.DataType_Int8Vector:
 				if vf.GetInt8Vector() == nil {
-					return fmt.Errorf("Int8Vector data is nil for elementType Int8Vector")
+					return merr.WrapErrServiceInternalMsg("Int8Vector data is nil for elementType Int8Vector")
 				}
-				return appendVectorChunks(vf.GetInt8Vector(), int(dim))
+				return appendVectorChunks(vf.GetInt8Vector())
 
 			case schemapb.DataType_SparseFloatVector:
-				return fmt.Errorf("SparseFloatVector in VectorArray not implemented yet")
+				return merr.WrapErrServiceInternalMsg("SparseFloatVector in VectorArray not implemented yet")
 			default:
-				return fmt.Errorf("unsupported elementType for ArrayOfVector: %s", elementType.String())
+				return merr.WrapErrServiceInternalMsg("unsupported elementType for ArrayOfVector: %s", elementType.String())
 			}
 		},
 	}
@@ -565,7 +587,16 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return value, nil
 		}
-		return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
+		if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
+			value := arr.Value(i)
+			if shouldCopy {
+				result := make([]byte, len(value))
+				copy(result, value)
+				return result, nil
+			}
+			return value, nil
+		}
+		return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary or *array.Binary, got %T", a)
 	}
 	fixedSizeSerializer := func(b array.Builder, v any, _ schemapb.DataType) error {
 		if v == nil {
@@ -581,9 +612,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				builder.Append(v)
 				return nil
 			}
-			return fmt.Errorf("expected []byte value, got %T", v)
+			return merr.WrapErrServiceInternalMsg("expected []byte value, got %T", v)
 		}
-		return fmt.Errorf("expected *array.FixedSizeBinaryBuilder, got %T", b)
+		return merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinaryBuilder, got %T", b)
 	}
 
 	m[schemapb.DataType_BinaryVector] = serdeEntry{
@@ -615,16 +646,25 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if a.IsNull(i) {
 				return nil, nil
 			}
-			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
-				// convert to []int8
-				bytes := arr.Value(i)
+			var bytes []byte
+			switch arr := a.(type) {
+			case *array.FixedSizeBinary:
+				if i < arr.Len() {
+					bytes = arr.Value(i)
+				}
+			case *array.Binary:
+				if i < arr.Len() {
+					bytes = arr.Value(i)
+				}
+			}
+			if bytes != nil {
 				int8s := make([]int8, len(bytes))
 				for i, b := range bytes {
 					int8s[i] = int8(b)
 				}
 				return int8s, nil
 			}
-			return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary or *array.Binary, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -637,7 +677,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			} else if vv, ok := v.([]int8); ok {
 				bytesData = arrow.Int8Traits.CastToBytes(vv)
 			} else {
-				return fmt.Errorf("expected []byte or []int8 value, got %T", v)
+				return merr.WrapErrServiceInternalMsg("expected []byte or []int8 value, got %T", v)
 			}
 			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 				builder.Append(bytesData)
@@ -647,7 +687,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				builder.Append(bytesData)
 				return nil
 			}
-			return fmt.Errorf("expected *array.FixedSizeBinaryBuilder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinaryBuilder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
@@ -658,8 +698,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			if a.IsNull(i) {
 				return nil, nil
 			}
-			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
-				vector := arrow.Float32Traits.CastFromBytes(arr.Value(i))
+			var bytes []byte
+			switch arr := a.(type) {
+			case *array.FixedSizeBinary:
+				if i < arr.Len() {
+					bytes = arr.Value(i)
+				}
+			case *array.Binary:
+				if i < arr.Len() {
+					bytes = arr.Value(i)
+				}
+			}
+			if bytes != nil {
+				vector := arrow.Float32Traits.CastFromBytes(bytes)
 				if shouldCopy {
 					vectorCopy := make([]float32, len(vector))
 					copy(vectorCopy, vector)
@@ -667,7 +718,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 				return vector, nil
 			}
-			return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary or *array.Binary, got %T", a)
 		},
 		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
@@ -690,9 +741,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					builder.Append(bytesData)
 					return nil
 				}
-				return fmt.Errorf("expected *array.FixedSizeBinaryBuilder or *array.BinaryBuilder, got %T", b)
+				return merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinaryBuilder or *array.BinaryBuilder, got %T", b)
 			}
-			return fmt.Errorf("expected *array.FixedSizeBinaryBuilder, got %T", b)
+			return merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinaryBuilder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_SparseFloatVector] = byteEntry
@@ -936,9 +987,9 @@ func createEmptyVectorField(elementType schemapb.DataType, dim int64) (*schemapb
 			},
 		}, nil
 	case schemapb.DataType_SparseFloatVector:
-		return nil, fmt.Errorf("SparseFloatVector in empty VectorArray not implemented yet")
+		return nil, merr.WrapErrServiceInternalMsg("SparseFloatVector in empty VectorArray not implemented yet")
 	default:
-		return nil, fmt.Errorf("unsupported element type for empty ArrayOfVector: %s", elementType.String())
+		return nil, merr.WrapErrServiceInternalMsg("unsupported element type for empty ArrayOfVector: %s", elementType.String())
 	}
 }
 
@@ -950,10 +1001,10 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 
 	arr, ok := a.(*array.List)
 	if !ok {
-		return nil, fmt.Errorf("expected *array.List for ArrayOfVector, got %T", a)
+		return nil, merr.WrapErrServiceInternalMsg("expected *array.List for ArrayOfVector, got %T", a)
 	}
 	if i >= arr.Len() {
-		return nil, fmt.Errorf("index %d out of bounds for array of length %d", i, arr.Len())
+		return nil, merr.WrapErrServiceInternalMsg("index %d out of bounds for array of length %d", i, arr.Len())
 	}
 
 	start, end := arr.ValueOffsets(i)
@@ -968,7 +1019,7 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 	valuesArray := arr.ListValues()
 	binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
 	if !ok {
-		return nil, fmt.Errorf("expected *array.FixedSizeBinary for ArrayOfVector values, got %T", valuesArray)
+		return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary for ArrayOfVector values, got %T", valuesArray)
 	}
 
 	numVectors := int(totalElements)
@@ -1037,9 +1088,9 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 			},
 		}, nil
 	case schemapb.DataType_SparseFloatVector:
-		return nil, fmt.Errorf("SparseFloatVector in VectorArray deserialization not implemented yet")
+		return nil, merr.WrapErrServiceInternalMsg("SparseFloatVector in VectorArray deserialization not implemented yet")
 	default:
-		return nil, fmt.Errorf("unsupported element type for ArrayOfVector deserialization: %s", elementType.String())
+		return nil, merr.WrapErrServiceInternalMsg("unsupported element type for ArrayOfVector deserialization: %s", elementType.String())
 	}
 }
 
@@ -1074,7 +1125,7 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 		)
 	}
 
-	if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
+	if field.GetNullable() && typeutil.IsSupportedNullableVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
 		arrowType = arrow.BinaryTypes.Binary
 		fieldMetadata = arrow.NewMetadata(
 			[]string{"dim"},
@@ -1106,8 +1157,9 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 
 	// Use appropriate Arrow writer properties for ArrayOfVector
 	arrowWriterProps := pqarrow.DefaultWriterProps()
-	if field.DataType == schemapb.DataType_ArrayOfVector {
-		// Ensure schema metadata is preserved for ArrayOfVector
+	if field.DataType == schemapb.DataType_ArrayOfVector ||
+		(field.GetNullable() && isNullableDenseVectorArrowType(field.DataType)) {
+		// Preserve dim/elementType metadata required by binary-backed vector layouts.
 		arrowWriterProps = pqarrow.NewArrowWriterProperties(
 			pqarrow.WithStoreSchema(),
 		)
@@ -1285,7 +1337,7 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 		}
 
 		if fieldData.RowNum() == 0 {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("row num is 0 for field %s", field.Name))
+			return merr.WrapErrServiceInternalMsg("row num is 0 for field %s", field.Name)
 		}
 
 		// Get element type for ArrayOfVector, otherwise use None
@@ -1294,7 +1346,7 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			elementType = field.GetElementType()
 		}
 
-		if field.GetNullable() && typeutil.IsVectorType(field.DataType) {
+		if field.GetNullable() && typeutil.IsSupportedNullableVectorType(field.DataType) {
 			var validData []bool
 			switch fd := fieldData.(type) {
 			case *FloatVectorFieldData:
@@ -1313,12 +1365,12 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			// Use len(validData) as logical row count, GetRow takes logical index
 			for j := 0; j < len(validData); j++ {
 				if !validData[j] {
-					fBuilder.(*array.BinaryBuilder).AppendNull()
+					fBuilder.AppendNull()
 				} else {
 					rowData := fieldData.GetRow(j)
 					err := typeEntry.serialize(fBuilder, rowData, elementType)
 					if err != nil {
-						return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s: %v", field.DataType.String(), err))
+						return merr.Wrapf(err, "serialize error on type %s", field.DataType.String())
 					}
 				}
 			}
@@ -1326,7 +1378,7 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			for j := 0; j < fieldData.RowNum(); j++ {
 				err := typeEntry.serialize(fBuilder, fieldData.GetRow(j), elementType)
 				if err != nil {
-					return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s: %v", field.DataType.String(), err))
+					return merr.Wrapf(err, "serialize error on type %s", field.DataType.String())
 				}
 			}
 		}

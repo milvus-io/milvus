@@ -24,7 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
@@ -142,6 +143,31 @@ func (s *SearchOptionSuite) TestPlaceHolder() {
 			expectType: commonpb.PlaceholderType_VarChar,
 		},
 		{
+			tag:        "emb_list_float",
+			input:      []entity.Vector{entity.FloatVectorArray{entity.FloatVector([]float32{0.1, 0.2})}},
+			expectType: commonpb.PlaceholderType_EmbListFloatVector,
+		},
+		{
+			tag:        "emb_list_fp16",
+			input:      []entity.Vector{entity.Float16VectorArray{entity.Float16Vector([]byte{})}},
+			expectType: commonpb.PlaceholderType_EmbListFloat16Vector,
+		},
+		{
+			tag:        "emb_list_bf16",
+			input:      []entity.Vector{entity.BFloat16VectorArray{entity.BFloat16Vector([]byte{})}},
+			expectType: commonpb.PlaceholderType_EmbListBFloat16Vector,
+		},
+		{
+			tag:        "emb_list_binary",
+			input:      []entity.Vector{entity.BinaryVectorArray{entity.BinaryVector([]byte{})}},
+			expectType: commonpb.PlaceholderType_EmbListBinaryVector,
+		},
+		{
+			tag:        "emb_list_int8",
+			input:      []entity.Vector{entity.Int8VectorArray{entity.Int8Vector([]int8{})}},
+			expectType: commonpb.PlaceholderType_EmbListInt8Vector,
+		},
+		{
 			tag:         "non_supported",
 			input:       []entity.Vector{nonSupportData{}},
 			expectError: true,
@@ -156,6 +182,79 @@ func (s *SearchOptionSuite) TestPlaceHolder() {
 				s.NoError(err)
 				s.Equal(tc.expectType, phv.GetType())
 			}
+		})
+	}
+}
+
+func (s *SearchOptionSuite) TestSearchAggregationOption() {
+	opt := NewSearchOption("coll", 100, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithSearchAggregation(
+			NewSearchAggregation([]string{"brand"}, 3).
+				WithMetric("count_all", "count", "*").
+				WithTopHits(NewTopHits(2).WithSort("_score", "asc")),
+		)
+
+	req, err := opt.Request()
+	s.Require().NoError(err)
+	s.NotNil(req.GetSearchAggregation())
+	s.Equal([]string{"brand"}, req.GetSearchAggregation().GetFields())
+	s.EqualValues(3, req.GetSearchAggregation().GetSize())
+	s.Equal("count", req.GetSearchAggregation().GetMetrics()["count_all"].GetOp())
+}
+
+func (s *SearchOptionSuite) TestSearchAggregationRejectsConflictingOptions() {
+	base := func() *searchOption {
+		return NewSearchOption("coll", 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithSearchAggregation(NewSearchAggregation([]string{"brand"}, 3))
+	}
+
+	cases := []struct {
+		name string
+		opt  *searchOption
+		msg  string
+	}{
+		{
+			name: "legacy group by field",
+			opt:  base().WithGroupByField("brand"),
+			msg:  "search_aggregation and group_by_field/group_size are mutually exclusive",
+		},
+		{
+			name: "legacy group size",
+			opt:  base().WithGroupSize(2),
+			msg:  "search_aggregation and group_by_field/group_size are mutually exclusive",
+		},
+		{
+			name: "legacy strict group size",
+			opt:  base().WithStrictGroupSize(true),
+			msg:  "search_aggregation and group_by_field/group_size are mutually exclusive",
+		},
+		{
+			name: "offset",
+			opt:  base().WithOffset(1),
+			msg:  "offset is not supported with search_aggregation",
+		},
+		{
+			name: "raw offset param",
+			opt:  base().WithSearchParam("offset", "1"),
+			msg:  "offset is not supported with search_aggregation",
+		},
+		{
+			name: "raw group_by_field param",
+			opt:  base().WithSearchParam("group_by_field", "brand"),
+			msg:  "group_by_field and search_aggregation cannot be used simultaneously",
+		},
+		{
+			name: "raw group_by_fields param",
+			opt:  base().WithSearchParam("group_by_fields", "brand,color"),
+			msg:  "group_by_fields and search_aggregation cannot be used simultaneously",
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			_, err := tc.opt.Request()
+			s.Require().Error(err)
+			s.Contains(err.Error(), tc.msg)
 		})
 	}
 }
@@ -328,5 +427,174 @@ func TestAny2TmplValue(t *testing.T) {
 
 		_, err = any2TmplValue([]struct{}{})
 		assert.Error(t, err)
+	})
+}
+
+func (s *SearchOptionSuite) TestSearchByIDs() {
+	collName := "search_by_ids_test"
+	limit := 10
+
+	s.Run("int64_ids", func() {
+		ids := column.NewColumnInt64("id", []int64{1, 2, 3, 4, 5})
+		opt := NewSearchByIDsOption(collName, limit, ids)
+		opt = opt.WithANNSField("vector_field").WithConsistencyLevel(entity.ClStrong)
+
+		req, err := opt.Request()
+		s.Require().NoError(err)
+
+		s.Equal(collName, req.GetCollectionName())
+		s.Equal(int64(5), req.GetNq()) // 5 IDs
+		s.NotNil(req.GetIds())
+		s.Equal([]int64{1, 2, 3, 4, 5}, req.GetIds().GetIntId().GetData())
+	})
+
+	s.Run("varchar_ids", func() {
+		ids := column.NewColumnVarChar("id", []string{"a", "b", "c"})
+		opt := NewSearchByIDsOption(collName, limit, ids)
+
+		req, err := opt.Request()
+		s.Require().NoError(err)
+
+		s.Equal(int64(3), req.GetNq()) // 3 IDs
+		s.NotNil(req.GetIds())
+		s.Equal([]string{"a", "b", "c"}, req.GetIds().GetStrId().GetData())
+	})
+
+	s.Run("empty_ids_error", func() {
+		ids := column.NewColumnInt64("id", []int64{})
+		opt := NewSearchByIDsOption(collName, limit, ids)
+
+		_, err := opt.Request()
+		s.Error(err)
+		s.Contains(err.Error(), "cannot be empty")
+	})
+
+	s.Run("with_filter", func() {
+		ids := column.NewColumnInt64("id", []int64{1, 2, 3})
+		opt := NewSearchByIDsOption(collName, limit, ids).
+			WithFilter("status == 'active'").
+			WithANNSField("vector")
+
+		req, err := opt.Request()
+		s.Require().NoError(err)
+
+		s.Equal("status == 'active'", req.GetDsl())
+		s.Equal(int64(3), req.GetNq())
+	})
+
+	s.Run("with_output_fields", func() {
+		ids := column.NewColumnInt64("id", []int64{1, 2})
+		opt := NewSearchByIDsOption(collName, limit, ids).
+			WithOutputFields("id", "name", "vector")
+
+		req, err := opt.Request()
+		s.Require().NoError(err)
+
+		s.ElementsMatch([]string{"id", "name", "vector"}, req.GetOutputFields())
+	})
+
+	s.Run("single_id", func() {
+		ids := column.NewColumnInt64("id", []int64{42})
+		opt := NewSearchByIDsOption(collName, limit, ids)
+
+		req, err := opt.Request()
+		s.Require().NoError(err)
+
+		s.Equal(int64(1), req.GetNq())
+		s.Equal([]int64{42}, req.GetIds().GetIntId().GetData())
+	})
+
+	s.Run("unsupported_id_type_error", func() {
+		// Float column is not a valid primary key type
+		ids := column.NewColumnFloat("id", []float32{1.0, 2.0})
+		opt := NewSearchByIDsOption(collName, limit, ids)
+
+		_, err := opt.Request()
+		s.Error(err)
+		s.Contains(err.Error(), "failed to convert IDs column")
+		s.Contains(err.Error(), "unsupported primary key type")
+	})
+}
+
+func TestColumn2IDs(t *testing.T) {
+	t.Run("int64_column", func(t *testing.T) {
+		col := column.NewColumnInt64("pk", []int64{100, 200, 300})
+		ids, err := column2IDs(col)
+		assert.NoError(t, err)
+		assert.NotNil(t, ids.GetIntId())
+		assert.Equal(t, []int64{100, 200, 300}, ids.GetIntId().GetData())
+	})
+
+	t.Run("varchar_column", func(t *testing.T) {
+		col := column.NewColumnVarChar("pk", []string{"id1", "id2", "id3"})
+		ids, err := column2IDs(col)
+		assert.NoError(t, err)
+		assert.NotNil(t, ids.GetStrId())
+		assert.Equal(t, []string{"id1", "id2", "id3"}, ids.GetStrId().GetData())
+	})
+
+	t.Run("string_column", func(t *testing.T) {
+		col := column.NewColumnString("pk", []string{"str1", "str2"})
+		ids, err := column2IDs(col)
+		assert.NoError(t, err)
+		assert.NotNil(t, ids.GetStrId())
+		assert.Equal(t, []string{"str1", "str2"}, ids.GetStrId().GetData())
+	})
+
+	t.Run("nil_column_error", func(t *testing.T) {
+		_, err := column2IDs(nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be nil")
+	})
+
+	t.Run("unsupported_type_error", func(t *testing.T) {
+		col := column.NewColumnFloat("pk", []float32{1.0, 2.0})
+		_, err := column2IDs(col)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported primary key type")
+	})
+}
+
+func TestAnnRequestWithIDs(t *testing.T) {
+	t.Run("basic_with_ids", func(t *testing.T) {
+		ids := column.NewColumnInt64("pk", []int64{1, 2, 3})
+		req := NewAnnRequest("vector_field", 10)
+		req.WithIDs(ids)
+
+		searchReq, err := req.searchRequest()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(3), searchReq.GetNq())
+		assert.NotNil(t, searchReq.GetIds())
+	})
+
+	t.Run("ids_override_vectors", func(t *testing.T) {
+		// When IDs are set, vectors should be ignored
+		vectors := []entity.Vector{entity.FloatVector([]float32{0.1, 0.2, 0.3})}
+		ids := column.NewColumnInt64("pk", []int64{1, 2})
+
+		req := NewAnnRequest("vector_field", 10, vectors...)
+		req.WithIDs(ids)
+
+		searchReq, err := req.searchRequest()
+		assert.NoError(t, err)
+		// Nq should be based on IDs count, not vectors count
+		assert.Equal(t, int64(2), searchReq.GetNq())
+		assert.NotNil(t, searchReq.GetIds())
+		assert.Nil(t, searchReq.GetPlaceholderGroup())
+	})
+
+	t.Run("with_search_params", func(t *testing.T) {
+		ids := column.NewColumnInt64("pk", []int64{1, 2, 3})
+		req := NewAnnRequest("vector_field", 10).
+			WithIDs(ids).
+			WithSearchParam("nprobe", "16").
+			WithFilter("category == 'A'")
+
+		searchReq, err := req.searchRequest()
+		assert.NoError(t, err)
+		assert.Equal(t, "category == 'A'", searchReq.GetDsl())
+
+		params := entity.KvPairsMap(searchReq.GetSearchParams())
+		assert.Equal(t, "16", params["nprobe"])
 	})
 }

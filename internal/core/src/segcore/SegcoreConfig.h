@@ -73,6 +73,26 @@ class SegcoreConfig {
     }
 
     void
+    set_storage_v3_enabled(bool storage_v3_enabled) {
+        this->storage_v3_enabled_ = storage_v3_enabled;
+    }
+
+    bool
+    get_storage_v3_enabled() const {
+        return storage_v3_enabled_;
+    }
+
+    void
+    set_enable_growing_source_flush(bool enable_growing_source_flush) {
+        this->enable_growing_source_flush_ = enable_growing_source_flush;
+    }
+
+    bool
+    get_enable_growing_source_flush() const {
+        return enable_growing_source_flush_;
+    }
+
+    void
     set_sub_dim(int64_t sub_dim) {
         sub_dim_ = sub_dim;
     }
@@ -157,6 +177,38 @@ class SegcoreConfig {
     }
 
     void
+    set_visibility_filter_enabled(bool value) {
+        visibility_filter_enabled_ = value;
+    }
+
+    bool
+    get_visibility_filter_enabled() const {
+        return visibility_filter_enabled_;
+    }
+
+    void
+    set_prefer_field_data_when_index_has_raw_data(bool value) {
+        prefer_field_data_when_index_has_raw_data_ = value;
+    }
+
+    bool
+    get_prefer_field_data_when_index_has_raw_data() const {
+        return prefer_field_data_when_index_has_raw_data_;
+    }
+
+    static constexpr int64_t kDefaultMaxGroupByGroups = 100000;
+
+    int64_t
+    get_max_group_by_groups() const {
+        return max_group_by_groups_;
+    }
+
+    void
+    set_max_group_by_groups(int64_t v) {
+        max_group_by_groups_ = v;
+    }
+
+    void
     set_interim_index_mem_expansion_rate(float rate) {
         interim_index_mem_expansion_rate_ = rate;
     }
@@ -172,7 +224,9 @@ class SegcoreConfig {
             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
             knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
     };
+    inline static bool storage_v3_enabled_ = false;
     inline static bool enable_interim_segment_index_ = false;
+    inline static bool enable_growing_source_flush_ = false;
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
     inline static int64_t nprobe_ = 4;
@@ -185,7 +239,10 @@ class SegcoreConfig {
         knowhere::RefineType::DATA_VIEW;
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
+    inline static bool visibility_filter_enabled_ = true;
+    inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
+    inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
 };
 
 }  // namespace milvus::segcore

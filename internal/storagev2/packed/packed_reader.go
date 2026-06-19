@@ -25,15 +25,15 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"io"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedReader, error) {
@@ -86,6 +86,8 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
 			use_custom_part_upload: true,
 			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
+			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+			use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
 		}
 		defer C.free(unsafe.Pointer(cStorageConfig.address))
 		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
@@ -99,6 +101,7 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
+		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 
 		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cStorageConfig, &cPackedReader, pluginContextPtr)
 	} else {
@@ -140,7 +143,7 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	}()
 	recordBatch, err := cdata.ImportCRecordBatch(goCArr, goCSchema)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert ArrowArray to Record: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to convert ArrowArray to Record")
 	}
 	pr.currentBatch = recordBatch
 

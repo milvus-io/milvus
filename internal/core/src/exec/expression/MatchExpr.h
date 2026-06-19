@@ -57,6 +57,9 @@ class PhyMatchFilterExpr : public Expr {
                     ? active_count_ - current_pos_
                     : batch_size_;
             current_pos_ += real_batch_size;
+            for (auto& input : inputs_) {
+                input->MoveCursor();
+            }
         }
     }
 
@@ -73,6 +76,11 @@ class PhyMatchFilterExpr : public Expr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return std::nullopt;
+    }
+
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
     }
 
  private:

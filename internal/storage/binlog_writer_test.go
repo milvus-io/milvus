@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 func TestBinlogReaderWriterCipher(t *testing.T) {
@@ -49,11 +49,11 @@ func TestBinlogReaderWriterCipher(t *testing.T) {
 	assert.NoError(t, err)
 	assert.EqualValues(t, 3, nums)
 	sizeTotal := 20000000
-	binlogWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	binlogWriter.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	err = binlogWriter.Finish()
 	assert.NoError(t, err)
 
-	storedEdek, ok := binlogWriter.descriptorEvent.GetEdek()
+	storedEdek, ok := binlogWriter.GetEdek()
 	assert.True(t, ok)
 	assert.EqualValues(t, safeKey, storedEdek)
 	assert.NoError(t, err)
@@ -73,7 +73,7 @@ func TestBinlogReaderWriterCipher(t *testing.T) {
 
 	log.Info("binlogReader", zap.Any("descriptorEvent", binlogReader.descriptorEvent))
 
-	gotsafeKey, ok := binlogReader.descriptorEvent.GetEdek()
+	gotsafeKey, ok := binlogReader.GetEdek()
 	assert.True(t, ok)
 	assert.EqualValues(t, safeKey, gotsafeKey)
 
@@ -111,7 +111,7 @@ func TestBinlogWriterReader(t *testing.T) {
 	assert.NoError(t, err)
 	assert.EqualValues(t, 3, nums)
 	sizeTotal := 20000000
-	binlogWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	binlogWriter.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	err = binlogWriter.Finish()
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, binlogWriter.GetEventNums())

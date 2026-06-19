@@ -4,7 +4,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -51,10 +51,15 @@ type policyConfig struct {
 	RebalanceMaxStep   int
 }
 
-// Vaildate validates the vchannel fair policy config.
+// errPolicyConfigNegative is returned by policyConfig.Validate when any
+// numeric field is negative. INTERNAL: caller logs it (caller already
+// dumps cfg via zap.Any), never crosses any gRPC boundary.
+var errPolicyConfigNegative = errors.New("vchannel fair policy config has negative value(s)")
+
+// Validate validates the vchannel fair policy config.
 func (c policyConfig) Validate() error {
 	if c.PChannelWeight < 0 || c.VChannelWeight < 0 || c.AntiAffinityWeight < 0 || c.RebalanceTolerance < 0 || c.RebalanceMaxStep < 0 {
-		return errors.Errorf("invalid vchannel fair policy config, %+v", c)
+		return errPolicyConfigNegative
 	}
 	return nil
 }

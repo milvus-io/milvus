@@ -19,17 +19,16 @@ package csv
 import (
 	"context"
 	"encoding/csv"
-	"fmt"
 	"io"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Row = map[storage.FieldID]any
@@ -52,9 +51,9 @@ type reader struct {
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int, sep rune, nullkey string) (*reader, error) {
 	cmReader, err := cm.Reader(ctx, path)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read csv file failed, path=%s, err=%s", path, err.Error()))
+		return nil, merr.Wrapf(err, "read csv file failed, path=%s", path)
 	}
-	retryableReader := common.NewRetryableReader(ctx, path, cmReader)
+	retryableReader := common.NewRetryableReaderWithReopen(ctx, path, cmReader, common.NewChunkManagerReopenReaderFunc(cm), cm.Size)
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
@@ -66,7 +65,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	header, err := csvReader.Read()
 	log.Info("csv header parsed", zap.Strings("header", header))
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read csv header, error: %v", err))
+		return nil, merr.WrapErrImportSysFailedMsg("failed to read csv header, error: %v", err)
 	}
 
 	rowParser, err := NewRowParser(schema, header, nullkey)
@@ -88,7 +87,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertData(r.schema)
+	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -100,11 +99,11 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		}
 		row, err := r.parser.Parse(value)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse row, error: %v", err))
+			return nil, merr.WrapErrImportFailedMsg("failed to parse row, error: %v", err)
 		}
 		err = insertData.Append(row)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, error: %v", err))
+			return nil, merr.WrapErrImportFailedMsg("failed to append row, error: %v", err)
 		}
 		cnt++
 		if cnt >= r.count {
@@ -119,6 +118,8 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if insertData.GetRowNum() == 0 {
 		return nil, io.EOF
 	}
+
+	common.RemoveUnpopulatedFunctionOutputFields(r.schema, insertData)
 
 	return insertData, nil
 }

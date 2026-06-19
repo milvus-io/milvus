@@ -106,25 +106,39 @@ SegmentLoad(CTraceContext c_trace,
             CLoadCancellationSource source);
 
 /**
- * @brief Reopen an existing segment with updated load information
- *
- * This function reopens a segment with new load configuration, typically used
- * when the segment needs to be reconfigured due to schema changes or updated
- * load parameters. The segment will be reinitialized with the provided load info
- * while preserving its identity (segment_id).
- *
- * @param c_trace Tracing context for distributed tracing and debugging
- * @param c_segment The segment handle to be reopened
- * @param load_info_blob Serialized SegmentLoadInfo protobuf message containing
- *                       the new load configuration (field data info, index info, etc.)
- * @param load_info_length Length of the load_info_blob in bytes
- * @return CStatus indicating success or failure with error details
+ * @brief Async load segment using Future mechanism with built-in cancellation
+ * @param c_trace: tracing context param
+ * @param c_segment: segment handle indicate which segment to load
+ * @return CFuture* that resolves when load completes (result pointer is nullptr)
  */
-CStatus
-ReopenSegment(CTraceContext c_trace,
-              CSegmentInterface c_segment,
-              const uint8_t* load_info_blob,
-              const int64_t load_info_length);
+CFuture*
+AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
+
+/**
+ * @brief Async reopen segment using Future mechanism with built-in cancellation.
+ *
+ * Reopen applies a new SegmentLoadInfo and the latest collection schema.
+ * schema_blob/schema_length are required so sealed segments compute LoadDiff
+ * against the new schema and handle schema changes through the same load-diff
+ * framework as manifest/binlog/index updates.
+ *
+ * @param c_trace tracing context param
+ * @param c_segment segment handle to reopen
+ * @param load_info_blob serialized SegmentLoadInfo protobuf message
+ * @param load_info_length length of load_info_blob in bytes
+ * @param schema_blob serialized CollectionSchema protobuf message; must not be null
+ * @param schema_length length of schema_blob in bytes; must be positive
+ * @param schema_version schema version assigned to the parsed schema
+ * @return CFuture* that resolves when reopen completes (result pointer is nullptr)
+ */
+CFuture*
+AsyncReopenSegment(CTraceContext c_trace,
+                   CSegmentInterface c_segment,
+                   const uint8_t* load_info_blob,
+                   const int64_t load_info_length,
+                   const void* schema_blob,
+                   const int64_t schema_length,
+                   const uint64_t schema_version);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
@@ -135,6 +149,28 @@ ClearSegmentData(CSegmentInterface c_segment);
 void
 DeleteSearchResult(CSearchResult search_result);
 
+/**
+ * @brief Get the valid_count from a search result (used for two-stage search)
+ * @param search_result: The search result to extract valid_count from
+ * @return valid_count (-1 if not set, i.e., normal search mode)
+ */
+int64_t
+GetSearchResultValidCount(CSearchResult search_result);
+
+/**
+ * @brief Execute search on a segment
+ *
+ * @param c_trace: Tracing context for distributed tracing
+ * @param c_segment: Segment to search
+ * @param c_plan: Search plan containing filter predicates and vector query
+ * @param c_placeholder_group: Placeholder group with query vectors (can be NULL if filter_only=true)
+ * @param timestamp: MVCC timestamp for consistency
+ * @param consistency_level: Consistency level for the query
+ * @param collection_ttl: Collection TTL for query context
+ * @param filter_only: If true, only execute filter and return valid_count in result (Stage 1 of two-stage search)
+ * @param enable_expr_cache: If true, enable expression filter cache for two-stage search
+ * @return CFuture* Future that resolves to SearchResult (with valid_count set if filter_only=true)
+ */
 CFuture*  // Future<CSearchResultBody>
 AsyncSearch(CTraceContext c_trace,
             CSegmentInterface c_segment,
@@ -142,7 +178,10 @@ AsyncSearch(CTraceContext c_trace,
             CPlaceholderGroup c_placeholder_group,
             uint64_t timestamp,
             int32_t consistency_level,
-            uint64_t collection_ttl);
+            uint64_t collection_ttl,
+            uint64_t entity_ttl_physical_time_us,
+            bool filter_only,
+            bool enable_expr_cache);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
@@ -155,7 +194,8 @@ AsyncRetrieve(CTraceContext c_trace,
               int64_t limit_size,
               bool ignore_non_pk,
               int32_t consistency_level,
-              uint64_t collection_ttl);
+              uint64_t collection_ttl,
+              uint64_t entity_ttl_physical_time_us);
 
 CFuture*  // Future<CRetrieveResult>
 AsyncRetrieveByOffsets(CTraceContext c_trace,
@@ -209,12 +249,6 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
                          CLoadIndexInfo c_load_index_info);
 
 CStatus
-LoadTextIndex(CSegmentInterface c_segment,
-              const uint8_t* serialized_load_text_index_info,
-              const uint64_t len,
-              CLoadCancellationSource source);
-
-CStatus
 LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialied_load_json_key_index_info,
@@ -240,10 +274,6 @@ DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
                            int64_t field_id,
                            const char* nested_path);
 
-CStatus
-AddFieldDataInfoForSealed(CSegmentInterface c_segment,
-                          CLoadFieldDataInfo c_load_field_data_info);
-
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
 ExistPk(CSegmentInterface c_segment,
@@ -262,12 +292,73 @@ void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
 
 CStatus
-CreateTextIndex(CSegmentInterface c_segment,
-                int64_t field_id,
-                CLoadCancellationSource source);
+ExprResCacheEraseSegment(int64_t segment_id);
+
+//////////////////////////////    interfaces for growing segment flush    //////////////////////////////
+
+/**
+ * @brief Configuration for flushing growing segment data to storage.
+ */
+typedef struct CFlushConfig {
+    const char* segment_path;   // base path for segment manifest and data
+    int64_t read_version;       // version to read (-1 = latest)
+    uint32_t retry_limit;       // retry limit for commit
+    const char* writer_format;  // writer.format
+    // TEXT column configurations
+    int64_t* text_field_ids;       // array of TEXT field IDs
+    const char** text_lob_paths;   // array of LOB paths for each TEXT field
+    size_t num_text_columns;       // number of TEXT columns
+    int64_t* bm25_field_ids;       // array of BM25 sparse output field IDs
+    int64_t* bm25_stats_log_ids;   // array of BM25 stats log IDs
+    size_t num_bm25_fields;        // number of BM25 output fields
+    bool write_merged_bm25_stats;  // whether to write compound BM25 stats
+} CFlushConfig;
+
+/**
+ * @brief Result of flushing growing segment data.
+ */
+typedef struct CFlushResult {
+    char* manifest_path;  // path to the committed manifest (caller must free)
+    int64_t committed_version;  // committed version number
+    int64_t num_rows;           // number of rows flushed
+    int64_t* bm25_field_ids;    // field ids for serialized BM25 stats
+    uint8_t** bm25_stats;       // serialized BM25 stats per field
+    size_t* bm25_stats_sizes;   // serialized BM25 stats sizes
+    size_t num_bm25_stats;      // number of BM25 stats entries
+} CFlushResult;
+
+/**
+ * @brief Flush data from a growing segment directly to storage.
+ *
+ * This function extracts data from the growing segment's ConcurrentVector
+ * and writes it to storage via milvus-storage. It handles:
+ * - Extracting raw field data from InsertRecord
+ * - Converting to Arrow RecordBatch
+ * - Writing to storage with TEXT column LOB handling
+ * - Creating manifest with committed version
+ *
+ * @param c_segment The growing segment to flush
+ * @param start_offset Start row offset (inclusive)
+ * @param end_offset End row offset (exclusive)
+ * @param config Flush configuration
+ * @param result Output flush result (caller must free manifest_path)
+ * @return CStatus indicating success or failure
+ */
+CStatus
+FlushGrowingSegmentData(CSegmentInterface c_segment,
+                        int64_t start_offset,
+                        int64_t end_offset,
+                        const CFlushConfig* config,
+                        CFlushResult* result);
+
+/**
+ * @brief Free the manifest_path in CFlushResult.
+ */
+void
+FreeFlushResult(CFlushResult* result);
 
 CStatus
-ExprResCacheEraseSegment(int64_t segment_id);
+SegmentSetCommitTimestamp(CSegmentInterface c_segment, uint64_t commit_ts);
 
 #ifdef __cplusplus
 }

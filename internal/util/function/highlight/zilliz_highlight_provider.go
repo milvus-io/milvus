@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/zilliz"
 )
@@ -51,12 +51,16 @@ func newZillizHighlightProvider(params []*commonpb.KeyValuePair, conf map[string
 				return nil, err
 			}
 
+		case models.TimeoutMsParamKey:
+			// consumed by ResolveTimeoutMs; not a model-service param
 		default:
 			modelParams[param.Key] = param.Value
 		}
 	}
 
-	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, conf)
+	timeoutMs := models.ResolveTimeoutMs(params)
+
+	c, err := zilliz.NewZilliClient(modelDeploymentID, extraInfo.ClusterID, extraInfo.DBName, conf, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

@@ -3,10 +3,10 @@ package adaptor
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 var UnmashalerDispatcher = (&msgstream.ProtoUDFactory{}).NewUnmarshalDispatcher()
@@ -146,6 +146,8 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		tsMsg, err = NewTruncateCollectionMessageBody(msg)
 	case message.MessageTypeAlterWAL:
 		tsMsg, err = NewAlterWALMessageBody(msg)
+	case message.MessageTypeCreateIndex:
+		tsMsg, err = NewCreateIndexMessageBody(msg)
 	default:
 		panic("unsupported message type")
 	}

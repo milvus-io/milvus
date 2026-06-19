@@ -19,13 +19,13 @@ package metacache
 import (
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 type SegmentInfo struct {
@@ -49,6 +49,10 @@ type SegmentInfo struct {
 	bm25logs         []*datapb.FieldBinlog
 	currentSplit     []storagecommon.ColumnGroup
 	manifestPath     string
+
+	// flushSourceMode is process-local runtime state; not persisted.
+	// See FlushSourceMode docs for lifecycle semantics.
+	flushSourceMode FlushSourceMode
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -134,6 +138,13 @@ func (s *SegmentInfo) ManifestPath() string {
 	return s.manifestPath
 }
 
+// FlushSourceMode returns the sticky decision of which subsystem owns this
+// segment's payload at flush time. The value is process-local and not
+// persisted; see FlushSourceMode docs for details.
+func (s *SegmentInfo) FlushSourceMode() FlushSourceMode {
+	return s.flushSourceMode
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
@@ -156,6 +167,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		bm25logs:         s.bm25logs,
 		currentSplit:     s.currentSplit,
 		manifestPath:     s.manifestPath,
+		flushSourceMode:  s.flushSourceMode,
 	}
 }
 
@@ -173,6 +185,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 			currentSplit = append(currentSplit, storagecommon.ColumnGroup{
 				GroupID: group.GetFieldID(),
 				Fields:  group.GetChildFields(),
+				Format:  group.GetFormat(),
 			})
 		}
 		log.Info("recover split info", zap.Int64("segmentID", info.GetID()), zap.Stringers("columnGroup", currentSplit))

@@ -7,18 +7,18 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type insertTask struct {
@@ -37,6 +37,7 @@ type insertTask struct {
 	partitionKeys   *schemapb.FieldData
 	schemaTimestamp uint64
 	collectionID    int64
+	schemaVersion   int32
 }
 
 // TraceCtx returns insertTask context
@@ -152,9 +153,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 	it.schema = schema.CollectionSchema
+	it.schemaVersion = schema.Version
+	if err := validateTextStorageV3Enabled(it.schema); err != nil {
+		return err
+	}
 
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err
@@ -167,7 +172,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder("applyPK")
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
 	rowIDBegin, rowIDEnd, AllocErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if AllocErr != nil {
 		log.Ctx(ctx).Warn("failed to allocate auto id",
 			zap.String("collectionName", collectionName),
@@ -203,11 +208,9 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	if Params.CommonCfg.EnableNamespace.GetAsBool() {
-		err = addNamespaceData(it.schema, it.insertMsg)
-		if err != nil {
-			return err
-		}
+	err = addNamespaceData(it.schema, it.insertMsg)
+	if err != nil {
+		return err
 	}
 
 	err = checkAndFlattenStructFieldData(it.schema, it.insertMsg)
@@ -244,6 +247,11 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	err = fillFieldPropertiesOnly(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
 		log.Info("fill field properties failed", zap.Error(err))
+		return err
+	}
+	err = normalizeFP32ToFP16BF16VectorFieldData(it.insertMsg.GetFieldsData(), schema)
+	if err != nil {
+		log.Info("normalize fp32 to fp16/bf16 vector field data failed", zap.Error(err))
 		return err
 	}
 

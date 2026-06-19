@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func Test_HybridIndexChecker(t *testing.T) {
@@ -32,6 +32,20 @@ func Test_HybridIndexChecker(t *testing.T) {
 	assert.NoError(t, c.CheckValidDataType(IndexHybrid, &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float}))
 	assert.NoError(t, c.CheckValidDataType(IndexHybrid, &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double}))
 	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{}))
+	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "DOUBLE", "json_path": "/price",
+	}))
+	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "BOOL", "json_path": "/flag",
+	}))
+	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "VARCHAR", "json_path": "/name",
+	}))
+	// unsupported cast type for HYBRID
+	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "ARRAY_BOOL", "json_path": "/flags",
+	}))
+
 	assert.Error(t, c.CheckTrain(schemapb.DataType_Float, schemapb.DataType_None, map[string]string{"bitmap_cardinality_limit": "0"}))
 	assert.Error(t, c.CheckTrain(schemapb.DataType_Double, schemapb.DataType_None, map[string]string{"bitmap_cardinality_limit": "2000"}))
 }

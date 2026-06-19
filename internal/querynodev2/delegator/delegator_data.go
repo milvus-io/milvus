@@ -28,34 +28,47 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // delegator data related part
+
+// segmentEffectiveTs returns the timestamp for delete-buffer pin/ListAfter.
+// For import segments with commit_timestamp, only deletes from T_commit onwards
+// are applied via the buffer (pre-commit deletes are in the delta log or L0 path).
+func segmentEffectiveTs(info *querypb.SegmentLoadInfo) uint64 {
+	if ts := info.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return info.GetStartPosition().GetTimestamp()
+}
 
 // InsertData
 type InsertData struct {
@@ -133,7 +146,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			// panic here, insert failure
 			panic(err)
 		}
-		growing.UpdateBloomFilter(insertData.PrimaryKeys)
+		growing.UpdatePkCandidate(insertData.PrimaryKeys)
 
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()
@@ -153,8 +166,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 
 			if !sd.distribution.GrowingSegmentExists(segmentID) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
-				if sd.idfOracle != nil {
-					sd.idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
+				if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+					idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
 				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
@@ -168,8 +181,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 
 			sd.growingSegmentLock.Unlock()
-		} else if sd.idfOracle != nil {
-			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
+		} else if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+			idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
 		}
 		log.Info("insert into growing segment",
 			zap.Int64("collectionID", growing.Collection()),
@@ -178,7 +191,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			zap.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
 		)
 	}
-	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
+	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 }
 
@@ -221,7 +234,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 
 	sd.forwardStreamingDeletion(context.Background(), deleteData)
 
-	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
+	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 }
 
@@ -320,6 +333,10 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 						// cancel other request
 						cancel()
 						return false, err
+					} else if grpcclient.IsServerIDMismatchErr(err) {
+						log.Warn("try to delete data on mismatched node, node has been replaced", zap.Error(err))
+						cancel()
+						return false, err
 					} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
 						log.Warn("try to delete data of released segment")
 						return false, nil
@@ -386,9 +403,9 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
 
-	for _, segment := range loaded {
-		if sd.idfOracle != nil {
-			sd.idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
+	if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+		for _, segment := range loaded {
+			idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
 		}
 	}
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
@@ -404,48 +421,122 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	return nil
 }
 
-// load bm25 stats for sealed segments
+// load bm25 stats for sealed segments.
+// idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
-	if sd.idfOracle == nil {
+	idfOracle := sd.getIDFOracle()
+	if idfOracle == nil {
 		return nil
 	}
 
 	pool := segments.GetBM25LoadPool()
 
-	future := pool.Submit(func() (any, error) {
-		bm25Stats, err := sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
-		if err != nil {
-			log.Warn("failed to load bm25 stats for segment", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
-			return nil, err
-		}
-
-		if bm25Stats != nil {
-			bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
-				log.Info("register sealed segment bm25 stats into idforacle",
-					zap.Int64("segmentID", segmentID),
-				)
-				err = sd.idfOracle.RegisterSealed(segmentID, stats)
-				if err != nil {
-					log.Warn("failed to register sealed segment bm25 stats into idforacle", zap.Error(err))
-					return false
-				}
-				return true
-			})
-
-			if err != nil {
-				log.Warn("failed to register sealed segment bm25 stats into idforacle", zap.Error(err))
+	cm := sd.loader.GetChunkManager()
+	futures := make([]*conc.Future[any], 0, len(infos))
+	for _, info := range infos {
+		info := info
+		futures = append(futures, pool.Submit(func() (any, error) {
+			if err := idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
+				log.Warn("failed to load bm25 stats for segment",
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Int64("segmentID", info.GetSegmentID()),
+					zap.Error(err))
 				return nil, err
 			}
-		}
+			return nil, nil
+		}))
+	}
 
-		return nil, nil
-	})
-
-	err := conc.BlockOnAll(future)
+	err := conc.BlockOnAll(futures...)
 	if err != nil {
 		log.Warn("failed to load bm25 stats", zap.Error(err))
 		return err
 	}
+	return nil
+}
+
+func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	log := sd.getLogger(ctx).With(
+		zap.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
+		zap.String("loadScope", req.GetLoadScope().String()),
+	)
+
+	infosWithBM25Stats := make([]*querypb.SegmentLoadInfo, 0, len(req.GetInfos()))
+	for _, info := range req.GetInfos() {
+		bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+		if err != nil {
+			log.Warn("resolve reopened bm25 stats failed", zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))
+			return err
+		}
+		if len(bm25Paths) > 0 {
+			infosWithBM25Stats = append(infosWithBM25Stats, info)
+		}
+	}
+
+	if len(infosWithBM25Stats) == 0 {
+		return nil
+	}
+	return sd.loadBM25StatsForReopen(ctx, infosWithBM25Stats, req)
+}
+
+func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
+	idfOracle := sd.getIDFOracle()
+	if idfOracle == nil {
+		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
+	}
+
+	pool := segments.GetBM25LoadPool()
+	cm := sd.loader.GetChunkManager()
+	futures := make([]*conc.Future[any], 0, len(infos))
+	for _, info := range infos {
+		info := info
+		futures = append(futures, pool.Submit(func() (any, error) {
+			activateIfReadable := sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
+			if err := idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable); err != nil {
+				log.Warn("failed to load reopened bm25 stats for segment",
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Int64("segmentID", info.GetSegmentID()),
+					zap.Bool("activateIfReadable", activateIfReadable),
+					zap.Error(err))
+				return nil, err
+			}
+			return nil, nil
+		}))
+	}
+
+	if err := conc.BlockOnAll(futures...); err != nil {
+		log.Warn("failed to load reopened bm25 stats", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// syncCollectionIndexMeta refreshes the delegator node's CCollection IndexMeta after a
+// forwarded worker load. Worker LoadSegments already updates IndexMeta on the target
+// worker, but the delegator (which executes growing search locally) must stay in sync.
+func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	if len(req.GetIndexInfoList()) == 0 {
+		return nil
+	}
+
+	schema := req.GetSchema()
+	if schema == nil {
+		schema = sd.collection.Schema()
+	}
+
+	loadMeta := req.GetLoadMeta()
+	if loadMeta == nil {
+		loadMeta = &querypb.LoadMetaInfo{
+			CollectionID:  req.GetCollectionID(),
+			SchemaVersion: sd.collection.SchemaVersion(),
+		}
+	}
+
+	meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
+	if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
+		return err
+	}
+	sd.collectionManager.Unref(req.GetCollectionID(), 1)
 	return nil
 }
 
@@ -472,11 +563,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	// Note: if delete records is pinned, it will skip cleanup during SyncTargetVersion
 	// which means after segment is loaded, then delete buffer will be cleaned up by next SyncTargetVersion call
 	for _, info := range req.GetInfos() {
-		sd.deleteBuffer.Pin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+		sd.deleteBuffer.Pin(segmentEffectiveTs(info), info.GetSegmentID())
 	}
 	defer func() {
 		for _, info := range req.GetInfos() {
-			sd.deleteBuffer.Unpin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+			sd.deleteBuffer.Unpin(segmentEffectiveTs(info), info.GetSegmentID())
 		}
 	}()
 
@@ -526,64 +617,97 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug("work loads segments done")
 
+	if err := sd.syncCollectionIndexMeta(ctx, req); err != nil {
+		log.Warn("failed to sync collection index meta on delegator", zap.Error(err))
+		return err
+	}
+
 	// load index segment need no stream delete and distribution change
 	if req.GetLoadScope() == querypb.LoadScope_Index {
 		return nil
 	}
-
-	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-		return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
-	})
-
-	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
-	if err != nil {
-		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
-		return err
+	if req.GetLoadScope() == querypb.LoadScope_Reopen {
+		return sd.handleReopenPostLoad(ctx, req)
 	}
 
-	log.Debug("load delete...")
-	err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker)
-	if err != nil {
-		log.Warn("load stream delete failed", zap.Error(err))
-		return err
-	}
+	return sd.withPostLoadLimit(ctx, func() error {
+		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
+			return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
+		})
 
-	err = sd.loadBM25Stats(ctx, infos, req)
-	if err != nil {
-		log.Warn("failed to load BM25 stats", zap.Error(err))
-		return err
-	}
-
-	// Build a map from segmentID to BloomFilterSet
-	bfMap := make(map[int64]pkoracle.Candidate)
-	for _, candidate := range candidates {
-		log.Info("loaded bloom filter set for sealed segment",
-			zap.Int64("segmentID", candidate.ID()),
-		)
-		bfMap[candidate.ID()] = candidate
-	}
-
-	// Build entries with Candidate - use filtered infos instead of req.GetInfos()
-	// This ensures we only add entries for segments that were actually loaded (not skipped as duplicates)
-	entries := make([]SegmentEntry, 0, len(infos))
-	for _, info := range infos {
-		entry := SegmentEntry{
-			SegmentID:   info.GetSegmentID(),
-			PartitionID: info.GetPartitionID(),
-			NodeID:      req.GetDstNodeID(),
-			Version:     req.GetVersion(),
-			Level:       info.GetLevel(),
-			Candidate:   bfMap[info.GetSegmentID()],
+		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
+		if err != nil {
+			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
+			return err
 		}
-		entries = append(entries, entry)
+
+		// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
+		err = sd.loadBM25Stats(ctx, infos, req)
+		if err != nil {
+			log.Warn("failed to load BM25 stats", zap.Error(err))
+			return err
+		}
+
+		// Build a map from segmentID to BloomFilterSet
+		bfMap := make(map[int64]pkoracle.Candidate)
+		for _, candidate := range candidates {
+			log.Info("loaded bloom filter set for sealed segment",
+				zap.Int64("segmentID", candidate.ID()),
+			)
+			bfMap[candidate.ID()] = candidate
+		}
+
+		// Build entries with Candidate before loadStreamDelete, which will atomically add them to distribution
+		entries := make([]SegmentEntry, 0, len(infos))
+		for _, info := range infos {
+			entries = append(entries, SegmentEntry{
+				SegmentID:   info.GetSegmentID(),
+				PartitionID: info.GetPartitionID(),
+				NodeID:      req.GetDstNodeID(),
+				Version:     req.GetVersion(),
+				Level:       info.GetLevel(),
+				Candidate:   bfMap[info.GetSegmentID()],
+			})
+		}
+
+		log.Debug("load delete...")
+		// loadStreamDelete now handles distribution add atomically in Phase 3
+		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
+			entries, req.GetLoadMeta().GetSchemaVersion())
+		if err != nil {
+			log.Warn("load stream delete failed", zap.Error(err))
+			// BM25 stats already loaded into idf oracle will be cleaned up
+			// automatically by SyncDistribution when the segment is not in target.
+			return err
+		}
+		log.Debug("load stream delete done")
+
+		return nil
+	})
+}
+
+func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error) error {
+	if sd.postLoadSem == nil {
+		return fn()
 	}
 
-	return sd.addDistributionIfVersionOK(req.GetLoadMeta().GetSchemaVersion(), entries...)
+	start := time.Now()
+	if err := sd.postLoadSem.Acquire(ctx); err != nil {
+		return err
+	}
+	defer sd.postLoadSem.Release()
+
+	log.Ctx(ctx).Debug("delegator acquired post-load slot",
+		zap.Duration("wait", time.Since(start)),
+		zap.Int("capacity", sd.postLoadSem.Cap()),
+		zap.Int("current", sd.postLoadSem.Current()))
+
+	return fn()
 }
 
 func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
-	sd.schemaChangeMutex.Lock()
-	defer sd.schemaChangeMutex.Unlock()
+	sd.schemaChangeMutex.RLock()
+	defer sd.schemaChangeMutex.RUnlock()
 	if version < sd.schemaVersion {
 		return merr.WrapErrServiceInternal("schema version changed")
 	}
@@ -637,7 +761,7 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 	log := sd.getLogger(context.Background())
 	start := time.Now()
 	totalL0Rows := 0
-	totalBfHitRows := int64(0)
+	totalForwardRows := int64(0)
 	processedL0Count := 0
 
 	for _, segment := range level0Segments {
@@ -654,14 +778,25 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 					endIdx = len(segmentPks)
 				}
 
+				if !candidate.PkCandidateExist() {
+					for i := idx; i < endIdx; i++ {
+						totalForwardRows += 1
+						if err := fn(segmentPks[i], segmentTss[i]); err != nil {
+							return err
+						}
+					}
+					continue
+				}
+
 				lc := storage.NewBatchLocationsCache(segmentPks[idx:endIdx])
 				hits := candidate.BatchPkExist(lc)
 				for i, hit := range hits {
-					if hit {
-						totalBfHitRows += 1
-						if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
-							return err
-						}
+					if !hit {
+						continue
+					}
+					totalForwardRows += 1
+					if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
+						return err
 					}
 				}
 			}
@@ -671,9 +806,10 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 	log.Info("forward delete from L0 segments to worker",
 		zap.Int64("targetSegmentID", candidate.ID()),
 		zap.String("channel", sd.vchannelName),
+		zap.Bool("broadcast", !candidate.PkCandidateExist()),
 		zap.Int("l0SegmentCount", processedL0Count),
 		zap.Int("totalDeleteRowsInL0", totalL0Rows),
-		zap.Int64("totalBfHitRows", totalBfHitRows),
+		zap.Int64("totalForwardRows", totalForwardRows),
 		zap.Int64("totalCost", time.Since(start).Milliseconds()),
 	)
 
@@ -711,17 +847,74 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 	}
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		fmt.Sprint(sd.Collection()),
 		commonpb.SegmentState_Sealed.String(),
 		datapb.SegmentLevel_L0.String(),
 	).Set(float64(len(level0Segments)))
 
 	metrics.QueryNodeLevelZeroSize.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		fmt.Sprint(sd.collectionID),
 		sd.vchannelName,
 	).Set(float64(totalSize))
+}
+
+// processDeleteRecords performs BF checks on delete buffer records and forwards matching deletes
+// via the buffered forwarder. Does NOT require any lock to be held.
+// When candidate has no stats (PkCandidateExist() == false), all deletes are forwarded (broadcast mode).
+// Returns the number of timestamp-hit and bloom-filter-hit rows.
+func (sd *shardDelegator) processDeleteRecords(
+	candidate *pkoracle.BloomFilterSet,
+	records []*deletebuffer.Item,
+	forwarder *BufferForwarder,
+) (tsHit, bfHit int64, err error) {
+	for _, entry := range records {
+		for _, record := range entry.Data {
+			tsHit += int64(len(record.DeleteData.Pks))
+			if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
+				continue
+			}
+			pks := record.DeleteData.Pks
+			batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+			for idx := 0; idx < len(pks); idx += batchSize {
+				endIdx := idx + batchSize
+				if endIdx > len(pks) {
+					endIdx = len(pks)
+				}
+
+				// When BF not initialized (bloom filter disabled), forward all deletes
+				if !candidate.PkCandidateExist() {
+					for i := idx; i < endIdx; i++ {
+						bfHit++
+						if err = forwarder.Buffer(pks[i], record.DeleteData.Tss[i]); err != nil {
+							return tsHit, bfHit, err
+						}
+					}
+					continue
+				}
+
+				lc := storage.NewBatchLocationsCache(pks[idx:endIdx])
+				hits := candidate.BatchPkExist(lc)
+				for i, hit := range hits {
+					if hit {
+						bfHit++
+						if err = forwarder.Buffer(pks[idx+i], record.DeleteData.Tss[idx+i]); err != nil {
+							return tsHit, bfHit, err
+						}
+					}
+				}
+			}
+		}
+	}
+	return tsHit, bfHit, nil
+}
+
+// segDeleteSnapshot holds the snapshotted delete buffer entries for a segment,
+// captured under RLock in Phase 1 of loadStreamDelete.
+type segDeleteSnapshot struct {
+	records       []*deletebuffer.Item // copied slice of delete buffer entries
+	snapshotMaxTs uint64               // max Item.Ts in snapshot, used for timestamp-based catch-up
 }
 
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
@@ -730,29 +923,50 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	req *querypb.LoadSegmentsRequest,
 	targetNodeID int64,
 	worker cluster.Worker,
+	entries []SegmentEntry,
+	schemaVersion uint64,
 ) error {
 	log := sd.getLogger(ctx)
 
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
+
+	// Phase 0: Forward L0 deletions (no lock needed, unchanged)
 	for _, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
-		// forward l0 deletion
 		err := sd.forwardL0Deletion(ctx, info, req, candidate, targetNodeID, worker)
 		if err != nil {
 			return err
 		}
 	}
 
+	// === Phase 1: Snapshot delete buffer entries under RLock (fast — microseconds) ===
 	sd.deleteMut.RLock()
-	defer sd.deleteMut.RUnlock()
-	// apply buffered delete for new segments
-	// no goroutines here since qnv2 has no load merging logic
-	for _, info := range infos {
+	snapshots := make([]segDeleteSnapshot, len(infos))
+	for i, info := range infos {
+		records := sd.deleteBuffer.ListAfter(segmentEffectiveTs(info))
+		// Copy the slice to safely use outside lock scope.
+		// ListAfter returns a new slice from doubleCacheBuffer, but we copy to
+		// ensure no dependency on internal buffer state that may change after unlock.
+		copied := make([]*deletebuffer.Item, len(records))
+		copy(copied, records)
+		var maxTs uint64
+		if len(records) > 0 {
+			maxTs = records[len(records)-1].Ts
+		}
+		snapshots[i] = segDeleteSnapshot{
+			records:       copied,
+			snapshotMaxTs: maxTs,
+		}
+	}
+	sd.deleteMut.RUnlock()
+	// RLock released — WAL pipeline (ProcessDelete) is now unblocked
+
+	// Create one forwarder per segment, shared across Phase 2 and Phase 3, flushed once at the end.
+	forwarders := make([]*BufferForwarder, len(infos))
+	for i, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
-		// after L0 segment feature
-		// growing segemnts should have load stream delete as well
 		deleteScope := querypb.DataScope_All
 		switch candidate.Type() {
 		case commonpb.SegmentState_Sealed:
@@ -760,57 +974,73 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		case commonpb.SegmentState_Growing:
 			deleteScope = querypb.DataScope_Streaming
 		}
-
-		bufferedForwarder := NewBufferedForwarder(paramtable.Get().QueryNodeCfg.ForwardBatchSize.GetAsInt64(),
+		forwarders[i] = NewBufferedForwarder(paramtable.Get().QueryNodeCfg.ForwardBatchSize.GetAsInt64(),
 			deleteViaWorker(ctx, worker, targetNodeID, info, deleteScope))
+	}
 
-		// list buffered delete
-		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
-		tsHitDeleteRows := int64(0)
-		bfHitDeleteRows := int64(0)
+	// === Phase 2: Process snapshot WITHOUT lock (expensive — seconds) ===
+	for i, info := range infos {
+		candidate := idCandidates[info.GetSegmentID()]
 		start := time.Now()
-		for _, entry := range deleteRecords {
-			for _, record := range entry.Data {
-				tsHitDeleteRows += int64(len(record.DeleteData.Pks))
-				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
-					continue
-				}
-				pks := record.DeleteData.Pks
-				batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-				for idx := 0; idx < len(pks); idx += batchSize {
-					endIdx := idx + batchSize
-					if endIdx > len(pks) {
-						endIdx = len(pks)
-					}
-
-					lc := storage.NewBatchLocationsCache(pks[idx:endIdx])
-					hits := candidate.BatchPkExist(lc)
-					for i, hit := range hits {
-						if hit {
-							bfHitDeleteRows += 1
-							err := bufferedForwarder.Buffer(pks[idx+i], record.DeleteData.Tss[idx+i])
-							if err != nil {
-								return err
-							}
-						}
-					}
-				}
-			}
-		}
-		log.Info("forward delete to worker...",
-			zap.String("channel", info.InsertChannel),
-			zap.Int64("segmentID", info.GetSegmentID()),
-			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
-			zap.Int64("tsHitDeleteRowNum", tsHitDeleteRows),
-			zap.Int64("bfHitDeleteRowNum", bfHitDeleteRows),
-			zap.Int64("bfCost", time.Since(start).Milliseconds()),
-		)
-		err := bufferedForwarder.Flush()
+		tsHit, bfHit, err := sd.processDeleteRecords(candidate, snapshots[i].records, forwarders[i])
 		if err != nil {
 			return err
 		}
+		log.Info("forward delete to worker (phase 2: snapshot)...",
+			zap.String("channel", info.InsertChannel),
+			zap.Int64("segmentID", info.GetSegmentID()),
+			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
+			zap.Int64("tsHitDeleteRowNum", tsHit),
+			zap.Int64("bfHitDeleteRowNum", bfHit),
+			zap.Int64("bfCost", time.Since(start).Milliseconds()),
+		)
 	}
-	log.Info("load delete done")
+
+	// === Phase 3: Catch-up new entries + flush + add distribution under RLock (fast — milliseconds) ===
+	sd.deleteMut.RLock()
+	defer sd.deleteMut.RUnlock()
+
+	for i, info := range infos {
+		candidate := idCandidates[info.GetSegmentID()]
+
+		// Use timestamp-based catch-up: fetch records added after the snapshot's max timestamp.
+		// This is robust against delete buffer eviction (Put → evict discards old tail during Phase 2).
+		// Index-based approach (allRecords[snapshotLen:]) would panic or miss data if eviction occurs.
+		// Item.Ts comes from WAL TSO, monotonically increasing and unique per ProcessDelete call,
+		// so ListAfter(snapshotMaxTs + 1) precisely captures only new records.
+		catchUpTs := segmentEffectiveTs(info)
+		if snapshots[i].snapshotMaxTs > 0 {
+			catchUpTs = snapshots[i].snapshotMaxTs + 1
+		}
+		newRecords := sd.deleteBuffer.ListAfter(catchUpTs)
+		if len(newRecords) > 0 {
+			start := time.Now()
+			tsHit, bfHit, err := sd.processDeleteRecords(candidate, newRecords, forwarders[i])
+			if err != nil {
+				return err
+			}
+			log.Info("forward delete to worker (phase 3: catch-up)...",
+				zap.String("channel", info.InsertChannel),
+				zap.Int64("segmentID", info.GetSegmentID()),
+				zap.Int64("tsHitDeleteRowNum", tsHit),
+				zap.Int64("bfHitDeleteRowNum", bfHit),
+				zap.Int64("bfCost", time.Since(start).Milliseconds()),
+			)
+		}
+
+		// Flush once per segment after both phases are done
+		if err := forwarders[i].Flush(); err != nil {
+			return err
+		}
+	}
+
+	// Atomically add to distribution while still holding RLock.
+	// This guarantees no ProcessDelete can run between catch-up and distribution update,
+	// so there is no gap between "deletes applied" and "segment visible".
+	if err := sd.addDistributionIfVersionOK(schemaVersion, entries...); err != nil {
+		return err
+	}
+	log.Info("load stream delete done")
 	return nil
 }
 
@@ -860,6 +1090,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	case querypb.DataScope_Historical:
 		sealed = lo.Map(req.GetSegmentIDs(), convertSealed)
 	}
+
 	signal := sd.distribution.RemoveDistributions(sealed, growing)
 	// wait cleared signal
 	<-signal
@@ -877,10 +1108,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		return id, req.GetCheckpoint().GetTimestamp()
 	})
 	sd.AddExcludedSegments(droppedInfos)
-
-	// Note: Candidate cleanup is handled by RemoveDistributions above
-	// - Sealed segment candidates (BloomFilterSet) are refunded in RemoveDistributions
-	// - Growing segment candidates (LocalSegment) are managed by segmentManager.Release()
 
 	var releaseErr error
 	if !force {
@@ -902,6 +1129,11 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 
 	if releaseErr != nil {
 		return releaseErr
+	}
+	if len(growing) > 0 && sd.growingSourceProvider != nil {
+		for _, entry := range growing {
+			sd.growingSourceProvider.ClearReleasePrepared(entry.SegmentID)
+		}
 	}
 	return nil
 }
@@ -961,9 +1193,16 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 	}
 }
 
-func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
+func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.SearchRequest) (float64, error) {
+	idfOracle := sd.getIDFOracle()
+	if idfOracle == nil {
+		return 0, merr.WrapErrServiceInternal("bm25 oracle is not initialized")
+	}
+
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
+		return 0, merr.WrapErrParameterInvalidMsg("failed to unmarshal BM25 IDF placeholder group: %v", err)
+	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
@@ -971,42 +1210,58 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	datas := []any{texts}
-	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
-	if !ok {
-		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-	}
-
-	if len(functionRunner.GetInputFields()) == 2 {
-		analyzerName := "default"
-		if name := req.GetAnalyzerName(); name != "" {
-			// use user provided analyzer name
-			analyzerName = name
+	var tfArray *schemapb.SparseFloatArray
+	schemaVersion := sd.collection.Schema().GetVersion()
+	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
+		if functionType != schemapb.FunctionType_BM25 {
+			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 		}
 
-		analyzers := make([]string, len(texts))
-		for i := range texts {
-			analyzers[i] = analyzerName
-		}
-		datas = append(datas, analyzers)
-	}
+		datas := []any{texts}
+		if len(functionRunner.GetInputFields()) == 2 {
+			analyzerName := "default"
+			if name := req.GetAnalyzerName(); name != "" {
+				// use user provided analyzer name
+				analyzerName = name
+			}
 
-	// get search text term frequency
-	output, err := functionRunner.BatchRun(datas...)
+			analyzers := make([]string, len(texts))
+			for i := range texts {
+				analyzers[i] = analyzerName
+			}
+			datas = append(datas, analyzers)
+		}
+
+		// get search text term frequency
+		output, err := functionRunner.BatchRun(datas...)
+		if err != nil {
+			return err
+		}
+		if len(output) == 0 {
+			return merr.WrapErrFunctionFailedMsg("BM25 embedding failed: runner returned empty output")
+		}
+
+		var ok bool
+		tfArray, ok = output[0].(*schemapb.SparseFloatArray)
+		if !ok {
+			return merr.WrapErrFunctionFailedMsg("functionRunner return unknown data")
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
-
-	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return 0, errors.New("functionRunner return unknown data")
+		// internal invariant: runners are populated with the schema, never by
+		// the request — classified system, keeps cross-replica failover
+		return 0, merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
-	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)
+	idfSparseVector, avgdl, err := idfOracle.BuildIDF(req.GetFieldId(), tfArray)
 	if err != nil {
 		return 0, err
 	}
@@ -1016,7 +1271,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	}
 
 	for _, idf := range idfSparseVector {
-		metrics.QueryNodeSearchFTSNumTokens.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(sd.collectionID), fmt.Sprint(req.GetFieldId())).Observe(float64(typeutil.SparseFloatRowElementCount(idf)))
+		metrics.QueryNodeSearchFTSNumTokens.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(sd.collectionID), fmt.Sprint(req.GetFieldId())).Observe(float64(typeutil.SparseFloatRowElementCount(idf)))
 	}
 
 	err = SetBM25Params(req, avgdl)
@@ -1028,9 +1283,11 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	return avgdl, nil
 }
 
-func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
+func (sd *shardDelegator) parseMinHash(ctx context.Context, req *internalpb.SearchRequest) error {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
+		return merr.WrapErrParameterInvalidMsg("failed to unmarshal MinHash placeholder group: %v", err)
+	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search")
@@ -1038,37 +1295,47 @@ func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for MinHash Function based search, got %s", holder.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	datas := []any{texts}
-	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
-	if !ok {
-		return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-	}
+	var fieldData *schemapb.FieldData
+	schemaVersion := sd.collection.Schema().GetVersion()
+	ok, err := function.RunWithRunner(ctx, sd.collectionID, schemaVersion, req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner) error {
+		if functionType != schemapb.FunctionType_MinHash {
+			return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
+		}
 
-	output, err := functionRunner.BatchRun(datas...)
+		output, err := functionRunner.BatchRun(texts)
+		if err != nil {
+			return err
+		}
+		if len(output) == 0 {
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
+		}
+
+		var ok bool
+		fieldData, ok = output[0].(*schemapb.FieldData)
+		if !ok {
+			return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	if len(output) == 0 {
-		return errors.New("MinHash embedding failed: runner returned empty output")
-	}
-
-	fieldData, ok := output[0].(*schemapb.FieldData)
 	if !ok {
-		return errors.New("MinHash embedding failed: MinHash functionRunner return unknown data")
+		return merr.WrapErrServiceInternalMsg("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
 	vectorField := fieldData.GetVectors()
 	if vectorField == nil {
-		return errors.New("MinHash embedding failed: output is not a vector field")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a vector field")
 	}
 
 	binaryVector := vectorField.GetBinaryVector()
 	if binaryVector == nil {
-		return errors.New("MinHash embedding failed: output is not a binary vector")
+		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a binary vector")
 	}
 
 	req.PlaceholderGroup, err = funcutil.FieldDataToPlaceholderGroupBytes(fieldData)
@@ -1092,27 +1359,27 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {
-			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
-		}
-		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
-		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the highlight field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
+			return nil, merr.WrapErrServiceInternalMsg("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
 		}
 		topks := req.GetTopks()
 		var results [][]*milvuspb.AnalyzerToken
-		var err error
-
-		if len(analyzer.GetInputFields()) == 1 {
-			results, err = analyzer.BatchAnalyze(true, false, task.GetTexts())
-			if err != nil {
-				return nil, err
+		var analyzeErr error
+		ok, err := sd.runWithAnalyzer(ctx, task.GetFieldId(), func(analyzer function.Analyzer) error {
+			if len(analyzer.GetInputFields()) == 1 {
+				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts())
+				return analyzeErr
 			}
-		} else if len(analyzer.GetInputFields()) == 2 {
-			// use analyzer names if analyzer need two input field
-			results, err = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzerNames())
-			if err != nil {
-				return nil, err
+			if len(analyzer.GetInputFields()) == 2 {
+				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzerNames())
+				return analyzeErr
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the highlight field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
 		}
 
 		// analyze result of search text

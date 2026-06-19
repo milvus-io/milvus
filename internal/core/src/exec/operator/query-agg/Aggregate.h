@@ -77,6 +77,7 @@ class Aggregate {
 
     virtual void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) = 0;
 
     virtual void

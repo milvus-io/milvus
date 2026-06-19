@@ -27,21 +27,20 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
 
 type collectionMeta struct {
@@ -395,6 +394,54 @@ func (coord *MixCoordMock) AddCollectionField(ctx context.Context, req *milvuspb
 	return merr.Success(), nil
 }
 
+func (coord *MixCoordMock) AddCollectionStructField(ctx context.Context, req *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	collID, exist := coord.collName2ID[req.CollectionName]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "collection not exist",
+		}, nil
+	}
+
+	collInfo, exist := coord.collID2Meta[collID]
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "collection info not exist",
+		}, nil
+	}
+	structField := proto.Clone(req.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
+	fieldIDStart := int64(common.StartOfUserFieldID + typeutil.GetTotalFieldsNum(collInfo.schema) + 1)
+	structField.FieldID = fieldIDStart
+	for i, field := range structField.GetFields() {
+		field.FieldID = fieldIDStart + int64(i) + 1
+	}
+	collInfo.schema.StructArrayFields = append(collInfo.schema.StructArrayFields, structField)
+	ts := uint64(time.Now().Nanosecond())
+	coord.collID2Meta[collID] = collectionMeta{
+		name:                 req.CollectionName,
+		id:                   collID,
+		schema:               collInfo.schema,
+		shardsNum:            collInfo.shardsNum,
+		virtualChannelNames:  collInfo.virtualChannelNames,
+		physicalChannelNames: collInfo.physicalChannelNames,
+		createdTimestamp:     ts,
+		createdUtcTimestamp:  ts,
+		properties:           collInfo.properties,
+	}
+	return merr.Success(), nil
+}
+
 func (coord *MixCoordMock) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {
@@ -569,10 +616,7 @@ func (coord *MixCoordMock) DescribeCollection(ctx context.Context, req *milvuspb
 	defer coord.collMtx.RUnlock()
 
 	var collID UniqueID
-	usingID := false
-	if req.CollectionName == "" {
-		usingID = true
-	}
+	usingID := req.CollectionName == ""
 
 	collID, exist := coord.collName2ID[req.CollectionName]
 	if !exist && !usingID {
@@ -680,6 +724,10 @@ func (coord *MixCoordMock) CreatePartition(ctx context.Context, req *milvuspb.Cr
 	}
 
 	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	return &rootcoordpb.CreatePartitionResponse{}, nil
 }
 
 func (coord *MixCoordMock) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -1133,6 +1181,10 @@ func (coord *MixCoordMock) CreateRole(ctx context.Context, req *milvuspb.CreateR
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (coord *MixCoordMock) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }
@@ -1167,6 +1219,10 @@ func (coord *MixCoordMock) AlterCollection(ctx context.Context, request *milvusp
 
 func (coord *MixCoordMock) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return &milvuspb.AlterCollectionSchemaResponse{}, nil
 }
 
 func (coord *MixCoordMock) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -1390,6 +1446,18 @@ func (coord *MixCoordMock) ListImports(ctx context.Context, in *internalpb.ListI
 	return &internalpb.ListImportsResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+func (coord *MixCoordMock) CommitImport(ctx context.Context, in *datapb.CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) AbortImport(ctx context.Context, in *datapb.AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) HandleCommitVchannel(ctx context.Context, in *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
 }
 
 func (coord *MixCoordMock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -1670,11 +1738,25 @@ func (coord *MixCoordMock) ListRestoreSnapshotJobs(ctx context.Context, req *dat
 	}, nil
 }
 
+func (coord *MixCoordMock) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest, opts ...grpc.CallOption) (*datapb.PinSnapshotDataResponse, error) {
+	return &datapb.PinSnapshotDataResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (coord *MixCoordMock) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 func (coord *MixCoordMock) Search() {
 }
 
 func (coord *MixCoordMock) GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
 	return &internalpb.GetQuotaMetricsResponse{}, nil
+}
+
+func (coord *MixCoordMock) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }
 
 func (coord *MixCoordMock) ListLoadedSegments(ctx context.Context, in *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error) {
@@ -1716,9 +1798,34 @@ func (coord *MixCoordMock) ValidateAnalyzer(ctx context.Context, req *querypb.Va
 	return &querypb.ValidateAnalyzerResponse{Status: merr.Success()}, nil
 }
 
-func (coord *MixCoordMock) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest, opts ...grpc.CallOption) (*datapb.CreateExternalCollectionResponse, error) {
-	return &datapb.CreateExternalCollectionResponse{
+func (coord *MixCoordMock) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest, opts ...grpc.CallOption) (*datapb.RefreshExternalCollectionResponse, error) {
+	return &datapb.RefreshExternalCollectionResponse{
 		Status: merr.Success(),
+		JobId:  1,
+	}, nil
+}
+
+func (coord *MixCoordMock) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return &datapb.GetRefreshExternalCollectionProgressResponse{
+		Status: merr.Success(),
+		JobInfo: &datapb.ExternalCollectionRefreshJob{
+			JobId:    req.GetJobId(),
+			State:    indexpb.JobState_JobStateFinished,
+			Progress: 100,
+		},
+	}, nil
+}
+
+func (coord *MixCoordMock) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return &datapb.ListRefreshExternalCollectionJobsResponse{
+		Status: merr.Success(),
+		Jobs: []*datapb.ExternalCollectionRefreshJob{
+			{
+				JobId:    1,
+				State:    indexpb.JobState_JobStateFinished,
+				Progress: 100,
+			},
+		},
 	}, nil
 }
 
@@ -1748,6 +1855,14 @@ func (coord *MixCoordMock) GetClientTelemetry(ctx context.Context, req *milvuspb
 
 func (coord *MixCoordMock) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
 	return &milvuspb.PushClientCommandResponse{}, nil
+}
+
+func (coord *MixCoordMock) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest, opts ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error) {
+	return &datapb.CommitBackfillResultResponse{Status: merr.Success()}, nil
 }
 
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)

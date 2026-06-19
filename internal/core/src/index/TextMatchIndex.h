@@ -43,9 +43,14 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     // for loading built index
     explicit TextMatchIndex(const storage::FileManagerContext& ctx);
 
+    using InvertedIndexTantivy<std::string>::Load;
+
  public:
     IndexStatsPtr
     Upload(const Config& config) override;
+
+    IndexStatsPtr
+    UploadUnified(const Config& config) override;
 
     void
     Load(const Config& config);

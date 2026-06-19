@@ -46,6 +46,11 @@ extraConfigFiles:
         dir: /var/lib/milvus/etcd
     common:
       storageType: local
+      storage:
+        # enable storage v3
+        useLoonFFI: true
+    dataCoord:
+      targetVecIndexVersion: 10
     queryNode:
       segcore:
         exprEvalBatchSize: 512
@@ -99,6 +104,13 @@ service:
 standalone:
   disk:
     enabled: true
+  resources:
+    limits:
+      cpu: "8"
+      memory: 16Gi
+    requests:
+      cpu: "3"
+      memory: 8Gi
   extraEnv:
   - name: ETCD_CONFIG_PATH
     value: /milvus/configs/advanced/etcd.yaml

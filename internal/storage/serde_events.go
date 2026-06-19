@@ -19,7 +19,6 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math"
 	"sort"
@@ -31,15 +30,15 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func parseBlobKey(blobKey string) (colId FieldID, logId UniqueID) {
@@ -206,7 +205,7 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 
 				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
 				if err != nil {
-					return merr.WrapErrServiceInternal(fmt.Sprintf("deserialize error on type %s: %v", dt, err))
+					return merr.WrapErrServiceInternalMsg("deserialize error on type %s: %v", dt, err)
 				}
 				m[j] = d // TODO: avoid memory copy here.
 			}
@@ -370,8 +369,8 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de := NewBaseDescriptorEvent(bsw.collectionID, bsw.partitionID, bsw.segmentID)
 	de.PayloadDataType = bsw.fieldSchema.DataType
 	de.FieldID = bsw.fieldSchema.FieldID
-	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
-	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
+	de.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
+	de.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
 	// Additional head options
 	if bsw.headerOpt != nil {
 		bsw.headerOpt(de)
@@ -425,21 +424,20 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 	for _, structField := range schema.StructArrayFields {
 		allFieldsSchema = append(allFieldsSchema, structField.Fields...)
 	}
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	if err != nil {
+		return nil, err
+	}
 
 	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
 	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
-	for _, f := range allFieldsSchema {
-		dim, _ := typeutil.GetDim(f)
-
-		elementType := schemapb.DataType_None
+	for i, f := range allFieldsSchema {
 		if f.DataType == schemapb.DataType_ArrayOfVector {
-			elementType = f.GetElementType()
-			elementTypes[f.FieldID] = elementType
+			elementTypes[f.FieldID] = f.GetElementType()
 		}
 
-		arrowType := serdeMap[f.DataType].arrowType(int(dim), elementType)
-		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowType)
+		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowSchema.Field(i).Type)
 		builders[f.FieldID].Reserve(len(v)) // reserve space to avoid copy
 		types[f.FieldID] = f.DataType
 	}
@@ -460,7 +458,7 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 			}
 
 			if err := typeEntry.serialize(builders[fid], e, elementType); err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s: %v", types[fid], err))
+				return nil, merr.WrapErrServiceInternalMsg("serialize error on type %s: %v", types[fid], err)
 			}
 		}
 	}
@@ -471,7 +469,7 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 		builder := builders[field.FieldID]
 		arrays[i] = builder.NewArray()
 		builder.Release()
-		fields[i] = ConvertToArrowField(field, arrays[i].DataType(), false)
+		fields[i] = arrowSchema.Field(i)
 		field2Col[field.FieldID] = i
 	}
 	return NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), field2Col), nil

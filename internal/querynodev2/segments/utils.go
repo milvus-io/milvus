@@ -1,47 +1,28 @@
 package segments
 
-/*
-#cgo pkg-config: milvus_core
-
-#include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
-#include "segcore/segcore_init_c.h"
-#include "common/init_c.h"
-
-*/
-import "C"
-
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"strconv"
-	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-var errLazyLoadTimeout = merr.WrapErrServiceInternal("lazy load time out")
 
 func GetPkField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
 	for _, field := range schema.GetFields() {
@@ -87,7 +68,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 4
 					break
@@ -98,7 +79,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim / 8
 					break
@@ -109,7 +90,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 2
 					break
@@ -120,14 +101,14 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 2
 					break
 				}
 			}
 		case schemapb.DataType_SparseFloatVector:
-			return nil, errors.New("SparseFloatVector not support in row based message")
+			return nil, merr.WrapErrParameterInvalidMsg("SparseFloatVector not support in row based message")
 		}
 	}
 
@@ -183,15 +164,6 @@ func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.Co
 	return result
 }
 
-func getIndexEngineVersion() (minimal, current int32) {
-	GetDynamicPool().Submit(func() (any, error) {
-		cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
-		minimal, current = int32(cMinimal), int32(cCurrent)
-		return nil, nil
-	}).Await()
-	return minimal, current
-}
-
 // getSegmentMetricLabel returns the label for segment metrics.
 func getSegmentMetricLabel(segment Segment) metricsutil.SegmentLabel {
 	return metricsutil.SegmentLabel{
@@ -208,13 +180,6 @@ func FilterZeroValuesFromSlice(intVals []int64) []int64 {
 		}
 	}
 	return result
-}
-
-// withLazyLoadTimeoutContext returns a new context with lazy load timeout.
-func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	lazyLoadTimeout := paramtable.Get().QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
-	// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
-	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, errLazyLoadTimeout)
 }
 
 func GetSegmentRelatedDataSize(segment Segment) int64 {
@@ -284,7 +249,7 @@ func getFieldSchema(schema *schemapb.CollectionSchema, fieldID int64) (*schemapb
 			}
 		}
 	}
-	return nil, fmt.Errorf("field %d not found in schema", fieldID)
+	return nil, merr.WrapErrFieldNotFound(fieldID, "not in schema")
 }
 
 func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {
@@ -324,12 +289,11 @@ func isGrowingMmapEnable() bool {
 }
 
 // getFieldWarmupPolicy returns the warmup policy for field data loading.
-// Priority: field TypeParams (propagated from collection-level by QueryCoord) > global config
+// Priority: field TypeParams (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
 func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 	// Check field TypeParams (collection-level warmup.scalarField/warmup.vectorField
-	// is propagated to field TypeParams by QueryCoord)
+	// and autoWarmupForNonPKIsolationCollection are propagated to field TypeParams by QueryCoord)
 	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
-
 	if exist {
 		return policy
 	}
@@ -341,10 +305,10 @@ func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 }
 
 // getIndexWarmupPolicy returns the warmup policy for index loading.
-// Priority: index params (propagated from collection-level by QueryCoord) > global config
+// Priority: index params (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
 func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) string {
 	// Check index params (collection-level warmup.scalarIndex/warmup.vectorIndex
-	// is propagated to index params by QueryCoord)
+	// and autoWarmupForNonPKIsolationCollection are propagated to index params by QueryCoord)
 	policy, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
 	if exist {
 		return policy
@@ -357,12 +321,61 @@ func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.
 }
 
 // getScalarDataWarmupPolicy returns the warmup policy for scalar data, but also include json key stats and text match.
-// Priority: field TypeParams (propagated from collection-level by QueryCoord) > global config
+// Priority: field TypeParams (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
 func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
-	// Check field TypeParams (collection-level warmup.scalarField is propagated
+	// Check field TypeParams (collection-level warmup.scalarField and autoWarmupForNonPKIsolationCollection are propagated by QueryCoord)
 	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
 	if exist {
 		return policy
 	}
 	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
+}
+
+// isExternalCollectionLazyLoad checks if all external fields in the schema
+// have warmup=disable (lazy load). Returns true only when every external
+// field's resolved warmup policy is "disable", meaning no field data will be
+// downloaded during segment load.
+func isExternalCollectionLazyLoad(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetExternalField() == "" {
+			continue
+		}
+		policy := getFieldWarmupPolicy(field)
+		if policy != common.WarmupDisable {
+			return false
+		}
+	}
+	return true
+}
+
+// GetVirtualPK generates a virtual primary key from segmentID and offset.
+// Virtual PK format: (truncated_segmentID << 32) | offset
+// Only the lower 32 bits of segmentID are preserved. Milvus segment IDs are
+// TSO-allocated 64-bit values that typically exceed 32 bits, so truncation
+// is expected. Use IsVirtualPKFromSegment for safe comparison.
+func GetVirtualPK(segmentID int64, offset int64) int64 {
+	return ((segmentID & 0xFFFFFFFF) << 32) | (offset & 0xFFFFFFFF)
+}
+
+// ExtractSegmentIDFromVirtualPK extracts the segmentID from a virtual PK.
+// Uses unsigned right shift to avoid sign-extension for large segment IDs.
+func ExtractSegmentIDFromVirtualPK(virtualPK int64) int64 {
+	return int64(uint64(virtualPK) >> 32)
+}
+
+// ExtractOffsetFromVirtualPK extracts the offset from a virtual PK.
+func ExtractOffsetFromVirtualPK(virtualPK int64) int64 {
+	return virtualPK & 0xFFFFFFFF
+}
+
+// IsVirtualPKFromSegment checks if a virtual PK belongs to the given segment.
+// Note: Only the lower 32 bits of segmentID are preserved in the virtual PK,
+// so we compare with the truncated segment ID.
+func IsVirtualPKFromSegment(virtualPK int64, segmentID int64) bool {
+	return ExtractSegmentIDFromVirtualPK(virtualPK) == (segmentID & 0xFFFFFFFF)
+}
+
+// IsExternalField checks if a field is an external field (data stored externally).
+func IsExternalField(field *schemapb.FieldSchema) bool {
+	return field.GetExternalField() != ""
 }

@@ -45,9 +45,10 @@ func (vn *VersionedNotifier) NotifyAll() {
 // Listen creates a listener at given position.
 func (vn *VersionedNotifier) Listen(at versionedListenAt) *VersionedListener {
 	var last int
-	if at == VersionedListenAtEarliest {
+	switch at {
+	case VersionedListenAtEarliest:
 		last = -1
-	} else if at == VersionedListenAtLatest {
+	case VersionedListenAtLatest:
 		vn.inner.cond.L.Lock()
 		last = vn.inner.version
 		vn.inner.cond.L.Unlock()

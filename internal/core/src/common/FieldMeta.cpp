@@ -140,17 +140,19 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     auto field_id = FieldId(schema_proto.fieldid());
     auto name = FieldName(schema_proto.name());
     auto nullable = schema_proto.nullable();
-    if (field_id.get() < 100) {
+    if (field_id.get() < START_USER_FIELDID) {
         // system field id
         auto is_system =
             SystemProperty::Instance().SystemFieldVerify(name, field_id);
         AssertInfo(is_system,
-                   "invalid system type: name(" + name.get() + "), id(" +
-                       std::to_string(field_id.get()) + ")");
+                   "invalid system type: name({}), id({})",
+                   name.get(),
+                   field_id.get());
     }
 
     auto data_type = DataType(schema_proto.data_type());
     auto element_type = DataType(schema_proto.element_type());
+    auto external_field_mapping = schema_proto.external_field();
 
     if (data_type == DataType::VECTOR_ARRAY) {
         AssertInfo(element_type != DataType::NONE,
@@ -171,8 +173,14 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         AssertInfo(type_map.count("dim"), "dim not found");
         dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
 
-        return FieldMeta{
-            name, field_id, data_type, element_type, dim, std::nullopt};
+        return FieldMeta{name,
+                         field_id,
+                         data_type,
+                         element_type,
+                         dim,
+                         std::nullopt,
+                         nullable,
+                         external_field_mapping};
     }
 
     if (IsVectorDataType(data_type)) {
@@ -194,7 +202,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                              dim,
                              std::nullopt,
                              nullable,
-                             default_value};
+                             default_value,
+                             external_field_mapping};
         }
         auto metric_type = index_map.at("metric_type");
         return FieldMeta{name,
@@ -203,13 +212,19 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          dim,
                          metric_type,
                          nullable,
-                         default_value};
+                         default_value,
+                         external_field_mapping};
     }
 
     if (IsStringDataType(data_type)) {
         auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
-        AssertInfo(type_map.count(MAX_LENGTH), "max_length not found");
-        auto max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
+        int64_t max_len = 0;
+        if (type_map.count(MAX_LENGTH)) {
+            max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
+        } else {
+            AssertInfo(data_type == DataType::TEXT,
+                       "max_length not found for non-Text string field");
+        }
 
         auto get_bool_value = [&](const std::string& key) -> bool {
             if (!type_map.count(key)) {
@@ -237,7 +252,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          enable_match,
                          enable_analyzer,
                          type_map,
-                         default_value};
+                         default_value,
+                         external_field_mapping};
     }
 
     if (IsArrayDataType(data_type)) {
@@ -246,10 +262,16 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          data_type,
                          DataType(schema_proto.element_type()),
                          nullable,
-                         default_value};
+                         default_value,
+                         external_field_mapping};
     }
 
-    return FieldMeta{name, field_id, data_type, nullable, default_value};
+    return FieldMeta{name,
+                     field_id,
+                     data_type,
+                     nullable,
+                     default_value,
+                     external_field_mapping};
 }
 
 }  // namespace milvus

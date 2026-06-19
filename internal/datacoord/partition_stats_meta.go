@@ -2,16 +2,15 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 const emptyPartitionStatsVersion = int64(0)
@@ -183,11 +182,11 @@ func (psm *partitionStatsMeta) innerSaveCurrentPartitionStatsVersion(collectionI
 
 	if _, ok := psm.partitionStatsInfos[vChannel]; !ok {
 		return merr.WrapErrClusteringCompactionMetaError("SaveCurrentPartitionStatsVersion",
-			fmt.Errorf("update current partition stats version failed, there is no partition info exists with collID: %d, partID: %d, vChannel: %s", collectionID, partitionID, vChannel))
+			merr.WrapErrServiceInternalMsg("update current partition stats version failed, there is no partition info exists with collID: %d, partID: %d, vChannel: %s", collectionID, partitionID, vChannel))
 	}
 	if _, ok := psm.partitionStatsInfos[vChannel][partitionID]; !ok {
 		return merr.WrapErrClusteringCompactionMetaError("SaveCurrentPartitionStatsVersion",
-			fmt.Errorf("update current partition stats version failed, there is no partition info exists with collID: %d, partID: %d, vChannel: %s", collectionID, partitionID, vChannel))
+			merr.WrapErrServiceInternalMsg("update current partition stats version failed, there is no partition info exists with collID: %d, partID: %d, vChannel: %s", collectionID, partitionID, vChannel))
 	}
 
 	if err := psm.catalog.SaveCurrentPartitionStatsVersion(psm.ctx, collectionID, partitionID, vChannel, currentPartitionStatsVersion); err != nil {

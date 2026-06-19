@@ -29,20 +29,20 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestQueryTask_all(t *testing.T) {
@@ -122,6 +122,7 @@ func TestQueryTask_all(t *testing.T) {
 		task := &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -175,7 +176,7 @@ func TestQueryTask_all(t *testing.T) {
 		assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
 
 		// check reduce_stop_for_best
-		assert.Equal(t, false, task.RetrieveRequest.GetReduceStopForBest())
+		assert.Equal(t, false, task.GetReduceStopForBest())
 		task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{
 			Key:   ReduceStopForBestKey,
 			Value: "trxxxx",
@@ -219,12 +220,12 @@ func TestQueryTask_all(t *testing.T) {
 		for i := 0; i < len(fieldName2Types); i++ {
 			outputFieldIDs = append(outputFieldIDs, int64(common.StartOfUserFieldID+i))
 		}
-		task.RetrieveRequest.OutputFieldsId = outputFieldIDs
+		task.OutputFieldsId = outputFieldIDs
 		for fieldName, dataType := range fieldName2Types {
 			result1.FieldsData = append(result1.FieldsData, generateFieldData(dataType, fieldName, hitNum))
 		}
 		result1.FieldsData = append(result1.FieldsData, generateFieldData(schemapb.DataType_Int64, common.TimeStampFieldName, hitNum))
-		task.RetrieveRequest.OutputFieldsId = append(task.RetrieveRequest.OutputFieldsId, common.TimeStampField)
+		task.OutputFieldsId = append(task.OutputFieldsId, common.TimeStampField)
 		task.ctx = ctx
 		qn.ExpectedCalls = nil
 		qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -268,6 +269,7 @@ func TestQueryTask_all(t *testing.T) {
 		qt := &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -319,6 +321,7 @@ func TestQueryTask_all(t *testing.T) {
 		qt = &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -360,6 +363,210 @@ func TestQueryTask_all(t *testing.T) {
 		assert.True(t, qt.queryParams.isIterator)
 		// from the second page, the mvccTs is set to the sessionTs init in the first page
 		assert.Equal(t, enqueTs, qt.GetMvccTimestamp())
+	})
+
+	t.Run("test count(*) with aggregation validation rules", func(t *testing.T) {
+		// Test cases for the two validation rule fixes:
+		// 1. Aggregation queries exempt from "empty expression needs limit" check (#47326)
+		// 2. count(*) pagination only blocked when no GROUP BY (#47326)
+
+		makeTask := func(exprStr string, outputFields []string, limitValue int64, groupByField string) *queryTask {
+			queryParams := []*commonpb.KeyValuePair{
+				{Key: IgnoreGrowingKey, Value: "false"},
+			}
+			if limitValue > 0 {
+				queryParams = append(queryParams, &commonpb.KeyValuePair{
+					Key:   LimitKey,
+					Value: fmt.Sprintf("%d", limitValue),
+				})
+			}
+			if groupByField != "" {
+				queryParams = append(queryParams, &commonpb.KeyValuePair{
+					Key:   GroupByFieldsKey,
+					Value: groupByField,
+				})
+			}
+			task := &queryTask{
+				Condition: NewTaskCondition(ctx),
+				RetrieveRequest: &internalpb.RetrieveRequest{
+					QueryLabel: "query",
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_Retrieve,
+						SourceID: paramtable.GetNodeID(),
+					},
+					CollectionID:   collectionID,
+					OutputFieldsId: make([]int64, 0),
+				},
+				ctx: ctx,
+				result: &milvuspb.QueryResults{
+					Status:     merr.Success(),
+					FieldsData: []*schemapb.FieldData{},
+				},
+				request: &milvuspb.QueryRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_Retrieve,
+						SourceID: paramtable.GetNodeID(),
+					},
+					CollectionName: collectionName,
+					Expr:           exprStr,
+					OutputFields:   outputFields,
+					QueryParams:    queryParams,
+				},
+				mixCoord:       qc,
+				lb:             lb,
+				shardclientMgr: mgr,
+			}
+			task.OnEnqueue()
+			return task
+		}
+
+		// Case 1: count(*) + GROUP BY + limit → should PASS
+		{
+			task := makeTask(
+				expr,
+				[]string{testInt64Field, "count(*)"},
+				100,
+				testInt64Field,
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "count(*) with GROUP BY and limit should be allowed")
+		}
+
+		// Case 2: count(*) + GROUP BY + no limit → should PASS
+		{
+			task := makeTask(
+				expr,
+				[]string{testInt64Field, "count(*)"},
+				0,
+				testInt64Field,
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "count(*) with GROUP BY and no limit should be allowed")
+		}
+
+		// Case 3: count(*) + no GROUP BY + limit → should FAIL
+		{
+			task := makeTask(
+				expr,
+				[]string{"count(*)"},
+				100,
+				"",
+			)
+			err := task.PreExecute(ctx)
+			assert.Error(t, err, "count(*) without GROUP BY with limit should fail")
+			assert.Contains(t, err.Error(), "count entities with pagination is not allowed")
+		}
+
+		// Case 4: aggregation + empty expr + no limit → should PASS
+		{
+			task := makeTask(
+				"",
+				[]string{testInt64Field, "count(*)"},
+				0,
+				testInt64Field,
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "aggregation with empty expr and no limit should be allowed")
+		}
+
+		// Case 5: non-aggregation + empty expr + no limit → should FAIL
+		{
+			task := makeTask(
+				"",
+				[]string{testInt64Field},
+				0,
+				"",
+			)
+			err := task.PreExecute(ctx)
+			assert.Error(t, err, "non-aggregation with empty expr and no limit should fail")
+			assert.Contains(t, err.Error(), "empty expression should be used with limit")
+		}
+	})
+
+	t.Run("test order by without limit", func(t *testing.T) {
+		// ORDER BY without explicit limit should fail with an error
+		task := &queryTask{
+			Condition: NewTaskCondition(ctx),
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionID:   collectionID,
+				OutputFieldsId: make([]int64, len(fieldName2Types)),
+			},
+			ctx: ctx,
+			request: &milvuspb.QueryRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionName: collectionName,
+				Expr:           expr,
+				QueryParams: []*commonpb.KeyValuePair{
+					{
+						Key:   IgnoreGrowingKey,
+						Value: "false",
+					},
+					{
+						Key:   OrderByFieldsKey,
+						Value: testInt64Field + ":asc",
+					},
+					// No limit specified
+				},
+			},
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
+		}
+		assert.NoError(t, task.OnEnqueue())
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ORDER BY requires explicit limit")
+	})
+
+	t.Run("test order by with limit succeeds", func(t *testing.T) {
+		// ORDER BY with explicit limit should pass the validation
+		task := &queryTask{
+			Condition: NewTaskCondition(ctx),
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionID:   collectionID,
+				OutputFieldsId: make([]int64, len(fieldName2Types)),
+			},
+			ctx: ctx,
+			request: &milvuspb.QueryRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionName: collectionName,
+				Expr:           expr,
+				QueryParams: []*commonpb.KeyValuePair{
+					{
+						Key:   IgnoreGrowingKey,
+						Value: "false",
+					},
+					{
+						Key:   OrderByFieldsKey,
+						Value: testInt64Field + ":asc",
+					},
+					{
+						Key:   LimitKey,
+						Value: "10",
+					},
+				},
+			},
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
+		}
+		assert.NoError(t, task.OnEnqueue())
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 }
 
@@ -539,7 +746,7 @@ func TestTaskQuery_functions(t *testing.T) {
 						Value: test.inValue[i],
 					})
 				}
-				ret, err := parseQueryParams(inParams)
+				ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 				if test.expectErr {
 					assert.Error(t, err)
 					assert.Empty(t, ret)
@@ -563,7 +770,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrderForBest, ret.reduceType)
 		}
@@ -577,7 +784,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "TrueXXXX",
 			})
-			ret, err := parseQueryParams(inParams)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.Error(t, err)
 			assert.Nil(t, ret)
 		}
@@ -591,7 +798,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.Error(t, err)
 			assert.Nil(t, ret)
 		}
@@ -602,7 +809,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Value: "True",
 			})
 			// when not setting iterator tag, ignore reduce_stop_for_best
-			ret, err := parseQueryParams(inParams)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceNoOrder, ret.reduceType)
 		}
@@ -613,7 +820,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Value: "True",
 			})
 			// when not setting reduce_stop_for_best tag, reduce by keep results in order
-			ret, err := parseQueryParams(inParams)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrder, ret.reduceType)
 		}
@@ -627,7 +834,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrder, ret.reduceType)
 		}
@@ -641,9 +848,166 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "False",
 			})
-			ret, err := parseQueryParams(inParams)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceNoOrder, ret.reduceType)
+		}
+	})
+
+	t.Run("test parseQueryParams for query iterator cursor", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err := parseQueryParams(params, false, schemapb.DataType_Int64)
+		require.NoError(t, err)
+		require.NotNil(t, ret.queryIteratorCursor)
+		require.NotNil(t, ret.queryIteratorCursor.LastIntPk)
+		assert.EqualValues(t, 7, ret.queryIteratorCursor.GetLastIntPk())
+		assert.EqualValues(t, 2, ret.queryIteratorCursor.GetLastElementOffset())
+
+		params = []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "pk-7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_VarChar)
+		require.NoError(t, err)
+		require.NotNil(t, ret.queryIteratorCursor)
+		assert.Equal(t, "pk-7", ret.queryIteratorCursor.GetLastStrPk())
+
+		params = []*commonpb.KeyValuePair{
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_Int64)
+		assert.Error(t, err)
+		assert.Nil(t, ret)
+
+		params = []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "-1"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_Int64)
+		assert.Error(t, err)
+		assert.Nil(t, ret)
+	})
+
+	t.Run("test parseQueryIteratorCursor", func(t *testing.T) {
+		tests := []struct {
+			name          string
+			params        []*commonpb.KeyValuePair
+			isIterator    bool
+			pkDataType    schemapb.DataType
+			wantNil       bool
+			wantIntPK     int64
+			checkIntPK    bool
+			wantStrPK     string
+			wantOffset    int64
+			wantErrSubstr string
+		}{
+			{
+				name:       "no cursor params",
+				params:     nil,
+				isIterator: true,
+				pkDataType: schemapb.DataType_Int64,
+				wantNil:    true,
+			},
+			{
+				name:       "int64 pk with zero offset",
+				params:     []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "0"}},
+				isIterator: true,
+				pkDataType: schemapb.DataType_Int64,
+				wantIntPK:  7,
+				checkIntPK: true,
+				wantOffset: 0,
+			},
+			{
+				name:       "varchar pk",
+				params:     []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "pk-7"}, {Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator: true,
+				pkDataType: schemapb.DataType_VarChar,
+				wantStrPK:  "pk-7",
+				wantOffset: 2,
+			},
+			{
+				name:          "cursor params require iterator",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator:    false,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "invalid query iterator cursor params",
+			},
+			{
+				name:          "missing offset",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "incomplete query iterator cursor params",
+			},
+			{
+				name:          "missing pk",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "incomplete query iterator cursor params",
+			},
+			{
+				name:          "invalid offset",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "abc"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "value for query iterator last element offset is invalid",
+			},
+			{
+				name:          "negative offset",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "-1"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "value for query iterator last element offset is invalid",
+			},
+			{
+				name:          "invalid int64 pk",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "abc"}, {Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int64,
+				wantErrSubstr: "value for query iterator last primary key is invalid",
+			},
+			{
+				name:          "unsupported pk type",
+				params:        []*commonpb.KeyValuePair{{Key: QueryIterLastPKKey, Value: "7"}, {Key: QueryIterLastOffsetKey, Value: "2"}},
+				isIterator:    true,
+				pkDataType:    schemapb.DataType_Int32,
+				wantErrSubstr: "unsupported primary key type",
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				cursor, err := parseQueryIteratorCursor(test.params, test.isIterator, test.pkDataType)
+				if test.wantErrSubstr != "" {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), test.wantErrSubstr)
+					assert.Nil(t, cursor)
+					return
+				}
+				require.NoError(t, err)
+				if test.wantNil {
+					assert.Nil(t, cursor)
+					return
+				}
+				require.NotNil(t, cursor)
+				assert.Equal(t, test.wantOffset, cursor.GetLastElementOffset())
+				if test.checkIntPK {
+					require.NotNil(t, cursor.LastIntPk)
+					assert.Equal(t, test.wantIntPK, cursor.GetLastIntPk())
+				}
+				if test.wantStrPK != "" {
+					require.NotNil(t, cursor.LastStrPk)
+					assert.Equal(t, test.wantStrPK, cursor.GetLastStrPk())
+				}
+			})
 		}
 	})
 
@@ -895,6 +1259,266 @@ func TestTaskQuery_functions(t *testing.T) {
 			assert.Equal(t, 2, len(result.GetFieldsData()))
 			// Should include the maxInt64PK result
 			assert.Equal(t, []int64{maxInt64PK}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+		})
+
+		t.Run("test element-level reduce", func(t *testing.T) {
+			// Helper to create element-level retrieve result
+			makeElementLevelResult := func(pks []int64, elemIndices [][]int32) *internalpb.RetrieveResults {
+				elemIdxList := make([]*internalpb.ElementIndices, len(elemIndices))
+				for i, indices := range elemIndices {
+					elemIdxList[i] = &internalpb.ElementIndices{Indices: indices}
+				}
+				return &internalpb.RetrieveResults{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: pks},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{
+						getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, pks, 1),
+					},
+					ElementLevel:   true,
+					ElementIndices: elemIdxList,
+				}
+			}
+
+			t.Run("basic element-level merge", func(t *testing.T) {
+				r1 := makeElementLevelResult([]int64{1, 3}, [][]int32{{0, 1}, {2}})
+				r2 := makeElementLevelResult([]int64{2, 4}, [][]int32{{0}, {1, 2}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: typeutil.Unlimited})
+				assert.NoError(t, err)
+				assert.Equal(t, 4, len(result.GetElementIndices()))
+				// Verify element_indices are converted to int64
+				assert.Equal(t, []int64{0, 1}, result.GetElementIndices()[0].GetIndices().GetData())
+				assert.Equal(t, []int64{0}, result.GetElementIndices()[1].GetIndices().GetData())
+				assert.Equal(t, []int64{2}, result.GetElementIndices()[2].GetIndices().GetData())
+				assert.Equal(t, []int64{1, 2}, result.GetElementIndices()[3].GetIndices().GetData())
+			})
+
+			t.Run("element-level limit counts elements not docs", func(t *testing.T) {
+				// doc1 has 3 elements, doc2 has 2 elements
+				r := makeElementLevelResult([]int64{1, 2}, [][]int32{{0, 1, 2}, {0, 1}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 3}) // limit=3 elements
+				assert.NoError(t, err)
+				// Should get doc1 (3 elements) only
+				assert.Equal(t, 1, len(result.GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+				assert.Equal(t, int64(1), result.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+				assert.Equal(t, 1, len(result.GetElementIndices()))
+			})
+
+			t.Run("element-level limit allows partial fill", func(t *testing.T) {
+				// doc1 has 2 elements, doc2 has 2 elements
+				r := makeElementLevelResult([]int64{1, 2}, [][]int32{{0, 1}, {0, 1}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 3}) // limit=3 elements
+				assert.NoError(t, err)
+				// Behavior: process docs while availableCount < limit
+				// doc1 (2 elements): 0 < 3, process, count=2
+				// doc2 (2 elements): 2 < 3, process, count=4
+				// Both docs are included because the check is done before processing each doc
+				assert.Equal(t, 2, len(result.GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+			})
+
+			t.Run("element-level with offset", func(t *testing.T) {
+				r := makeElementLevelResult([]int64{1, 2, 3}, [][]int32{{0}, {1}, {2}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 2, offset: 1}) // skip 1 doc, get 2 docs
+				assert.NoError(t, err)
+				assert.Equal(t, 2, len(result.GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+				assert.Equal(t, []int64{2, 3}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+			})
+
+			t.Run("element-level offset should skip by element count not doc count", func(t *testing.T) {
+				// Doc layout:
+				//   pk=1: 3 elements [0,1,2]
+				//   pk=2: 2 elements [0,1]
+				//   pk=3: 1 element  [0]
+				// Total: 6 elements
+				//
+				// Query: offset=3, limit=3
+				// Correct (element-level offset):
+				//   Skip 3 elements (all from pk=1) → return pk=2 (2 elem) + pk=3 (1 elem) = 3 elements
+				// Bug (doc-level offset):
+				//   Skip 3 docs (pk=1, pk=2, pk=3) → nothing left → empty result
+				r := makeElementLevelResult([]int64{1, 2, 3}, [][]int32{{0, 1, 2}, {0, 1}, {0}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 3, offset: 3})
+				assert.NoError(t, err)
+				pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+				assert.Equal(t, []int64{2, 3}, pks, "offset=3 should skip 3 elements (all of pk=1), returning pk=2 and pk=3")
+				assert.Equal(t, 2, len(result.GetElementIndices()))
+				assert.Equal(t, []int64{0, 1}, result.GetElementIndices()[0].GetIndices().GetData())
+				assert.Equal(t, []int64{0}, result.GetElementIndices()[1].GetIndices().GetData())
+			})
+
+			t.Run("element-level offset falls mid-document trims elements", func(t *testing.T) {
+				// Doc layout:
+				//   pk=1: 3 elements [0,1,2]
+				//   pk=2: 2 elements [3,4]
+				// Total: 5 elements
+				//
+				// Query: offset=2, limit=10
+				// offset=2 falls in the middle of pk=1 (which has 3 elements).
+				// Should skip elements [0,1] of pk=1, keep element [2].
+				// Result: pk=1 with trimmed indices [2], pk=2 with [3,4] → 3 elements total
+				r := makeElementLevelResult([]int64{1, 2}, [][]int32{{0, 1, 2}, {3, 4}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 10, offset: 2})
+				assert.NoError(t, err)
+				pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+				assert.Equal(t, []int64{1, 2}, pks, "both docs should be present since offset lands mid-doc on pk=1")
+				assert.Equal(t, 2, len(result.GetElementIndices()))
+				// pk=1: original [0,1,2], trimmed first 2 → [2]
+				assert.Equal(t, []int64{2}, result.GetElementIndices()[0].GetIndices().GetData())
+				// pk=2: unchanged [3,4]
+				assert.Equal(t, []int64{3, 4}, result.GetElementIndices()[1].GetIndices().GetData())
+			})
+
+			t.Run("element-level offset+limit pagination consistency", func(t *testing.T) {
+				// Verify that two consecutive pages cover all elements without gap or overlap.
+				// Doc layout (across 2 shards):
+				//   shard0: pk=1 (2 elements [0,1]), pk=3 (1 element [0])
+				//   shard1: pk=2 (3 elements [0,1,2]), pk=4 (2 elements [0,1])
+				// Merged by PK: pk=1(2), pk=2(3), pk=3(1), pk=4(2) → total 8 elements
+				r1 := makeElementLevelResult([]int64{1, 3}, [][]int32{{0, 1}, {0}})
+				r2 := makeElementLevelResult([]int64{2, 4}, [][]int32{{0, 1, 2}, {0, 1}})
+
+				// Page 1: offset=0, limit=5 → first 5 elements
+				page1, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 5, offset: 0})
+				assert.NoError(t, err)
+				page1PKs := page1.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+
+				// Page 2: offset=5, limit=5 → next 3 elements (only 8 total)
+				// Recreate results since cursors are consumed
+				r1 = makeElementLevelResult([]int64{1, 3}, [][]int32{{0, 1}, {0}})
+				r2 = makeElementLevelResult([]int64{2, 4}, [][]int32{{0, 1, 2}, {0, 1}})
+				page2, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 5, offset: 5})
+				assert.NoError(t, err)
+				page2PKs := page2.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+
+				// Count total elements across both pages
+				page1ElemCount := 0
+				for _, ei := range page1.GetElementIndices() {
+					page1ElemCount += len(ei.GetIndices().GetData())
+				}
+				page2ElemCount := 0
+				for _, ei := range page2.GetElementIndices() {
+					page2ElemCount += len(ei.GetIndices().GetData())
+				}
+
+				// The two pages together should cover exactly 8 elements total
+				assert.Equal(t, 8, page1ElemCount+page2ElemCount,
+					"page1 (%v, %d elems) + page2 (%v, %d elems) should cover all 8 elements",
+					page1PKs, page1ElemCount, page2PKs, page2ElemCount)
+			})
+
+			t.Run("element-level validation: inconsistent flag", func(t *testing.T) {
+				r1 := makeElementLevelResult([]int64{1}, [][]int32{{0, 1}})
+				r2 := &internalpb.RetrieveResults{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: []int64{2}},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{
+						getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{2}, 1),
+					},
+					ElementLevel: false, // inconsistent
+				}
+				_, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: typeutil.Unlimited})
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "inconsistent element-level flag")
+			})
+
+			t.Run("element-level validation: mismatched element_indices length", func(t *testing.T) {
+				r := &internalpb.RetrieveResults{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: []int64{1, 2}}, // 2 ids
+						},
+					},
+					FieldsData: []*schemapb.FieldData{
+						getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{1, 2}, 1),
+					},
+					ElementLevel: true,
+					ElementIndices: []*internalpb.ElementIndices{
+						{Indices: []int32{0}}, // only 1 element_indices, should be 2
+					},
+				}
+				_, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: typeutil.Unlimited})
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "element_indices length")
+			})
+
+			t.Run("element-level type conversion", func(t *testing.T) {
+				r := makeElementLevelResult([]int64{1}, [][]int32{{0, 100, 200}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: typeutil.Unlimited})
+				assert.NoError(t, err)
+				assert.Equal(t, 1, len(result.GetElementIndices()))
+				// Verify int32 -> int64 conversion
+				indices := result.GetElementIndices()[0].GetIndices().GetData()
+				assert.Equal(t, []int64{0, 100, 200}, indices)
+			})
+
+			t.Run("element-level with IReduceInOrderForBest", func(t *testing.T) {
+				// 2 results from different segments, both have HasMoreResult=true
+				// r1: PK=1 (2 elems), PK=3 (1 elem)
+				// r2: PK=2 (3 elems), PK=4 (1 elem)
+				// Merged order by PK: 1,2,3,4
+				// IReduceInOrderForBest does not use input limit for elements
+				// Stops when r1 drains after PK3 (ShouldStopWhenDrained=true)
+				r1 := makeElementLevelResult([]int64{1, 3}, [][]int32{{0, 1}, {2}})
+				r1.HasMoreResult = true
+				r2 := makeElementLevelResult([]int64{2, 4}, [][]int32{{0, 1, 2}, {1}})
+				r2.HasMoreResult = true
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 4, reduceType: reduce.IReduceInOrderForBest})
+				assert.NoError(t, err)
+				// IReduceInOrderForBest does not enforce element limit (ShouldUseInputLimit=false)
+				// It stops when one result is drained (ShouldStopWhenDrained=true)
+				// r1 drains after PK3, so result is {1, 2, 3}
+				pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+				assert.Equal(t, []int64{1, 2, 3}, pks)
+				assert.Equal(t, 3, len(result.GetElementIndices()))
+			})
+
+			t.Run("element-level with IReduceInOrderForBest drains one result", func(t *testing.T) {
+				// r1 has no more (HasMoreResult=false), r2 has more (HasMoreResult=true)
+				// drainResult only triggers when HasMoreResult=true, so r1 draining
+				// does not stop the loop — it's safe to continue with r2's remaining PKs
+				r1 := makeElementLevelResult([]int64{1}, [][]int32{{0, 1}})
+				r1.HasMoreResult = false
+				r2 := makeElementLevelResult([]int64{2, 4}, [][]int32{{0}, {1, 2}})
+				r2.HasMoreResult = true
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 10, reduceType: reduce.IReduceInOrderForBest})
+				assert.NoError(t, err)
+				// r1 HasMoreResult=false, so drain does not trigger stop
+				// All PKs are returned: 1, 2, 4
+				pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+				assert.Equal(t, []int64{1, 2, 4}, pks)
+				assert.Equal(t, 3, len(result.GetElementIndices()))
+			})
 		})
 	})
 }

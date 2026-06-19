@@ -23,16 +23,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func init() {
@@ -198,6 +201,82 @@ func TestNormalRead(t *testing.T) {
 	checkFn(true)
 }
 
+func TestNullableVectorValidDataUsesLogicalRows(t *testing.T) {
+	tests := []struct {
+		name      string
+		dataType  schemapb.DataType
+		fieldData storage.FieldData
+	}{
+		{
+			name:     "float vector",
+			dataType: schemapb.DataType_FloatVector,
+			fieldData: &storage.FloatVectorFieldData{
+				Data: make([]float32, 2*dim),
+				Dim:  dim,
+			},
+		},
+		{
+			name:     "float16 vector",
+			dataType: schemapb.DataType_Float16Vector,
+			fieldData: &storage.Float16VectorFieldData{
+				Data: make([]byte, 2*dim*2),
+				Dim:  dim,
+			},
+		},
+		{
+			name:     "bfloat16 vector",
+			dataType: schemapb.DataType_BFloat16Vector,
+			fieldData: &storage.BFloat16VectorFieldData{
+				Data: make([]byte, 2*dim*2),
+				Dim:  dim,
+			},
+		},
+		{
+			name:     "int8 vector",
+			dataType: schemapb.DataType_Int8Vector,
+			fieldData: &storage.Int8VectorFieldData{
+				Data: make([]int8, 2*dim),
+				Dim:  dim,
+			},
+		},
+		{
+			name:     "binary vector",
+			dataType: schemapb.DataType_BinaryVector,
+			fieldData: &storage.BinaryVectorFieldData{
+				Data: make([]byte, 2*dim/8),
+				Dim:  dim,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				FieldID:  100,
+				Name:     "nullable_vector",
+				DataType: tt.dataType,
+				Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "8"},
+				},
+			}
+			reader, err := createReader(tt.fieldData, tt.dataType)
+			assert.NoError(t, err)
+
+			fr, err := NewFieldReader(reader, field, common.DefaultTimezone)
+			assert.NoError(t, err)
+			data, validData, err := fr.Next(2)
+			assert.NoError(t, err)
+			assert.Len(t, validData.([]bool), 2)
+
+			dst, err := storage.NewFieldData(tt.dataType, field, 0)
+			assert.NoError(t, err)
+			assert.NoError(t, dst.AppendRows(data, validData))
+			assert.Equal(t, 2, dst.RowNum())
+		})
+	}
+}
+
 type ErrReader struct {
 	Err error
 }
@@ -345,6 +424,179 @@ func TestNumpyFieldReaderError(t *testing.T) {
 			assert.Error(t, err)
 			assert.Nil(t, data)
 			assert.Nil(t, validData)
+		})
+	}
+}
+
+func TestReadFP16BF16VectorFromFloatNumpy(t *testing.T) {
+	const (
+		fieldID  = int64(100)
+		rowCount = 2
+	)
+	makeField := func(dataType schemapb.DataType) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:  fieldID,
+			Name:     "vector",
+			DataType: dataType,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "8"},
+			},
+		}
+	}
+
+	t.Run("float32 source", func(t *testing.T) {
+		sourceSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{makeField(schemapb.DataType_FloatVector)}}
+		insertData, err := testutil.CreateInsertData(sourceSchema, rowCount)
+		assert.NoError(t, err)
+		floatData := append([]float32(nil), insertData.Data[fieldID].GetDataRows().([]float32)...)
+		reader, err := createReader(insertData.Data[fieldID], schemapb.DataType_FloatVector)
+		assert.NoError(t, err)
+
+		for _, tt := range []struct {
+			name     string
+			dataType schemapb.DataType
+			expected []byte
+		}{
+			{"float16", schemapb.DataType_Float16Vector, typeutil.Float32ArrayToFloat16Bytes(floatData)},
+			{"bfloat16", schemapb.DataType_BFloat16Vector, typeutil.Float32ArrayToBFloat16Bytes(floatData)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				fr, err := NewFieldReader(reader, makeField(tt.dataType), common.DefaultTimezone)
+				assert.NoError(t, err)
+				data, validData, err := fr.Next(rowCount)
+				assert.NoError(t, err)
+				assert.Nil(t, validData)
+				assert.Equal(t, tt.expected, data.([]byte))
+			})
+			reader, err = createReader(insertData.Data[fieldID], schemapb.DataType_FloatVector)
+			assert.NoError(t, err)
+		}
+	})
+	t.Run("float64 source", func(t *testing.T) {
+		rows := [][dim]float64{
+			{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8},
+			{0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6},
+		}
+		floatData := make([]float32, 0, rowCount*dim)
+		for _, row := range rows {
+			for _, value := range row {
+				floatData = append(floatData, float32(value))
+			}
+		}
+		buf := new(bytes.Buffer)
+		err := npyio.Write(buf, rows)
+		assert.NoError(t, err)
+
+		for _, tt := range []struct {
+			name     string
+			dataType schemapb.DataType
+			expected []byte
+		}{
+			{"float16", schemapb.DataType_Float16Vector, typeutil.Float32ArrayToFloat16Bytes(floatData)},
+			{"bfloat16", schemapb.DataType_BFloat16Vector, typeutil.Float32ArrayToBFloat16Bytes(floatData)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				fr, err := NewFieldReader(bytes.NewReader(buf.Bytes()), makeField(tt.dataType), common.DefaultTimezone)
+				assert.NoError(t, err)
+				data, validData, err := fr.Next(rowCount)
+				assert.NoError(t, err)
+				assert.Nil(t, validData)
+				assert.Equal(t, tt.expected, data.([]byte))
+			})
+		}
+	})
+
+	t.Run("unsupported source type", func(t *testing.T) {
+		sourceSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{makeField(schemapb.DataType_Int8Vector)}}
+		insertData, err := testutil.CreateInsertData(sourceSchema, rowCount)
+		assert.NoError(t, err)
+		reader, err := createReader(insertData.Data[fieldID], schemapb.DataType_Int8Vector)
+		assert.NoError(t, err)
+
+		fr, err := NewFieldReader(reader, makeField(schemapb.DataType_Float16Vector), common.DefaultTimezone)
+		assert.Error(t, err)
+		assert.Nil(t, fr)
+		assert.Contains(t, err.Error(), "expected element type")
+	})
+}
+
+func TestNullableFP16BF16VectorFromFloatNumpyUsesLogicalRows(t *testing.T) {
+	const (
+		fieldID  = int64(100)
+		rowCount = 2
+	)
+	makeField := func(dataType schemapb.DataType, nullable bool, defaultValue *schemapb.ValueField) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:      fieldID,
+			Name:         "vector",
+			DataType:     dataType,
+			Nullable:     nullable,
+			DefaultValue: defaultValue,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "8"},
+			},
+		}
+	}
+	writeRows := func(t *testing.T, rows any) []byte {
+		buf := new(bytes.Buffer)
+		assert.NoError(t, npyio.Write(buf, rows))
+		return buf.Bytes()
+	}
+
+	float32Rows := [][dim]float32{
+		{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8},
+		{0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6},
+	}
+	float64Rows := [][dim]float64{
+		{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8},
+		{0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6},
+	}
+
+	for _, tt := range []struct {
+		name       string
+		sourceData []byte
+		field      *schemapb.FieldSchema
+	}{
+		{
+			name:       "nullable float32 to float16",
+			sourceData: writeRows(t, float32Rows),
+			field:      makeField(schemapb.DataType_Float16Vector, true, nil),
+		},
+		{
+			name:       "nullable float64 to float16",
+			sourceData: writeRows(t, float64Rows),
+			field:      makeField(schemapb.DataType_Float16Vector, true, nil),
+		},
+		{
+			name:       "nullable float32 to bfloat16",
+			sourceData: writeRows(t, float32Rows),
+			field:      makeField(schemapb.DataType_BFloat16Vector, true, nil),
+		},
+		{
+			name:       "nullable float64 to bfloat16",
+			sourceData: writeRows(t, float64Rows),
+			field:      makeField(schemapb.DataType_BFloat16Vector, true, nil),
+		},
+		{
+			name:       "default float32 to float16",
+			sourceData: writeRows(t, float32Rows),
+			field:      makeField(schemapb.DataType_Float16Vector, false, &schemapb.ValueField{}),
+		},
+		{
+			name:       "default float64 to bfloat16",
+			sourceData: writeRows(t, float64Rows),
+			field:      makeField(schemapb.DataType_BFloat16Vector, false, &schemapb.ValueField{}),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fr, err := NewFieldReader(bytes.NewReader(tt.sourceData), tt.field, common.DefaultTimezone)
+			assert.NoError(t, err)
+
+			data, validData, err := fr.Next(rowCount)
+
+			assert.NoError(t, err)
+			assert.Len(t, data.([]byte), rowCount*dim*2)
+			assert.Equal(t, []bool{true, true}, validData.([]bool))
 		})
 	}
 }

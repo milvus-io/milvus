@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestCheckGeneralCapacity(t *testing.T) {
@@ -42,6 +42,7 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	catalog.EXPECT().ListAliases(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().CreateDatabase(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DeleteGrantByCollectionName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	allocator := mocktso.NewAllocator(t)
 	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)

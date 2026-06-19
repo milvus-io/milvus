@@ -26,16 +26,16 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type L0PreImportTask struct {
@@ -141,7 +141,7 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	fn := func(i int, file *internalpb.ImportFile) (err error) {
 		defer func() {
 			if err != nil {
-				var reason string = err.Error()
+				reason := err.Error()
 				if len(t.GetFileStats()) == 1 {
 					reason = fmt.Sprintf("error: %v, file: %s", err, t.GetFileStats()[0].GetImportFile().String())
 				}
@@ -160,7 +160,7 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 			return
 		}
 
-		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize, tsStart, tsEnd)
+		reader, err := binlog.NewL0Reader(t.ctx, t.cm, t.req.GetStorageConfig(), pkField, file, bufferSize, tsStart, tsEnd)
 		if err != nil {
 			return
 		}

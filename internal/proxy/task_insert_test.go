@@ -7,19 +7,115 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
+
+func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t *testing.T) {
+	paramtable.Init()
+
+	oldCache := globalMetaCache
+	cache := NewMockCache(t)
+	cache.On("GetPartitionID", mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+	globalMetaCache = cache
+	defer func() { globalMetaCache = oldCache }()
+
+	insertMsg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Insert,
+				SourceID: 1,
+			},
+			CollectionID:   100,
+			DbName:         "db",
+			CollectionName: "coll",
+			PartitionName:  "_default",
+			NumRows:        1,
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "pk",
+					FieldId:   1,
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1}},
+							},
+						},
+					},
+				},
+			},
+			RowIDs:     []int64{1},
+			Timestamps: []uint64{1},
+		},
+	}
+	result := &milvuspb.MutationResult{
+		IDs: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+		},
+	}
+
+	msgs, err := repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0)
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 1)
+
+	msg := message.MustAsMutableInsertMessageV1(msgs[0])
+	header := msg.Header()
+	assert.NotNil(t, header.SchemaVersion)
+	assert.Equal(t, int32(0), header.GetSchemaVersion())
+}
+
+func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	})
+
+	oldCache := globalMetaCache
+	t.Cleanup(func() {
+		globalMetaCache = oldCache
+	})
+
+	const (
+		dbName         = "db"
+		collectionName = "text_collection"
+	)
+	schema := newSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(int64(100), nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{}, nil)
+	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
+	globalMetaCache = cache
+
+	task := &insertTask{
+		ctx: context.Background(),
+		insertMsg: &BaseInsertTask{
+			InsertRequest: &msgpb.InsertRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				NumRows:        1,
+			},
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "TEXT field requires StorageV3")
+}
 
 func TestInsertTask_CheckAligned(t *testing.T) {
 	var err error
@@ -593,8 +689,6 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 
 func TestInsertTask_Namespace(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("true")
-	defer paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("false")
 	cache := NewMockCache(t)
 	globalMetaCache = cache
 	cache.On("GetDatabaseInfo",
@@ -622,9 +716,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 				{Key: common.MaxLengthKey, Value: "100"},
 			}},
 		},
-		Properties: []*commonpb.KeyValuePair{
-			{Key: common.NamespaceEnabledKey, Value: "true"},
-		},
+		EnableNamespace: true,
 	}
 
 	schemaWithNamespaceDisabled := &schemapb.CollectionSchema{

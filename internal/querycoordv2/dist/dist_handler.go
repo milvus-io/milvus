@@ -26,22 +26,22 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type TriggerUpdateTargetVersion = func(collectionID int64)
@@ -68,42 +68,35 @@ func (dh *distHandler) start(ctx context.Context) {
 	defer dh.wg.Done()
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qcv2.distHandler", 1, 60)
 	log.Info("start dist handler")
+
+	var loopWG sync.WaitGroup
+	loopWG.Add(2)
+	go func() {
+		defer loopWG.Done()
+		dh.startPullDistLoop(ctx)
+	}()
+	go func() {
+		defer loopWG.Done()
+		dh.startDispatchLoop(ctx)
+	}()
+	loopWG.Wait()
+}
+
+func (dh *distHandler) startPullDistLoop(ctx context.Context) {
 	distInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
 	ticker := time.NewTicker(distInterval)
 	defer ticker.Stop()
-	flagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
-	checkExecutedFlagTicker := time.NewTicker(flagInterval)
-	defer checkExecutedFlagTicker.Stop()
 	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("close dist handler due to context done")
+			log.Ctx(ctx).Info("close dist pull loop due to context done", zap.Int64("nodeID", dh.nodeID))
 			return
 		case <-dh.c:
-			log.Info("close dist handler")
+			log.Ctx(ctx).Info("close dist pull loop", zap.Int64("nodeID", dh.nodeID))
 			return
-		case <-checkExecutedFlagTicker.C:
-			executedFlagChan := dh.scheduler.GetExecutedFlag(dh.nodeID)
-			if executedFlagChan != nil {
-				select {
-				case <-executedFlagChan:
-					dh.pullDist(ctx, &failures, false)
-				default:
-				}
-			}
-			// only reset when interval updated
-			newFlagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
-			if newFlagInterval != flagInterval {
-				flagInterval = newFlagInterval
-				select {
-				case <-checkExecutedFlagTicker.C:
-				default:
-				}
-				checkExecutedFlagTicker.Reset(flagInterval)
-			}
 		case <-ticker.C:
-			dh.pullDist(ctx, &failures, true)
+			dh.pullDist(ctx, &failures)
 			// only reset when interval updated
 			newDistInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
 			if newDistInterval != distInterval {
@@ -118,7 +111,34 @@ func (dh *distHandler) start(ctx context.Context) {
 	}
 }
 
-func (dh *distHandler) pullDist(ctx context.Context, failures *int, dispatchTask bool) {
+func (dh *distHandler) startDispatchLoop(ctx context.Context) {
+	dispatchInterval := Params.QueryCoordCfg.DispatchInterval.GetAsDuration(time.Millisecond)
+	ticker := time.NewTicker(dispatchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Ctx(ctx).Info("close dist dispatch loop due to context done", zap.Int64("nodeID", dh.nodeID))
+			return
+		case <-dh.c:
+			log.Ctx(ctx).Info("close dist dispatch loop", zap.Int64("nodeID", dh.nodeID))
+			return
+		case <-ticker.C:
+			dh.scheduler.Dispatch(dh.nodeID)
+			newDispatchInterval := Params.QueryCoordCfg.DispatchInterval.GetAsDuration(time.Millisecond)
+			if newDispatchInterval != dispatchInterval {
+				dispatchInterval = newDispatchInterval
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(dispatchInterval)
+			}
+		}
+	}
+}
+
+func (dh *distHandler) pullDist(ctx context.Context, failures *int) {
 	tr := timerecord.NewTimeRecorder("")
 	resp, err := dh.getDistribution(ctx)
 	d1 := tr.RecordSpan()
@@ -134,14 +154,14 @@ func (dh *distHandler) pullDist(ctx context.Context, failures *int, dispatchTask
 			RatedWarn(30.0, "failed to get data distribution", fields...)
 	} else {
 		*failures = 0
-		dh.handleDistResp(ctx, resp, dispatchTask)
+		dh.handleDistResp(ctx, resp)
 	}
 	log.Ctx(ctx).WithRateGroup("distHandler.pullDist", 1, 120).
 		RatedInfo(120.0, "pull and handle distribution done",
 			zap.Int("respSize", proto.Size(resp)), zap.Duration("pullDur", d1), zap.Duration("handleDur", tr.RecordSpan()))
 }
 
-func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetDataDistributionResponse, dispatchTask bool) {
+func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetDataDistributionResponse) {
 	node := dh.nodeManager.Get(resp.GetNodeID())
 	if node == nil {
 		return
@@ -165,14 +185,10 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
 			session.WithMemCapacity(resp.GetMemCapacityInMB()),
-			session.WithChannelCnt(int(resp.GetCpuNum())),
+			session.WithCPUNum(resp.GetCpuNum()),
 		)
 		dh.updateSegmentsDistribution(ctx, resp)
 		dh.updateChannelsDistribution(ctx, resp)
-	}
-
-	if dispatchTask {
-		dh.scheduler.Dispatch(dh.nodeID)
 	}
 }
 
@@ -207,6 +223,7 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 			IndexInfo:          s.GetIndexInfo(),
 			JSONStatsField:     s.GetJsonStatsInfo(),
 			ManifestPath:       s.GetManifestPath(),
+			DataVersion:        s.DataVersion,
 		})
 	}
 
@@ -289,27 +306,34 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
-			collectionIDs.Insert(ch.VchannelInfo.CollectionID)
+			collectionIDs.Insert(ch.CollectionID)
 		}
 		dh.notifyFunc(collectionIDs.Collect()...)
 	}
 }
 
 func checkDelegatorServiceable(ctx context.Context, dh *distHandler, view *meta.LeaderView) bool {
+	// if status is already set, return directly without creating log object
+	if status := view.Status; status != nil {
+		if status.GetServiceable() {
+			return true
+		}
+		// Only create log when not serviceable
+		log.Ctx(ctx).
+			WithRateGroup(fmt.Sprintf("distHandler.updateChannelsDistribution.%s", view.Channel), 1, 60).
+			With(
+				zap.Int64("nodeID", view.ID),
+				zap.String("channel", view.Channel),
+			).RatedInfo(10, "delegator is not serviceable", zap.Int64("queryViewVersion", view.TargetVersion))
+		return false
+	}
+
 	log := log.Ctx(ctx).
 		WithRateGroup(fmt.Sprintf("distHandler.updateChannelsDistribution.%s", view.Channel), 1, 60).
 		With(
 			zap.Int64("nodeID", view.ID),
 			zap.String("channel", view.Channel),
 		)
-
-	if status := view.Status; status != nil {
-		if !status.GetServiceable() {
-			log.RatedInfo(10, "delegator is not serviceable", zap.Int64("queryViewVersion", view.TargetVersion))
-			return false
-		}
-		return true
-	}
 
 	// check leader data ready for version before 2.5.8
 	if err := utils.CheckDelegatorDataReady(dh.nodeManager, dh.target, view, meta.CurrentTarget); err != nil {

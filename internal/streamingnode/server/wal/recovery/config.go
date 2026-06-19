@@ -3,9 +3,8 @@ package recovery
 import (
 	"time"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // newConfig creates a new config for the recovery module.
@@ -34,13 +33,13 @@ type config struct {
 
 func (cfg *config) validate() error {
 	if cfg.persistInterval <= 0 {
-		return errors.New("persist interval must be greater than 0")
+		return status.NewInvalidArgument("persist interval must be greater than 0")
 	}
 	if cfg.maxDirtyMessages <= 0 {
-		return errors.New("max dirty messages must be greater than 0")
+		return status.NewInvalidArgument("max dirty messages must be greater than 0")
 	}
 	if cfg.gracefulTimeout <= 0 {
-		return errors.New("graceful timeout must be greater than 0")
+		return status.NewInvalidArgument("graceful timeout must be greater than 0")
 	}
 	return nil
 }

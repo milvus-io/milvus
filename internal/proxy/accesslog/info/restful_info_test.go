@@ -25,11 +25,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type RestfulAccessInfoSuite struct {
@@ -37,6 +37,7 @@ type RestfulAccessInfoSuite struct {
 
 	username string
 	traceID  string
+	ctx      *gin.Context
 	info     *RestfulInfo
 }
 
@@ -47,10 +48,12 @@ func (s *RestfulAccessInfoSuite) SetupSuite() {
 func (s *RestfulAccessInfoSuite) SetupTest() {
 	s.username = "test-user"
 	s.traceID = "test-trace"
-	s.info = &RestfulInfo{}
+	s.ctx = &gin.Context{}
+	s.ctx.Keys = make(map[any]any)
+	s.info = &RestfulInfo{ctx: s.ctx}
 	s.info.SetParams(
 		&gin.LogFormatterParams{
-			Keys: make(map[string]any),
+			Keys: make(map[any]any),
 		})
 }
 
@@ -96,9 +99,9 @@ func (s *RestfulAccessInfoSuite) TestTraceID() {
 	result := Get(s.info, "$trace_id")
 	s.Equal(Unknown, result[0])
 
-	s.info.params.Keys["traceID"] = "testtrace"
+	s.ctx.Set("traceID", "testtrace")
 	result = Get(s.info, "$trace_id")
-	s.Equal(s.info.params.Keys["traceID"], result[0])
+	s.Equal("testtrace", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestStatus() {
@@ -107,12 +110,12 @@ func (s *RestfulAccessInfoSuite) TestStatus() {
 	s.Equal("HttpError400", result[0])
 
 	s.info.params.StatusCode = http.StatusOK
-	s.info.params.Keys[ContextReturnCode] = merr.Code(merr.ErrChannelLack)
+	s.ctx.Set(ContextReturnCode, merr.Code(merr.ErrChannelLack))
 	result = Get(s.info, "$method_status")
 	s.Equal("Failed", result[0])
 
 	s.info.params.StatusCode = http.StatusOK
-	s.info.params.Keys[ContextReturnCode] = merr.Code(nil)
+	s.ctx.Set(ContextReturnCode, merr.Code(nil))
 	result = Get(s.info, "$method_status")
 	s.Equal("Successful", result[0])
 }
@@ -121,17 +124,17 @@ func (s *RestfulAccessInfoSuite) TestErrorCode() {
 	result := Get(s.info, "$error_code")
 	s.Equal(Unknown, result[0])
 
-	s.info.params.Keys[ContextReturnCode] = 200
+	s.ctx.Set(ContextReturnCode, 200)
 	result = Get(s.info, "$error_code")
 	s.Equal(fmt.Sprint(200), result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestErrorMsg() {
-	s.info.params.Keys[ContextReturnMessage] = merr.ErrChannelLack.Error()
+	s.ctx.Set(ContextReturnMessage, merr.ErrChannelLack.Error())
 	result := Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
-	s.info.params.Keys[ContextReturnMessage] = "test error. stack: 1:\n 2:\n 3:\n"
+	s.ctx.Set(ContextReturnMessage, "test error. stack: 1:\n 2:\n 3:\n")
 	result = Get(s.info, "$error_msg")
 	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
 }
@@ -176,21 +179,34 @@ func (s *RestfulAccessInfoSuite) TestOutputFields() {
 	s.Equal(Unknown, result[0])
 
 	fields := []string{"pk"}
-	s.info.params.Keys[ContextRequest] = &milvuspb.QueryRequest{
+	s.ctx.Set(ContextRequest, &milvuspb.QueryRequest{
 		OutputFields: fields,
-	}
+	})
 	s.info.InitReq()
 	result = Get(s.info, "$output_fields")
 	s.Equal(fmt.Sprint(fields), result[0])
+}
+
+func (s *RestfulAccessInfoSuite) TestPartialUpdate() {
+	// non-Upsert request -> NotAny
+	s.Equal(NotAny, Get(s.info, "$partial_update")[0])
+
+	s.ctx.Set(ContextRequest, &milvuspb.UpsertRequest{PartialUpdate: false})
+	s.info.InitReq()
+	s.Equal("false", Get(s.info, "$partial_update")[0])
+
+	s.ctx.Set(ContextRequest, &milvuspb.UpsertRequest{PartialUpdate: true})
+	s.info.InitReq()
+	s.Equal("true", Get(s.info, "$partial_update")[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestConsistencyLevel() {
 	result := Get(s.info, "$consistency_level")
 	s.Equal(Unknown, result[0])
 
-	s.info.params.Keys[ContextRequest] = &milvuspb.QueryRequest{
+	s.ctx.Set(ContextRequest, &milvuspb.QueryRequest{
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
-	}
+	})
 	s.info.InitReq()
 	result = Get(s.info, "$consistency_level")
 	s.Equal(commonpb.ConsistencyLevel_Bounded.String(), result[0])

@@ -5,8 +5,8 @@ import (
 	"math"
 	"math/rand"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // getSegmentLimitationPolicy returns the segment limitation policy.

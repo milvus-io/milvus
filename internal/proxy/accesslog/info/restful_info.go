@@ -25,10 +25,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
 const (
@@ -36,10 +37,15 @@ const (
 	ContextReturnCode    = "code"
 	ContextReturnMessage = "message"
 	ContextRequest       = "request"
-	ContextToken         = "token"
+	// ContextErrorType carries the merr classification (input_error/system_error)
+	// set by the REST handler when it holds the error object; must match the key
+	// written in internal/distributed/proxy/httpserver.
+	ContextErrorType = "error_type"
+	ContextToken     = "token"
 )
 
 type RestfulInfo struct {
+	ctx    *gin.Context
 	params *gin.LogFormatterParams
 	start  time.Time
 	req    interface{}
@@ -48,8 +54,8 @@ type RestfulInfo struct {
 	actualConsistencyLevel *commonpb.ConsistencyLevel
 }
 
-func NewRestfulInfo() *RestfulInfo {
-	return &RestfulInfo{start: time.Now(), params: &gin.LogFormatterParams{}}
+func NewRestfulInfo(ctx *gin.Context) *RestfulInfo {
+	return &RestfulInfo{ctx: ctx, start: time.Now(), params: &gin.LogFormatterParams{}}
 }
 
 func (i *RestfulInfo) SetParams(p *gin.LogFormatterParams) {
@@ -57,7 +63,7 @@ func (i *RestfulInfo) SetParams(p *gin.LogFormatterParams) {
 }
 
 func (i *RestfulInfo) InitReq() {
-	req, ok := i.params.Keys[ContextRequest]
+	req, ok := i.ctx.Get(ContextRequest)
 	if !ok {
 		return
 	}
@@ -79,6 +85,13 @@ func (i *RestfulInfo) TimeStart() string {
 	return i.start.Format(timeFormat)
 }
 
+// Start returns the request-entry timestamp captured by the access middleware.
+// Exposed so downstream consumers (e.g. audit plugins) can measure end-to-end
+// request latency instead of their own instantiation time.
+func (i *RestfulInfo) Start() time.Time {
+	return i.start
+}
+
 func (i *RestfulInfo) TimeEnd() string {
 	return i.params.TimeStamp.Format(timeFormat)
 }
@@ -92,7 +105,7 @@ func (i *RestfulInfo) Address() string {
 }
 
 func (i *RestfulInfo) TraceID() string {
-	traceID, ok := i.params.Keys["traceID"]
+	traceID, ok := i.ctx.Get("traceID")
 	if !ok {
 		return Unknown
 	}
@@ -104,7 +117,7 @@ func (i *RestfulInfo) MethodStatus() string {
 		return fmt.Sprintf("HttpError%d", i.params.StatusCode)
 	}
 
-	value, ok := i.params.Keys[ContextReturnCode]
+	value, ok := i.ctx.Get(ContextReturnCode)
 	if !ok {
 		return Unknown
 	}
@@ -122,7 +135,7 @@ func (i *RestfulInfo) MethodStatus() string {
 }
 
 func (i *RestfulInfo) UserName() string {
-	username, ok := i.params.Keys[ContextUsername]
+	username, ok := i.ctx.Get(ContextUsername)
 	if !ok || username == "" {
 		return Unknown
 	}
@@ -135,7 +148,7 @@ func (i *RestfulInfo) ResponseSize() string {
 }
 
 func (i *RestfulInfo) ErrorCode() string {
-	code, ok := i.params.Keys[ContextReturnCode]
+	code, ok := i.ctx.Get(ContextReturnCode)
 	if !ok {
 		return Unknown
 	}
@@ -143,7 +156,7 @@ func (i *RestfulInfo) ErrorCode() string {
 }
 
 func (i *RestfulInfo) ErrorMsg() string {
-	message, ok := i.params.Keys[ContextReturnMessage]
+	message, ok := i.ctx.Get(ContextReturnMessage)
 	if !ok {
 		return ""
 	}
@@ -151,7 +164,20 @@ func (i *RestfulInfo) ErrorMsg() string {
 }
 
 func (i *RestfulInfo) ErrorType() string {
-	return Unknown
+	if et, ok := i.ctx.Get(ContextErrorType); ok {
+		if s, ok := et.(string); ok {
+			return s
+		}
+	}
+	// Aborts that never reached the proxy call (request binding / local
+	// validation) only stored the wire code; recover the sentinel's baked
+	// classification from it. Success rows report "" like the gRPC access log.
+	if code, ok := i.ctx.Get(ContextReturnCode); ok {
+		if c, ok := code.(int32); ok && c != 0 {
+			return merr.ErrorTypeOfCode(c).String()
+		}
+	}
+	return ""
 }
 
 func (i *RestfulInfo) SdkVersion() string {
@@ -285,4 +311,11 @@ func (i *RestfulInfo) TemplateValueLength() string {
 	})
 
 	return fmt.Sprint(m)
+}
+
+func (i *RestfulInfo) PartialUpdate() string {
+	if req, ok := i.req.(*milvuspb.UpsertRequest); ok {
+		return fmt.Sprint(req.GetPartialUpdate())
+	}
+	return NotAny
 }

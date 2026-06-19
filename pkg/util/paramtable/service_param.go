@@ -27,11 +27,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 const (
@@ -310,7 +310,7 @@ We recommend using version 1.2 and above.`,
 
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Version:      "2.3.7",
 		Doc:          "Whether to enable authentication",
 		Export:       true,
@@ -318,24 +318,35 @@ We recommend using version 1.2 and above.`,
 	p.EtcdEnableAuth.Init(base.mgr)
 
 	if p.UseEmbedEtcd.GetAsBool() && p.EtcdEnableAuth.GetAsBool() {
-		panic("embedded etcd can not enable auth")
+		log.Warn("embedded etcd does not support auth, disabling etcd auth automatically")
+		p.EtcdEnableAuth.SwapTempValue("false")
 	}
 
 	p.EtcdAuthUserName = ParamItem{
-		Key:     "etcd.auth.userName",
-		Version: "2.3.7",
-		Doc:     "username for etcd authentication",
-		Export:  true,
+		Key:          "etcd.auth.userName",
+		Version:      "2.3.7",
+		DefaultValue: "etcdadmin",
+		Doc:          "username for etcd authentication",
+		Export:       true,
 	}
 	p.EtcdAuthUserName.Init(base.mgr)
 
 	p.EtcdAuthPassword = ParamItem{
-		Key:     "etcd.auth.password",
-		Version: "2.3.7",
-		Doc:     "password for etcd authentication",
-		Export:  true,
+		Key:          "etcd.auth.password",
+		Version:      "2.3.7",
+		DefaultValue: "etcdadmin",
+		Doc:          "password for etcd authentication",
+		Export:       true,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
+
+	if p.EtcdEnableAuth.GetAsBool() && !p.UseEmbedEtcd.GetAsBool() {
+		if p.EtcdAuthUserName.GetValue() == "" || p.EtcdAuthPassword.GetValue() == "" {
+			panic("etcd auth is enabled but userName or password is empty. " +
+				"Set etcd.auth.userName and etcd.auth.password in milvus.yaml, " +
+				"or via environment variables etcd_auth_userName and etcd_auth_password")
+		}
+	}
 }
 
 func (p *EtcdConfig) GetAll() map[string]string {
@@ -510,12 +521,10 @@ It is recommended to change this parameter before starting Milvus for the first 
 }
 
 type MetaStoreConfig struct {
-	MetaStoreType              ParamItem `refreshable:"false"`
-	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
-	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
-	PaginationSize             ParamItem `refreshable:"true"`
-	ReadConcurrency            ParamItem `refreshable:"true"`
-	MaxEtcdTxnNum              ParamItem `refreshable:"true"`
+	MetaStoreType   ParamItem `refreshable:"false"`
+	PaginationSize  ParamItem `refreshable:"true"`
+	ReadConcurrency ParamItem `refreshable:"true"`
+	MaxEtcdTxnNum   ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -527,24 +536,6 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
-
-	p.SnapshotTTLSeconds = ParamItem{
-		Key:          "metastore.snapshot.ttl",
-		Version:      "2.4.14",
-		DefaultValue: "86400",
-		Doc:          `snapshot ttl in seconds`,
-		Export:       true,
-	}
-	p.SnapshotTTLSeconds.Init(base.mgr)
-
-	p.SnapshotReserveTimeSeconds = ParamItem{
-		Key:          "metastore.snapshot.reserveTime",
-		Version:      "2.4.14",
-		DefaultValue: "3600",
-		Doc:          `snapshot reserve time in seconds`,
-		Export:       true,
-	}
-	p.SnapshotReserveTimeSeconds.Init(base.mgr)
 
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",
@@ -723,6 +714,18 @@ type WoodpeckerConfig struct {
 	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
 	AuditorMaxInterval      ParamItem `refreshable:"true"`
 
+	// quorum configuration
+	// Buffer pools for different regions
+	QuorumBufferPools ParamItem `refreshable:"true"`
+
+	// Quorum selection strategy
+	QuorumAffinityMode ParamItem `refreshable:"true"`
+	QuorumReplicas     ParamItem `refreshable:"true"`
+	QuorumStrategy     ParamItem `refreshable:"true"`
+
+	// Custom placement for replicas
+	QuorumCustomPlacement ParamItem `refreshable:"true"`
+
 	// logstore
 	SyncMaxInterval                ParamItem `refreshable:"true"`
 	SyncMaxIntervalForLocalStorage ParamItem `refreshable:"true"`
@@ -741,8 +744,9 @@ type WoodpeckerConfig struct {
 	FencePolicyConditionWrite      ParamItem `refreshable:"true"`
 
 	// storage
-	StorageType ParamItem `refreshable:"false"`
-	RootPath    ParamItem `refreshable:"false"`
+	StorageType       ParamItem `refreshable:"false"`
+	ForceLocalStorage ParamItem `refreshable:"false"`
+	RootPath          ParamItem `refreshable:"false"`
 }
 
 func (p *WoodpeckerConfig) Init(base *BaseTable) {
@@ -817,6 +821,80 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AuditorMaxInterval.Init(base.mgr)
+
+	// Buffer pools for different regions
+	p.QuorumBufferPools = ParamItem{
+		Key:          "woodpecker.client.quorum.quorumBufferPools",
+		Version:      "2.6.0",
+		DefaultValue: "",
+		Doc: `Quorum Buffer Pools: Define groups of nodes for different purposes
+Example configuration below:
+  - name: region1 # Name of the region pool
+    seeds: [n1,n2,n3] # List of seed node addresses for this pool
+  - name: region2 # Name of the region pool
+    seeds: [n4,n5,n6] # List of seed node addresses for this pool`,
+		Export: false,
+	}
+	p.QuorumBufferPools.Init(base.mgr)
+
+	// Quorum selection strategy
+	p.QuorumAffinityMode = ParamItem{
+		Key:          "woodpecker.client.quorum.quorumSelectStrategy.affinityMode",
+		Version:      "2.6.0",
+		DefaultValue: "soft",
+		Doc:          "Affinity mode for node selection rules. Valid values: [soft, hard]",
+		Export:       false,
+	}
+	p.QuorumAffinityMode.Init(base.mgr)
+
+	p.QuorumReplicas = ParamItem{
+		Key:          "woodpecker.client.quorum.quorumSelectStrategy.replicas",
+		Version:      "2.6.0",
+		DefaultValue: "3",
+		Doc:          "Number of replicas in the quorum ensemble. Valid values: [3, 5]",
+		Export:       false,
+	}
+	p.QuorumReplicas.Init(base.mgr)
+
+	p.QuorumStrategy = ParamItem{
+		Key:          "woodpecker.client.quorum.quorumSelectStrategy.strategy",
+		Version:      "2.6.0",
+		DefaultValue: "random",
+		Doc: `Node selection strategy
+Valid values: [random, single-az-single-rg, single-az-multi-rg, multi-az-single-rg, multi-az-multi-rg, cross-region, custom]
+random: nodes are selected randomly
+single-az-single-rg: All nodes in same availability zone and resource group
+single-az-multi-rg: Same availability zone, multiple resource groups
+multi-az-single-rg: Multiple availability zones, single resource group
+multi-az-multi-rg: Multiple availability zones and resource groups
+cross-region: Nodes across different regions for maximum durability
+custom: Use custom expressions defined below`,
+		Export: false,
+	}
+	p.QuorumStrategy.Init(base.mgr)
+
+	// Custom placement for replica 1
+	p.QuorumCustomPlacement = ParamItem{
+		Key:          "woodpecker.client.quorum.quorumSelectStrategy.customPlacement",
+		Version:      "2.6.0",
+		DefaultValue: "",
+		Doc: `Custom expressions for node selection (only used when strategy is 'custom')
+Example configuration below:
+  - name: replica-1
+    region: "default-region-pool"
+    az: "az-1"
+    resourceGroup: "rg.*"
+  - name: replica-2
+    region: "default-region-pool"
+    az: "az-2"
+    resourceGroup: "rg.*"
+  - name: replica-3
+    region: "default-region-pool"
+    az: "az.*"
+    resourceGroup: "rg.*"`,
+		Export: false,
+	}
+	p.QuorumCustomPlacement.Init(base.mgr)
 
 	p.SyncMaxInterval = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxInterval",
@@ -963,6 +1041,15 @@ Valid values: [auto, enable, disable]`,
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
+
+	p.ForceLocalStorage = ParamItem{
+		Key:          "woodpecker.storage.forceLocalStorage",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "Force using local storage in cluster mode. Not recommended unless you know what you are doing.",
+		Export:       false,
+	}
+	p.ForceLocalStorage.Init(base.mgr)
 
 	p.RootPath = ParamItem{
 		Key:          "woodpecker.storage.rootPath",
@@ -1382,6 +1469,7 @@ type MinioConfig struct {
 	SecretAccessKey    ParamItem `refreshable:"false"`
 	UseSSL             ParamItem `refreshable:"false"`
 	SslCACert          ParamItem `refreshable:"false"`
+	SslTLSMinVersion   ParamItem `refreshable:"false"`
 	BucketName         ParamItem `refreshable:"false"`
 	RootPath           ParamItem `refreshable:"false"`
 	UseIAM             ParamItem `refreshable:"false"`
@@ -1394,6 +1482,7 @@ type MinioConfig struct {
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
 	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
+	UseCRC32C          ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1469,12 +1558,25 @@ The default value applies to MinIO or S3 service that started with the default d
 	p.UseSSL.Init(base.mgr)
 
 	p.SslCACert = ParamItem{
-		Key:     "minio.ssl.tlsCACert",
-		Version: "2.3.12",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:          "minio.ssl.tlsCACert",
+		Version:      "2.3.12",
+		DefaultValue: "",
+		Doc:          "path to your CACert file",
+		Export:       true,
 	}
 	p.SslCACert.Init(base.mgr)
+
+	p.SslTLSMinVersion = ParamItem{
+		Key:          "minio.ssl.tlsMinVersion",
+		DefaultValue: "default",
+		Version:      "2.6.11",
+		Doc: `TLS minimum version for MinIO/S3 SSL connections.
+Optional values: "default", "1.0", "1.1", "1.2", "1.3".
+When set to "default", the SDK/runtime default is used (typically TLS 1.2).
+We recommend using version 1.2 and above.`,
+		Export: true,
+	}
+	p.SslTLSMinVersion.Init(base.mgr)
 
 	p.BucketName = ParamItem{
 		Key:          "minio.bucketName",
@@ -1609,10 +1711,19 @@ Leave it empty if you want to use AWS default endpoint`,
 		Version:      "2.4.1",
 		DefaultValue: "0",
 		Doc: `The maximum number of objects requested per batch in minio ListObjects rpc, 
-0 means using oss client by default, decrease these configration if ListObjects timeout`,
+0 means using oss client by default, decrease these configuration if ListObjects timeout`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
+
+	p.UseCRC32C = ParamItem{
+		Key:          "minio.ssl.useCRC32C",
+		Version:      "2.6.11",
+		DefaultValue: "false",
+		Doc:          "Whether to use CRC32C checksum for data integrity validation on MinIO/S3 PutObject requests.",
+		Export:       true,
+	}
+	p.UseCRC32C.Init(base.mgr)
 }
 
 // profile config

@@ -56,50 +56,39 @@ ValidateIndexParams(const char* index_type,
 
         knowhere::Status status;
         std::string error_msg;
-        auto check_leaf_type = [&index_type, &json, &error_msg, &status](
-                                   milvus::DataType dataType) {
+        auto version_number =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        auto check_leaf_type = [&index_type,
+                                &json,
+                                &error_msg,
+                                &status,
+                                version_number](milvus::DataType dataType) {
             if (dataType == milvus::DataType::VECTOR_BINARY) {
                 status =
                     knowhere::IndexStaticFaced<knowhere::bin1>::ConfigCheck(
-                        index_type,
-                        knowhere::Version::GetCurrentVersion().VersionNumber(),
-                        json,
-                        error_msg);
+                        index_type, version_number, json, error_msg);
             } else if (dataType == milvus::DataType::VECTOR_FLOAT) {
                 status =
                     knowhere::IndexStaticFaced<knowhere::fp32>::ConfigCheck(
-                        index_type,
-                        knowhere::Version::GetCurrentVersion().VersionNumber(),
-                        json,
-                        error_msg);
+                        index_type, version_number, json, error_msg);
             } else if (dataType == milvus::DataType::VECTOR_BFLOAT16) {
                 status =
                     knowhere::IndexStaticFaced<knowhere::bf16>::ConfigCheck(
-                        index_type,
-                        knowhere::Version::GetCurrentVersion().VersionNumber(),
-                        json,
-                        error_msg);
+                        index_type, version_number, json, error_msg);
             } else if (dataType == milvus::DataType::VECTOR_FLOAT16) {
                 status =
                     knowhere::IndexStaticFaced<knowhere::fp16>::ConfigCheck(
-                        index_type,
-                        knowhere::Version::GetCurrentVersion().VersionNumber(),
-                        json,
-                        error_msg);
+                        index_type, version_number, json, error_msg);
             } else if (dataType == milvus::DataType::VECTOR_SPARSE_U32_F32) {
-                status = knowhere::IndexStaticFaced<knowhere::sparse_u32_f32>::
-                    ConfigCheck(
-                        index_type,
-                        knowhere::Version::GetCurrentVersion().VersionNumber(),
-                        json,
-                        error_msg);
+                status = knowhere::IndexStaticFaced<
+                    knowhere::sparse_u32_f32>::ConfigCheck(index_type,
+                                                           version_number,
+                                                           json,
+                                                           error_msg);
             } else if (dataType == milvus::DataType::VECTOR_INT8) {
                 status =
                     knowhere::IndexStaticFaced<knowhere::int8>::ConfigCheck(
-                        index_type,
-                        knowhere::Version::GetCurrentVersion().VersionNumber(),
-                        json,
-                        error_msg);
+                        index_type, version_number, json, error_msg);
             } else {
                 status = knowhere::Status::invalid_args;
             }

@@ -12,7 +12,7 @@
 package client
 
 import (
-	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 )
 
 // ProducerOptions is the options of a producer

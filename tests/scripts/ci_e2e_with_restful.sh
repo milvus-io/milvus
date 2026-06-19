@@ -47,10 +47,11 @@ MINIO_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-minio.${MILVUS_HELM_NAMES
 # Shellcheck source=ci-util.sh
 source "${ROOT}/tests/scripts/ci-util.sh"
 
+activate_pytest_python_env
 
 cd ${ROOT}/tests/python_client
 
-# Print python3 version, python version 3.6.8 is more stable for test
+# Print python3 version
 python3 -V
 
 # Pytest will try to get ${CI_LOG_PATH} from environment variables first,then use default path
@@ -83,18 +84,9 @@ cd ${ROOT}/tests/restful_client_v2
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 360
+  timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x --tags L0 L1 -n 6 --timeout 360
 else
-  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 360
-fi
-
-if [[ "${MILVUS_HELM_RELEASE_NAME}" != *"msop"* ]]; then
-  if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-
-    timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360
-  else
-    pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360
-  fi
+  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x --tags L0 L1 -n 6 --timeout 360
 fi
 
 cd ${ROOT}/tests/python_client

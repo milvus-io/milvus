@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/zap/zapcore"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
 type MessageType messagespb.MessageType
@@ -21,8 +21,8 @@ type MessageTypeProperties struct {
 	ExclusiveRequired bool
 	// a cipher enabled message type will be encrypted before appending to the wal if cipher is enabled.
 	CipherEnabled bool
-	// A broadcast to all message type is a message that will be broadcasted to all vchannels.
-	BroadcastToAll bool
+	// A message type belong to some data operation, such as insert, delete, upsert, which may create a huge overhead if not limited.
+	DMLMessageType bool
 }
 
 var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
@@ -32,12 +32,14 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		SelfControlled: true,
 	},
 	MessageTypeInsert: {
-		LogLevel:      zapcore.DebugLevel,
-		CipherEnabled: true,
+		LogLevel:       zapcore.DebugLevel,
+		CipherEnabled:  true,
+		DMLMessageType: true,
 	},
 	MessageTypeDelete: {
-		LogLevel:      zapcore.DebugLevel,
-		CipherEnabled: true,
+		LogLevel:       zapcore.DebugLevel,
+		CipherEnabled:  true,
+		DMLMessageType: true,
 	},
 	MessageTypeCreateCollection: {
 		ExclusiveRequired: true,
@@ -55,6 +57,13 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		ExclusiveRequired: true,
 	},
 	MessageTypeImport: {},
+	MessageTypeCommitImport: {
+		ExclusiveRequired: true,
+	},
+	MessageTypeRollbackImport: {
+		ExclusiveRequired: true,
+	},
+	MessageTypeBatchUpdateManifest: {},
 	MessageTypeCreateSegment: {
 		SelfControlled: true,
 	},
@@ -114,11 +123,9 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeDropIndex:           {},
 	MessageTypeFlushAll: {
 		ExclusiveRequired: true,
-		BroadcastToAll:    true,
 	},
 	MessageTypeAlterWAL: {
 		ExclusiveRequired: true,
-		BroadcastToAll:    true,
 	},
 }
 
@@ -161,9 +168,9 @@ func (t MessageType) IsSelfControlled() bool {
 	return messageTypePropertiesMap[t].SelfControlled
 }
 
-// IsBroadcastToAll checks if the MessageType is broadcast to all.
-func (t MessageType) IsBroadcastToAll() bool {
-	return messageTypePropertiesMap[t].BroadcastToAll
+// IsDMLMessageType checks if the MessageType is a data operation message type.
+func (t MessageType) IsDMLMessageType() bool {
+	return messageTypePropertiesMap[t].DMLMessageType
 }
 
 // LogLevel returns the log level of the MessageType.

@@ -25,25 +25,37 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"io"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedReader, error) {
+// ExternalReaderContext carries per-collection context needed by the FFI
+// reader to resolve extfs aliases for external collections. Zero value is
+// safe for non-external collections.
+type ExternalReaderContext struct {
+	CollectionID int64
+	Source       string
+	Spec         string
+}
+
+func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, ext ExternalReaderContext) (*FFIPackedReader, error) {
+	collectionID := ext.CollectionID
+	externalSource := ext.Source
+	externalSpec := ext.Spec
 	cLoonManifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get manifest")
+		return nil, merr.Wrap(err, "failed to get manifest")
 	}
+	defer C.loon_manifest_destroy(cLoonManifest)
 
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
@@ -74,7 +86,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 			storage_type:           C.CString(storageConfig.GetStorageType()),
 			cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
 			iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:              C.CString("Warn"), // TODO use config after storage support lower case configuration
+			log_level:              C.CString("warn"),
 			useSSL:                 C.bool(storageConfig.GetUseSSL()),
 			sslCACert:              C.CString(storageConfig.GetSslCACert()),
 			useIAM:                 C.bool(storageConfig.GetUseIAM()),
@@ -84,6 +96,8 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
 			use_custom_part_upload: true,
 			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
+			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+			use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
 		}
 		defer C.free(unsafe.Pointer(cStorageConfig.address))
 		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
@@ -97,18 +111,34 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
+		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 
 		cNeededColumn := make([]*C.char, len(neededColumns))
 		for i, columnName := range neededColumns {
 			cNeededColumn[i] = C.CString(columnName)
 			defer C.free(unsafe.Pointer(cNeededColumn[i]))
 		}
-		cNeededColumnArray := (**C.char)(unsafe.Pointer(&cNeededColumn[0]))
+		var cNeededColumnArray **C.char
+		if len(cNeededColumn) > 0 {
+			cNeededColumnArray = (**C.char)(unsafe.Pointer(&cNeededColumn[0]))
+		}
 		cNumColumns := C.int64_t(len(neededColumns))
 
-		status = C.NewPackedFFIReaderWithManifest(cLoonManifest, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr)
+		// Avoid C.CString allocations on the non-external hot path. The C side
+		// treats nullptr the same as an empty string (empty-source guard).
+		var cExternalSource, cExternalSpec *C.char
+		if externalSource != "" {
+			cExternalSource = C.CString(externalSource)
+			defer C.free(unsafe.Pointer(cExternalSource))
+			if externalSpec != "" {
+				cExternalSpec = C.CString(externalSpec)
+				defer C.free(unsafe.Pointer(cExternalSpec))
+			}
+		}
+
+		status = C.NewPackedFFIReaderWithManifest(cLoonManifest, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr, C.int64_t(collectionID), cExternalSource, cExternalSpec)
 	} else {
-		return nil, fmt.Errorf("storageConfig is required")
+		return nil, merr.WrapErrServiceInternalMsg("storageConfig is required")
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
@@ -119,14 +149,14 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	status = C.GetFFIReaderStream(cPackedReader, C.int64_t(8196), (*C.struct_ArrowArrayStream)(unsafe.Pointer(&cStream)))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		C.CloseFFIReader(cPackedReader)
-		return nil, fmt.Errorf("failed to get reader stream: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to get reader stream")
 	}
 
 	// Import the stream as a RecordReader
 	recordReader, err := cdata.ImportCRecordReader(&cStream, schema)
 	if err != nil {
 		C.CloseFFIReader(cPackedReader)
-		return nil, fmt.Errorf("failed to import record reader: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to import record reader")
 	}
 
 	return &FFIPackedReader{
@@ -137,21 +167,17 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 }
 
 // ReadNext reads the next record batch from the reader
-func (r *FFIPackedReader) ReadNext() (arrow.Record, error) {
+func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 	if r.recordReader == nil {
 		return nil, io.EOF
 	}
 
-	// no need to manual release
-	// stream reader will release previous one
-
-	// Read next record from the stream
-	rec, err := r.recordReader.Read()
+	rec, err = r.recordReader.Read()
 	if err != nil {
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		return nil, fmt.Errorf("failed to read next record: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to read next record")
 	}
 
 	return rec, nil
@@ -159,6 +185,10 @@ func (r *FFIPackedReader) ReadNext() (arrow.Record, error) {
 
 // Close closes the FFI reader
 func (r *FFIPackedReader) Close() error {
+	if r.cPackedReader == nil {
+		return nil
+	}
+
 	// no need to manual release current batch
 	// stream reader handles it
 
@@ -167,6 +197,7 @@ func (r *FFIPackedReader) Close() error {
 	}
 
 	status := C.CloseFFIReader(r.cPackedReader)
+	r.cPackedReader = nil
 	return ConsumeCStatusIntoError(&status)
 }
 
@@ -186,7 +217,7 @@ func (r *FFIPackedReader) Release() {
 
 func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig) (loonManifestHandle *C.LoonManifest, err error) {
 	var cManifestHandle *C.LoonManifest
-	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return cManifestHandle, err
 	}
@@ -196,11 +227,12 @@ func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig
 	if err != nil {
 		return cManifestHandle, err
 	}
+	defer C.loon_properties_free(cProperties)
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &cTransactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	err = HandleLoonFFIResult(result)
 	if err != nil {
 		return cManifestHandle, err

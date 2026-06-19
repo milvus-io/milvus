@@ -21,21 +21,23 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.AlterDatabaseRequest) error {
@@ -68,11 +70,11 @@ func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.Alte
 
 	oldDB, err := c.meta.GetDatabaseByName(ctx, req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
-		return errors.Wrap(err, "failed to get database by name")
+		return merr.Wrap(err, "failed to get database by name")
 	}
 	alterLoadConfig, err := c.getAlterLoadConfigOfAlterDatabase(ctx, req.GetDbName(), oldDB.Properties, req.GetProperties())
 	if err != nil {
-		return errors.Wrap(err, "failed to get alter load config of alter database")
+		return merr.Wrap(err, "failed to get alter load config of alter database")
 	}
 
 	// We only allow to alter or delete properties, not both.
@@ -139,7 +141,7 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 
 	db := model.NewDatabase(header.DbId, header.DbName, etcdpb.DatabaseState_DatabaseCreated, body.Properties)
 	if err := c.meta.AlterDatabase(ctx, db, result.GetControlChannelResult().TimeTick); err != nil {
-		return errors.Wrap(err, "failed to alter database")
+		return merr.Wrap(err, "failed to alter database")
 	}
 	if body.AlterLoadConfig != nil {
 		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
@@ -147,8 +149,15 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 			ReplicaNumber:  body.AlterLoadConfig.ReplicaNumber,
 			ResourceGroups: body.AlterLoadConfig.ResourceGroups,
 		})
+		if err != nil {
+			return merr.Wrap(err, "failed to update load config")
+		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return errors.Wrap(err, "failed to update load config")
+			if errors.Is(err, merr.ErrResourceGroupNotFound) {
+				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				return nil
+			}
+			return merr.Wrap(err, "failed to update load config")
 		}
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().

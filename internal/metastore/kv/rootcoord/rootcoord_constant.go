@@ -1,9 +1,11 @@
 package rootcoord
 
 import (
+	"bytes"
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -55,13 +57,13 @@ const (
 	// PrivilegeGroupPrefix prefix for privilege group
 	PrivilegeGroupPrefix = ComponentPrefix + "/privilege-group"
 
-	// prefix for file resource meta
+	// FileResourceMetaPrefix prefix for file resource meta
 	FileResourceMetaPrefix = ComponentPrefix + "/file_resource_info"
 	FileResourceVersionKey = ComponentPrefix + "/file_resource_version"
 )
 
 func BuildDatabasePrefixWithDBID(dbID int64) string {
-	return fmt.Sprintf("%s/%d", CollectionInfoMetaPrefix, dbID)
+	return fmt.Sprintf("%s/%d/", CollectionInfoMetaPrefix, dbID)
 }
 
 func BuildCollectionKeyWithDBID(dbID int64, collectionID int64) string {
@@ -76,9 +78,29 @@ func getDatabasePrefix(dbID int64) string {
 	if dbID != util.NonDBID {
 		return BuildDatabasePrefixWithDBID(dbID)
 	}
-	return CollectionMetaPrefix
+	return CollectionMetaPrefix + "/"
 }
 
 func BuildPrivilegeGroupkey(groupName string) string {
 	return fmt.Sprintf("%s/%s", PrivilegeGroupPrefix, groupName)
+}
+
+// Legacy snapshot utilities — kept for migration tool compatibility only.
+
+// SuffixSnapshotTombstone is the tombstone marker used in legacy snapshot keys.
+var SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
+
+// IsTombstone checks whether the value is a legacy tombstone marker.
+func IsTombstone(value string) bool {
+	return bytes.Equal([]byte(value), SuffixSnapshotTombstone)
+}
+
+// ConstructTombstone returns a copy of the tombstone marker.
+func ConstructTombstone() []byte {
+	return append([]byte{}, SuffixSnapshotTombstone...)
+}
+
+// ComposeSnapshotKey builds a legacy snapshot key from prefix, key, separator, and timestamp.
+func ComposeSnapshotKey(snapshotPrefix string, key string, separator string, ts typeutil.Timestamp) string {
+	return util.GetPath(snapshotPrefix, fmt.Sprintf("%s%s%d", key, separator, ts))
 }

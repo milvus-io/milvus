@@ -99,6 +99,10 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<ArrayView>(input);
             break;
         }
+        case DataType::VECTOR_ARRAY: {
+            result = ExecVisitorImpl<VectorArray>(input);
+            break;
+        }
         case DataType::GEOMETRY: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
@@ -117,16 +121,25 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 }
 
+void
+PhyNullExpr::DetermineExecPath() {
+    if (expr_->column_.data_type_ == DataType::VECTOR_ARRAY) {
+        exec_path_ = ExprExecPath::RawData;
+        return;
+    }
+    SegmentExpr::DetermineExecPath();
+}
+
 template <typename T>
 VectorPtr
 PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
     if (auto res = PreCheckNullable(input)) {
         return res;
     }
-    auto valid_res = (input != nullptr)
-                         ? ProcessChunksForValidByOffsets<T>(
-                               SegmentExpr::CanUseIndex(), *input)
-                         : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+    auto valid_res =
+        (input != nullptr)
+            ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
+            : ProcessChunksForValid<T>(UseIndexCursor());
     TargetBitmap res = valid_res.clone();
     if (expr_->op_ == proto::plan::NullExpr_NullOp_IsNull) {
         res.flip();

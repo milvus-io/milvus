@@ -83,10 +83,14 @@ class SegmentInterface {
     virtual ~SegmentInterface() = default;
 
     virtual void
-    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const = 0;
+    FillPrimaryKeys(const query::Plan* plan,
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual void
-    FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
+    FillTargetEntry(const query::Plan* plan,
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual bool
     Contain(const PkType& pk) const = 0;
@@ -97,7 +101,10 @@ class SegmentInterface {
            Timestamp timestamp,
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
-           Timestamp collection_ttl) const = 0;
+           Timestamp collection_ttl,
+           int64_t entity_ttl_physical_time_us = 0,
+           bool filter_only = false,
+           bool enable_expr_cache = false) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -109,7 +116,10 @@ class SegmentInterface {
                       timestamp,
                       folly::CancellationToken(),
                       0,
-                      0);
+                      0,
+                      0,
+                      false,
+                      false);
     }
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
@@ -120,7 +130,8 @@ class SegmentInterface {
              bool ignore_non_pk,
              const folly::CancellationToken& cancel_token,
              int32_t consistency_level,
-             Timestamp collection_ttl) const = 0;
+             Timestamp collection_ttl,
+             int64_t entity_ttl_physical_time_us = 0) const = 0;
 
     // Only used for test
     std::unique_ptr<proto::segcore::RetrieveResults>
@@ -136,6 +147,7 @@ class SegmentInterface {
                         ignore_non_pk,
                         folly::CancellationToken(),
                         0,
+                        0,
                         0);
     }
 
@@ -143,7 +155,9 @@ class SegmentInterface {
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              const int64_t* offsets,
-             int64_t size) const = 0;
+             int64_t size,
+             const folly::CancellationToken& cancel_token =
+                 folly::CancellationToken()) const = 0;
 
     virtual size_t
     GetMemoryUsageInBytes() const = 0;
@@ -209,6 +223,18 @@ class SegmentInterface {
         return {};
     }
 
+    // Returns the nested path of the JsonFlatIndex that would match
+    // query_path for field_id, or empty string if no JsonFlatIndex covers
+    // this path. Reads segment-level JSON index metadata directly -- does
+    // NOT pin the index cell. Used by expression DetermineExecPath() to
+    // check path compatibility without triggering a tiered-storage cold
+    // fetch when the decision is going to be RawData anyway.
+    virtual std::string
+    GetJsonFlatIndexNestedPath(FieldId field_id,
+                               std::string_view query_path) const {
+        return "";
+    }
+
     virtual std::vector<PinWrapper<const index::IndexBase*>>
     PinIndex(milvus::OpContext* op_ctx,
              FieldId field_id,
@@ -224,7 +250,7 @@ class SegmentInterface {
     virtual void
     BulkGetJsonData(milvus::OpContext* op_ctx,
                     FieldId field_id,
-                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const std::function<void(milvus::Json, size_t, bool)>& fn,
                     const int64_t* offsets,
                     int64_t count) const = 0;
 
@@ -239,22 +265,76 @@ class SegmentInterface {
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
+    // Compute exact distances from the index for given query vectors and candidate IDs.
+    // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
+    virtual bool
+    CalcDistByIDs(milvus::OpContext* op_ctx,
+                  FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const {
+        return false;
+    }
+
+    virtual bool
+    CalcDistByIDs(FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const {
+        return CalcDistByIDs(nullptr,
+                             field_id,
+                             query_dataset,
+                             seg_offsets,
+                             count,
+                             is_cosine,
+                             distances);
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(milvus::OpContext* op_ctx, FieldId field_id) const {
+        return false;
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(FieldId field_id) const {
+        return IsIndexRefineEnabled(nullptr, field_id);
+    }
+
     virtual void
-    LazyCheckSchema(SchemaPtr sch) = 0;
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) = 0;
 
     // reopen segment with new schema
     virtual void
     Reopen(SchemaPtr sch) = 0;
 
     virtual void
-    Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
     virtual void
-    SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+           SchemaPtr new_schema) = 0;
+
+    virtual void
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) = 0;
+
+    virtual void
+    SetCommitTimestamp(uint64_t ts) {
+    }
+
+    virtual uint64_t
+    GetCommitTimestamp() const {
+        return 0;
+    }
 
     virtual void
     Load(milvus::tracer::TraceContext& trace_ctx,
-         milvus::OpContext* op_ctx = nullptr) = 0;
+         milvus::OpContext* op_ctx) = 0;
 
     // Get IArrayOffsets for element-level filtering on array fields
     // Returns nullptr if the field doesn't have IArrayOffsets
@@ -272,6 +352,24 @@ class SegmentInternalInterface : public SegmentInterface {
                     const std::vector<int64_t>& chunk_ids) const {
         // do nothing
     }
+
+    // Apply field nullability to an already-initialized valid_result bitmap.
+    // Implementations only clear invalid rows and leave valid rows unchanged.
+    virtual void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const = 0;
+
+    // Offsets are segment-level row offsets. valid_result must have count bits.
+    virtual void
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapView valid_result) const = 0;
 
     template <typename T>
     PinWrapper<Span<T>>
@@ -303,15 +401,17 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw =
                 chunk_string_view_impl(op_ctx, field_id, chunk_id, offset_len);
-            auto [string_views, valid_data] = pw.get();
+            auto& [string_views, valid_data] = pw.get();
             std::vector<Json> res;
             res.reserve(string_views.size());
             for (const auto& str_view : string_views) {
                 res.emplace_back(Json(str_view));
             }
+            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                std::move(res), std::move(valid_data)};
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                pw, {std::move(res), std::move(valid_data)});
+                std::move(pw), std::move(content));
         }
     }
 
@@ -346,14 +446,17 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw = chunk_string_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
+            auto& [string_views, valid_data] = pw.get();
             std::vector<ViewType> res;
-            res.reserve(pw.get().first.size());
-            for (const auto& view : pw.get().first) {
+            res.reserve(string_views.size());
+            for (const auto& view : string_views) {
                 res.emplace_back(view);
             }
+            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                std::move(res), std::move(valid_data)};
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                {std::move(res), pw.get().second});
+                std::move(pw), std::move(content));
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
@@ -376,15 +479,20 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp timestamp,
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
-           Timestamp collection_ttl) const override;
+           Timestamp collection_ttl,
+           int64_t entity_ttl_physical_time_us = 0,
+           bool filter_only = false,
+           bool enable_expr_cache = false) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
-                    SearchResult& results) const override;
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const override;
 
     void
     FillTargetEntry(const query::Plan* plan,
-                    SearchResult& results) const override;
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const override;
 
     // Bring in base class Retrieve overloads to avoid name hiding
     using SegmentInterface::Retrieve;
@@ -397,16 +505,33 @@ class SegmentInternalInterface : public SegmentInterface {
              bool ignore_non_pk,
              const folly::CancellationToken& cancel_token,
              int32_t consistency_level,
-             Timestamp collection_ttl) const override;
+             Timestamp collection_ttl,
+             int64_t entity_ttl_physical_time_us = 0) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              const int64_t* offsets,
-             int64_t size) const override;
+             int64_t size,
+             const folly::CancellationToken& cancel_token) const override;
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
+
+    bool
+    FieldAccessible(FieldId field_id) const {
+        return HasFieldData(field_id) || HasIndex(field_id);
+    }
+
+    // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
+    // per-segment container from the scalar/vector/binlog index bitsets, so
+    // they are checked via this dedicated API rather than widening HasIndex().
+    // Default returns false for segment types that never build JSON indexes
+    // (e.g. growing segments); sealed segments override.
+    virtual bool
+    HasJsonIndex(FieldId field_id) const {
+        return false;
+    }
 
     int64_t
     get_real_count() const override;
@@ -457,9 +582,8 @@ class SegmentInternalInterface : public SegmentInterface {
                          const std::string& nested_path) const override;
 
     void
-    SetLoadInfo(
-        const milvus::proto::segcore::SegmentLoadInfo& load_info) override {
-        load_info_ = load_info;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override {
+        load_info_ = std::move(load_info);
     }
 
     virtual std::shared_ptr<index::JsonKeyStats>
@@ -515,6 +639,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
 
+    virtual Timestamp
+    get_max_timestamp() const = 0;
+
     /**
      * search offset by possible pk values and mvcc timestamp
      *
@@ -528,32 +655,6 @@ class SegmentInternalInterface : public SegmentInterface {
     search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
 
     /**
-     * Apply timestamp filtering on bitset, the query can't see an entity whose
-     * timestamp is bigger than the timestamp of query.
-     *
-     * @param bitset The final bitset after scalar filtering and delta filtering,
-     *  `false` means that the entity will be filtered out.
-     * @param timestamp The timestamp of query.
-     */
-    void
-    timestamp_filter(BitsetType& bitset, Timestamp timestamp) const;
-
-    /**
-     * Apply timestamp filtering on bitset, the query can't see an entity whose
-     * timestamp is bigger than the timestamp of query. The passed offsets are
-     * all candidate entities.
-     *
-     * @param bitset The final bitset after scalar filtering and delta filtering,
-     *  `true` means that the entity will be filtered out.
-     * @param offsets The segment offsets of all candidates.
-     * @param timestamp The timestamp of query.
-     */
-    void
-    timestamp_filter(BitsetType& bitset,
-                     const std::vector<int64_t>& offsets,
-                     Timestamp timestamp) const;
-
-    /**
      * Sort all candidates in ascending order, and then return the limit smallest.
      * Bitset is used to check if the candidate will be filtered out. `false_filtered_out`
      * determines how to filter out candidates. If `false_filtered_out` is true, we will
@@ -565,11 +666,39 @@ class SegmentInternalInterface : public SegmentInterface {
      * @return All candidates offsets.
      */
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetTypeView& bitset) const = 0;
+    find_first_n(int64_t limit, const BitsetTypeView& bitset) const = 0;
+
+    /**
+     * Element-level version of find_first_n.
+     * Find the first N elements that pass the filter from an element-level bitset.
+     *
+     * @param limit Maximum number of elements to return
+     * @param element_bitset Element-level bitset (size = total_element_count)
+     * @param array_offsets Mapping between element IDs and (doc_id, element_index)
+     * @return tuple of:
+     *   - vector of unique doc_offsets (no duplicates)
+     *   - vector of element_indices per doc (element_indices[i] for doc_offsets[i])
+     *   - has_more_result flag
+     */
+    virtual std::
+        tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+        find_first_n_element(
+            int64_t limit,
+            const BitsetTypeView& element_bitset,
+            const IArrayOffsets* array_offsets,
+            const std::optional<QueryIteratorCursor>& cursor) const = 0;
 
     void
     FillTargetEntryDirectly(
         tracer::TraceContext* trace_ctx,
+        const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+        RetrieveResult& retrieveResult) const;
+
+    // ORDER BY path: move sorted columns, late-materialize deferred fields,
+    // and populate PK-based IDs for proxy reduce.
+    void
+    FillOrderByResult(
+        const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
         RetrieveResult& retrieveResult) const;
 
@@ -581,7 +710,8 @@ class SegmentInternalInterface : public SegmentInterface {
         const int64_t* offsets,
         int64_t size,
         bool ignore_non_pk,
-        bool fill_ids) const;
+        bool fill_ids,
+        milvus::OpContext* op_ctx = nullptr) const;
 
     // return whether field mmap or not
     virtual bool

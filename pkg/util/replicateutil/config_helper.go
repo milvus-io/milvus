@@ -21,8 +21,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type Role int
@@ -101,7 +102,7 @@ func NewConfigHelper(currentClusterID string, cfg *commonpb.ReplicateConfigurati
 		}
 	}
 	if primaryCount != 1 {
-		return nil, errors.Wrap(ErrWrongConfiguration, "primary count is not 1")
+		return nil, merr.Wrap(ErrWrongConfiguration, "primary count is not 1")
 	}
 	if _, ok := vs[currentClusterID]; !ok {
 		return nil, ErrCurrentClusterNotFound
@@ -109,7 +110,7 @@ func NewConfigHelper(currentClusterID string, cfg *commonpb.ReplicateConfigurati
 	pchannels := len(vs[currentClusterID].Pchannels)
 	for _, vertice := range vs {
 		if len(vertice.Pchannels) != pchannels {
-			return nil, errors.Wrap(ErrWrongConfiguration, fmt.Sprintf("pchannel count is not equal for cluster %s", vertice.GetClusterId()))
+			return nil, merr.Wrapf(ErrWrongConfiguration, "pchannel count is not equal for cluster %s", vertice.GetClusterId())
 		}
 	}
 	h.currentClusterID = currentClusterID
@@ -133,6 +134,13 @@ func (g *ConfigHelper) GetReplicateConfiguration() *commonpb.ReplicateConfigurat
 // GetCurrentCluster returns the current cluster id.
 func (g *ConfigHelper) GetCurrentCluster() *MilvusCluster {
 	return g.vs[g.currentClusterID]
+}
+
+// IsJoinReplication returns true if the current cluster participates in a
+// cross-cluster replication topology (either as primary with targets or as secondary with a source).
+func (g *ConfigHelper) IsJoinReplication() bool {
+	currentCluster := g.GetCurrentCluster()
+	return len(currentCluster.TargetClusters()) > 0 || currentCluster.SourceCluster() != nil
 }
 
 // GetCluster returns the cluster from the graph.
@@ -206,11 +214,11 @@ func (v *MilvusCluster) MustGetSourceChannel(pchannel string) string {
 // GetTargetChannel returns the target channel of the current cluster.
 func (v *MilvusCluster) GetTargetChannel(currentClusterPChannel string, targetClusterID string) (string, error) {
 	if !v.targets.Contain(targetClusterID) {
-		return "", errors.Errorf("target cluster %s not found, current cluster is %s", targetClusterID, v.GetClusterId())
+		return "", merr.WrapErrParameterInvalidMsg("target cluster %s not found, current cluster is %s", targetClusterID, v.GetClusterId())
 	}
 	idx, ok := v.idxMap[currentClusterPChannel]
 	if !ok {
-		return "", errors.Errorf("current cluster pchannel %s not found in the graph", currentClusterPChannel)
+		return "", merr.WrapErrServiceInternalMsg("current cluster pchannel %s not found in the graph", currentClusterPChannel)
 	}
 	target := v.h.vs[targetClusterID]
 	return target.Pchannels[idx], nil

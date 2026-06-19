@@ -19,22 +19,28 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // allocPool pool of Allocation, to reduce allocation of Allocation
@@ -74,6 +80,7 @@ type AllocNewGrowingSegmentRequest struct {
 	ChannelName          string
 	StorageVersion       int64
 	IsCreatedByStreaming bool
+	SchemaVersion        int32
 }
 
 // Manager manages segment related operations.
@@ -292,7 +299,7 @@ func (s *SegmentManager) genLastExpireTsForSegments() (Timestamp, error) {
 	}, retry.Attempts(Params.DataCoordCfg.AllocLatestExpireAttempt.GetAsUint()), retry.Sleep(200*time.Millisecond))
 	if allocateErr != nil {
 		log.Warn("cannot allocate latest lastExpire from rootCoord", zap.Error(allocateErr))
-		return 0, errors.New("global max expire ts is unavailable for segment manager")
+		return 0, merr.WrapErrServiceInternalMsg("global max expire ts is unavailable for segment manager")
 	}
 	return latestTs, nil
 }
@@ -415,6 +422,13 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		}
 	}
 
+	var manifestPath string
+	if req.StorageVersion == storage.StorageV3 {
+		k := metautil.JoinIDPath(req.CollectionID, req.PartitionID, req.SegmentID)
+		basePath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+		manifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+	}
+
 	segmentInfo := &datapb.SegmentInfo{
 		ID:                   req.SegmentID,
 		CollectionID:         req.CollectionID,
@@ -427,6 +441,8 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		LastExpireTime:       0,
 		StorageVersion:       req.StorageVersion,
 		IsCreatedByStreaming: req.IsCreatedByStreaming,
+		ManifestPath:         manifestPath,
+		SchemaVersion:        req.SchemaVersion,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(ctx, segment); err != nil {
@@ -440,6 +456,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.String("Channel", segmentInfo.InsertChannel),
 		zap.Bool("IsCreatedByStreaming", segmentInfo.IsCreatedByStreaming),
+		zap.Int32("SchemaVersion", segmentInfo.SchemaVersion),
 	)
 
 	return segment, s.helper.afterCreateSegment(segmentInfo)
@@ -449,7 +466,7 @@ func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error
 	// it's ok to use meta.GetCollection here, since collection meta is set before using segmentManager
 	collMeta := s.meta.GetCollection(collectionID)
 	if collMeta == nil {
-		return -1, fmt.Errorf("failed to get collection %d", collectionID)
+		return -1, merr.WrapErrServiceInternalMsg("failed to get collection %d", collectionID)
 	}
 	return s.estimatePolicy(collMeta.Schema)
 }
@@ -504,12 +521,8 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, channel string, se
 			return isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Growing
 		})
 	} else {
-		sealedSegments = s.meta.GetSegments(sealed.Collect(), func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment)
-		})
-		growingSegments = s.meta.GetSegments(growing.Collect(), func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment)
-		})
+		sealedSegments = s.meta.GetSegments(sealed.Collect(), isSegmentHealthy)
+		growingSegments = s.meta.GetSegments(growing.Collect(), isSegmentHealthy)
 	}
 
 	var ret []UniqueID

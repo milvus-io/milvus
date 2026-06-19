@@ -17,6 +17,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -90,17 +91,41 @@ TEST(IterativeFilter, SealedIndex) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int8", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
+    schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
     size_t N = 50;
 
     //2. load raw data
     auto raw_data = DataGen(schema, N, 42, 0, 8, 10, false, false);
+
+    // Override int16 column: 6 rows = 1, 6 rows = 2, rest >= 3.
+    // Shuffle so rows are not trivially ordered, guaranteeing >= 10
+    // matches for "int16 in [1, 2]" regardless of platform RNG.
+    {
+        std::vector<int16_t> int16_vals;
+        for (int i = 0; i < 6; ++i) int16_vals.push_back(1);
+        for (int i = 0; i < 6; ++i) int16_vals.push_back(2);
+        for (size_t i = 12; i < N; ++i)
+            int16_vals.push_back(static_cast<int16_t>(i + 3));
+        std::mt19937 rng(42);
+        std::shuffle(int16_vals.begin(), int16_vals.end(), rng);
+
+        for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+            auto* fd = raw_data.raw_->mutable_fields_data(i);
+            if (fd->field_id() == int16_fid.get()) {
+                auto* int_data = fd->mutable_scalars()->mutable_int_data();
+                int_data->clear_data();
+                for (auto v : int16_vals) int_data->add_data(v);
+                break;
+            }
+        }
+    }
+
     auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     //3. load index
@@ -115,7 +140,6 @@ TEST(IterativeFilter, SealedIndex) {
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(load_index_info);
     int topK = 10;
-    int group_size = 3;
 
     ScopedSchemaHandle handle(*schema);
 
@@ -210,14 +234,14 @@ TEST(IterativeFilter, SealedData) {
     //0. prepare schema
     int dim = 64;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
+    schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
     size_t N = 100;
 
@@ -261,12 +285,11 @@ TEST(IterativeFilter, SealedData) {
 
 TEST(IterativeFilter, GrowingRawData) {
     int dim = 128;
-    uint64_t seed = 512;
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
     auto int64_field_id = schema->AddDebugField("int64", DataType::INT64);
-    auto int32_field_id = schema->AddDebugField("int32", DataType::INT32);
-    auto vec_field_id = schema->AddDebugField(
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field_id);
 
@@ -330,11 +353,10 @@ TEST(IterativeFilter, GrowingRawData) {
 
 TEST(IterativeFilter, GrowingIndex) {
     int dim = 128;
-    uint64_t seed = 512;
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
     auto int64_field_id = schema->AddDebugField("int64", DataType::INT64);
-    auto int32_field_id = schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int32", DataType::INT32);
     auto vec_field_id = schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field_id);

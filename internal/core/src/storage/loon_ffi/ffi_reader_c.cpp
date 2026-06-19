@@ -34,6 +34,8 @@
 #include "storage/PluginLoader.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
+#include <arrow/array.h>
+#include <arrow/record_batch.h>
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.
@@ -131,15 +133,26 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                int64_t needed_columns_size,
                                CFFIPackedReader* c_loon_reader,
                                CStorageConfig c_storage_config,
-                               CPluginContext* c_plugin_context) {
+                               CPluginContext* c_plugin_context,
+                               int64_t collection_id,
+                               const char* external_source,
+                               const char* external_spec) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         auto properties =
             MakeInternalPropertiesFromStorageConfig(c_storage_config);
+        if (external_source != nullptr && external_source[0] != '\0') {
+            InjectExternalSpecProperties(*properties,
+                                         collection_id,
+                                         std::string(external_source),
+                                         external_spec != nullptr
+                                             ? std::string(external_spec)
+                                             : std::string());
+        }
         auto column_groups =
             std::make_shared<milvus_storage::api::ColumnGroups>();
-        auto status = milvus_storage::import_column_groups(
+        auto status = milvus_storage::column_groups_import(
             &loon_manifest->column_groups, column_groups.get());
         AssertInfo(status.ok(),
                    "Failed to import column groups: {}",
@@ -175,6 +188,7 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
                    result.status().ToString());
 
         auto array_stream = result.ValueOrDie();
+
         arrow::Status status =
             arrow::ExportRecordBatchReader(array_stream, out_stream);
         AssertInfo(status.ok(),
@@ -192,8 +206,12 @@ CloseFFIReader(CFFIPackedReader c_packed_reader) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
+        if (c_packed_reader == nullptr) {
+            return milvus::SuccessCStatus();
+        }
         auto reader =
             static_cast<milvus_storage::api::Reader*>(c_packed_reader);
+        AssertInfo(reader, "cannot close nullptr ffi reader");
         delete reader;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

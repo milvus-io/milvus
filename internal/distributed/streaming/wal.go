@@ -3,7 +3,6 @@ package streaming
 import (
 	"context"
 	"sync"
-	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -12,13 +11,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var ErrWALAccesserClosed = status.NewOnShutdownError("wal accesser closed")
@@ -70,7 +69,10 @@ func (w *walAccesserImpl) ForwardService() ForwardService {
 }
 
 func (w *walAccesserImpl) Replicate() ReplicateService {
-	return replicateService{w}
+	return replicateService{
+		walAccesserImpl:  w,
+		skipMessageTypes: buildSkipMessageTypes(paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.GetAsStrings()),
+	}
 }
 
 func (w *walAccesserImpl) Balancer() Balancer {
@@ -79,6 +81,10 @@ func (w *walAccesserImpl) Balancer() Balancer {
 
 func (w *walAccesserImpl) Local() Local {
 	return localServiceImpl{w}
+}
+
+func (w *walAccesserImpl) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+	return w.handlerClient.PrepareReleaseManualFlush(ctx, collectionID, vchannel, releaseSegmentIDs)
 }
 
 // ControlChannel returns the control channel name of the wal.
@@ -93,13 +99,11 @@ func (w *walAccesserImpl) ControlChannel() string {
 // RawAppend writes a record to the log.
 func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	assertValidMessage(msg)
-	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, ErrWALAccesserClosed
-	}
-	defer w.lifetime.Done()
 
 	msg = applyOpt(msg, opts...)
-	return w.appendToWAL(ctx, msg)
+
+	resp := w.AppendMessages(ctx, msg)
+	return resp.Responses[0].AppendResult, resp.Responses[0].Error
 }
 
 // Read returns a scanner for reading records from the wal.
@@ -135,49 +139,6 @@ func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 // Broadcast returns a broadcast for broadcasting records to the wal.
 func (w *walAccesserImpl) Broadcast() Broadcast {
 	return broadcast{w}
-}
-
-func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) {
-	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, ErrWALAccesserClosed
-	}
-
-	if opts.VChannel == "" {
-		w.lifetime.Done()
-		return nil, status.NewInvaildArgument("vchannel is required")
-	}
-	if opts.Keepalive != 0 && opts.Keepalive < 1*time.Millisecond {
-		w.lifetime.Done()
-		return nil, status.NewInvaildArgument("ttl must be greater than or equal to 1ms")
-	}
-
-	// Create a new transaction, send the begin txn message.
-	beginTxn, err := message.NewBeginTxnMessageBuilderV2().
-		WithVChannel(opts.VChannel).
-		WithHeader(&message.BeginTxnMessageHeader{
-			KeepaliveMilliseconds: opts.Keepalive.Milliseconds(),
-		}).
-		WithBody(&message.BeginTxnMessageBody{}).
-		BuildMutable()
-	if err != nil {
-		w.lifetime.Done()
-		return nil, err
-	}
-
-	appendResult, err := w.appendToWAL(ctx, beginTxn)
-	if err != nil {
-		w.lifetime.Done()
-		return nil, err
-	}
-
-	// Create new transaction success.
-	return &txnImpl{
-		mu:              sync.Mutex{},
-		state:           message.TxnStateInFlight,
-		opts:            opts,
-		txnCtx:          appendResult.TxnCtx,
-		walAccesserImpl: w,
-	}, nil
 }
 
 // Close closes all the wal accesser.

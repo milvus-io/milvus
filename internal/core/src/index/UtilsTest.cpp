@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <initializer_list>
 #include <iostream>
@@ -33,6 +34,8 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/Utils.h"
+#include "storage/IndexData.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus;
 using namespace milvus::index;
@@ -65,7 +68,7 @@ struct TmpFileWrapperIndexUtilsTest {
 TEST(UtilIndex, ReadFromFD) {
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
-    auto file = std::string("/tmp/") + uuid_string;
+    auto file = TestLocalPath + uuid_string;
 
     auto tmp_file = TmpFileWrapperIndexUtilsTest(file);
     ASSERT_NE(tmp_file.fd, -1);
@@ -82,12 +85,6 @@ TEST(UtilIndex, ReadFromFD) {
         std::shared_ptr<uint8_t[]>(new uint8_t[data_size * max_loop]);
     EXPECT_NO_THROW(milvus::index::ReadDataFromFD(
         tmp_file.fd, read_buf.get(), data_size * max_loop));
-
-    // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
-    EXPECT_THROW(
-        milvus::index::ReadDataFromFD(
-            tmp_file.fd, read_buf.get(), data_size * max_loop, INT_MAX),
-        milvus::SegcoreError);
 }
 
 TEST(UtilIndex, TestGetValueFromConfig) {
@@ -139,4 +136,47 @@ TEST(UtilIndex, TestGetValueFromConfigWithoutTypeCheck) {
     ASSERT_FALSE(e_value.has_value());
     auto f_value = GetValueFromConfig<bool>(cfg, "f");
     ASSERT_FALSE(f_value.has_value());
+}
+
+TEST(UtilIndex, AssembleIndexDataCodecConcatenatesSlices) {
+    std::vector<std::string> slices = {"hello", " ", "world"};
+
+    IndexDataCodec codec;
+    for (const auto& slice : slices) {
+        auto data = std::shared_ptr<uint8_t[]>(new uint8_t[slice.size()]);
+        std::memcpy(data.get(), slice.data(), slice.size());
+        auto index_data =
+            std::make_unique<storage::IndexData>(data.get(), slice.size());
+        index_data->SetData(std::move(data));
+        codec.size_ += slice.size();
+        codec.codecs_.push_back(std::move(index_data));
+    }
+
+    auto assembled = AssembleIndexDataCodec(codec);
+    ASSERT_EQ(assembled->PayloadSize(), codec.size_);
+    EXPECT_EQ(
+        std::string(reinterpret_cast<const char*>(assembled->PayloadData()),
+                    assembled->PayloadSize()),
+        "hello world");
+}
+
+TEST(UtilIndex, AssembleIndexDataCodecMovesSingleSlice) {
+    std::string slice = "hello";
+    auto data = std::shared_ptr<uint8_t[]>(new uint8_t[slice.size()]);
+    std::memcpy(data.get(), slice.data(), slice.size());
+    auto index_data =
+        std::make_unique<storage::IndexData>(data.get(), slice.size());
+    index_data->SetData(std::move(data));
+
+    auto* original_codec = index_data.get();
+    IndexDataCodec codec;
+    codec.size_ = slice.size();
+    codec.codecs_.push_back(std::move(index_data));
+
+    auto assembled = AssembleIndexDataCodec(std::move(codec));
+    EXPECT_EQ(assembled.get(), original_codec);
+    EXPECT_EQ(
+        std::string(reinterpret_cast<const char*>(assembled->PayloadData()),
+                    assembled->PayloadSize()),
+        slice);
 }

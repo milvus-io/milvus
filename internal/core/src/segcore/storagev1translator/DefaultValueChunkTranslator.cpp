@@ -169,6 +169,7 @@ DefaultValueChunkTranslator::value_size() const {
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING:
         case milvus::DataType::TEXT:
+        case milvus::DataType::GEOMETRY:
             if (field_meta_.default_value().has_value()) {
                 auto default_value = field_meta_.default_value().value();
                 value_size = default_value.string_data().size() +
@@ -182,6 +183,12 @@ DefaultValueChunkTranslator::value_size() const {
             break;
         case milvus::DataType::ARRAY:
             value_size = sizeof(Array);
+            break;
+        case milvus::DataType::VECTOR_ARRAY:
+            AssertInfo(field_meta_.is_nullable(),
+                       "only nullable vector array fields can be "
+                       "dynamically added");
+            value_size = 0;
             break;
         case milvus::DataType::VECTOR_FLOAT:
         case milvus::DataType::VECTOR_BINARY:
@@ -213,9 +220,9 @@ DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     auto rows = rows_end - rows_begin;
     auto cell_bytes = value_size * rows;
     if (use_mmap_) {
-        return {{0, cell_bytes}, {0, cell_bytes}};
+        return {{0, cell_bytes}, {0, 0}};
     } else {
-        return {{cell_bytes, 0}, {cell_bytes, 0}};
+        return {{cell_bytes, 0}, {0, 0}};
     }
 }
 
@@ -230,7 +237,16 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
     auto data_type = field_meta_.get_data_type();
     std::shared_ptr<arrow::ArrayBuilder> builder;
 
-    if (IsVectorDataType(data_type)) {
+    if (data_type == milvus::DataType::VECTOR_ARRAY) {
+        AssertInfo(field_meta_.is_nullable(),
+                   "only nullable vector array fields can be "
+                   "dynamically added");
+        builder =
+            milvus::storage::CreateArrowBuilder(data_type,
+                                                field_meta_.get_element_type(),
+                                                field_meta_.get_dim(),
+                                                true);
+    } else if (IsVectorDataType(data_type)) {
         AssertInfo(field_meta_.is_nullable(),
                    "only nullable vector fields can be dynamically added");
         builder = std::make_shared<arrow::BinaryBuilder>();

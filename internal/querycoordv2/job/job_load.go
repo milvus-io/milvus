@@ -32,12 +32,17 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/eventlog"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/pkg/v3/eventlog"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type LoadCollectionJob struct {
@@ -53,6 +58,7 @@ type LoadCollectionJob struct {
 	collectionObserver *observers.CollectionObserver
 	checkerController  *checkers.CheckerController
 	nodeMgr            *session.NodeManager
+	proxyManager       proxyutil.ProxyClientManagerInterface
 }
 
 func NewLoadCollectionJob(
@@ -66,6 +72,7 @@ func NewLoadCollectionJob(
 	collectionObserver *observers.CollectionObserver,
 	checkerController *checkers.CheckerController,
 	nodeMgr *session.NodeManager,
+	proxyManager proxyutil.ProxyClientManagerInterface,
 ) *LoadCollectionJob {
 	return &LoadCollectionJob{
 		BaseJob:            NewBaseJob(ctx, 0, result.Message.Header().GetCollectionId()),
@@ -79,31 +86,53 @@ func NewLoadCollectionJob(
 		collectionObserver: collectionObserver,
 		checkerController:  checkerController,
 		nodeMgr:            nodeMgr,
+		proxyManager:       proxyManager,
 	}
 }
 
 func (job *LoadCollectionJob) Execute() error {
 	req := job.result.Message.Header()
-	vchannels := job.result.GetVChannelsWithoutControlChannel()
-
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
 
-	// 1. create replica if not exist
-	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
-		CollectionID: req.GetCollectionId(),
-		Channels:     vchannels,
-		Configs:      req.GetReplicas(),
-	}); err != nil {
-		return err
-	}
-
 	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 
-	// 2. put load info meta
+	// 1. resolve replica config: use local cluster-level config if this is a replicated message
+	replicas := req.GetReplicas()
+	if req.GetUseLocalReplicaConfig() {
+		localReplicas, err := getLocalReplicaConfig(job.ctx, job.meta, req.GetCollectionId())
+		if err != nil {
+			return err
+		}
+		replicas = localReplicas
+		log.Info("using local cluster-level replica config for replicated load",
+			zap.Int("localReplicaCount", len(localReplicas)))
+	}
+
+	// 2. create replica if not exist (may also remove redundant replicas)
+	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
+		CollectionID: req.GetCollectionId(),
+		Channels:     collInfo.GetVirtualChannelNames(),
+		Configs:      replicas,
+	}); err != nil {
+		return err
+	}
+
+	// 2.1 invalidate shard leader cache after replica changes, so proxies stop
+	// routing to released replicas' shard leaders before async cleanup happens.
+	if job.proxyManager != nil {
+		job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+			CollectionIDs: []int64{req.GetCollectionId()},
+		})
+	}
+
+	// 3. put load info meta
 	fieldIndexIDs := make(map[int64]int64, len(req.GetLoadFields()))
 	fieldIDs := make([]int64, 0, len(req.GetLoadFields()))
 	for _, loadField := range req.GetLoadFields() {
@@ -112,7 +141,7 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 		fieldIDs = append(fieldIDs, loadField.GetFieldId())
 	}
-	replicaNumber := int32(len(req.GetReplicas()))
+	replicaNumber := int32(len(replicas))
 	partitions := lo.Map(req.GetPartitionIds(), func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -143,7 +172,7 @@ func (job *LoadCollectionJob) Execute() error {
 		Schema:    collInfo.GetSchema(),
 	}
 	incomingPartitions := typeutil.NewSet(req.GetPartitionIds()...)
-	currentPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
 	toReleasePartitions := make([]int64, 0)
 	for _, partition := range currentPartitions {
 		if !incomingPartitions.Contain(partition.GetPartitionID()) {
@@ -152,15 +181,15 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 	if len(toReleasePartitions) > 0 {
 		job.targetObserver.ReleasePartition(req.GetCollectionId(), toReleasePartitions...)
-		if err := job.meta.CollectionManager.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
-			return errors.Wrap(err, "failed to remove partitions")
+		if err := job.meta.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
+			return merr.Wrap(err, "failed to remove partitions")
 		}
 	}
 
-	if err = job.meta.CollectionManager.PutCollection(job.ctx, collection, partitions...); err != nil {
+	if err = job.meta.PutCollection(job.ctx, collection, partitions...); err != nil {
 		msg := "failed to store collection and partitions"
 		log.Warn(msg, zap.Error(err))
-		return errors.Wrap(err, msg)
+		return merr.Wrapf(err, "%s", msg)
 	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
@@ -194,4 +223,40 @@ func (job *LoadCollectionJob) Execute() error {
 		log.Info("wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
 	}
 	return nil
+}
+
+// getLocalReplicaConfig reads the local cluster-level replica config and generates LoadReplicaConfig entries.
+// It uses generateReplicas to ensure idempotency on WAL replay by reusing existing replicas from meta.
+// If local config is not set, defaults to 1 replica in __default_resource_group.
+func getLocalReplicaConfig(ctx context.Context, m *meta.Meta, collectionID int64) ([]*messagespb.LoadReplicaConfig, error) {
+	replicaNum := int(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64())
+	rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+
+	if replicaNum <= 0 {
+		replicaNum = 1
+	}
+	if len(rgs) == 0 {
+		rgs = []string{meta.DefaultResourceGroupName}
+	}
+
+	// Use AssignReplica to determine expected replica distribution per RG
+	expectedReplicaNumber, err := utils.AssignReplica(ctx, m, rgs, int32(replicaNum), false)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get current replicas from meta for idempotent generation
+	currentReplicas := m.GetByCollection(ctx, collectionID)
+	currentReplicaMap := make(map[int64]*meta.Replica)
+	for _, r := range currentReplicas {
+		currentReplicaMap[r.GetID()] = r
+	}
+
+	// Use generateReplicas which reuses existing replicas (idempotent on replay)
+	req := &AlterLoadConfigRequest{
+		Meta:     m,
+		Current:  CurrentLoadConfig{Replicas: currentReplicaMap},
+		Expected: ExpectedLoadConfig{ExpectedReplicaNumber: expectedReplicaNumber},
+	}
+	return req.generateReplicas(ctx)
 }

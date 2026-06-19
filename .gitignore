@@ -1,5 +1,8 @@
 # CLion generated files
 
+# Git worktrees
+.worktrees/
+
 # This can ignore
 #   cmake-build-debug/
 #   proxy/cmake-build-debug/
@@ -12,6 +15,7 @@
 **/CMakeFiles/*
 **/.cmake/*
 CMakeCache.txt
+CMakeUserPresets.json
 .cache
 coverage_report/
 
@@ -91,6 +95,9 @@ cpp_coverage/
 venv/
 .venv/
 
+# Python egg-info
+*.egg-info/
+
 # gopls generated
 go.work
 go.work.sum
@@ -115,26 +122,16 @@ pkg/streaming/proto/**/*.pb.go
 
 #AI rules
 WARP.md
+.claude/
 
 # Antlr
 .antlr
 
 # Gocache
 **/.gocache/
-claude.md
 docs/plans/
 
-# Claude sandbox env
-.bash_profile
-.bashrc
-.claude/
-.gitconfig
-.gitmodules
-.idea
-.mcp.json
-.profile
-.ripgreprc
-.zprofile
-.zshrc
+.worktrees/
 
-
+# agent context
+.context/

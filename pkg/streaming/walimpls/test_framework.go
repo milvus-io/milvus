@@ -14,14 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -268,11 +267,13 @@ func (f *testOneWALImplsFramework) assertEqualMessageList(msgs1 []message.Immuta
 
 func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) ([]message.ImmutableMessage, error) {
 	ids := make([]message.ImmutableMessage, f.messageCount)
-	swg := sizedwaitgroup.New(5)
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
 	for i := 0; i < f.messageCount-1; i++ {
-		swg.Add()
+		sem <- struct{}{}
+		wg.Add(1)
 		go func(i int) {
-			defer swg.Done()
+			defer func() { <-sem; wg.Done() }()
 			// ...rocksmq has a dirty implement of properties,
 			// without commonpb.MsgHeader, it can not work.
 			properties := map[string]string{
@@ -286,7 +287,7 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 			ids[i] = msg.IntoImmutableMessage(id)
 		}(i)
 	}
-	swg.Wait()
+	wg.Wait()
 
 	properties := map[string]string{
 		"id":    fmt.Sprintf("%d", f.messageCount-1),

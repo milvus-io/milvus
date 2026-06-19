@@ -25,7 +25,7 @@ type SessionInterface interface {
 	UnmarshalJSON(data []byte) error
 	MarshalJSON() ([]byte, error)
 
-	Init(serverName, address string, exclusive bool, triggerKill bool)
+	Init(serverName, address string, exclusive bool)
 	String() string
 	Register()
 
@@ -46,7 +46,6 @@ type SessionInterface interface {
 	GetAddress() string
 	GetServerID() int64
 	GetRegisteredRevision() int64
-	IsTriggerKill() bool
 }
 
 type SessionWatcher interface {

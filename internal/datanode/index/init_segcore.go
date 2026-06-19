@@ -34,15 +34,17 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func InitSegcore(nodeID int64) error {
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.IndexBuilderInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
+
+	C.LogOpenSSLFIPSStatus()
 
 	// update log level based on current setup
 	initcore.UpdateLogLevel(paramtable.Get().LogCfg.Level.GetValue())
@@ -55,6 +57,8 @@ func InitSegcore(nodeID int64) error {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.SetIndexSliceSize(cIndexSliceSize)
+	cStreamBudgetRatio := C.double(paramtable.Get().CommonCfg.StreamBudgetRatio.GetAsFloat())
+	C.SetStreamBudgetRatio(cStreamBudgetRatio)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
@@ -63,6 +67,8 @@ func InitSegcore(nodeID int64) error {
 	C.SetMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
 	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
 	C.SetLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
+	cThreadPoolMaxThreadsSize := C.int(paramtable.Get().CommonCfg.ThreadPoolMaxThreadsSize.GetAsInt())
+	C.SetThreadPoolMaxThreadsSize(cThreadPoolMaxThreadsSize)
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
@@ -78,10 +84,28 @@ func InitSegcore(nodeID int64) error {
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereThreadPoolSize)
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	if err := initcore.InitLocalChunkManager(localDataRootPath); err != nil {
+		return err
+	}
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
+
+	// Apply Arrow IO thread pool capacity from paramtable. Without this call the
+	// pool stays at Arrow's built-in default (kDefaultNumIoThreads = 8), which is
+	// almost always undersized for DataNode under concurrent storage v2 reads
+	// (sort compaction, import, stats). Mirror of the QueryNode wiring in #49208.
+	C.SetArrowIOThreadPoolCapacity(C.int(initcore.ResolveArrowIOThreadPoolCapacity()))
+
+	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
+	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
+		return err
+	}
+
+	// Wire hot-reload watchers so capacity / coalescing-limit changes take effect
+	// without restart, matching QueryNode behavior.
+	initcore.RegisterArrowIOThreadPoolWatchers(paramtable.Get(), "datanode")
+	initcore.RegisterArrowReaderConfigWatchers(paramtable.Get(), "datanode")
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()

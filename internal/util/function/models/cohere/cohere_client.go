@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type CohereClient struct {
@@ -29,7 +30,7 @@ type CohereClient struct {
 
 func NewCohereClient(apiKey string) (*CohereClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.CohereAIAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.CohereAIAKEnvStr)
 	}
 	return &CohereClient{
 		apiKey: apiKey,
@@ -44,14 +45,14 @@ func (c *CohereClient) headers() map[string]string {
 	}
 }
 
-func (c *CohereClient) Embedding(url string, modelName string, texts []string, inputType string, outputType string, truncate string, dim int, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *CohereClient) Embedding(url string, modelName string, texts []string, inputType string, outputType string, truncate string, dim int, timeoutMs int64) (*EmbeddingResponse, error) {
 	embClient := newCohereEmbedding(c.apiKey, url)
-	return embClient.embedding(modelName, texts, inputType, outputType, truncate, dim, c.headers(), timeoutSec)
+	return embClient.embedding(modelName, texts, inputType, outputType, truncate, dim, c.headers(), timeoutMs)
 }
 
-func (c *CohereClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *CohereClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	rerankClient := newCohereRerankClient(c.apiKey, url)
-	return rerankClient.rerank(modelName, query, texts, c.headers(), params, timeoutSec)
+	return rerankClient.rerank(modelName, query, texts, c.headers(), params, timeoutMs)
 }
 
 type EmbeddingRequest struct {
@@ -97,7 +98,7 @@ func newCohereEmbedding(apiKey string, url string) *cohereEmbedding {
 	}
 }
 
-func (c *cohereEmbedding) embedding(modelName string, texts []string, inputType string, outputType string, truncate string, dim int, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *cohereEmbedding) embedding(modelName string, texts []string, inputType string, outputType string, truncate string, dim int, headers map[string]string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	r.Model = modelName
 	r.Texts = texts
@@ -110,7 +111,7 @@ func (c *cohereEmbedding) embedding(modelName string, texts []string, inputType 
 		r.OutputDimension = dim
 	}
 
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +180,7 @@ func newCohereRerankClient(apiKey string, url string) *cohereRerank {
 	}
 }
 
-func (c *cohereRerank) rerank(modelName string, query string, texts []string, headers map[string]string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *cohereRerank) rerank(modelName string, query string, texts []string, headers map[string]string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	r := map[string]any{
 		"model":     modelName,
 		"query":     query,
@@ -190,7 +191,7 @@ func (c *cohereRerank) rerank(modelName string, query string, texts []string, he
 		r[k] = v
 	}
 
-	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

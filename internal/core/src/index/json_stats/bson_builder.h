@@ -81,7 +81,6 @@ class BsonBuilder {
     ExtractBsonKeyOffsets(const bsoncxx::document::view& view) {
         std::vector<std::pair<std::string, size_t>> result;
         const uint8_t* raw_data = view.data();
-        size_t raw_len = view.length();
 
         ExtractOffsetsRecursive(raw_data, raw_data, "", result);
         return result;

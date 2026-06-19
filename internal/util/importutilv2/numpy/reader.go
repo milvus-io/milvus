@@ -23,7 +23,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 )
@@ -76,7 +76,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertData(r.schema)
+	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +93,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			return nil, err
 		}
 	}
+	common.RemoveUnpopulatedFunctionOutputFields(r.schema, insertData)
 	return insertData, nil
 }
 

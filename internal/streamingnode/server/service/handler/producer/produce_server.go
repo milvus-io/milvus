@@ -12,10 +12,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 // CreateProduceServer create a new producer.
@@ -28,7 +29,7 @@ import (
 func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb.StreamingNodeHandlerService_ProduceServer) (*ProduceServer, error) {
 	createReq, err := contextutil.GetCreateProducer(streamServer.Context())
 	if err != nil {
-		return nil, status.NewInvaildArgument("create producer request is required")
+		return nil, status.NewInvalidArgument("create producer request is required")
 	}
 	l, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
@@ -44,27 +45,31 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 		return nil, errors.Wrap(err, "at send created")
 	}
 	metrics := newProducerMetrics(l.Channel())
-	return &ProduceServer{
+	p := &ProduceServer{
 		wal:           l,
 		produceServer: produceServer,
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("producer-server"),
 			zap.String("channel", l.Channel().Name),
 			zap.Int64("term", l.Channel().Term)),
-		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse),
-		appendWG:         sync.WaitGroup{},
-		metrics:          metrics,
-	}, nil
+		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse),
+		rateLimitMessageCh: make(chan ratelimit.RateLimitState, 1),
+		appendWG:           sync.WaitGroup{},
+		metrics:            metrics,
+	}
+	l.Register(p)
+	return p, nil
 }
 
 // ProduceServer is a ProduceServer of log messages.
 type ProduceServer struct {
-	wal              wal.WAL
-	produceServer    *produceGrpcServerHelper
-	logger           *log.MLogger
-	produceMessageCh chan *streamingpb.ProduceMessageResponse // All processing messages result should sent from theses channel.
-	appendWG         sync.WaitGroup
-	metrics          *producerMetrics
+	wal                wal.WAL
+	produceServer      *produceGrpcServerHelper
+	logger             *log.MLogger
+	produceMessageCh   chan *streamingpb.ProduceMessageResponse // All processing messages result should sent from theses channel.
+	rateLimitMessageCh chan ratelimit.RateLimitState            // All rate limit messages should sent from theses channel.
+	appendWG           sync.WaitGroup
+	metrics            *producerMetrics
 }
 
 // Execute starts the producer.
@@ -83,6 +88,7 @@ func (p *ProduceServer) Execute() error {
 	// 2. recv arm recv closed and all response is sent.
 	err := p.sendLoop()
 	p.metrics.Close()
+	p.wal.Unregister(p)
 	return err
 }
 
@@ -110,7 +116,7 @@ func (p *ProduceServer) sendLoop() (err error) {
 			// Recv arm will be closed by context cancel of stream server.
 			// Send an unavailable response to ask client to release resource.
 			p.produceServer.SendClosed()
-			return errors.New("send loop is stopped for close of wal")
+			return status.NewOnShutdownError("send loop is stopped for close of wal")
 		case resp, ok := <-p.produceMessageCh:
 			if !ok {
 				// all message has been sent, sent close response.
@@ -118,6 +124,10 @@ func (p *ProduceServer) sendLoop() (err error) {
 				return nil
 			}
 			if err := p.produceServer.SendProduceMessage(resp); err != nil {
+				return err
+			}
+		case state := <-p.rateLimitMessageCh:
+			if err := p.produceServer.SendProduceRateLimitMessage(state); err != nil {
 				return err
 			}
 		case <-p.produceServer.Context().Done():
@@ -205,9 +215,43 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 	// validate the msg.
 	if !msg.MessageType().Valid() {
-		return status.NewInvaildArgument("unsupported message type")
+		return status.NewInvalidArgument("unsupported message type")
 	}
 	return nil
+}
+
+// UpdateRateLimitState updates the rate limit state.
+// This function is non-blocking and only keeps the latest state.
+func (p *ProduceServer) UpdateRateLimitState(state ratelimit.RateLimitState) {
+	if p.produceServer.Context().Err() != nil {
+		p.logger.Warn("stream closed before rate limit state updated", zap.Any("state", state))
+		return
+	}
+	done := p.produceServer.Context().Done()
+
+	// Non-blocking send, only keep the latest state
+	select {
+	case <-done:
+		p.logger.Warn("stream closed before rate limit state updated", zap.Any("state", state))
+		return
+	case p.rateLimitMessageCh <- state:
+		return
+	default:
+	}
+
+	// Channel is full, drain it
+	select {
+	case <-p.rateLimitMessageCh:
+	default:
+	}
+
+	// Try to send the new state
+	select {
+	case <-done:
+		p.logger.Warn("stream closed before rate limit state updated", zap.Any("state", state))
+		return
+	case p.rateLimitMessageCh <- state:
+	}
 }
 
 // sendProduceResult sends the produce result to client.

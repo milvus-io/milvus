@@ -23,15 +23,15 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/clusteringpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 var _ Task = (*analyzeTask)(nil)
@@ -115,6 +115,8 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		RequestTimeoutMs:  at.req.GetStorageConfig().GetRequestTimeoutMs(),
 		SslCACert:         at.req.GetStorageConfig().GetSslCACert(),
 		GcpCredentialJSON: at.req.GetStorageConfig().GetGcpCredentialJSON(),
+		SslTlsMinVersion:  at.req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum: at.req.GetStorageConfig().GetUseCrc32CChecksum(),
 	}
 
 	numRowsMap := make(map[int64]int64)

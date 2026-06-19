@@ -18,16 +18,15 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (t *flushAllTask) Execute(ctx context.Context) error {
@@ -35,7 +34,7 @@ func (t *flushAllTask) Execute(ctx context.Context) error {
 		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		return fmt.Errorf("failed to call flush all to data coordinator: %s", err.Error())
+		return merr.Wrap(err, "failed to call flush all to data coordinator")
 	}
 	t.result = &milvuspb.FlushAllResponse{
 		Status:       merr.Success(),

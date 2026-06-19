@@ -6,13 +6,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func GracefulStopGRPCServer(s *grpc.Server) {
@@ -52,7 +52,7 @@ func getTLSCreds(certFile string, keyFile string, nodeType string) credentials.T
 
 func EnableInternalTLS(NodeType string) grpc.ServerOption {
 	log := log.Ctx(context.TODO())
-	var Params *paramtable.ComponentParam = paramtable.Get()
+	Params := paramtable.Get()
 	certFile := Params.InternalTLSCfg.InternalTLSServerPemPath.GetValue()
 	keyFile := Params.InternalTLSCfg.InternalTLSServerKeyPath.GetValue()
 	internaltlsEnabled := Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool()
@@ -80,7 +80,7 @@ func CreateCertPoolforClient(caFile string, nodeType string) (*x509.CertPool, er
 
 	if !certPool.AppendCertsFromPEM(b) {
 		log.Error("credentials: failed to append certificates")
-		return nil, errors.New("failed to append certificates") // Cert pool is invalid, return nil and the error
+		return nil, merr.WrapErrParameterInvalidMsg("failed to append certificates") // Cert pool is invalid, return nil and the error
 	}
 	return certPool, err
 }

@@ -20,15 +20,15 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type VoyageAIEmbeddingProvider struct {
@@ -42,9 +42,9 @@ type VoyageAIEmbeddingProvider struct {
 	embdType      models.EmbeddingType
 	outputType    string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*VoyageAIEmbeddingProvider, error) {
@@ -72,7 +72,7 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 			}
 		case models.TruncationParamKey:
 			if truncate, err = strconv.ParseBool(param.Value); err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is invalid, only supports: [true/false]", models.TruncationParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is invalid, only supports: [true/false]", models.TruncationParamKey, param.Value)
 			}
 		default:
 		}
@@ -89,7 +89,7 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 
 	embdType := models.GetEmbdType(fieldSchema.DataType)
 	if embdType == models.UnsupportEmbd {
-		return nil, fmt.Errorf("Unsupport output type: %s", fieldSchema.DataType)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported output type: %s", fieldSchema.DataType)
 	}
 
 	outputType := func() string {
@@ -98,6 +98,8 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		}
 		return "int8"
 	}()
+
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
 
 	provider := VoyageAIEmbeddingProvider{
 		client:        c,
@@ -109,7 +111,7 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		embdType:      embdType,
 		outputType:    outputType,
 		maxBatch:      128,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -138,19 +140,19 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(ctx context.Context, te
 		if end > numRows {
 			end = numRows
 		}
-		r, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.truncate, provider.timeoutSec)
+		r, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.truncate, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if provider.embdType == models.Float32Embd {
 			resp := r.(*voyageai.EmbeddingResponse[float32])
 			if end-i != len(resp.Data) {
-				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+				return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 			}
 
 			for _, item := range resp.Data {
 				if len(item.Embedding) != int(provider.fieldDim) {
-					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+					return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 						provider.fieldDim, len(item.Embedding))
 				}
 				embRet.Append(item.Embedding)
@@ -158,12 +160,12 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(ctx context.Context, te
 		} else {
 			resp := r.(*voyageai.EmbeddingResponse[int8])
 			if end-i != len(resp.Data) {
-				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+				return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 			}
 
 			for _, item := range resp.Data {
 				if len(item.Embedding) != int(provider.fieldDim) {
-					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+					return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 						provider.fieldDim, len(item.Embedding))
 				}
 				embRet.Append(item.Embedding)

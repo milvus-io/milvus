@@ -17,13 +17,13 @@
 package pipeline
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type (
@@ -71,5 +71,5 @@ func (fgMsg *FlowGraphMsg) TimeTick() typeutil.Timestamp {
 }
 
 func (fgMsg *FlowGraphMsg) IsClose() bool {
-	return fgMsg.BaseMsg.IsCloseMsg()
+	return fgMsg.IsCloseMsg()
 }

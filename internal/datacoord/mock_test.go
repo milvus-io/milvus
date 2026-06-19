@@ -26,28 +26,27 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ kv.MetaKv = &metaMemoryKV{}
@@ -61,7 +60,7 @@ func NewMetaMemoryKV() *metaMemoryKV {
 }
 
 func (mm *metaMemoryKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	keys, values, err := mm.MemoryKV.LoadWithPrefix(context.TODO(), prefix)
+	keys, values, err := mm.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return err
 	}
@@ -130,7 +129,9 @@ func newMock0Allocator(t *testing.T) *allocator.MockAllocator {
 	mock0Allocator := allocator.NewMockAllocator(t)
 	mock0Allocator.EXPECT().AllocID(mock.Anything).Return(100, nil).Maybe()
 	mock0Allocator.EXPECT().AllocTimestamp(mock.Anything).Return(1000, nil).Maybe()
-	mock0Allocator.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Maybe()
+	mock0Allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
+		return 100, 100 + i, nil
+	}).Maybe()
 	return mock0Allocator
 }
 
@@ -164,6 +165,14 @@ type mockMixCoord struct {
 
 func (m *mockMixCoord) GetGcStatus(context.Context) (*datapb.GetGcStatusResponse, error) {
 	return &datapb.GetGcStatusResponse{}, nil
+}
+
+func (m *mockMixCoord) BatchUpdateManifest(context.Context, *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (m *mockMixCoord) CommitBackfillResult(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
+	return &datapb.CommitBackfillResultResponse{Status: merr.Success()}, nil
 }
 
 func (m *mockMixCoord) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
@@ -213,8 +222,16 @@ func (m *mockMixCoord) AddCollectionField(ctx context.Context, req *milvuspb.Add
 	panic("implement me")
 }
 
+func (m *mockMixCoord) AddCollectionStructField(ctx context.Context, req *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	panic("implement me")
+}
+
+func (m *mockMixCoord) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }
 
 func (m *mockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
@@ -231,8 +248,20 @@ func (m *mockMixCoord) ComputePhraseMatchSlop(ctx context.Context, req *querypb.
 	panic("implement me")
 }
 
-func (m *mockMixCoord) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
-	return &datapb.CreateExternalCollectionResponse{
+func (m *mockMixCoord) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
+	return &datapb.RefreshExternalCollectionResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (m *mockMixCoord) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return &datapb.GetRefreshExternalCollectionProgressResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (m *mockMixCoord) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return &datapb.ListRefreshExternalCollectionJobsResponse{
 		Status: merr.Success(),
 	}, nil
 }
@@ -353,6 +382,10 @@ func (m *mockMixCoord) AlterCollectionField(ctx context.Context, request *milvus
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -366,6 +399,10 @@ func (m *mockMixCoord) DropCollectionFunction(ctx context.Context, request *milv
 }
 
 func (m *mockMixCoord) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -516,6 +553,14 @@ func (m *mockMixCoord) GetQcMetrics(ctx context.Context, req *milvuspb.GetMetric
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -593,6 +638,10 @@ func (m *mockMixCoord) GetCredential(ctx context.Context, req *rootcoordpb.GetCr
 }
 
 func (m *mockMixCoord) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockMixCoord) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
@@ -1030,6 +1079,26 @@ func (s *mockMixCoord) GetClientTelemetry(ctx context.Context, req *milvuspb.Get
 }
 
 func (s *mockMixCoord) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 

@@ -25,23 +25,23 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 // IndexBuildTask is used to record the information of the index tasks.
@@ -121,8 +121,8 @@ func (it *indexBuildTask) Name() string {
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
 	if state == indexpb.JobState_JobStateFinished {
-		metrics.DataNodeBuildIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(it.tr.ElapseSpan().Seconds())
-		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(it.queueDur.Milliseconds()))
+		metrics.DataNodeBuildIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(it.tr.ElapseSpan().Seconds())
+		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(it.queueDur.Milliseconds()))
 	}
 }
 
@@ -214,7 +214,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	}
 
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
-	it.req.CurrentScalarIndexVersion = getCurrentScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
+	it.req.CurrentScalarIndexVersion = common.ClampScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
 
 	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
@@ -235,13 +235,22 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
 	var fieldDataSize uint64
-	var err error
 
-	// Ignore the error here, this param will only be used for diskann and aisaq
-	fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
+	// Estimate field data size, only used for diskann and aisaq
+	dim := uint64(it.req.GetDim())
+	numRows := uint64(it.req.GetNumRows())
+	switch it.req.GetField().GetDataType() {
+	case schemapb.DataType_BinaryVector:
+		fieldDataSize = dim / 8 * numRows
+	case schemapb.DataType_FloatVector:
+		fieldDataSize = dim * numRows * 4
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		fieldDataSize = dim * numRows * 2
+	case schemapb.DataType_ArrayOfVector:
+		fieldDataSize = getFieldDataSizeFromBinlogs(it.req.GetInsertLogs(), it.req.GetField().GetFieldID())
+	}
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
-		if err != nil {
+		if err := indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize)); err != nil {
 			log.Warn("failed to fill disk index params", zap.Error(err))
 			return err
 		}
@@ -268,6 +277,8 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		RequestTimeoutMs:  it.req.GetStorageConfig().GetRequestTimeoutMs(),
 		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
 		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
+		SslTlsMinVersion:  it.req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum: it.req.GetStorageConfig().GetUseCrc32CChecksum(),
 	}
 
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
@@ -300,7 +311,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		TypeParams:                mapToKVPairs(it.newTypeParams),
 		StorePath:                 it.req.GetStorePath(),
 		StoreVersion:              it.req.GetStoreVersion(),
-		IndexStorePath:            it.req.GetIndexStorePath(),
+		IndexStorePathVersion:     it.req.GetIndexStorePathVersion(),
 		OptFields:                 optFields,
 		PartitionKeyIsolation:     it.req.GetPartitionKeyIsolation(),
 		LackBinlogRows:            it.req.GetLackBinlogRows(),
@@ -314,6 +325,8 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			it.req.GetPartitionID(),
 			it.req.GetSegmentID())
 		buildIndexParams.Manifest = it.req.GetManifest()
+		buildIndexParams.ExternalSource = it.req.GetExternalSource()
+		buildIndexParams.ExternalSpec = it.req.GetExternalSpec()
 	}
 	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
 
@@ -322,6 +335,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		buildIndexParams.StoragePluginContext = it.pluginContext
 	}
 
+	var err error
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
@@ -378,6 +392,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		uint64(indexStats.MemSize),
 		it.req.GetCurrentIndexVersion(),
 		it.req.GetCurrentScalarIndexVersion(),
+		it.req.GetIndexStorePathVersion(),
 	)
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.DataNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())

@@ -21,21 +21,21 @@ package embedding
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	milvusCredentials "github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type BedrockClient interface {
@@ -50,20 +50,20 @@ type BedrockEmbeddingProvider struct {
 	embedDimParam int64
 	normalize     bool
 
-	maxBatch   int
-	timeoutSec int
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey string, region string) (*bedrockruntime.Client, error) {
 	if awsAccessKeyId == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.BedrockAccessKeyId)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.BedrockAccessKeyId)
 	}
 	if awsSecretAccessKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.BedrockSAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.BedrockSAKEnvStr)
 	}
 	if region == "" {
-		return nil, errors.New("Missing AWS Service region. Please pass `region` param.")
+		return nil, merr.WrapErrParameterInvalidMsg("missing AWS Service region. Please pass `region` param")
 	}
 
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region),
@@ -140,7 +140,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 			case "true":
 				normalize = true
 			default:
-				return nil, fmt.Errorf("Illegal [%s:%s] param, ", models.NormalizeParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("illegal [%s:%s] param", models.NormalizeParamKey, param.Value)
 			}
 		default:
 		}
@@ -161,6 +161,8 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		client = c
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	return &BedrockEmbeddingProvider{
 		client:        client,
 		fieldDim:      fieldDim,
@@ -168,7 +170,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		embedDimParam: dim,
 		normalize:     normalize,
 		maxBatch:      1,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}, nil
 }
@@ -199,11 +201,13 @@ func (provider *BedrockEmbeddingProvider) CallEmbedding(ctx context.Context, tex
 			return nil, err
 		}
 
-		output, err := provider.client.InvokeModel(context.Background(), &bedrockruntime.InvokeModelInput{
+		callCtx, cancel := context.WithTimeout(ctx, time.Duration(provider.timeoutMs)*time.Millisecond)
+		output, err := provider.client.InvokeModel(callCtx, &bedrockruntime.InvokeModelInput{
 			Body:        payloadBytes,
 			ModelId:     aws.String(provider.modelName),
 			ContentType: aws.String("application/json"),
 		})
+		cancel()
 		if err != nil {
 			return nil, err
 		}
@@ -214,7 +218,7 @@ func (provider *BedrockEmbeddingProvider) CallEmbedding(ctx context.Context, tex
 			return nil, err
 		}
 		if len(resp.Embedding) != int(provider.fieldDim) {
-			return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+			return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 				provider.fieldDim, len(resp.Embedding))
 		}
 		data = append(data, resp.Embedding)

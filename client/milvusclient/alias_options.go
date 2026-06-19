@@ -16,7 +16,7 @@
 
 package milvusclient
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+import "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 // CreateCollectionOption is the interface builds CreateAliasRequest.
 type CreateAliasOption interface {

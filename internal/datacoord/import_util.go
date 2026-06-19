@@ -29,23 +29,23 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
@@ -239,9 +239,8 @@ func AllocImportSegment(ctx context.Context,
 		log.Error("failed to alloc id for import segment", zap.Error(err))
 		return nil, err
 	}
-	ts := dataTimestamp
-	if ts == 0 {
-		ts, err = alloc.AllocTimestamp(ctx)
+	if dataTimestamp == 0 {
+		_, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -335,7 +334,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 
 	idBegin, idEnd, err := common.AllocAutoID(func(n uint32) (int64, int64, error) {
 		ids, ide, e := alloc.AllocN(int64(n))
-		return int64(ids), int64(ide), e
+		return ids, ide, e
 	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
@@ -600,6 +599,20 @@ func GetJobProgress(ctx context.Context, jobID int64,
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 10 + 30 + 30 + 10 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
+	case internalpb.ImportJobState_Uncommitted:
+		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
+		if job.GetAutoCommit() {
+			return 99, internalpb.ImportJobState_Importing, totalRows, totalRows, ""
+		}
+		return 99, internalpb.ImportJobState_Uncommitted, totalRows, totalRows, ""
+
+	case internalpb.ImportJobState_Committing:
+		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
+		if job.GetAutoCommit() {
+			return 99, internalpb.ImportJobState_Importing, totalRows, totalRows, ""
+		}
+		return 99, internalpb.ImportJobState_Committing, totalRows, totalRows, ""
+
 	case internalpb.ImportJobState_Completed:
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 100, internalpb.ImportJobState_Completed, totalRows, totalRows, ""
@@ -657,8 +670,8 @@ func ListBinlogsAndGroupBySegment(ctx context.Context,
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
 	}
 	if len(importFile.GetPaths()) > 2 {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
-			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths()))
+		return nil, merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths())
 	}
 
 	insertPrefix := importFile.GetPaths()[0]
@@ -681,9 +694,7 @@ func ListBinlogsAndGroupBySegment(ctx context.Context,
 	if len(segmentDeltaPaths) == 0 {
 		return segmentImportFiles, nil
 	}
-	deltaSegmentIDs := lo.KeyBy(segmentDeltaPaths, func(deltaPrefix string) string {
-		return path.Base(deltaPrefix)
-	})
+	deltaSegmentIDs := lo.KeyBy(segmentDeltaPaths, path.Base)
 
 	for i := range segmentImportFiles {
 		segmentID := path.Base(segmentImportFiles[i].GetPaths()[0])
@@ -779,18 +790,18 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	}
 	err := conc.AwaitAll(futures...)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err))
+		return nil, merr.WrapErrServiceUnavailableMsg("list binlogs failed, err=%s", err)
 	}
 
 	resFiles = lo.Filter(resFiles, func(file *internalpb.ImportFile, _ int) bool {
 		return len(file.GetPaths()) > 0
 	})
 	if len(resFiles) == 0 {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", reqFiles))
+		return nil, merr.WrapErrImportFailedMsg("no binlog to import, input=%s", reqFiles)
 	}
 	if len(resFiles) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
-			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(resFiles)))
+		return nil, merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
+			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(resFiles))
 	}
 	log.Info("list binlogs prefixes for import done", zap.Int("num", len(resFiles)), zap.Any("binlog_prefixes", resFiles))
 	return resFiles, nil
@@ -801,7 +812,7 @@ func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) erro
 	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
 	executingNum := importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
 	if executingNum >= maxNum {
-		return merr.WrapErrImportFailed(
+		return merr.WrapErrImportSysFailed(
 			fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
 				"If your request is set to only import a single file, " +
 				"please consider importing multiple files in one request for better efficiency."))
@@ -829,7 +840,7 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
 	if task.GetType() == ImportTaskType {
 		// ImportTask use dynamic buffer size calculated by vchannels and partitions
-		taskBufferSize = int(baseBufferSize) * len(job.GetVchannels()) * len(job.GetPartitionIDs())
+		taskBufferSize = baseBufferSize * len(job.GetVchannels()) * len(job.GetPartitionIDs())
 	} else {
 		// PreImportTask use fixed buffer size
 		taskBufferSize = baseBufferSize

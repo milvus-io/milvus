@@ -40,10 +40,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var initQueryNodeOnce sync.Once
@@ -65,12 +65,27 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 
+	C.LogOpenSSLFIPSStatus()
+
 	// update log level based on current setup
 	UpdateLogLevel(paramtable.Get().LogCfg.Level.GetValue())
 
 	// override segcore chunk size
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
+
+	cMaxGroupByGroups := C.int64_t(paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64())
+	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
+
+	visibilityEnabled := paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool()
+	bloomEnabled := paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()
+	C.SegcoreSetVisibilityFilterEnabled(C.bool(visibilityEnabled))
+	if !visibilityEnabled && bloomEnabled {
+		log.Warn("visibilityFilterEnabled=false with bloomFilterEnabled=true: deletes are forwarded via bloom filter but never applied — consider disabling bloom filter to save memory")
+	}
+
+	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -91,6 +106,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.SetIndexSliceSize(cIndexSliceSize)
+	cStreamBudgetRatio := C.double(paramtable.Get().CommonCfg.StreamBudgetRatio.GetAsFloat())
+	C.SetStreamBudgetRatio(cStreamBudgetRatio)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
@@ -99,6 +116,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	C.SetMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
 	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
 	C.SetLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
+	cThreadPoolMaxThreadsSize := C.int(paramtable.Get().CommonCfg.ThreadPoolMaxThreadsSize.GetAsInt())
+	C.SetThreadPoolMaxThreadsSize(cThreadPoolMaxThreadsSize)
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
@@ -123,6 +142,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
 	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
 
+	cJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
+	C.SetDefaultJSONKeyStatsEnable(cJSONKeyStatsEnabled)
+
 	cGrowingJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledGrowingSegmentJSONKeyStats.GetAsBool())
 	C.SetDefaultGrowingJSONKeyStatsEnable(cGrowingJSONKeyStatsEnabled)
 
@@ -138,17 +160,30 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
 	C.SetExprResCacheEnable(cExprResCacheEnabled)
 
-	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
-	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
+	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		UpdateExprResCacheConfig()
+	}
 
-	cEnableParquetStatsSkipIndex := C.bool(paramtable.Get().CommonCfg.EnableNamespace.GetAsBool())
-	C.SetDefaultEnableParquetStatsSkipIndex(cEnableParquetStatsSkipIndex)
+	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
+
+	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
+	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)
+
+	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
+	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
+
+	err := InitArrowReaderConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
-	InitLocalChunkManager(localDataRootPath)
+	if err := InitLocalChunkManager(localDataRootPath); err != nil {
+		return err
+	}
 
-	err := InitRemoteChunkManager(paramtable.Get())
+	err = InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
 		return err
 	}
@@ -189,4 +224,30 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	// init paramtable change callback for core related config
 	SetupCoreConfigChangelCallback()
 	return InitPluginLoader()
+}
+
+// SyncPreferFieldDataWhenIndexHasRawData pushes the current paramtable value
+// of queryNode.preferFieldDataWhenIndexHasRawData into the segcore C++
+// singleton. Safe to call repeatedly; tests invoke it after mutating the
+// paramtable so the Go and C++ views of the flag stay in sync.
+func SyncPreferFieldDataWhenIndexHasRawData(ctx context.Context, params *paramtable.ComponentParam) {
+	v := params.QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool()
+	C.SegcoreSetPreferFieldDataWhenIndexHasRawData(C.bool(v))
+	if v {
+		log.Ctx(ctx).Info("preferFieldDataWhenIndexHasRawData=true: sealed retrieve will read field data instead of index raw data; " +
+			"both will stay resident in memory, increasing the memory footprint for fields whose index also holds raw data")
+	}
+}
+
+// SyncEnableGrowingSourceFlush pushes the effective growing-source flush switch
+// into segcore so growing segments only retain raw chunks when the Go flush path
+// may later persist them through StorageV3 FlushGrowingSegmentData.
+func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.ComponentParam) {
+	storageV3Enabled := params.CommonCfg.UseLoonFFI.GetAsBool()
+	v := storageV3Enabled && params.CommonCfg.EnableGrowingSourceFlush.GetAsBool()
+	C.SegcoreSetStorageV3Enabled(C.bool(storageV3Enabled))
+	C.SegcoreSetEnableGrowingSourceFlush(C.bool(v))
+	if v {
+		log.Ctx(ctx).Info("enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
+	}
 }

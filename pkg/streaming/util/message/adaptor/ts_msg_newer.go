@@ -1,9 +1,9 @@
 package adaptor
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 var (
@@ -248,5 +248,33 @@ func NewAlterWALMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, erro
 			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
 		},
 		AlterWALMessage: alterWALMsg,
+	}, nil
+}
+
+type CreateIndexMessageBody struct {
+	*tsMsgImpl
+	CreateIndexMessage message.ImmutableCreateIndexMessageV2
+}
+
+func (c *CreateIndexMessageBody) ID() msgstream.UniqueID {
+	return 0
+}
+
+func NewCreateIndexMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	createIndexMsg, err := message.AsImmutableCreateIndexMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &CreateIndexMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		CreateIndexMessage: createIndexMsg,
 	}, nil
 }

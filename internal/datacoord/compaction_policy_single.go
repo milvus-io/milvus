@@ -25,10 +25,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // singleCompactionPolicy is to compact one segment with too many delta logs
@@ -40,6 +40,9 @@ type singleCompactionPolicy struct {
 	handler   Handler
 }
 
+// Ensure singleCompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*singleCompactionPolicy)(nil)
+
 func newSingleCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *singleCompactionPolicy {
 	return &singleCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
@@ -48,13 +51,16 @@ func (policy *singleCompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
 }
 
+func (policy *singleCompactionPolicy) Name() string {
+	return "SingleCompactionPolicy"
+}
+
 func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
 	collections := policy.meta.GetCollections()
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	views := make([]CompactionView, 0)
 	sortViews := make([]CompactionView, 0)
-	partitionKeySortViews := make([]CompactionView, 0)
 	for _, collection := range collections {
 		if collection == nil {
 			continue
@@ -63,21 +69,21 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 			log.Ctx(ctx).Info("skip single compaction trigger for external collection", zap.Int64("collectionID", collection.ID))
 			continue
 		}
+		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+			log.Ctx(ctx).Info("skip single compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("collectionID", collection.ID))
+			continue
+		}
 		collectionViews, collectionSortViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
 			log.Warn("fail to trigger single compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 		}
 		views = append(views, collectionViews...)
-		if IsPartitionKeySortCompactionEnabled(collection.Properties) {
-			partitionKeySortViews = append(partitionKeySortViews, collectionSortViews...)
-		} else {
-			sortViews = append(sortViews, collectionSortViews...)
-		}
+		sortViews = append(sortViews, collectionSortViews...)
 	}
 	events[TriggerTypeSingle] = views
 	events[TriggerTypeSort] = sortViews
-	events[TriggerTypePartitionKeySort] = partitionKeySortViews
 	return events, nil
 }
 
@@ -110,15 +116,20 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		log.Info("skip sort compaction for external collection", zap.Int64("collectionID", collection.ID))
 		return nil
 	}
-	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Properties)
-	if !canTriggerSortCompaction(segment, isPartitionIsolationEnabled) {
+	if !canTriggerSortCompaction(segment) {
 		log.Warn("fail to apply triggerSegmentSortCompaction",
 			zap.String("state", segment.GetState().String()),
 			zap.String("level", segment.GetLevel().String()),
 			zap.Bool("isSorted", segment.GetIsSorted()),
+			zap.Bool("isNamespaceSorted", segment.GetIsSortedByNamespace()),
 			zap.Bool("isImporting", segment.GetIsImporting()),
 			zap.Bool("isCompacting", segment.isCompacting),
 			zap.Bool("isInvisible", segment.GetIsInvisible()))
+		return nil
+	}
+	if policy.meta.isSegmentCompactionProtected(segment.GetID()) {
+		log.Info("skip sort compaction for snapshot-protected segment",
+			zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
 
@@ -145,11 +156,6 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 	log.Info("succeeded to apply triggerSegmentSortCompaction",
 		zap.Int64("triggerID", newTriggerID))
 	return view
-}
-
-func IsPartitionKeySortCompactionEnabled(properties map[string]string) bool {
-	iso, _ := common.IsPartitionKeyIsolationPropEnabled(properties)
-	return Params.CommonCfg.EnableNamespace.GetAsBool() && iso
 }
 
 func (policy *singleCompactionPolicy) triggerSortCompaction(
@@ -179,10 +185,10 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 		log.Info("skip triggerSegmentSortCompaction for external collection", zap.Int64("collectionID", collection.ID))
 		return nil, nil
 	}
-	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Properties)
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return canTriggerSortCompaction(seg, isPartitionIsolationEnabled)
+			return canTriggerSortCompaction(seg) &&
+				!policy.meta.isSegmentCompactionProtected(seg.GetID())
 		}))
 	if len(triggerableSegments) == 0 {
 		log.RatedInfo(20, "no triggerable segments")
@@ -275,7 +281,8 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() == datapb.SegmentLevel_L2 && // only support L2 for now
-			!segment.GetIsInvisible()
+			!segment.GetIsInvisible() &&
+			!policy.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 
 	for _, group := range partSegments {
@@ -327,6 +334,20 @@ func (v *MixSegmentView) GetSegmentsView() []*SegmentView {
 	}
 
 	return v.segments
+}
+
+func (v *MixSegmentView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return sumSegmentSize(v.segments)
+}
+
+func (v *MixSegmentView) GetCollectionTTL() time.Duration {
+	if v == nil {
+		return 0
+	}
+	return v.collectionTTL
 }
 
 func (v *MixSegmentView) Append(segments ...*SegmentView) {

@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "common/Slice.h"
+#include "common/FastMem.h"
 
 #include <string.h>
 #include <algorithm>
@@ -52,7 +53,8 @@ Slice(const std::string& prefix,
         int64_t ri = std::min(i + slice_len, data_src->size);
         auto size = static_cast<size_t>(ri - i);
         auto slice_i = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
-        memcpy(slice_i.get(), data_src->data.get() + i, size);
+        milvus::fastmem::FastMemcpy(
+            slice_i.get(), data_src->data.get() + i, size);
         binarySet.Append(GenSlicedFileName(prefix, slice_num), slice_i, ri - i);
         i = ri;
     }
@@ -79,9 +81,9 @@ Assemble(BinarySet& binarySet) {
         int64_t pos = 0;
         for (auto i = 0; i < slice_num; ++i) {
             auto slice_i_sp = binarySet.Erase(GenSlicedFileName(prefix, i));
-            memcpy(p_data.get() + pos,
-                   slice_i_sp->data.get(),
-                   static_cast<size_t>(slice_i_sp->size));
+            milvus::fastmem::FastMemcpy(p_data.get() + pos,
+                                        slice_i_sp->data.get(),
+                                        static_cast<size_t>(slice_i_sp->size));
             pos += slice_i_sp->size;
         }
         binarySet.Append(prefix, p_data, total_len);
@@ -100,20 +102,17 @@ Disassemble(BinarySet& binarySet) {
         }
     }
 
+    const auto slice_size = FILE_SLICE_SIZE.load();
     std::vector<std::string> slice_key_list;
     slice_key_list.reserve(binarySet.binary_map_.size());
     for (auto& kv : binarySet.binary_map_) {
-        if (kv.second->size > FILE_SLICE_SIZE.load()) {
+        if (kv.second->size > slice_size) {
             slice_key_list.push_back(kv.first);
         }
     }
     for (auto& key : slice_key_list) {
         Config slice_i;
-        Slice(key,
-              binarySet.Erase(key),
-              FILE_SLICE_SIZE.load(),
-              binarySet,
-              slice_i);
+        Slice(key, binarySet.Erase(key), slice_size, binarySet, slice_i);
         meta_info[META].emplace_back(slice_i);
     }
     if (!slice_key_list.empty()) {
@@ -126,7 +125,7 @@ AppendSliceMeta(BinarySet& binarySet, const Config& meta_info) {
     auto meta_str = meta_info.dump();
     auto meta_len = meta_str.length();
     std::shared_ptr<uint8_t[]> meta_data(new uint8_t[meta_len + 1]);
-    memcpy(meta_data.get(), meta_str.data(), meta_len);
+    milvus::fastmem::FastMemcpy(meta_data.get(), meta_str.data(), meta_len);
     meta_data[meta_len] = 0;
     binarySet.Append(INDEX_FILE_SLICE_META, meta_data, meta_len + 1);
 }

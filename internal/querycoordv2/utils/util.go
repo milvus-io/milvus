@@ -26,10 +26,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
@@ -55,7 +56,7 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 	if info == nil {
 		err := merr.WrapErrNodeOffline(leader.ID)
 		log.Info("leader is not available", zap.Error(err))
-		return fmt.Errorf("leader not available: %w", err)
+		return merr.Wrap(err, "leader not available")
 	}
 
 	// Check if delegator is still catching up with streaming data
@@ -94,19 +95,45 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 
 	// Check whether segments are fully loaded
 	segmentDist := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope)
+	distSegments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
+	distBySegmentID := make(map[int64][]*meta.Segment, len(distSegments))
+	for _, segment := range distSegments {
+		distBySegmentID[segment.GetID()] = append(distBySegmentID[segment.GetID()], segment)
+	}
+
 	for segmentID, segmentInfo := range segmentDist {
-		segments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithSegmentID(segmentID))
+		segments := distBySegmentID[segmentID]
 		if len(segments) == 0 {
 			log.RatedInfo(10, "segment is not available", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 
 		for _, segment := range segments {
-			// Compare manifest path for now
-			// alternative is to compare version, but it's not recommended to add extra info in segmentinfo
-			// we may use data view version in the future
-			if segment.ManifestPath != segmentInfo.GetManifestPath() {
-				log.RatedInfo(10, "segment is not updated", zap.Int64("segmentID", segmentID))
+			cmp, err := packed.CompareManifestPath(segment.ManifestPath, segmentInfo.GetManifestPath())
+			if err != nil {
+				log.RatedWarn(10, "segment manifest path not comparable",
+					zap.Int64("segmentID", segmentID),
+					zap.String("distManifest", segment.ManifestPath),
+					zap.String("targetManifest", segmentInfo.GetManifestPath()),
+					zap.Error(err))
+				return err
+			}
+			if cmp < 0 {
+				// dist manifest is older than target, segment data is not ready yet
+				log.RatedInfo(10, "segment manifest is outdated",
+					zap.Int64("segmentID", segmentID),
+					zap.String("distManifest", segment.ManifestPath),
+					zap.String("targetManifest", segmentInfo.GetManifestPath()))
+				return merr.WrapErrSegmentNotLoaded(segmentID)
+			}
+			// cmp >= 0: dist manifest is same or newer than target.
+			// Still check DataVersion for storage v2 binlog changes that don't move the manifest.
+			// Skip when the QueryNode did not report DataVersion (old node in mixed-version rollout).
+			if segment.DataVersion != nil && *segment.DataVersion < segmentInfo.GetDataVersion() {
+				log.RatedInfo(10, "segment data version is outdated",
+					zap.Int64("segmentID", segmentID),
+					zap.Int32("distDataVersion", *segment.DataVersion),
+					zap.Int32("targetDataVersion", segmentInfo.GetDataVersion()))
 				return merr.WrapErrSegmentNotLoaded(segmentID)
 			}
 		}
@@ -114,14 +141,20 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 	return nil
 }
 
-func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64) error {
-	percentage := m.CollectionManager.CalculateLoadPercentage(ctx, collectionID)
+func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64, withUnserviceableShards bool) error {
+	percentage := m.CalculateLoadPercentage(ctx, collectionID)
 	if percentage < 0 {
 		err := merr.WrapErrCollectionNotLoaded(collectionID)
 		log.Ctx(ctx).Warn("failed to GetShardLeaders", zap.Error(err))
 		return err
 	}
-	collection := m.CollectionManager.GetCollection(ctx, collectionID)
+	// When the caller accepts unserviceable shards (e.g. proxy refreshing its
+	// shard-leader cache during replica reconfig), skip the full-load gate so
+	// the caller can route by the per-leader Serviceable flag instead.
+	if withUnserviceableShards {
+		return nil
+	}
+	collection := m.GetCollection(ctx, collectionID)
 	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
 		// when collection is loaded, regard collection as readable, set percentage == 100
 		percentage = 100
@@ -145,9 +178,22 @@ func GetShardLeadersWithChannels(
 	channels map[string]*meta.DmChannel,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
+	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, nil)
+}
+
+func GetShardLeadersWithChannelsAndReplicaFilter(
+	ctx context.Context,
+	m *meta.Meta,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	channels map[string]*meta.DmChannel,
+	withUnserviceableShards bool,
+	replicaFilter func(*meta.Replica) bool,
+) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 
-	replicas := m.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := m.GetByCollection(ctx, collectionID)
 	for _, channel := range channels {
 		log := log.Ctx(ctx).With(zap.String("channel", channel.GetChannelName()))
 
@@ -155,6 +201,9 @@ func GetShardLeadersWithChannels(
 		addrs := make([]string, 0, len(replicas))
 		serviceable := make([]bool, 0, len(replicas))
 		for _, replica := range replicas {
+			if replicaFilter != nil && !replicaFilter(replica) {
+				continue
+			}
 			leader := dist.ChannelDistManager.GetShardLeader(channel.GetChannelName(), replica)
 			if leader == nil || (!withUnserviceableShards && !leader.IsServiceable()) {
 				log.WithRateGroup("util.GetShardLeaders", 1, 60).
@@ -195,8 +244,19 @@ func GetShardLeaders(ctx context.Context,
 	collectionID int64,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
-	// skip check load status if withUnserviceableShards is true
-	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
+	return GetShardLeadersWithReplicaFilter(ctx, m, targetMgr, dist, nodeMgr, collectionID, withUnserviceableShards, nil)
+}
+
+func GetShardLeadersWithReplicaFilter(ctx context.Context,
+	m *meta.Meta,
+	targetMgr meta.TargetManagerInterface,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	withUnserviceableShards bool,
+	replicaFilter func(*meta.Replica) bool,
+) ([]*querypb.ShardLeadersList, error) {
+	if err := checkLoadStatus(ctx, m, collectionID, withUnserviceableShards); err != nil {
 		return nil, err
 	}
 
@@ -207,7 +267,7 @@ func GetShardLeaders(ctx context.Context,
 		log.Ctx(ctx).Warn("failed to get channels", zap.Error(err))
 		return nil, err
 	}
-	return GetShardLeadersWithChannels(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards)
+	return GetShardLeadersWithChannelsAndReplicaFilter(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards, replicaFilter)
 }
 
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
@@ -234,7 +294,7 @@ func CheckCollectionsQueryable(ctx context.Context, m *meta.Meta, targetMgr meta
 // checkCollectionQueryable check all channels are watched and all segments are loaded for this collection
 func checkCollectionQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager, coll *meta.Collection) error {
 	collectionID := coll.GetCollectionID()
-	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
+	if err := checkLoadStatus(ctx, m, collectionID, false); err != nil {
 		return err
 	}
 

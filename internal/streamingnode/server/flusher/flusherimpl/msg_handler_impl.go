@@ -24,11 +24,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func newMsgHandler(wbMgr writebuffer.BufferManager) *msgHandlerImpl {
@@ -44,11 +44,13 @@ type msgHandlerImpl struct {
 func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
 	vchannel := createSegmentMsg.VChannel()
 	h := createSegmentMsg.Header()
+
 	if err := impl.createNewGrowingSegment(ctx, vchannel, h); err != nil {
 		return err
 	}
 	logger := log.With(log.FieldMessage(createSegmentMsg))
-	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId); err != nil {
+
+	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId, h.SchemaVersion); err != nil {
 		logger.Warn("fail to create new growing segment")
 		return err
 	}
@@ -72,6 +74,10 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 	}
 	logger := log.With(zap.Int64("collectionID", h.CollectionId), zap.Int64("partitionID", h.PartitionId), zap.Int64("segmentID", h.SegmentId))
 	return retry.Do(ctx, func() (err error) {
+		// TODO: propagate SchemaVersion from CreateSegmentMessageHeader into AllocSegmentRequest
+		// so that DataCoord records the correct schema version for streaming-created segments.
+		// Without this, new segments get SchemaVersion=0 and will be falsely flagged for backfill.
+		// Tracked in companion PR: https://github.com/milvus-io/milvus/pull/48865
 		resp, err := mix.AllocSegment(ctx, &datapb.AllocSegmentRequest{
 			CollectionId:         h.CollectionId,
 			PartitionId:          h.PartitionId,
@@ -79,14 +85,15 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 			Vchannel:             vchannel,
 			StorageVersion:       h.StorageVersion,
 			IsCreatedByStreaming: true,
+			SchemaVersion:        h.SchemaVersion,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			logger.Warn("failed to alloc growing segment at datacoord")
 			return errors.Wrap(err, "failed to alloc growing segment at datacoord")
 		}
-		logger.Info("alloc growing segment at datacoord")
+		logger.Info("alloc growing segment at datacoord", zap.Int32("schemaVersion", h.SchemaVersion))
 		return nil
-	}, retry.AttemptAlways())
+	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 }
 
 func (impl *msgHandlerImpl) HandleFlush(flushMsg message.ImmutableFlushMessageV2) error {

@@ -11,6 +11,7 @@
 
 #include "segcore/ConcurrentVector.h"
 
+#include <algorithm>
 #include <cstdint>
 
 #include "common/Types.h"
@@ -54,9 +55,42 @@ VectorBase::set_data_raw(ssize_t element_offset,
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
             auto& vector_array = data->vectors().vector_array().data();
             std::vector<VectorArray> data_raw{};
-            data_raw.reserve(vector_array.size());
-            for (auto& e : vector_array) {
-                data_raw.emplace_back(VectorArray(e));
+            if (field_meta.is_nullable() &&
+                data->valid_data_size() == element_count) {
+                ssize_t valid_count = 0;
+                for (ssize_t i = 0; i < element_count; ++i) {
+                    if (data->valid_data(i)) {
+                        ++valid_count;
+                    }
+                }
+                data_raw.reserve(valid_count);
+                if (vector_array.size() == element_count) {
+                    for (ssize_t i = 0; i < element_count; ++i) {
+                        if (data->valid_data(i)) {
+                            data_raw.emplace_back(VectorArray(vector_array[i]));
+                        }
+                    }
+                } else {
+                    AssertInfo(
+                        vector_array.size() == valid_count,
+                        "compact nullable VECTOR_ARRAY data size {} must "
+                        "match valid count {}",
+                        vector_array.size(),
+                        valid_count);
+                    for (auto& e : vector_array) {
+                        data_raw.emplace_back(VectorArray(e));
+                    }
+                }
+            } else {
+                AssertInfo(vector_array.size() == element_count,
+                           "VECTOR_ARRAY data size {} must match element "
+                           "count {} when not using compact nullable format",
+                           vector_array.size(),
+                           element_count);
+                data_raw.reserve(vector_array.size());
+                for (auto& e : vector_array) {
+                    data_raw.emplace_back(VectorArray(e));
+                }
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);
         } else {
@@ -102,6 +136,7 @@ VectorBase::set_data_raw(ssize_t element_offset,
                                 FIELD_DATA(data, timestamptz).data(),
                                 element_count);
         }
+        case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT: {
             auto& field_data = FIELD_DATA(data, string);

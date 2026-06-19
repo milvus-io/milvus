@@ -19,12 +19,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -78,7 +78,7 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchanne
 	logger := log.With(zap.String("pchannel", pchannel), zap.String("handler", "replicate checkpoint"))
 	cp, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			return nil, errors.New("replicate checkpoint can only be read for RW channel")
+			return nil, status.NewInvalidArgument("replicate checkpoint can only be read for RW channel")
 		}
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
@@ -105,6 +105,99 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchanne
 	return cp.(*wal.ReplicateCheckpoint), nil
 }
 
+// GetSalvageCheckpoint gets all salvage checkpoints of the wal.
+func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel string) ([]*wal.ReplicateCheckpoint, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	logger := log.With(zap.String("pchannel", pchannel), zap.String("handler", "salvage checkpoint"))
+	cps, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+		if assign.Channel.AccessMode != types.AccessModeRW {
+			return nil, status.NewInvalidArgument("salvage checkpoint can only be read for RW channel")
+		}
+		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
+		if err == nil {
+			// Local WAL - get salvage checkpoints directly
+			return localWAL.GetSalvageCheckpoint(), nil
+		}
+		if !shouldUseRemoteWAL(err) {
+			return nil, err
+		}
+		handlerService, err := hc.service.GetService(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := handlerService.GetSalvageCheckpoint(ctx, &streamingpb.GetSalvageCheckpointRequest{
+			Pchannel: types.NewProtoFromPChannelInfo(assign.Channel),
+		})
+		if err != nil {
+			return nil, err
+		}
+		result := make([]*wal.ReplicateCheckpoint, 0, len(resp.GetCheckpoints()))
+		for _, cp := range resp.GetCheckpoints() {
+			result = append(result, utility.NewReplicateCheckpointFromProto(cp))
+		}
+		return result, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if cps == nil {
+		return nil, nil
+	}
+	return cps.([]*wal.ReplicateCheckpoint), nil
+}
+
+// PrepareReleaseManualFlush appends a normal ManualFlush and prepares local growing-source retention.
+func (hc *handlerClientImpl) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return false, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	logger := log.With(
+		zap.String("pchannel", pchannel),
+		zap.String("vchannel", vchannel),
+		zap.Int64("collectionID", collectionID),
+		zap.Int64s("releaseSegmentIDs", releaseSegmentIDs),
+		zap.String("handler", "prepare release manual flush"),
+	)
+	result, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+		if assign.Channel.AccessMode != types.AccessModeRW {
+			logger.Info("skip release manual flush prepare because channel is not RW",
+				zap.String("accessMode", assign.Channel.AccessMode.String()))
+			return false, nil
+		}
+
+		_, err := registry.GetLocalAvailableWAL(assign.Channel)
+		if err != nil {
+			if errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
+				status.AsStreamingError(err).IsWrongStreamingNode() {
+				logger.Info("skip release manual flush prepare because channel is not owned by local streaming node",
+					zap.Error(err))
+				return false, nil
+			}
+			return false, err
+		}
+
+		preparer, err := registry.GetLocalReleaseManualFlushPreparer()
+		if err != nil {
+			return false, err
+		}
+		return preparer.PrepareReleaseManualFlush(ctx, assign.Channel, collectionID, vchannel, releaseSegmentIDs)
+	})
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return false, nil
+	}
+	return result.(bool), nil
+}
+
 // GetWALMetricsIfLocal gets the metrics of the local wal.
 func (hc *handlerClientImpl) GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -125,7 +218,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 	logger := log.With(zap.String("pchannel", opts.PChannel), zap.String("handler", "producer"))
 	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			return nil, errors.New("producer can only be created for RW channel")
+			return nil, status.NewInvalidArgument("producer can only be created for RW channel")
 		}
 		// Check if the localWAL is assigned at local
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
@@ -151,7 +244,9 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 	if err != nil {
 		return nil, err
 	}
-	return p.(Producer), nil
+	newProducer := p.(Producer)
+	newProducer.Register(opts.RateLimitObserver)
+	return newProducer, nil
 }
 
 // CreateConsumer creates a consumer.
@@ -246,6 +341,15 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 				return createResult, nil
 			}
 			logger.Warn("create handler failed", zap.Any("assignment", assign), zap.Error(err))
+
+			// Unrecoverable errors (e.g. replicate violation when the WAL is no longer
+			// a secondary cluster) won't change by retrying the same WAL role. Surface
+			// them immediately so callers get a typed error within RTT instead of
+			// retrying until their context deadline.
+			if status.AsStreamingError(err).IsUnrecoverable() {
+				logger.Warn("create handler failed with unrecoverable error, stop retrying", zap.Error(err))
+				return nil, err
+			}
 
 			// Check if the error is permanent failure until new assignment.
 			if isPermanentFailureUntilNewAssignment(err) {

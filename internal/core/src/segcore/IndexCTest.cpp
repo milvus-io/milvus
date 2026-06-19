@@ -68,10 +68,10 @@ TestVecIndex() {
     std::string type_params_str, index_params_str;
     bool ok = google::protobuf::TextFormat::PrintToString(type_params,
                                                           &type_params_str);
-    assert(ok);
+    ASSERT_TRUE(ok);
     ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                      &index_params_str);
-    assert(ok);
+    ASSERT_TRUE(ok);
     auto dataset =
         std::is_same_v<TraitType, milvus::BinaryVector>
             ? GenFieldData(NB, metric_type, TraitType::data_type, BINARY_DIM)
@@ -204,7 +204,7 @@ TEST(CBoolIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[](char*)(half_ds->GetTensor());
+    delete[] (char*)(half_ds->GetTensor());
 }
 
 // TODO: more scalar type.
@@ -321,7 +321,7 @@ TEST(CStringIndexTest, All) {
         { DeleteBinarySet(binary_set); }
     }
 
-    delete[](char*)(str_ds->GetTensor());
+    delete[] (char*)(str_ds->GetTensor());
 }
 #endif
 
@@ -366,7 +366,7 @@ TEST(CreateIndexTest, StorageV2) {
 
     auto* storage_config = build_index_info->mutable_storage_config();
     storage_config->set_storage_type("remote");
-    storage_config->set_root_path("/tmp/test_storage");
+    storage_config->set_root_path(TestLocalPath);
     storage_config->set_address("localhost:9000");
     storage_config->set_bucket_name("test_bucket");
     storage_config->set_access_keyid("test_access_key");
@@ -432,7 +432,7 @@ TEST(VectorMemIndexTest, StorageV2) {
 
     auto* storage_config = build_index_info->mutable_storage_config();
     storage_config->set_storage_type("local");
-    storage_config->set_root_path("/tmp");
+    storage_config->set_root_path(TestLocalPath);
 
     std::string serialized_info;
     build_index_info->SerializeToString(&serialized_info);

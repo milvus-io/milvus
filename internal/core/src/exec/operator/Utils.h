@@ -30,14 +30,28 @@
 
 namespace milvus {
 namespace exec {
-
-static bool
-UseVectorIterator(const SearchInfo& search_info) {
-    return search_info.group_by_field_id_.has_value() ||
-           search_info.iterative_filter_execution;
+// Binary search to find insert position for sorted order
+// Used by iterative filter and element filter nodes
+template <bool large_is_better>
+inline size_t
+find_binsert_position(const std::vector<float>& distances,
+                      size_t lo,
+                      size_t hi,
+                      float dist) {
+    auto first = distances.begin() + lo;
+    auto last = distances.begin() + hi;
+    auto it = large_is_better
+                  ? std::upper_bound(first, last, dist, std::greater<float>{})
+                  : std::upper_bound(first, last, dist);
+    return static_cast<size_t>(it - distances.begin());
 }
 
-static bool
+[[maybe_unused]] static bool
+UseVectorIterator(const SearchInfo& search_info) {
+    return search_info.has_group_by() || search_info.iterative_filter_execution;
+}
+
+[[maybe_unused]] static bool
 PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                                 int nq,
                                 const DatasetPtr dataset,
@@ -56,16 +70,23 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             if (iterators_val.has_value()) {
                 bool larger_is_closer =
                     PositivelyRelated(search_info.metric_type_);
+                // Element-level search skips row-level mapping (element IDs
+                // are not row-aligned); see ChunkMergeIterator ctor.
+                const auto& offset_mapping = index.GetOffsetMapping();
+                const milvus::OffsetMapping* iter_offset_mapping =
+                    (search_info.array_offsets_ != nullptr ||
+                     !offset_mapping.IsEnabled())
+                        ? nullptr
+                        : &offset_mapping;
                 search_result.AssembleChunkVectorIterators(
                     nq,
                     1,
-                    {0},
                     iterators_val.value(),
-                    index.GetOffsetMapping(),
+                    iter_offset_mapping,
                     larger_is_closer);
             } else {
                 std::string operator_type = "";
-                if (search_info.group_by_field_id_.has_value()) {
+                if (search_info.has_group_by()) {
                     operator_type = "group_by";
                 } else {
                     operator_type = "iterative filter";
@@ -82,11 +103,11 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                         "inside, terminate {} operation",
                         operator_type));
             }
-            search_result.total_nq_ = dataset->GetRows();
+            search_result.total_nq_ = nq;
             search_result.unity_topK_ = search_info.topk_;
         } catch (const std::runtime_error& e) {
             std::string operator_type = "";
-            if (search_info.group_by_field_id_.has_value()) {
+            if (search_info.has_group_by()) {
                 operator_type = "group_by";
             } else {
                 operator_type = "iterative filter";
@@ -98,9 +119,9 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                 e.what(),
                 operator_type);
             ThrowInfo(ErrorCode::Unsupported,
-                      fmt::format("Failed to {}, current index:" +
-                                      index.GetIndexType() + " doesn't support",
-                                  operator_type));
+                      "Failed to {}, current index:{} doesn't support",
+                      operator_type,
+                      index.GetIndexType());
         }
         return true;
     }
@@ -117,6 +138,12 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
     std::vector<int64_t> new_seg_offsets = std::vector<int64_t>();
     new_distances.reserve(size);
     new_seg_offsets.reserve(size);
+
+    bool has_element_indices = !result.element_indices_.empty();
+    std::vector<int32_t> new_element_indices;
+    if (has_element_indices) {
+        new_element_indices.reserve(size);
+    }
 
     std::vector<size_t> idx(topk);
 
@@ -141,11 +168,17 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
         for (auto i : idx) {
             new_distances.push_back(result.distances_[i]);
             new_seg_offsets.push_back(result.seg_offsets_[i]);
+            if (has_element_indices) {
+                new_element_indices.push_back(result.element_indices_[i]);
+            }
         }
     }
 
-    result.distances_ = new_distances;
-    result.seg_offsets_ = new_seg_offsets;
+    result.distances_ = std::move(new_distances);
+    result.seg_offsets_ = std::move(new_seg_offsets);
+    if (has_element_indices) {
+        result.element_indices_ = std::move(new_element_indices);
+    }
 }
 
 }  // namespace exec

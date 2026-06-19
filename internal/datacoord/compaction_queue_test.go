@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 func TestCompactionQueue(t *testing.T) {
@@ -133,6 +133,14 @@ func TestCompactionQueue(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(3), task.GetTaskProto().GetPlanID())
 	})
+}
+
+func TestBumpSchemaVersionPrioritizer(t *testing.T) {
+	task := &bumpSchemaVersionTask{}
+	task.SetTask(&datapb.CompactionTask{Type: datapb.CompactionType_BumpSchemaVersionCompaction})
+
+	assert.Equal(t, 10, LevelPrioritizer(task))
+	assert.Equal(t, 1, MixFirstPrioritizer(task))
 }
 
 func TestConcurrency(t *testing.T) {

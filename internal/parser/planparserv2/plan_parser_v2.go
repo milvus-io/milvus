@@ -11,19 +11,19 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -60,7 +60,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 		case error:
 			return nil, v
 		default:
-			return nil, fmt.Errorf("unknown cache error: %v", v)
+			return nil, merr.WrapErrQueryPlanMsg("unknown cache error: %v", v)
 		}
 	}
 
@@ -91,7 +91,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 
 	if parser.GetCurrentToken().GetTokenType() != antlr.TokenEOF {
 		log.Info("invalid expression", zap.String("expr", exprStr))
-		err = fmt.Errorf("invalid expression: %s", exprStr)
+		err = merr.WrapErrQueryPlanMsg("invalid expression: %s", exprStr)
 		return
 	}
 
@@ -106,7 +106,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 func handleExprInternal(schema *typeutil.SchemaHelper, exprStr string, visitorArgs *ParserVisitorArgs) (result interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
-			result = fmt.Errorf("unsupported expression: %s", exprStr)
+			result = merr.WrapErrQueryPlanMsg("unsupported expression: %s", exprStr)
 		}
 	}()
 
@@ -130,15 +130,25 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 	ret := handleExprInternal(schema, exprStr, visitorArgs)
 
 	if err := getError(ret); err != nil {
-		return nil, fmt.Errorf("cannot parse expression: %s, error: %s", exprStr, err)
+		return nil, merr.WrapErrQueryPlan(err, "cannot parse expression: %s", exprStr)
 	}
 
 	predicate := getExpr(ret)
 	if predicate == nil {
-		return nil, fmt.Errorf("cannot parse expression: %s", exprStr)
+		return nil, merr.WrapErrQueryPlanMsg("cannot parse expression: %s", exprStr)
 	}
 	if !canBeExecuted(predicate) {
-		return nil, fmt.Errorf("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
+		// Handle standalone boolean literals: true → AlwaysTrueExpr, false → AlwaysFalseExpr.
+		if boolVal := predicate.expr.GetValueExpr().GetValue(); boolVal != nil && IsBool(boolVal) {
+			if boolVal.GetBoolVal() {
+				predicate.expr = alwaysTrueExpr()
+			} else {
+				predicate.expr = alwaysFalseExpr()
+			}
+			predicate.nodeDependent = false
+		} else {
+			return nil, merr.WrapErrQueryPlanMsg("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
+		}
 	}
 
 	valueMap, err := UnmarshalExpressionValues(exprTemplateValues)
@@ -162,15 +172,15 @@ func parseIdentifierInner(schema *typeutil.SchemaHelper, identifier string, chec
 	ret := handleExprInternal(schema, identifier, visitorArgs)
 
 	if err := getError(ret); err != nil {
-		return fmt.Errorf("cannot parse identifier: %s, error: %s", identifier, err)
+		return merr.WrapErrQueryPlan(err, "cannot parse identifier: %s", identifier)
 	}
 
 	predicate := getExpr(ret)
 	if predicate == nil {
-		return fmt.Errorf("cannot parse identifier: %s", identifier)
+		return merr.WrapErrQueryPlanMsg("cannot parse identifier: %s", identifier)
 	}
 	if predicate.expr.GetColumnExpr() == nil {
-		return fmt.Errorf("cannot parse identifier: %s", identifier)
+		return merr.WrapErrQueryPlanMsg("cannot parse identifier: %s", identifier)
 	}
 
 	return checkFunc(predicate.expr)
@@ -232,7 +242,7 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 
 	var vectorType planpb.VectorType
 	if !typeutil.IsVectorType(dataType) {
-		return nil, fmt.Errorf("field (%s) to search is not of vector data type", vectorFieldName)
+		return nil, merr.WrapErrQueryPlanMsg("field (%s) to search is not of vector data type", vectorFieldName)
 	}
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
@@ -261,12 +271,12 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 			vectorType = planpb.VectorType_EmbListInt8Vector
 		default:
 			log.Error("Invalid elementType for ArrayOfVector", zap.Any("elementType", elementType))
-			return nil, fmt.Errorf("unsupported element type for ArrayOfVector: %v", elementType)
+			return nil, merr.WrapErrQueryPlanMsg("unsupported element type for ArrayOfVector: %v", elementType)
 		}
 
 	default:
 		log.Error("Invalid dataType", zap.Any("dataType", dataType))
-		return nil, fmt.Errorf("unsupported vector data type: %v", dataType)
+		return nil, merr.WrapErrQueryPlanMsg("unsupported vector data type: %v", dataType)
 	}
 
 	scorers, options, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)
@@ -275,7 +285,7 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 	}
 
 	if len(scorers) != 0 && (queryInfo.GroupByFieldId != -1 || queryInfo.SearchIteratorV2Info != nil) {
-		return nil, fmt.Errorf("don't support use segment scorer with group_by or search_iterator")
+		return nil, merr.WrapErrQueryPlanMsg("don't support use segment scorer with group_by or search_iterator")
 	}
 
 	exprParams := ParseExprParams(exprTemplateValues)
@@ -369,19 +379,19 @@ func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.Functi
 		if ok {
 			expr, err := ParseExpr(schema, filter, exprTemplateValues)
 			if err != nil {
-				return nil, fmt.Errorf("parse expr failed with error: {%v}", err)
+				return nil, merr.WrapErrQueryPlan(err, "parse expr failed")
 			}
 			scorer.Filter = expr
 		}
 
 		weightStr, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(rerank.WeightKey, function.GetParams())
 		if !ok {
-			return nil, fmt.Errorf("must set weight params for weight scorer")
+			return nil, merr.WrapErrQueryPlanMsg("must set weight params for weight scorer")
 		}
 
 		weight, err := strconv.ParseFloat(weightStr, 32)
 		if err != nil {
-			return nil, fmt.Errorf("parse function scorer weight params failed with error: {%v}", err)
+			return nil, merr.WrapErrQueryPlan(err, "parse function scorer weight params failed")
 		}
 		scorer.Weight = float32(weight)
 

@@ -23,9 +23,9 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
@@ -57,15 +57,19 @@ func newMinioObjectStorageWithConfig(ctx context.Context, c *objectstorage.Confi
 func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
 	opts := minio.GetObjectOptions{}
 	if offset > 0 {
-		err := opts.SetRange(offset, offset+size-1)
+		end := int64(0)
+		if size > 0 {
+			end = offset + size - 1
+		}
+		err := opts.SetRange(offset, end)
 		if err != nil {
 			log.Warn("failed to set range", zap.String("bucket", bucketName), zap.String("path", objectName), zap.Error(err))
-			return nil, checkObjectStorageError(objectName, err)
+			return nil, mapObjectStorageError(objectName, err)
 		}
 	}
 	object, err := minioObjectStorage.Client.GetObject(ctx, bucketName, objectName, opts)
 	if err != nil {
-		return nil, checkObjectStorageError(objectName, err)
+		return nil, mapObjectStorageError(objectName, err)
 	}
 	return &ObjectReader{
 		Object: object,
@@ -74,12 +78,12 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
 	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minio.PutObjectOptions{})
-	return checkObjectStorageError(objectName, err)
+	return mapObjectStorageError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := minioObjectStorage.Client.StatObject(ctx, bucketName, objectName, minio.StatObjectOptions{})
-	return info.Size, checkObjectStorageError(objectName, err)
+	return info.Size, mapObjectStorageError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
@@ -87,7 +91,7 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 	// recursive = true may timeout during the recursive browsing the objects.
 	// See also: https://github.com/milvus-io/milvus/issues/19095
 	// So we can change the `ListObjectsMaxKeys` to limit the max keys by batch to avoid timeout.
-	in := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
+	in := minioObjectStorage.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: recursive,
 		MaxKeys:   paramtable.Get().MinioCfg.ListObjectsMaxKeys.GetAsInt(),
@@ -106,7 +110,7 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	err := minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
-	return checkObjectStorageError(objectName, err)
+	return mapObjectStorageError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
@@ -119,5 +123,5 @@ func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bu
 		Object: dstObjectName,
 	}
 	_, err := minioObjectStorage.Client.CopyObject(ctx, dstOpts, srcOpts)
-	return checkObjectStorageError(dstObjectName, err)
+	return mapObjectStorageError(srcObjectName, err)
 }

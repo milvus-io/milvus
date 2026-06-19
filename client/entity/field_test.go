@@ -94,6 +94,144 @@ func TestStructSchema(t *testing.T) {
 	assert.Equal(t, FieldTypeFloat, schema.Fields[2].DataType)
 }
 
+func TestStructSchemaValidate(t *testing.T) {
+	t.Run("ok: mixed scalar and vector sub-fields", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("tag").WithDataType(FieldTypeVarChar).WithMaxLength(64)).
+			WithField(NewField().WithName("emb").WithDataType(FieldTypeFloatVector).WithDim(8))
+		assert.NoError(t, ss.Validate("clips"))
+	})
+
+	t.Run("empty sub-fields", func(t *testing.T) {
+		assert.Error(t, NewStructSchema().Validate("clips"))
+	})
+
+	t.Run("duplicate sub-field name", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32)).
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject nested array", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeArray).WithElementType(FieldTypeInt32))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject primary key / nullable / autoID", func(t *testing.T) {
+		assert.Error(t, NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32).WithIsPrimaryKey(true)).
+			Validate("clips"))
+		assert.Error(t, NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32).WithNullable(true)).
+			Validate("clips"))
+		assert.Error(t, NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32).WithIsAutoID(true)).
+			Validate("clips"))
+	})
+
+	t.Run("nil struct schema", func(t *testing.T) {
+		var ss *StructSchema
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("nil sub-field", func(t *testing.T) {
+		ss := &StructSchema{Fields: []*Field{nil}}
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("sub-field with empty name", func(t *testing.T) {
+		ss := NewStructSchema().WithField(NewField().WithDataType(FieldTypeInt32))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject nested struct sub-field", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeStruct))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject sparse vector sub-field", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeSparseVector))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject partition key sub-field", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt64).WithIsPartitionKey(true))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject clustering key sub-field", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt64).WithIsClusteringKey(true))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject dynamic sub-field", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt64).WithIsDynamic(true))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject default value sub-field", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt64).WithDefaultValueLong(7))
+		assert.Error(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject nested struct schema inside sub-field", func(t *testing.T) {
+		inner := NewStructSchema().WithField(NewField().WithName("x").WithDataType(FieldTypeInt32))
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt64).WithStructSchema(inner))
+		assert.Error(t, ss.Validate("clips"))
+	})
+}
+
+func TestSchemaValidateExtra(t *testing.T) {
+	t.Run("nil schema", func(t *testing.T) {
+		var s *Schema
+		assert.Error(t, s.Validate())
+	})
+
+	t.Run("schema with nil field", func(t *testing.T) {
+		s := &Schema{Fields: []*Field{nil}}
+		assert.Error(t, s.Validate())
+	})
+
+	t.Run("non-struct fields are skipped", func(t *testing.T) {
+		// Only FieldTypeArray + ElementType=FieldTypeStruct triggers StructSchema validation.
+		s := NewSchema().WithName("c").
+			WithField(NewField().WithName("id").WithDataType(FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(NewField().WithName("tags").WithDataType(FieldTypeArray).WithElementType(FieldTypeInt32))
+		assert.NoError(t, s.Validate())
+	})
+}
+
+func TestSchemaValidateStructArray(t *testing.T) {
+	// valid schema passes
+	s := NewSchema().WithName("c").
+		WithField(NewField().WithName("id").WithDataType(FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(NewField().WithName("clips").
+			WithDataType(FieldTypeArray).WithElementType(FieldTypeStruct).
+			WithMaxCapacity(32).
+			WithStructSchema(NewStructSchema().
+				WithField(NewField().WithName("tag").WithDataType(FieldTypeVarChar).WithMaxLength(64)).
+				WithField(NewField().WithName("emb").WithDataType(FieldTypeFloatVector).WithDim(8))))
+	assert.NoError(t, s.Validate())
+
+	// schema with invalid struct sub-field fails
+	bad := NewSchema().WithName("c").
+		WithField(NewField().WithName("id").WithDataType(FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(NewField().WithName("clips").
+			WithDataType(FieldTypeArray).WithElementType(FieldTypeStruct).
+			WithStructSchema(NewStructSchema().
+				WithField(NewField().WithName("a").WithDataType(FieldTypeStruct))))
+	assert.Error(t, bad.Validate())
+}
+
 func TestFieldWithStructSchema(t *testing.T) {
 	// Create a struct schema
 	structSchema := NewStructSchema().

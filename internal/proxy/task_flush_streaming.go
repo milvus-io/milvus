@@ -18,22 +18,21 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (t *flushTask) Execute(ctx context.Context) error {
@@ -49,8 +48,9 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(t.ctx, t.DbName, collName)
 		if err != nil {
-			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+			return err
 		}
+
 		vchannels, err := t.chMgr.getVChannels(collID)
 		if err != nil {
 			return err
@@ -76,7 +76,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		}
 		resp, err := t.mixCoord.Flush(ctx, flushReq)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
+			return merr.Wrap(err, "failed to call flush to data coordinator")
 		}
 
 		// Remove the flushed segments from onFlushSegmentIDs

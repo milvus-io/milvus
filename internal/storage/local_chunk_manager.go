@@ -28,9 +28,9 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // LocalChunkManager is responsible for read and write local file.
@@ -80,6 +80,23 @@ func (lcm *LocalChunkManager) Reader(ctx context.Context, filePath string) (File
 	}, nil
 }
 
+func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath string, offset int64) (FileReader, error) {
+	if offset < 0 {
+		return nil, io.EOF
+	}
+	reader, err := lcm.Reader(ctx, filePath)
+	if err != nil {
+		return nil, err
+	}
+	if offset > 0 {
+		if _, err = reader.Seek(offset, io.SeekStart); err != nil {
+			_ = reader.Close()
+			return nil, err
+		}
+	}
+	return reader, nil
+}
+
 // Write writes the data to local storage.
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	dir := path.Dir(filePath)
@@ -102,7 +119,7 @@ func (lcm *LocalChunkManager) MultiWrite(ctx context.Context, contents map[strin
 	for filePath, content := range contents {
 		err := lcm.Write(ctx, filePath, content)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "write %s failed", filePath))
+			el = merr.Combine(el, merr.Wrapf(err, "write %s failed", filePath))
 		}
 	}
 	return el
@@ -132,7 +149,7 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 	for i, filePath := range filePaths {
 		content, err := lcm.Read(ctx, filePath)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to read %s", filePath))
+			el = merr.Combine(el, merr.Wrapf(err, "failed to read %s", filePath))
 		}
 		results[i] = content
 	}
@@ -254,7 +271,7 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 	if len(prefix) == 0 {
 		errMsg := "empty prefix is not allowed for ChunkManager remove operation"
 		log.Warn(errMsg)
-		return merr.WrapErrParameterInvalidMsg(errMsg)
+		return merr.WrapErrStorageMsg("%s", errMsg)
 	}
 	var removeErr error
 	if err := lcm.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *ChunkObjectInfo) bool {

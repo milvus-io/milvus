@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -34,10 +34,36 @@ type ColumnGroup struct {
 	GroupID typeutil.UniqueID
 	Columns []int // column indices
 	Fields  []int64
+	Format  string // Only used for loon writer.
 }
 
 func (cg ColumnGroup) String() string {
-	return fmt.Sprintf("[GroupID: %d, ColumnIndices: %v, Fields: %v]", cg.GroupID, cg.Columns, cg.Fields)
+	if cg.Format == "" {
+		return fmt.Sprintf("[GroupID: %d, ColumnIndices: %v, Fields: %v]", cg.GroupID, cg.Columns, cg.Fields)
+	}
+	return fmt.Sprintf("[GroupID: %d, ColumnIndices: %v, Fields: %v, Format: %s]", cg.GroupID, cg.Columns, cg.Fields, cg.Format)
+}
+
+func FillColumnGroupFormats(columnGroups []ColumnGroup, fallbackFormat string) []ColumnGroup {
+	result := make([]ColumnGroup, len(columnGroups))
+	copy(result, columnGroups)
+	for i := range result {
+		if result[i].Format == "" {
+			result[i].Format = fallbackFormat
+		}
+	}
+	return result
+}
+
+func ColumnGroupFormats(columnGroups []ColumnGroup, fallbackFormat string) []string {
+	formats := make([]string, len(columnGroups))
+	for i, columnGroup := range columnGroups {
+		formats[i] = columnGroup.Format
+		if formats[i] == "" {
+			formats[i] = fallbackFormat
+		}
+	}
+	return formats
 }
 
 func SplitColumns(fields []*schemapb.FieldSchema, stats map[int64]ColumnStats, policies ...ColumnGroupSplitPolicy) []ColumnGroup {

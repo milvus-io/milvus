@@ -24,15 +24,22 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+)
+
+// Type aliases for metricsinfo types to avoid import cycles
+type (
+	DataCoordTopology  = metricsinfo.DataCoordTopology
+	QueryCoordTopology = metricsinfo.QueryCoordTopology
 )
 
 // Limiter defines the interface to perform request rate limiting.
@@ -178,6 +185,8 @@ type Proxy interface {
 	ImportV2(context.Context, *internalpb.ImportRequest) (*internalpb.ImportResponse, error)
 	GetImportProgress(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)
 	ListImports(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)
+	CommitImport(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)
+	AbortImport(context.Context, *datapb.AbortImportRequest) (*commonpb.Status, error)
 }
 
 // ProxyComponent defines the interface of proxy component.
@@ -275,7 +284,6 @@ type MixCoordClient interface {
 	rootcoordpb.RootCoordClient
 	querypb.QueryCoordClient
 	datapb.DataCoordClient
-	indexpb.IndexCoordClient
 }
 
 // MixCoord is the interface `MixCoord` package implements
@@ -292,6 +300,10 @@ type MixCoord interface {
 
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	GetQcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*DataCoordTopology, error)
+
+	GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*QueryCoordTopology, error)
 
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error

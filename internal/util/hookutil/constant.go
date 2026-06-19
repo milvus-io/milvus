@@ -39,4 +39,7 @@ var (
 	OpTypeSearch       = "search"
 	OpTypeHybridSearch = "hybrid_search"
 	OpTypeNodeID       = "node_id"
+
+	ActionAuthorize     = "Authorize"
+	ActionRestfulReturn = "RestfulReturn"
 )

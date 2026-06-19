@@ -72,12 +72,8 @@ void
 BsonInvertedIndex::AddRecord(const std::string& key,
                              uint32_t row_id,
                              uint32_t offset) {
-    if (inverted_index_map_.find(key) == inverted_index_map_.end()) {
-        inverted_index_map_[key] = {EncodeInvertedIndexValue(row_id, offset)};
-    } else {
-        inverted_index_map_[key].push_back(
-            EncodeInvertedIndexValue(row_id, offset));
-    }
+    inverted_index_map_[key].push_back(
+        EncodeInvertedIndexValue(row_id, offset));
 }
 
 void
@@ -117,17 +113,8 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
                              milvus::proto::common::LoadPriority priority,
                              bool load_in_mmap) {
     if (is_load_) {
-        // convert shared_key_index/... to remote_prefix/shared_key_index/...
-        std::vector<std::string> remote_files;
-        remote_files.reserve(index_files.size());
-        auto remote_prefix = disk_file_manager_->GetRemoteJsonStatsLogPrefix();
-        for (const auto& file : index_files) {
-            boost::filesystem::path full_path =
-                boost::filesystem::path(remote_prefix) / file;
-            remote_files.emplace_back(full_path.string());
-        }
-        // cache shared_key_index/... to disk
-        disk_file_manager_->CacheJsonStatsSharedIndexToDisk(remote_files,
+        // index_files are absolute remote paths (basePath already prepended by caller)
+        disk_file_manager_->CacheJsonStatsSharedIndexToDisk(index_files,
                                                             priority);
         AssertInfo(tantivy_index_exist(path_.c_str()),
                    "index dir not exist: {}",
@@ -160,17 +147,15 @@ BsonInvertedIndex::UploadIndex() {
 
     for (boost::filesystem::directory_iterator iter(p); iter != end_iter;
          iter++) {
+        auto file_path = iter->path().string();
         if (boost::filesystem::is_directory(*iter)) {
-            LOG_WARN("{} is a directory", iter->path().string());
+            LOG_WARN("{} is a directory", file_path);
         } else {
-            LOG_INFO("trying to add bson inverted index file: {}",
-                     iter->path().string());
-            AssertInfo(disk_file_manager_->AddJsonSharedIndexLog(
-                           iter->path().string()),
+            LOG_INFO("trying to add bson inverted index file: {}", file_path);
+            AssertInfo(disk_file_manager_->AddJsonSharedIndexLog(file_path),
                        "failed to add bson inverted index file: {}",
-                       iter->path().string());
-            LOG_INFO("bson inverted index file: {} added",
-                     iter->path().string());
+                       file_path);
+            LOG_INFO("bson inverted index file: {} added", file_path);
         }
     }
 
@@ -178,7 +163,7 @@ BsonInvertedIndex::UploadIndex() {
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size());
-    for (auto& file : remote_paths_to_size) {
+    for (const auto& file : remote_paths_to_size) {
         index_files.emplace_back(file.first, file.second);
     }
     return IndexStats::New(disk_file_manager_->GetAddedTotalFileSize(),

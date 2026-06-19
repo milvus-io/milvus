@@ -8,9 +8,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // recoverFromStream recovers the recovery storage from the recovery stream.
@@ -83,15 +83,44 @@ L:
 func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
-	for segmentID, segment := range r.segments {
-		if segment.IsGrowing() {
-			segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
-		}
-	}
+	// Collect active vchannels and build a set of active partition IDs (globally unique).
+	activePartitions := make(map[int64]struct{})
 	for channelName, vchannel := range r.vchannels {
 		if vchannel.IsActive() {
 			vchannels[channelName] = proto.Clone(vchannel.meta).(*streamingpb.VChannelMeta)
+			for _, p := range vchannel.meta.CollectionInfo.Partitions {
+				activePartitions[p.PartitionId] = struct{}{}
+			}
 		}
+	}
+	for segmentID, segment := range r.segments {
+		if !segment.IsGrowing() {
+			continue
+		}
+		// Defensive filtering: skip recoverable segment assignments whose parent vchannel
+		// does not exist or is not active, or whose partition has been dropped. This can happen due to
+		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
+		// for dropped collections/partitions.
+		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
+			r.Logger().Warn("getSnapshot: skipping orphaned segment assignment with non-active vchannel",
+				zap.Int64("segmentID", segmentID),
+				zap.String("vchannel", segment.meta.Vchannel),
+				zap.Int64("collectionID", segment.meta.CollectionId),
+				zap.String("state", segment.meta.State.String()),
+			)
+			continue
+		}
+		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
+			r.Logger().Warn("getSnapshot: skipping orphaned segment assignment with dropped partition",
+				zap.Int64("segmentID", segmentID),
+				zap.String("vchannel", segment.meta.Vchannel),
+				zap.Int64("collectionID", segment.meta.CollectionId),
+				zap.Int64("partitionID", segment.meta.PartitionId),
+				zap.String("state", segment.meta.State.String()),
+			)
+			continue
+		}
+		segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
 	}
 	snapshot := &RecoverySnapshot{
 		VChannels:          vchannels,
