@@ -209,7 +209,9 @@ class TestRestfulStructArrayNullable(TestBase):
             },
         )
         assert rsp["code"] != 0
-        assert "Invalid field type, type:ArrayOfStruct" in rsp["message"]
+        # The server rejects ArrayOfStruct via the regular field-add endpoint and
+        # directs the caller to the dedicated struct_fields/add endpoint.
+        assert "struct_fields/add" in rsp["message"]
 
         rsp = self.collection_client.collection_describe(name)
         assert rsp["code"] == 0
