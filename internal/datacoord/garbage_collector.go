@@ -1282,10 +1282,17 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 	defer func() { log.Info("recycleUnusedSegIndexes done", zap.Duration("timeCost", time.Since(start))) }()
 
 	segIndexes := gc.meta.indexMeta.GetAllSegIndexes()
-	for _, segIdx := range segIndexes {
+	for _, candidate := range segIndexes {
 		if ctx.Err() != nil {
 			// process canceled.
 			return
+		}
+		// GetAllSegIndexes returns a point-in-time snapshot. Refresh by buildID
+		// before making deletion decisions so GC does not act on stale task state
+		// or stale index file keys.
+		segIdx, ok := gc.getLatestSegmentIndexForGC(candidate)
+		if !ok {
+			continue
 		}
 		if gc.collectionGCPaused(segIdx.CollectionID) {
 			continue
@@ -1295,7 +1302,24 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
 		if gc.meta.GetSegment(ctx, segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			// Non-terminal tasks may still be writing index files or updating meta.
+			// Keep the SegmentIndex until the task reaches a terminal state.
+			if segIdx.IndexState == commonpb.IndexState_Unissued ||
+				segIdx.IndexState == commonpb.IndexState_InProgress ||
+				segIdx.IndexState == commonpb.IndexState_Retry {
+				log.Info("skip GC segment index since index task is not terminal",
+					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Int64("partitionID", segIdx.PartitionID),
+					zap.Int64("segmentID", segIdx.SegmentID),
+					zap.Int64("indexID", segIdx.IndexID),
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.String("state", segIdx.IndexState.String()))
+				continue
+			}
 			indexFiles := gc.getAllIndexFilesOfIndex(segIdx)
+			// Empty indexFiles is valid for fake-finished small/no-train indexes.
+			// removeObjectFiles is a no-op in that case; the stale meta still needs
+			// to be removed when its segment or field index is gone.
 			log := log.With(zap.Int64("collectionID", segIdx.CollectionID),
 				zap.Int64("partitionID", segIdx.PartitionID),
 				zap.Int64("segmentID", segIdx.SegmentID),
@@ -1331,6 +1355,19 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 			log.Info("index meta recycle success")
 		}
 	}
+}
+
+// getLatestSegmentIndexForGC takes a SegmentIndex candidate from GC scanning and
+// returns the latest SegmentIndex meta for the same buildID. The bool return
+// value is false when the candidate is nil or the buildID no longer exists.
+func (gc *garbageCollector) getLatestSegmentIndexForGC(candidate *model.SegmentIndex) (*model.SegmentIndex, bool) {
+	if candidate == nil {
+		return nil, false
+	}
+	if gc.meta == nil || gc.meta.indexMeta == nil || gc.meta.indexMeta.segmentBuildInfo == nil {
+		return candidate, true
+	}
+	return gc.meta.indexMeta.GetIndexJob(candidate.BuildID)
 }
 
 // recycleUnusedIndexFilesV0 deletes orphan files under the legacy v0 index_files prefix.

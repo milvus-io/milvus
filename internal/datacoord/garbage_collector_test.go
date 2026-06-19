@@ -623,6 +623,166 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		defer mockIsBuildIDBlocked.UnPatch()
 		gc.recycleUnusedSegIndexes(context.TODO(), nil)
 	})
+
+	t.Run("uses latest segment index when candidate is stale", func(t *testing.T) {
+		const (
+			collID  = UniqueID(100)
+			partID  = UniqueID(200)
+			segID   = UniqueID(300)
+			indexID = UniqueID(400)
+			buildID = UniqueID(2000)
+		)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndex(mock.Anything, collID, partID, segID, buildID).Return(nil)
+
+		meta := &meta{
+			segments: NewSegmentsInfo(),
+			indexMeta: &indexMeta{
+				catalog:          catalog,
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				keyLock:          lock.NewKeyLock[UniqueID](),
+			},
+		}
+		meta.snapshotMeta = &snapshotMeta{}
+		latest := &model.SegmentIndex{
+			SegmentID:             segID,
+			CollectionID:          collID,
+			PartitionID:           partID,
+			IndexID:               indexID,
+			BuildID:               buildID,
+			NodeID:                1,
+			IndexVersion:          1,
+			IndexStorePathVersion: 1,
+			IndexState:            commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"file1", "file2"},
+		}
+		meta.indexMeta.segmentBuildInfo.Add(latest)
+		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdxes.Insert(indexID, latest)
+		meta.indexMeta.segmentIndexes.Insert(segID, segIdxes)
+
+		stale := model.CloneSegmentIndex(latest)
+		stale.IndexState = commonpb.IndexState_InProgress
+		stale.IndexFileKeys = nil
+		mockAll := mockey.Mock((*indexMeta).GetAllSegIndexes).To(func(*indexMeta) map[int64]*model.SegmentIndex {
+			return map[int64]*model.SegmentIndex{buildID: stale}
+		}).Build()
+		defer mockAll.UnPatch()
+
+		mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().Remove(mock.Anything, "root/index_v1/100/200/300/2000/1/file1").Return(nil)
+		cm.EXPECT().Remove(mock.Anything, "root/index_v1/100/200/300/2000/1/file2").Return(nil)
+
+		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
+
+		_, ok := meta.indexMeta.segmentBuildInfo.Get(buildID)
+		assert.False(t, ok)
+	})
+
+	t.Run("skip when latest segment index is still in progress", func(t *testing.T) {
+		const (
+			collID  = UniqueID(100)
+			partID  = UniqueID(200)
+			segID   = UniqueID(300)
+			indexID = UniqueID(400)
+			buildID = UniqueID(2000)
+		)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		meta := &meta{
+			segments: NewSegmentsInfo(),
+			indexMeta: &indexMeta{
+				catalog:          catalog,
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				keyLock:          lock.NewKeyLock[UniqueID](),
+			},
+		}
+		meta.snapshotMeta = &snapshotMeta{}
+		latest := &model.SegmentIndex{
+			SegmentID:             segID,
+			CollectionID:          collID,
+			PartitionID:           partID,
+			IndexID:               indexID,
+			BuildID:               buildID,
+			NodeID:                1,
+			IndexVersion:          1,
+			IndexStorePathVersion: 1,
+			IndexState:            commonpb.IndexState_InProgress,
+			IndexFileKeys:         []string{"file1"},
+		}
+		meta.indexMeta.segmentBuildInfo.Add(latest)
+
+		stale := model.CloneSegmentIndex(latest)
+		stale.IndexState = commonpb.IndexState_Finished
+		mockAll := mockey.Mock((*indexMeta).GetAllSegIndexes).To(func(*indexMeta) map[int64]*model.SegmentIndex {
+			return map[int64]*model.SegmentIndex{buildID: stale}
+		}).Build()
+		defer mockAll.UnPatch()
+
+		cm := mocks.NewChunkManager(t)
+		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
+
+		_, ok := meta.indexMeta.segmentBuildInfo.Get(buildID)
+		assert.True(t, ok)
+		catalog.AssertNotCalled(t, "DropSegmentIndex", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		cm.AssertNotCalled(t, "Remove", mock.Anything, mock.Anything)
+	})
+
+	t.Run("remove finished segment index meta without recorded files", func(t *testing.T) {
+		const (
+			collID  = UniqueID(100)
+			partID  = UniqueID(200)
+			segID   = UniqueID(300)
+			indexID = UniqueID(400)
+			buildID = UniqueID(2000)
+		)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropSegmentIndex(mock.Anything, collID, partID, segID, buildID).Return(nil)
+		meta := &meta{
+			segments: NewSegmentsInfo(),
+			indexMeta: &indexMeta{
+				catalog:          catalog,
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				keyLock:          lock.NewKeyLock[UniqueID](),
+			},
+		}
+		meta.snapshotMeta = &snapshotMeta{}
+		meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
+			SegmentID:             segID,
+			CollectionID:          collID,
+			PartitionID:           partID,
+			IndexID:               indexID,
+			BuildID:               buildID,
+			NodeID:                1,
+			IndexVersion:          1,
+			IndexStorePathVersion: 1,
+			IndexState:            commonpb.IndexState_Finished,
+			IndexFileKeys:         nil,
+		})
+
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+
+		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
+
+		_, ok := meta.indexMeta.segmentBuildInfo.Get(buildID)
+		assert.False(t, ok)
+	})
 }
 
 func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta {
