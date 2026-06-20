@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -176,6 +177,25 @@ func TestMemoryKV_MultiSaveBytesAndRemove(t *testing.T) {
 	_values, err := mem.MultiLoadBytes(context.TODO(), keys[1:])
 	assert.Equal(t, values[1:], _values)
 	assert.NoError(t, err)
+}
+
+func TestMemoryKV_MultiLoadMissingKey(t *testing.T) {
+	mem := NewMemoryKV()
+	assert.NoError(t, mem.MultiSave(context.TODO(), map[string]string{"present": "v"}))
+	assert.NoError(t, mem.MultiSaveBytes(context.TODO(), map[string][]byte{"present": []byte("v")}))
+
+	// A missing key must not panic. Like Load() and the etcd MetaKv
+	// implementation, MultiLoad fills a placeholder for the missing key and
+	// returns a key-not-found error.
+	values, err := mem.MultiLoad(context.TODO(), []string{"present", "missing"})
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrIoKeyNotFound))
+	assert.Equal(t, []string{"v", ""}, values)
+
+	bytesValues, err := mem.MultiLoadBytes(context.TODO(), []string{"present", "missing"})
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrIoKeyNotFound))
+	assert.Equal(t, [][]byte{[]byte("v"), {}}, bytesValues)
 }
 
 func TestMemoryKV_MultiSaveBytesAndRemoveWithPrefix(t *testing.T) {
