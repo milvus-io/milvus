@@ -8,6 +8,8 @@ See [Collection Messages](../message/message-semantic-collection.md) for per-mes
 
 Growing segments are sealed when any registered policy triggers. See `internal/streamingnode/server/wal/interceptors/shard/policy/seal_policy.go` for the full list of policies.
 
+Note: L1 (normal insert) segments seal on **size only** — the row threshold is disabled (`SegmentRows = math.MaxUint64` in `segment_limitation_policy.go`); only L0 (delete) segments enforce both a row and a size limit (`FlushL0MaxRowNum` / `FlushL0MaxSize`).
+
 ## Key Packages
 
 - `internal/streamingnode/server/wal/interceptors/shard/` — Shard interceptor, `ShardManager`, seal policies, segment stats
