@@ -135,6 +135,10 @@ class MilvusConan(ConanFile):
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
         self.requires("lz4/1.10.0#982d9b673900f665a1da109e09c17cab", force=True)
+        # Pin rapidjson to the newest cci snapshot. Arrow 17 pulls an older
+        # rapidjson transitively, which fails to compile under clang 19 (libc++ 19).
+        # force=True overrides Arrow's transitive version.
+        self.requires("rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True)
         if self.settings.os == "Linux":
             self.requires("openblas/0.3.30")
         if self.settings.os != "Macos":
