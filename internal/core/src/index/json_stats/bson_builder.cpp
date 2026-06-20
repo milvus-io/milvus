@@ -14,30 +14,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <bson/bson.h>
 #include <simdjson.h>
 #include "common/FastMem.h"
 #include <string.h>
-#include <algorithm>
 #include <cstdint>
 #include <exception>
-#include <iostream>
 #include <map>
 #include <string>
 #include <string_view>
-#include <tuple>
-#include <type_traits>
+#include <utility>
 #include <vector>
 
-#include "bsoncxx/array/value.hpp"
-#include "bsoncxx/array/view.hpp"
-#include "bsoncxx/builder/basic/array.hpp"
-#include "bsoncxx/builder/basic/document.hpp"
-#include "bsoncxx/builder/basic/kvp.hpp"
-#include "bsoncxx/document/value.hpp"
-#include "bsoncxx/types.hpp"
-#include "bsoncxx/types/bson_value/value.hpp"
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
+#include "common/bson_shim.h"
 #include "glog/logging.h"
 #include "index/json_stats/bson_builder.h"
 #include "log/Log.h"
@@ -51,88 +42,74 @@ namespace milvus::index {
 
 namespace {
 
-using bsoncxx::builder::basic::kvp;
-
+// Append a simdjson DOM element to a libbson document/array target under the
+// given key (for arrays the key is the stringified index).
 void
-AppendDomElementToBsonArray(simdjson::dom::element elem,
-                            bsoncxx::builder::basic::array& out);
-
-void
-AppendDomElementToBsonDocument(simdjson::dom::element elem,
-                               std::string_view key,
-                               bsoncxx::builder::basic::document& out) {
+AppendJsonElementToBson(simdjson::dom::element elem,
+                        bson_t* out,
+                        const char* key,
+                        int key_len) {
     using simdjson::dom::element_type;
 
     auto type = elem.type();
-    if (type == element_type::STRING) {
-        std::string s(std::string_view(elem.get_string()));
-        out.append(kvp(std::string(key), std::move(s)));
-    } else if (type == element_type::INT64) {
-        out.append(kvp(std::string(key), int64_t(elem.get_int64())));
-    } else if (type == element_type::UINT64) {
-        out.append(kvp(std::string(key), double(elem.get_uint64())));
-    } else if (type == element_type::DOUBLE) {
-        out.append(kvp(std::string(key), elem.get_double()));
-    } else if (type == element_type::BOOL) {
-        out.append(kvp(std::string(key), bool(elem.get_bool())));
-    } else if (type == element_type::NULL_VALUE) {
-        out.append(kvp(std::string(key), bsoncxx::types::b_null{}));
-    } else if (type == element_type::OBJECT) {
-        bsoncxx::builder::basic::document sub;
-        for (auto [k, v] : elem.get_object()) {
-            AppendDomElementToBsonDocument(v, k, sub);
+    switch (type) {
+        case element_type::STRING: {
+            auto sv = std::string_view(elem.get_string());
+            bson_append_utf8(
+                out, key, key_len, sv.data(), static_cast<int>(sv.size()));
+            break;
         }
-        out.append(kvp(std::string(key), sub.extract()));
-    } else if (type == element_type::ARRAY) {
-        bsoncxx::builder::basic::array subarr;
-        for (simdjson::dom::element v : elem.get_array()) {
-            AppendDomElementToBsonArray(v, subarr);
+        case element_type::INT64:
+            bson_append_int64(out, key, key_len, int64_t(elem.get_int64()));
+            break;
+        case element_type::UINT64:
+            bson_append_double(out, key, key_len, double(elem.get_uint64()));
+            break;
+        case element_type::DOUBLE:
+            bson_append_double(out, key, key_len, double(elem.get_double()));
+            break;
+        case element_type::BOOL:
+            bson_append_bool(out, key, key_len, bool(elem.get_bool()));
+            break;
+        case element_type::NULL_VALUE:
+            bson_append_null(out, key, key_len);
+            break;
+        case element_type::OBJECT: {
+            bson_t child;
+            bson_append_document_begin(out, key, key_len, &child);
+            for (auto [k, v] : elem.get_object()) {
+                AppendJsonElementToBson(
+                    v, &child, k.data(), static_cast<int>(k.size()));
+            }
+            bson_append_document_end(out, &child);
+            break;
         }
-        out.append(kvp(std::string(key), subarr.extract()));
-    } else {
-        out.append(kvp(std::string(key), bsoncxx::types::b_null{}));
+        case element_type::ARRAY: {
+            bson_t child;
+            bson_append_array_begin(out, key, key_len, &child);
+            uint32_t i = 0;
+            char buf[16];
+            const char* idx_key = nullptr;
+            for (simdjson::dom::element v : elem.get_array()) {
+                size_t klen =
+                    bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
+                AppendJsonElementToBson(
+                    v, &child, idx_key, static_cast<int>(klen));
+                i++;
+            }
+            bson_append_array_end(out, &child);
+            break;
+        }
+        default:
+            bson_append_null(out, key, key_len);
+            break;
     }
 }
 
-void
-AppendDomElementToBsonArray(simdjson::dom::element elem,
-                            bsoncxx::builder::basic::array& out) {
-    using simdjson::dom::element_type;
-
-    auto type = elem.type();
-    if (type == element_type::STRING) {
-        out.append(std::string(std::string_view(elem.get_string())));
-    } else if (type == element_type::INT64) {
-        out.append(int64_t(elem.get_int64()));
-    } else if (type == element_type::UINT64) {
-        out.append(double(elem.get_uint64()));
-    } else if (type == element_type::DOUBLE) {
-        out.append(elem.get_double());
-    } else if (type == element_type::BOOL) {
-        out.append(bool(elem.get_bool()));
-    } else if (type == element_type::NULL_VALUE) {
-        out.append(bsoncxx::types::b_null{});
-    } else if (type == element_type::OBJECT) {
-        bsoncxx::builder::basic::document sub;
-        for (auto [k, v] : elem.get_object()) {
-            AppendDomElementToBsonDocument(v, k, sub);
-        }
-        out.append(sub.extract());
-    } else if (type == element_type::ARRAY) {
-        bsoncxx::builder::basic::array subarr;
-        for (simdjson::dom::element v : elem.get_array()) {
-            AppendDomElementToBsonArray(v, subarr);
-        }
-        out.append(subarr.extract());
-    } else {
-        out.append(bsoncxx::types::b_null{});
-    }
-}
 }  // namespace
 
-// Parse a JSON array string with simdjson and build an owning BSON array value
-bsoncxx::array::value
-BuildBsonArrayFromJsonString(const std::string& json_array) {
+std::vector<uint8_t>
+BuildBsonArrayBytesFromJsonString(const std::string& json_array) {
     simdjson::dom::parser parser;
     simdjson::dom::element root = parser.parse(json_array);
     if (root.type() != simdjson::dom::element_type::ARRAY) {
@@ -141,18 +118,20 @@ BuildBsonArrayFromJsonString(const std::string& json_array) {
                   json_array);
     }
 
-    bsoncxx::builder::basic::array out;
+    bson_t arr;
+    bson_init(&arr);
+    uint32_t i = 0;
+    char buf[16];
+    const char* idx_key = nullptr;
     for (simdjson::dom::element elem : root.get_array()) {
-        AppendDomElementToBsonArray(elem, out);
+        size_t klen = bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
+        AppendJsonElementToBson(elem, &arr, idx_key, static_cast<int>(klen));
+        i++;
     }
-    return out.extract();
-}
-
-std::vector<uint8_t>
-BuildBsonArrayBytesFromJsonString(const std::string& json_array) {
-    auto arr_value = BuildBsonArrayFromJsonString(json_array);
-    auto view = arr_value.view();
-    return std::vector<uint8_t>(view.data(), view.data() + view.length());
+    std::vector<uint8_t> out(bson_get_data(&arr),
+                             bson_get_data(&arr) + arr.len);
+    bson_destroy(&arr);
+    return out;
 }
 
 void
@@ -189,31 +168,46 @@ DomNode
 BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
     switch (type) {
         case JSONType::NONE: {
-            return DomNode(bsoncxx::types::b_null{});
+            DomScalar s;
+            s.type = JSONType::NONE;
+            return DomNode(std::move(s));
         }
         case JSONType::BOOL: {
-            bool b = (value == "true" || value == "1");
-            return DomNode(bsoncxx::types::b_bool{b});
+            DomScalar s;
+            s.type = JSONType::BOOL;
+            s.b = (value == "true" || value == "1");
+            return DomNode(std::move(s));
         }
         case JSONType::INT32: {
-            int32_t i = std::stoi(value);
-            return DomNode(bsoncxx::types::b_int32{i});
+            DomScalar s;
+            s.type = JSONType::INT32;
+            s.i32 = std::stoi(value);
+            return DomNode(std::move(s));
         }
         case JSONType::INT64: {
-            int64_t l = std::stoll(value);
-            return DomNode(bsoncxx::types::b_int64{l});
+            DomScalar s;
+            s.type = JSONType::INT64;
+            s.i64 = std::stoll(value);
+            return DomNode(std::move(s));
         }
         case JSONType::DOUBLE: {
-            double d = std::stod(value);
-            return DomNode(bsoncxx::types::b_double{d});
+            DomScalar s;
+            s.type = JSONType::DOUBLE;
+            s.d = std::stod(value);
+            return DomNode(std::move(s));
         }
         case JSONType::STRING: {
-            return DomNode(bsoncxx::types::b_string{value});
+            DomScalar s;
+            s.type = JSONType::STRING;
+            s.str = value;
+            return DomNode(std::move(s));
         }
         case JSONType::ARRAY: {
             try {
-                auto arr_value = BuildBsonArrayFromJsonString(value);
-                return DomNode(bsoncxx::types::b_array{arr_value.view()});
+                DomScalar s;
+                s.type = JSONType::ARRAY;
+                s.arr_bytes = BuildBsonArrayBytesFromJsonString(value);
+                return DomNode(std::move(s));
             } catch (const simdjson::simdjson_error& e) {
                 ThrowInfo(
                     ErrorCode::UnexpectedError,
@@ -241,19 +235,56 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
 }
 
 void
-BsonBuilder::ConvertDomToBson(const DomNode& node,
-                              bsoncxx::builder::basic::document& builder) {
+BsonBuilder::ConvertDomToBson(const DomNode& node, bson_t* builder) {
     for (const auto& [key, child] : node.document_children) {
+        const char* k = key.c_str();
+        const int klen = static_cast<int>(key.size());
         switch (child.type) {
             case DomNode::Type::VALUE: {
-                builder.append(bsoncxx::builder::basic::kvp(
-                    key, child.bson_value.value()));
+                const DomScalar& s = child.value.value();
+                switch (s.type) {
+                    case JSONType::NONE:
+                        bson_append_null(builder, k, klen);
+                        break;
+                    case JSONType::BOOL:
+                        bson_append_bool(builder, k, klen, s.b);
+                        break;
+                    case JSONType::INT32:
+                        bson_append_int32(builder, k, klen, s.i32);
+                        break;
+                    case JSONType::INT64:
+                        bson_append_int64(builder, k, klen, s.i64);
+                        break;
+                    case JSONType::DOUBLE:
+                        bson_append_double(builder, k, klen, s.d);
+                        break;
+                    case JSONType::STRING:
+                        bson_append_utf8(builder,
+                                         k,
+                                         klen,
+                                         s.str.data(),
+                                         static_cast<int>(s.str.size()));
+                        break;
+                    case JSONType::ARRAY: {
+                        bson_t arr;
+                        if (bson_init_static(
+                                &arr, s.arr_bytes.data(), s.arr_bytes.size())) {
+                            bson_append_array(builder, k, klen, &arr);
+                        }
+                        break;
+                    }
+                    default:
+                        ThrowInfo(ErrorCode::Unsupported,
+                                  "Unsupported scalar JSON type {}",
+                                  static_cast<int>(s.type));
+                }
                 break;
             }
             case DomNode::Type::DOCUMENT: {
-                bsoncxx::builder::basic::document sub_doc;
-                ConvertDomToBson(child, sub_doc);
-                builder.append(bsoncxx::builder::basic::kvp(key, sub_doc));
+                bson_t child_doc;
+                bson_append_document_begin(builder, k, klen, &child_doc);
+                ConvertDomToBson(child, &child_doc);
+                bson_append_document_end(builder, &child_doc);
                 break;
             }
             default: {
@@ -284,7 +315,7 @@ BsonBuilder::ExtractOffsetsRecursive(
         size_t key_offset = ptr - root_base_ptr;
 
         // read key type
-        auto type = static_cast<bsoncxx::type>(*ptr++);
+        auto type = static_cast<milvus::bson::type>(*ptr++);
 
         // read key
         auto key_name = reinterpret_cast<const char*>(ptr);
@@ -295,13 +326,13 @@ BsonBuilder::ExtractOffsetsRecursive(
 
         // do not record key offset pair for null value
         // because null value is not a valid key
-        if (type != bsoncxx::type::k_null) {
+        if (type != milvus::bson::type::k_null) {
             result.emplace_back(key_path, key_offset);
         }
 
         // handle value
         switch (type) {
-            case bsoncxx::type::k_document: {
+            case milvus::bson::type::k_document: {
                 ExtractOffsetsRecursive(root_base_ptr, ptr, key_path, result);
                 // skip sub doc
                 uint32_t child_len;
@@ -309,7 +340,7 @@ BsonBuilder::ExtractOffsetsRecursive(
                 ptr += child_len;
                 break;
             }
-            case bsoncxx::type::k_array: {
+            case milvus::bson::type::k_array: {
                 // not parse array
                 // skip sub doc
                 uint32_t child_len;
@@ -317,29 +348,29 @@ BsonBuilder::ExtractOffsetsRecursive(
                 ptr += child_len;
                 break;
             }
-            case bsoncxx::type::k_string: {
+            case milvus::bson::type::k_string: {
                 uint32_t str_len;
                 milvus::fastmem::FastMemcpy(&str_len, ptr, 4);
                 ptr += 4 + str_len;
                 break;
             }
-            case bsoncxx::type::k_int32: {
+            case milvus::bson::type::k_int32: {
                 ptr += 4;
                 break;
             }
-            case bsoncxx::type::k_int64: {
+            case milvus::bson::type::k_int64: {
                 ptr += 8;
                 break;
             }
-            case bsoncxx::type::k_double: {
+            case milvus::bson::type::k_double: {
                 ptr += 8;
                 break;
             }
-            case bsoncxx::type::k_bool: {
+            case milvus::bson::type::k_bool: {
                 ptr += 1;
                 break;
             }
-            case bsoncxx::type::k_null: {
+            case milvus::bson::type::k_null: {
                 break;
             }
             default: {

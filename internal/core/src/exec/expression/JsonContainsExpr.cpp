@@ -866,7 +866,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
 
             for (const auto& sub_value : array.value()) {
                 auto sub_array = milvus::BsonView::GetValueFromBsonView<
-                    bsoncxx::array::view>(sub_value.get_value());
+                    milvus::bson::array_view>(sub_value.get_value());
 
                 if (!sub_array.has_value())
                     continue;
@@ -1657,7 +1657,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                         }
                         case proto::plan::GenericValue::kArrayVal: {
                             auto val = milvus::BsonView::GetValueFromBsonView<
-                                bsoncxx::array::view>(sub_value.get_value());
+                                milvus::bson::array_view>(
+                                sub_value.get_value());
                             if (!val.has_value()) {
                                 continue;
                             }
@@ -1895,7 +1896,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             std::set<int> exist_elements_index;
             for (const auto& sub_value : array.value()) {
                 auto sub_array = milvus::BsonView::GetValueFromBsonView<
-                    bsoncxx::array::view>(sub_value.get_value());
+                    milvus::bson::array_view>(sub_value.get_value());
 
                 if (!sub_array.has_value())
                     continue;
@@ -2216,7 +2217,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                         }
                         case proto::plan::GenericValue::kArrayVal: {
                             auto val = milvus::BsonView::GetValueFromBsonView<
-                                bsoncxx::array::view>(sub_value.get_value());
+                                milvus::bson::array_view>(
+                                sub_value.get_value());
                             if (!val.has_value()) {
                                 continue;
                             }

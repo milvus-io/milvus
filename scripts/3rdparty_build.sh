@@ -141,7 +141,10 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     arm_crypto_flags=""
     if [[ "$(uname -m)" == "arm64" ]]; then
         # Homebrew LLVM needs ARM crypto enabled for libsodium armcrypto sources on macOS arm64.
-        arm_crypto_flags=" -march=armv8-a+crypto"
+        # +crc: Apple Silicon enables __ARM_FEATURE_CRC32 by default, so milvus core/knowhere
+        # compile folly's F14 hash table in SimdAndCrc mode. 3rdparty deps (folly) must match,
+        # else folly::f14::F14LinkCheck<mode> is undefined at link time.
+        arm_crypto_flags=" -march=armv8-a+crypto+crc"
     fi
     export CFLAGS="${CFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
     export CXXFLAGS="${CXXFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
