@@ -123,6 +123,9 @@ const (
 	ArithOpType_Div         ArithOpType = 4
 	ArithOpType_Mod         ArithOpType = 5
 	ArithOpType_ArrayLength ArithOpType = 6
+	ArithOpType_BitAnd      ArithOpType = 7
+	ArithOpType_BitOr       ArithOpType = 8
+	ArithOpType_BitXor      ArithOpType = 9
 )
 
 // Enum value maps for ArithOpType.
@@ -135,6 +138,9 @@ var (
 		4: "Div",
 		5: "Mod",
 		6: "ArrayLength",
+		7: "BitAnd",
+		8: "BitOr",
+		9: "BitXor",
 	}
 	ArithOpType_value = map[string]int32{
 		"Unknown":     0,
@@ -144,6 +150,9 @@ var (
 		"Div":         4,
 		"Mod":         5,
 		"ArrayLength": 6,
+		"BitAnd":      7,
+		"BitOr":       8,
+		"BitXor":      9,
 	}
 )
 

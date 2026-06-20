@@ -1138,6 +1138,16 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`15 + JSONField == 16`,
 		`Int64Field + (2**3) > 0`,
 		`1 + FloatField > 100`,
+		// bitwise operators on integer fields
+		`(Int64Field & 4) == 4`,
+		`(Int64Field & 4) != 0`,
+		`(Int32Field | 2) == 3`,
+		`(Int32Field | 2) != 0`,
+		`(Int64Field ^ 7) == 0`,
+		`(Int64Field ^ 7) != 5`,
+		`(Int8Field & 1) == 1`,
+		`(Int16Field | 8) >= 8`,
+		`(Int32Field ^ 15) < 16`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1156,6 +1166,10 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`Int64Field % 0 == 1`,
 		`FloatField / 0 == 1`,
 		`FloatField % 0 == 1`,
+		// bitwise ops on non-integer types are invalid
+		`(FloatField & 1) == 1`,
+		`(DoubleField | 2) == 3`,
+		`(FloatField ^ 4) == 0`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
