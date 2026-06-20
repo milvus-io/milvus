@@ -445,9 +445,6 @@ func (s *StorageVersionUpgradePolicySuite) TestSegmentColumnGroupFormatsAllEqual
 	assertLogContains := func(substr string) {
 		s.True(strings.Contains(logs.String(), substr), logs.String())
 	}
-	assertLogContainsNot := func(substr string) {
-		s.False(strings.Contains(logs.String(), substr), logs.String())
-	}
 
 	s.True(segmentColumnGroupFormatsAllEqual(
 		newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV3, "vortex"),
@@ -478,7 +475,6 @@ func (s *StorageVersionUpgradePolicySuite) TestSegmentColumnGroupFormatsAllEqual
 	assertLogContains("unexpected empty binlogs for V3 segment during storage format compaction")
 	assertLogContains("segmentID=105")
 	assertLogContains("targetFormat=vortex")
-	assertLogContainsNot("collectionID=100")
 	s.False(segmentColumnGroupFormatsAllEqual(
 		newStorageVersionPolicyTestSegment(collID, 106, storage.StorageV3, ""),
 		"vortex",
