@@ -4,6 +4,8 @@ package mlog
 
 import (
 	"context"
+	"io"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,6 +108,40 @@ func TestWithFieldsDoesNotMutateParent(t *testing.T) {
 	// Parent should still only have one field
 	parentFields := FieldsFromContext(parentCtx)
 	assert.Len(t, parentFields, 1)
+}
+
+func TestWithFieldsContextLoggerConcurrentUse(t *testing.T) {
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewJSONEncoder(zapcore.EncoderConfig{
+			MessageKey: "msg",
+			LevelKey:   "level",
+		}),
+		zapcore.AddSync(io.Discard),
+		zapcore.DebugLevel,
+	))
+	initForTest(logger)
+	defer resetLogger()
+
+	oldLevel := GetLevel()
+	SetLevel(DebugLevel)
+	defer SetLevel(oldLevel)
+
+	ctx := WithFields(context.Background(), String("module", "race-test"))
+
+	const workers = 32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			<-start
+			Debug(ctx, "concurrent context logger use", Int("worker", i))
+		}()
+	}
+	close(start)
+	wg.Wait()
 }
 
 func TestContextFieldHelpers(t *testing.T) {

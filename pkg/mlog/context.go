@@ -40,9 +40,9 @@ func (lc *logContext) withFields(ctx context.Context, fields []Field) context.Co
 
 	var newLogger *zap.Logger
 	if lc.logger != nil {
-		newLogger = lc.logger.WithLazy(fields...)
+		newLogger = lc.logger.With(fields...)
 	} else {
-		newLogger = getLogger().WithLazy(newFields...)
+		newLogger = getLogger().With(newFields...)
 	}
 
 	return context.WithValue(ctx, fieldsKey, &logContext{
