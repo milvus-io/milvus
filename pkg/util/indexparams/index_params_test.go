@@ -470,6 +470,14 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams[common.DimKey] = "ddd"
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
+		indexParams = make(map[string]string)
+		indexParams[common.DimKey] = "128"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
+		indexParams[PQCodeBudgetRatioKey] = "0.125"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
+		IsConfigableIndexParam(PQCodeBudgetRatioKey)
 	})
 
 	t.Run("set disk index load params without auto index param", func(t *testing.T) {
