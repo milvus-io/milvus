@@ -172,6 +172,12 @@ func TestDiskIndexParams(t *testing.T) {
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str2))
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.Error(t, err)
+		indexParams[common.IndexTypeKey] = "DISKANN"
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, "")
+		str, _ = json.Marshal(indexParams)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
 	})
 
 	t.Run("fill AISAQ index params with auto index", func(t *testing.T) {
@@ -475,6 +481,14 @@ func TestDiskIndexParams(t *testing.T) {
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
 		indexParams[PQCodeBudgetRatioKey] = "0.125"
+		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
+		indexParams = make(map[string]string)
+		indexParams[DiskPQCodeBudgetRatioKey] = "0.2"
+		indexParams[PQCodeBudgetRatioKey] = "0.125"
+		indexParams[NumBuildThreadRatioKey] = "aaa"
+		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
 		IsConfigableIndexParam(PQCodeBudgetRatioKey)
