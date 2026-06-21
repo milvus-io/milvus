@@ -68,6 +68,7 @@ const (
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
 	IndexHNSW            = "HNSW"
 	IndexSparseWand      = "SPARSE_WAND"
+	IndexDISKANN         = "DISKANN"
 
 	nlist               = 100
 	m                   = 4
