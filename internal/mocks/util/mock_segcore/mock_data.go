@@ -89,6 +89,8 @@ const (
 	dimKey         = common.DimKey
 	maxDegree      = 56
 	searchListSize = 100
+	numBuildThread = 2
+	numLoadThread  = 2
 
 	defaultLocalStorage = "/tmp/milvus_test/querynode"
 )
@@ -1034,6 +1036,8 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 	case IndexDISKANN:
 		indexParams["max_degree"] = strconv.Itoa(maxDegree)
 		indexParams["search_list_size"] = strconv.Itoa(searchListSize)
+		indexParams["num_build_thread"] = strconv.Itoa(numBuildThread)
+		indexParams["num_load_thread"] = strconv.Itoa(numLoadThread)
 	default:
 		panic("")
 	}
