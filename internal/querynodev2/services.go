@@ -591,9 +591,41 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
 	if err != nil {
 		log.Warn(ctx, "failed to update schema", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
+	infos := node.collectLoadedSealedSegmentLoadInfos(req.GetCollectionID())
+	if len(infos) == 0 {
+		return merr.Success(), nil
+	}
+
+	err = node.loader.ReopenSegments(ctx, infos)
+	if err != nil {
+		log.Warn(ctx, "failed to reopen loaded segments after schema update",
+			mlog.Int("segmentNum", len(infos)),
+			mlog.Err(err),
+		)
 	}
 
 	return merr.Status(err), nil
+}
+
+func (node *QueryNode) collectLoadedSealedSegmentLoadInfos(collectionID int64) []*querypb.SegmentLoadInfo {
+	loaded := node.manager.Segment.GetBy(
+		segments.WithType(segments.SegmentTypeSealed),
+		segments.WithoutLevel(datapb.SegmentLevel_L0),
+	)
+
+	infos := make([]*querypb.SegmentLoadInfo, 0, len(loaded))
+	for _, segment := range loaded {
+		if segment.Collection() != collectionID {
+			continue
+		}
+		if info := segment.LoadInfo(); info != nil {
+			infos = append(infos, info)
+		}
+	}
+	return infos
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode
