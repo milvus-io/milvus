@@ -70,6 +70,7 @@ set(MILVUS_TEST_FILES
         TextLobSpilloverTest.cpp
         test_commit_timestamp.cpp
         test_schema_reopen.cpp
+        test_growing_concurrent_reopen.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
