@@ -86,14 +86,7 @@ const (
 	DefaultDim        = 128
 	defaultMetricType = metric.L2
 
-	dimKey            = common.DimKey
-	maxDegree         = 56
-	searchListSize    = 100
-	numBuildThread    = 2
-	numLoadThread     = 2
-	buildDRAMBudgetGB = 2
-	pqCodeBudgetGB    = 0.001
-
+	dimKey              = common.DimKey
 	defaultLocalStorage = "/tmp/milvus_test/querynode"
 )
 
@@ -1035,13 +1028,6 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["nbits"] = strconv.Itoa(nbits)
 	case IndexFaissBinIDMap:
 		// indexParams[common.DimKey] = strconv.Itoa(defaultDim)
-	case IndexDISKANN:
-		indexParams["max_degree"] = strconv.Itoa(maxDegree)
-		indexParams["search_list_size"] = strconv.Itoa(searchListSize)
-		indexParams["num_build_thread"] = strconv.Itoa(numBuildThread)
-		indexParams["num_load_thread"] = strconv.Itoa(numLoadThread)
-		indexParams["build_dram_budget_gb"] = strconv.Itoa(buildDRAMBudgetGB)
-		indexParams["pq_code_budget_gb"] = strconv.FormatFloat(pqCodeBudgetGB, 'f', -1, 64)
 	default:
 		panic("")
 	}
