@@ -603,10 +603,10 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 	assert.False(t, result)
 }
 
-// TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced verifies that only ready delegators
-// are included in the sync operation. This test specifically validates the fix for the bug where
-// all delegators (including non-ready ones) were being added to readyDelegatorsInReplica.
-func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
+// TestShouldUpdateCurrentTarget_PartialReplicaReadinessDoesNotSync verifies that
+// NextTarget readiness is a prepare phase only. A ready delegator must not receive
+// SyncTargetVersion until every required delegator is ready.
+func TestShouldUpdateCurrentTarget_PartialReplicaReadinessDoesNotSync(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	collectionID := int64(1000)
@@ -669,16 +669,6 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	// Return segments for CheckSegmentDataReady
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(targetSegments).Maybe()
 
-	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-
-	// Track which nodes receive SyncDistribution calls
-	syncedNodes := make([]int64, 0)
-	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
-			syncedNodes = append(syncedNodes, nodeID)
-			return merr.Success(), nil
-		}).Maybe()
-
 	// Node 1: READY delegator
 	// - Has the target segment loaded (segment 100)
 	// - CheckDelegatorDataReady will return nil (ready)
@@ -729,15 +719,39 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	// Execute the function under test
 	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
 
-	// Verify the result is true (at least one ready delegator exists)
-	assert.True(t, result)
+	assert.False(t, result)
+	cluster.AssertNotCalled(t, "SyncDistribution", mock.Anything, mock.Anything, mock.Anything)
+	broker.AssertNotCalled(t, "ListIndexes", mock.Anything, mock.Anything)
+}
 
-	// Verify that ONLY node 1 received SyncDistribution call
-	// This is the key assertion: if the bug existed (using delegatorList instead of readyDelegatorsInChannel),
-	// node 2 would also receive a SyncDistribution call
-	assert.Equal(t, 1, len(syncedNodes), "Expected only 1 SyncDistribution call for the ready delegator")
-	assert.Contains(t, syncedNodes, int64(1), "Expected node 1 (ready delegator) to receive SyncDistribution")
-	assert.NotContains(t, syncedNodes, int64(2), "Node 2 (not ready delegator) should NOT receive SyncDistribution")
+func TestShouldUpdateNextTarget_DoesNotExpireAfterDelegatorSyncStarted(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	nextVersion := int64(100)
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+
+	targetMgr := meta.NewMockTargetManager(t)
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	observer := NewTargetObserver(
+		&meta.Meta{},
+		targetMgr,
+		distMgr,
+		meta.NewMockBroker(t),
+		session.NewMockCluster(t),
+		nodeMgr,
+	)
+
+	observer.nextTargetLastUpdate.Insert(collectionID, time.Now().Add(-time.Hour))
+	observer.nextTargetSyncStarted.Insert(collectionID, nextVersion)
+	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, collectionID).Return(true).Once()
+	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(nextVersion).Once()
+
+	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
 }
 
 // TestShouldUpdateCurrentTarget_AllChannelsSynced tests that shouldUpdateCurrentTarget returns true

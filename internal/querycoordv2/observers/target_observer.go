@@ -86,9 +86,12 @@ type TargetObserver struct {
 	initChan chan initRequest
 	// nextTargetLastUpdate map[int64]time.Time
 	nextTargetLastUpdate *typeutil.ConcurrentMap[int64, time.Time]
-	updateChan           chan targetUpdateRequest
-	mut                  sync.Mutex                // Guard readyNotifiers
-	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
+	// nextTargetSyncStarted records the NextTarget version after the observer
+	// enters SyncTargetVersion commit phase for a collection.
+	nextTargetSyncStarted *typeutil.ConcurrentMap[int64, int64]
+	updateChan            chan targetUpdateRequest
+	mut                   sync.Mutex                // Guard readyNotifiers
+	readyNotifiers        map[int64][]chan struct{} // CollectionID -> Notifiers
 
 	// loadingDispatcher updates targets for collections that are loading (also collections without a current target).
 	loadingDispatcher *taskDispatcher[int64]
@@ -110,17 +113,18 @@ func NewTargetObserver(
 	nodeMgr *session.NodeManager,
 ) *TargetObserver {
 	result := &TargetObserver{
-		meta:                 meta,
-		targetMgr:            targetMgr,
-		distMgr:              distMgr,
-		broker:               broker,
-		cluster:              cluster,
-		nodeMgr:              nodeMgr,
-		nextTargetLastUpdate: typeutil.NewConcurrentMap[int64, time.Time](),
-		updateChan:           make(chan targetUpdateRequest, 10),
-		readyNotifiers:       make(map[int64][]chan struct{}),
-		initChan:             make(chan initRequest),
-		keylocks:             lock.NewKeyLock[int64](),
+		meta:                  meta,
+		targetMgr:             targetMgr,
+		distMgr:               distMgr,
+		broker:                broker,
+		cluster:               cluster,
+		nodeMgr:               nodeMgr,
+		nextTargetLastUpdate:  typeutil.NewConcurrentMap[int64, time.Time](),
+		nextTargetSyncStarted: typeutil.NewConcurrentMap[int64, int64](),
+		updateChan:            make(chan targetUpdateRequest, 10),
+		readyNotifiers:        make(map[int64][]chan struct{}),
+		initChan:              make(chan initRequest),
+		keylocks:              lock.NewKeyLock[int64](),
 	}
 
 	result.loadingDispatcher = newTaskDispatcher(result.check)
@@ -400,6 +404,7 @@ func (ob *TargetObserver) clean() {
 	ob.nextTargetLastUpdate.Range(func(collectionID int64, _ time.Time) bool {
 		if !collectionSet.Contain(collectionID) {
 			ob.nextTargetLastUpdate.Remove(collectionID)
+			ob.nextTargetSyncStarted.Remove(collectionID)
 		}
 		return true
 	})
@@ -417,7 +422,14 @@ func (ob *TargetObserver) clean() {
 }
 
 func (ob *TargetObserver) shouldUpdateNextTarget(ctx context.Context, collectionID int64) bool {
-	return !ob.targetMgr.IsNextTargetExist(ctx, collectionID) || ob.isNextTargetExpired(collectionID)
+	if !ob.targetMgr.IsNextTargetExist(ctx, collectionID) {
+		return true
+	}
+	if !ob.isNextTargetExpired(collectionID) {
+		return false
+	}
+
+	return !ob.isNextTargetSyncStarted(ctx, collectionID)
 }
 
 func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
@@ -439,11 +451,29 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 		return err
 	}
 	ob.updateNextTargetTimestamp(collectionID)
+	ob.nextTargetSyncStarted.Remove(collectionID)
 	return nil
 }
 
 func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 	ob.nextTargetLastUpdate.Insert(collectionID, time.Now())
+}
+
+func (ob *TargetObserver) isNextTargetSyncStarted(ctx context.Context, collectionID int64) bool {
+	nextVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	if nextVersion <= 0 {
+		return false
+	}
+	if startedVersion, ok := ob.nextTargetSyncStarted.Get(collectionID); ok && startedVersion == nextVersion {
+		return true
+	}
+
+	delegators := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID))
+	return lo.ContainsBy(delegators, func(delegator *meta.DmChannel) bool {
+		return delegator != nil &&
+			delegator.View != nil &&
+			delegator.View.TargetVersion == nextVersion
+	})
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
@@ -486,38 +516,52 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		return (newVersion == channel.View.TargetVersion && channel.IsServiceable()) || dataReadyForNextTarget
 	}
 
-	// Iterate through each replica to check if all its delegators are ready.
-	// this approach ensures each replica has at least one ready delegator for every channel.
-	// This prevents the issue where some replicas may lack nodes during dynamic replica scaling,
-	// while the total count still meets the threshold.
-	readyDelegatorsInCollection := make([]*meta.DmChannel, 0)
 	replicas := ob.meta.GetByCollection(ctx, collectionID)
-	for _, replica := range replicas {
-		readyDelegatorsInReplica := make([]*meta.DmChannel, 0)
-		for channel := range channelNames {
-			// Filter delegators by replica to ensure we only check delegators belonging to this replica
-			delegatorList := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(channel))
-			readyDelegatorsInChannel := lo.Filter(delegatorList, func(ch *meta.DmChannel, _ int) bool {
-				return checkDelegatorDataReady(replica, ch)
-			})
-
-			if len(readyDelegatorsInChannel) > 0 {
-				readyDelegatorsInReplica = append(readyDelegatorsInReplica, readyDelegatorsInChannel...)
-			}
-		}
-		readyDelegatorsInCollection = append(readyDelegatorsInCollection, readyDelegatorsInReplica...)
-	}
-
-	syncSuccess := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsInCollection, newVersion)
-	syncedChannelNames := lo.Uniq(lo.Map(readyDelegatorsInCollection, func(ch *meta.DmChannel, _ int) string { return ch.ChannelName }))
-	// only after all channel are synced, we can consider the current target is ready
-	if !syncSuccess || !lo.Every(syncedChannelNames, lo.Keys(channelNames)) {
+	if len(replicas) == 0 {
 		return false
 	}
 
-	// segment data satisfies next target spec
-	return !paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() ||
-		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) == nil
+	// Prepare phase: verify all required replica/channel delegators are ready
+	// before SyncTargetVersion changes any readable view. This prevents a
+	// partially-synced NextTarget from being discarded later as an orphan.
+	readyDelegatorsToSync := make([]*meta.DmChannel, 0)
+	for _, replica := range replicas {
+		for channel := range channelNames {
+			// Filter delegators by replica to ensure we only check delegators belonging to this replica
+			delegatorList := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(channel))
+			if len(delegatorList) == 0 {
+				return false
+			}
+			for _, delegator := range delegatorList {
+				if delegator == nil || delegator.View == nil {
+					return false
+				}
+				if delegator.View.TargetVersion == newVersion && delegator.IsServiceable() {
+					continue
+				}
+				if checkDelegatorDataReady(replica, delegator) {
+					readyDelegatorsToSync = append(readyDelegatorsToSync, delegator)
+					continue
+				}
+				return false
+			}
+		}
+	}
+
+	// Collection-level segment readiness is the final prepare barrier. Do not
+	// sync readable views until the target can be promoted if sync succeeds.
+	if paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() &&
+		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) != nil {
+		return false
+	}
+
+	// Commit phase: once any delegator is synced to newVersion, updateNextTarget
+	// must not expire-replace this NextTarget. Later observer ticks will retry
+	// remaining delegators and then promote CurrentTarget.
+	if len(readyDelegatorsToSync) > 0 {
+		ob.nextTargetSyncStarted.Insert(collectionID, newVersion)
+	}
+	return ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsToSync, newVersion)
 }
 
 // sync next target info to delegator as readable snapshot
@@ -685,6 +729,7 @@ func (ob *TargetObserver) updateAllReplicasCheckpointMetric(ctx context.Context,
 func (ob *TargetObserver) updateCurrentTarget(ctx context.Context, collectionID int64) {
 	mlog.RatedInfo(ctx, rate.Limit(10), "observer trigger update current target", mlog.FieldCollectionID(collectionID))
 	if ob.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID) {
+		ob.nextTargetSyncStarted.Remove(collectionID)
 		ob.mut.Lock()
 		defer ob.mut.Unlock()
 		notifiers := ob.readyNotifiers[collectionID]
