@@ -71,8 +71,8 @@ type SplitShardResult struct {
 // ManualFlush is needed. The returned SwitchTimeTick is T_switch.
 //
 // The call is idempotent: a retry on an already-fenced source vchannel
-// returns ErrSourceVChannelFenced, and the caller recovers T_switch from its
-// persisted task state.
+// returns ErrSourceVChannelFenced together with a result carrying the recorded
+// T_switch, so the caller recovers T_switch even after a crash that lost it.
 func SplitShard(ctx context.Context, w WALAccesser, param SplitShardParam) (*SplitShardResult, error) {
 	if err := param.Validate(); err != nil {
 		return nil, err
@@ -92,8 +92,12 @@ func SplitShard(ctx context.Context, w WALAccesser, param SplitShardParam) (*Spl
 	}
 	splitResult, err := w.RawAppend(ctx, splitMsg)
 	if err != nil {
-		if status.AsStreamingError(err).IsShardFenced() {
-			return nil, errors.Wrapf(ErrSourceVChannelFenced, "%s", err.Error())
+		if streamErr := status.AsStreamingError(err); streamErr.IsShardFenced() {
+			// the source is already fenced by a previous split message; the
+			// streamingnode carries the recorded T_switch back on the error,
+			// so the caller still recovers T_switch even after a crash that
+			// lost the persisted value.
+			return &SplitShardResult{SwitchTimeTick: streamErr.FencedTimeTick}, errors.Wrapf(ErrSourceVChannelFenced, "%s", err.Error())
 		}
 		return nil, errors.Wrap(err, "append split shard message failed")
 	}

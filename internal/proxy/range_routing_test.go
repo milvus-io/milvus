@@ -246,7 +246,7 @@ func TestInsertTask_ShardFencedRefetch(t *testing.T) {
 	defer streaming.SetWALForTest(prevWAL)
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	fenced := types.NewAppendResponseN(1)
-	fenced.FillAllError(streamingstatus.NewShardFenced("vch0"))
+	fenced.FillAllError(streamingstatus.NewShardFenced("vch0", 0))
 	ok := types.NewAppendResponseN(1)
 	ok.FillAllResponse(types.AppendResponse{AppendResult: &types.AppendResult{TimeTick: 100}})
 	mockWAL.EXPECT().AppendMessages(mock.Anything, mock.Anything).Return(fenced).Once()

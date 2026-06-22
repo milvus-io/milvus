@@ -21,6 +21,11 @@ type ShardManager interface {
 	// has been fenced by shard split.
 	CheckIfVChannelCanBeWritten(collectionID int64) error
 
+	// GetSplitTimeTick returns T_switch (the time tick the collection's vchannel
+	// was fenced at by shard split), or 0 if the collection is unknown or not
+	// fenced. It is read on an already-fenced re-fence to recover T_switch.
+	GetSplitTimeTick(collectionID int64) uint64
+
 	// SplitShard marks the vchannel of the collection as splitted (fenced)
 	// when a SplitShard message is written into the wal. After it is called,
 	// any new DML on the vchannel is rejected forever.

@@ -71,9 +71,11 @@ func TestStreamingError(t *testing.T) {
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, pbErr.Code)
 
-	streamingErr = NewShardFenced("v1")
+	streamingErr = NewShardFenced("v1", 4242)
 	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_SHARD_FENCED, cause: v1 is fenced by shard split")
 	assert.True(t, streamingErr.IsShardFenced())
+	// T_switch is carried on the error for the split coordinator to recover.
+	assert.Equal(t, uint64(4242), streamingErr.FencedTimeTick)
 	assert.False(t, streamingErr.IsRoutingStale())
 	// the producer must not retry on the fenced vchannel,
 	// the error should be returned to the caller to refresh the routing table.

@@ -150,8 +150,9 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 
 // advanceFencing executes the write switch: it fences the source vchannel with
 // a single SplitShard message, then creates the target vchannels with a freshly
-// allocated barrier time tick (always greater than T_switch). DataCoord never
-// records T_switch; what it records is each target's consume start position.
+// allocated barrier time tick (always greater than T_switch). It records
+// T_switch on the task so the redistribution drain can gate on the source
+// channel checkpoint reaching it, and each target's consume start position.
 func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 	logger := m.taskLogger(task)
 	collection := m.meta.GetCollection(task.GetCollectionId())
@@ -187,11 +188,11 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 			logger.Warn("fence the source vchannel failed", zap.Error(err))
 			return
 		}
-		// On a fresh fence the result carries T_switch (the SplitShard message's
-		// time tick); record it so the redistribution drain can wait for the
-		// flusher to catch up to it. On an already-fenced retry the result is nil
-		// and T_switch stays 0 (the drain then falls back to the segment scan; a
-		// later increment recovers T_switch from the streamingnode on re-fence).
+		// Record T_switch (the SplitShard message's time tick) so the
+		// redistribution drain can wait for the flusher to catch up to it. A
+		// fresh fence carries it on the append result; an already-fenced retry
+		// carries the recorded T_switch back on the ShardFenced error, so a
+		// crash that lost the persisted value still recovers it on re-fence.
 		var switchTimeTick uint64
 		if result != nil {
 			switchTimeTick = result.SwitchTimeTick

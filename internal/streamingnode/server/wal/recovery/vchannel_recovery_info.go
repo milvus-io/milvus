@@ -215,6 +215,10 @@ func (info *vchannelRecoveryInfo) ObserveSplitShard(msg message.ImmutableSplitSh
 	}
 	info.meta.State = streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
 	info.meta.CheckpointTimeTick = msg.TimeTick()
+	// SplitTimeTick is T_switch and stays fixed at the fence, unlike
+	// CheckpointTimeTick which keeps advancing; it is read back on an
+	// already-fenced re-fence so the split coordinator recovers T_switch.
+	info.meta.SplitTimeTick = msg.TimeTick()
 	info.dirty = true
 }
 

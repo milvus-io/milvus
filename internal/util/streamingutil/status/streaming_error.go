@@ -202,8 +202,13 @@ func NewRateLimitRejected(format string, args ...interface{}) *StreamingError {
 }
 
 // NewShardFenced creates a new StreamingError with code STREAMING_CODE_SHARD_FENCED.
-func NewShardFenced(vchannel string) *StreamingError {
-	return New(streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, "%s is fenced by shard split", vchannel)
+// fencedTimeTick is T_switch (the time tick the vchannel was fenced at); it is 0
+// when unknown. The split coordinator reads it back from an already-fenced
+// re-fence to recover T_switch after a crash that lost the recorded value.
+func NewShardFenced(vchannel string, fencedTimeTick uint64) *StreamingError {
+	err := New(streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, "%s is fenced by shard split", vchannel)
+	err.FencedTimeTick = fencedTimeTick
+	return err
 }
 
 // NewRoutingStale creates a new StreamingError with code STREAMING_CODE_ROUTING_STALE.

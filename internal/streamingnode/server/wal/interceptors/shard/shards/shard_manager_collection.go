@@ -60,6 +60,18 @@ func (m *shardManagerImpl) CheckIfVChannelCanBeWritten(collectionID int64) error
 	return m.checkIfVChannelCanBeWritten(collectionID)
 }
 
+// GetSplitTimeTick returns T_switch (the time tick the collection's vchannel was
+// fenced at by shard split), or 0 if the collection is unknown or not fenced.
+func (m *shardManagerImpl) GetSplitTimeTick(collectionID int64) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if info, ok := m.collections[collectionID]; ok {
+		return info.SplitTimeTick
+	}
+	return 0
+}
+
 // checkIfVChannelCanBeWritten checks if the vchannel of the collection still accepts new DML.
 func (m *shardManagerImpl) checkIfVChannelCanBeWritten(collectionID int64) error {
 	collectionInfo, ok := m.collections[collectionID]
@@ -93,6 +105,9 @@ func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) 
 		return
 	}
 	collectionInfo.State = streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED
+	// record T_switch so an already-fenced re-fence can return it; the split
+	// coordinator recovers T_switch from here after a crash that lost it.
+	collectionInfo.SplitTimeTick = msg.TimeTick()
 	logger.Info("vchannel is fenced by shard split",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("splitTaskID", msg.Header().GetSplitTaskId()),

@@ -183,10 +183,11 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
 		}
 		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = &CollectionInfo{
-			VChannel:     vchannelInfo.Vchannel,
-			PartitionIDs: currentPartition,
-			Schema:       latestSchema,
-			State:        vchannelInfo.State,
+			VChannel:      vchannelInfo.Vchannel,
+			PartitionIDs:  currentPartition,
+			Schema:        latestSchema,
+			State:         vchannelInfo.State,
+			SplitTimeTick: vchannelInfo.GetSplitTimeTick(),
 		}
 	}
 	return collectionInfoMap
@@ -217,6 +218,10 @@ type CollectionInfo struct {
 	// VCHANNEL_STATE_SPLITTED means the vchannel is fenced by shard split
 	// and never accepts new DML again.
 	State streamingpb.VChannelState
+	// SplitTimeTick is T_switch: the time tick the vchannel was fenced at,
+	// set when State becomes SPLITTED. It is returned on an already-fenced
+	// re-fence so the split coordinator can recover T_switch after a crash.
+	SplitTimeTick uint64
 }
 
 // SchemaVersion returns the current collection schema version for the write path.

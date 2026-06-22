@@ -175,8 +175,9 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	schemaVersion := header.GetSchemaVersion()
 	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID); errors.Is(err, shards.ErrVChannelFenced) {
 		// the vchannel is fenced by shard split, the client should refresh
-		// the routing table and write to the new shards.
-		return nil, status.NewShardFenced(msg.VChannel())
+		// the routing table and write to the new shards. T_switch is not
+		// carried here: the DML client refreshes routing, it never reads it.
+		return nil, status.NewShardFenced(msg.VChannel(), 0)
 	}
 	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
 	if err != nil {
@@ -268,8 +269,9 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 	header := deleteMessage.Header()
 	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId()); errors.Is(err, shards.ErrVChannelFenced) {
 		// the vchannel is fenced by shard split, the client should refresh
-		// the routing table and write to the new shards.
-		return nil, status.NewShardFenced(msg.VChannel())
+		// the routing table and write to the new shards. T_switch is not
+		// carried here: the DML client refreshes routing, it never reads it.
+		return nil, status.NewShardFenced(msg.VChannel(), 0)
 	}
 	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
 		// The collection can not be deleted at current shard, ignored
@@ -291,9 +293,9 @@ func (impl *shardInterceptor) handleSplitShardMessage(ctx context.Context, msg m
 	if err := impl.shardManager.CheckIfVChannelCanBeWritten(collectionID); err != nil {
 		if errors.Is(err, shards.ErrVChannelFenced) {
 			// idempotent: the vchannel is already fenced by a previous split
-			// message, the split RPC interprets the error and returns the
-			// recorded T_switch.
-			return nil, status.NewShardFenced(msg.VChannel())
+			// message; carry the recorded T_switch back on the error so the
+			// split coordinator recovers it after a crash that lost it.
+			return nil, status.NewShardFenced(msg.VChannel(), impl.shardManager.GetSplitTimeTick(collectionID))
 		}
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
