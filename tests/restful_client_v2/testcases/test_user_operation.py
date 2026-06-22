@@ -36,22 +36,37 @@ class TestUserE2E(TestBase):
         # create user
         user_name = gen_unique_str("user")
         password = "1234578"
-        payload = {"userName": user_name, "password": password}
+        user_description = "rest user description"
+        updated_description = "rest updated user description"
+        payload = {"userName": user_name, "password": password, "description": user_description}
         rsp = self.user_client.user_create(payload)
-        # list user after create
-        rsp = self.user_client.user_list()
-        assert user_name in rsp["data"]
-        # describe user
-        rsp = self.user_client.user_describe(user_name)
-
-        # update user password
-        new_password = "87654321"
-        payload = {"userName": user_name, "password": password, "newPassword": new_password}
-        rsp = self.user_client.user_password_update(payload)
         assert rsp["code"] == 0
-        # drop user
-        payload = {"userName": user_name}
-        rsp = self.user_client.user_drop(payload)
+        try:
+            # list user after create
+            rsp = self.user_client.user_list()
+            assert user_name in rsp["data"]
+            # describe user
+            rsp = self.user_client.user_describe(user_name)
+            assert rsp["code"] == 0
+            assert rsp.get("description") == user_description
+
+            # update user password
+            new_password = "87654321"
+            payload = {
+                "userName": user_name,
+                "password": password,
+                "newPassword": new_password,
+                "description": updated_description,
+            }
+            rsp = self.user_client.user_password_update(payload)
+            assert rsp["code"] == 0
+            rsp = self.user_client.user_describe(user_name)
+            assert rsp["code"] == 0
+            assert rsp.get("description") == updated_description
+        finally:
+            # drop user
+            payload = {"userName": user_name}
+            self.user_client.user_drop(payload)
 
         rsp = self.user_client.user_list()
         assert user_name not in rsp["data"]
