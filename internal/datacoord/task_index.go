@@ -322,10 +322,10 @@ func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, s
 
 func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemapb.FieldSchema) (int64, error) {
 	if segment == nil {
-		return 0, errors.New("segment info is nil")
+		return 0, merr.WrapErrServiceInternalMsg("segment info is nil")
 	}
 	if field == nil {
-		return 0, errors.New("field schema is nil")
+		return 0, merr.WrapErrServiceInternalMsg("field schema is nil")
 	}
 	elementSize, err := vectorArrayElementSize(field)
 	if err != nil {
@@ -358,7 +358,7 @@ func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemap
 	}
 
 	if !seenFieldLog {
-		return 0, errors.Wrapf(errVectorArrayFieldBinlogNotFound, "fieldID=%d", field.GetFieldID())
+		return 0, merr.WrapErrServiceInternalErr(errVectorArrayFieldBinlogNotFound, "fieldID=%d", field.GetFieldID())
 	}
 	return totalPayloadBytes / elementSize, nil
 }
@@ -386,14 +386,14 @@ func fieldBinlogContainsField(fieldBinlog *datapb.FieldBinlog, fieldID int64) bo
 
 func vectorArrayElementSize(field *schemapb.FieldSchema) (int64, error) {
 	if field == nil {
-		return 0, errors.New("field schema is nil")
+		return 0, merr.WrapErrServiceInternalMsg("field schema is nil")
 	}
 	dim, err := storage.GetDimFromParams(field.GetTypeParams())
 	if err != nil {
-		return 0, errors.Wrapf(err, "invalid vector array dim, fieldID=%d", field.GetFieldID())
+		return 0, merr.WrapErrServiceInternalErr(err, "invalid vector array dim, fieldID=%d", field.GetFieldID())
 	}
 	if dim <= 0 {
-		return 0, errors.Newf("invalid vector array dim %d, fieldID=%d", dim, field.GetFieldID())
+		return 0, merr.WrapErrParameterInvalidMsg("invalid vector array dim %d, fieldID=%d", dim, field.GetFieldID())
 	}
 
 	switch field.GetElementType() {
@@ -406,7 +406,7 @@ func vectorArrayElementSize(field *schemapb.FieldSchema) (int64, error) {
 	case schemapb.DataType_Int8Vector:
 		return int64(dim), nil
 	default:
-		return 0, errors.Newf("unsupported vector array element type %s, fieldID=%d", field.GetElementType().String(), field.GetFieldID())
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported vector array element type %s, fieldID=%d", field.GetElementType().String(), field.GetFieldID())
 	}
 }
 
