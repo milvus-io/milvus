@@ -123,29 +123,31 @@ same transaction:
   shard (leaving the cold remainder as two ranges), and symmetrically to
   merge non-buddy hash shards. The flat single `lower/upper` form cannot
   express that. (Defined in milvus-proto #618; `model.ShardInfo` mirrors it.)
-- `etcdpb.CollectionInfo` gains `routing_version` (monotonically increased
-  by every routing change) and `routing_mode` (`Hash` for legacy
+- `etcdpb.CollectionInfo` gains `routing_mode` (`Hash` for legacy
   collections, `Range` for namespace collections subject to split).
 
 All new fields default to legacy-compatible zero values, so existing
 collections are unaffected. The in-memory routing table is *derived* from
 the collection meta; it is not persisted separately.
 
-### 3.3 Version negotiation
+### 3.3 Routing refresh on fence
 
-The proxy caches the routing table and attaches `routing_version` to write
-messages. The StreamingNode compares versions on append:
+There is no routing version on the write path. The proxy caches the routing
+table (derived from `DescribeCollection`) and routes each write directly to
+the owning shard's vchannel. When a write reaches a vchannel already fenced
+by a split, the StreamingNode's shard interceptor rejects it with
+`STREAMING_CODE_SHARD_FENCED` (the source vchannel is `Splitting`/`Dropped`).
+The proxy treats this as a stale-routing signal: it invalidates the cached
+collection meta, refetches `DescribeCollection`, re-resolves the write to the
+new owning shard, and retries. A single namespace write maps to exactly one
+shard, so the retry is all-or-nothing and cannot double-write. The refresh
+can race the routing commit (the new table may not be visible yet), so the
+retry is bounded with backoff; once the commit lands the refreshed table
+routes to the target and the loop terminates.
 
-- equal → process;
-- proxy older but the target shard is still `Normal` → process and return
-  the latest version;
-- target shard fenced → reject with `STREAMING_CODE_SHARD_FENCED`; the
-  response carries the routing version that contains the split, and the
-  proxy retries its refresh (with backoff) until its cached table reaches
-  that version — the reject→refresh loop terminates by construction
-  instead of bouncing off a not-yet-committed routing table;
-- stale version that can no longer be served → reject with
-  `STREAMING_CODE_ROUTING_STALE`.
+(`STREAMING_CODE_ROUTING_STALE` is defined alongside `SHARD_FENCED` for a
+future routing-version fast path, but is not on the implemented write path —
+the fence rejection above is the only signal the proxy acts on.)
 
 `SHARD_FENCED` is distinct from the existing `CHANNEL_FENCED`:
 `CHANNEL_FENCED` is term-based fencing of a pchannel, recovered by
@@ -330,13 +332,12 @@ interceptor chain.
    DataCoord persists into the collection meta — the same `StartPositions`
    field `CreateCollection` already populates.
 4. **Routing commit.** DataCoord commits the routing meta in one
-   transaction: the target shards become routable for writes and
-   `routing_version` is incremented.
-5. On rejection the proxy refreshes the routing table. The `SHARD_FENCED`
-   response carries the routing version that contains the split, and the
-   proxy retries the refresh (with backoff) until its cached table reaches
-   that version, then re-dispatches the writes in order — the
-   reject→refresh loop terminates by construction. Writes go directly to
+   transaction: the target shards become routable for writes.
+5. On rejection the proxy refreshes the routing table. A write to the fenced
+   source vchannel is rejected with `SHARD_FENCED`; the proxy invalidates its
+   cached collection meta, refetches it, re-resolves to the new owning shard
+   and retries (bounded with backoff, since the refresh can race the routing
+   commit), then re-dispatches the writes in order. Writes go directly to
    the new WALs from then on. The new shards are routable only after the
    routing/meta commit (the proxy cannot see a shard before its
    collection-meta write lands), so the write-unavailability window —
@@ -379,10 +380,10 @@ sequenceDiagram
     Note over SN0: handler auto-flushes growing + force-fails txns, vchannel0 fenced
     DC->>SNT: append CreateVChannel, barrier > T_switch (create == activate)
     SNT-->>DC: start position, persisted into collection meta
-    DC->>DC: routing commit: targets routable, routing_version++
+    DC->>DC: routing commit: targets routable
     PX->>SN0: write to old vchannel
-    SN0-->>PX: reject (SHARD_FENCED, expected routing_version)
-    PX->>SNT: refresh routing until version reached, write to WAL1/2
+    SN0-->>PX: reject (SHARD_FENCED)
+    PX->>SNT: invalidate cache, refetch routing, write to WAL1/2
     D0->>DC: consume SplitShard, RPC for target start positions
     D0->>D12: spawn children at fetched positions
     Note over D12: growing + deletes only, no sealed
@@ -541,8 +542,7 @@ sequenceDiagram
    flushed during the window were already loaded into delegator0's view as
    they appeared (§6.2, step 5).
 4. QueryCoord releases the source shard (draining in-flight queries
-   first), the routing version is bumped, and proxy caches are
-   invalidated. The split is complete.
+   first), and proxy caches are invalidated. The split is complete.
 
 ### 6.4 Release safety during redistribution
 
@@ -566,7 +566,7 @@ sequenceDiagram
         Note over DC: defense 2: GetRecoveryInfoV2(C0) returns the merged view<br/>(remaining C0 segments + already-relabeled ones)
         Note over QN: delegator0 distribution unchanged, S keeps serving
     end
-    DC->>META: final round: C1/C2 -> Normal, C0 -> Dropped, routing_version++ (one txn)
+    DC->>META: final round: C1/C2 -> Normal, C0 -> Dropped (one txn)
     DC->>QC: new shards visible
     QC->>QC: unfreeze, next target shows the complete C1/C2 segment lists
     QC->>QN: WatchDmChannel(C1/C2), recognize in-place children
@@ -786,7 +786,8 @@ by the namespace hard limit instead.
   no-op once the target vchannel exists (a fresh re-create still floors past
   `T_switch`). Target creation,
   routing commit and redistribution are all idempotent appends or metadata
-  transactions; routing versions never go backwards. DataCoord's only
+  transactions; shard states advance monotonically and never go backwards.
+  DataCoord's only
   persisted state is which FSM step it is on — and even that can be probed
   from the StreamingNode (is the source fenced? do the targets exist?). No
   `T_switch` value is captured, persisted, or recovered anywhere on the
