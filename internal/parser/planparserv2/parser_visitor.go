@@ -2268,17 +2268,28 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			FieldId:     field.FieldID,
 			DataType:    field.DataType,
 			ElementType: field.GetElementType(),
+			Nullable:    field.GetNullable(),
 		}
 	} else {
-		columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+		if ctx.Identifier() != nil {
+			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.Identifier().GetText()); ok || parentErr != nil {
+				columnInfo = parentColumnInfo
+				err = parentErr
+			}
+		}
+		if columnInfo == nil && err == nil {
+			columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+		}
 		if err != nil {
 			return err
 		}
 	}
 	if columnInfo == nil ||
-		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
+		(!typeutil.IsJSONType(columnInfo.GetDataType()) &&
+			!typeutil.IsArrayType(columnInfo.GetDataType()) &&
+			!typeutil.IsVectorArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
-			"array_length operation are only supported on json or array fields now, got: %s", ctx.GetText())
+			"array_length operation are only supported on json, array or array of struct fields now, got: %s", ctx.GetText())
 	}
 
 	expr := &planpb.Expr{

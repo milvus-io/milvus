@@ -671,6 +671,40 @@ class SegmentExpr : public Expr {
 
         auto& skip_index = segment_->GetSkipIndex();
 
+        if constexpr (std::is_same_v<T, VectorArrayView>) {
+            for (size_t i = 0; i < input->size(); ++i) {
+                int64_t offset = (*input)[i];
+                auto [chunk_id, chunk_offset] =
+                    segment_->get_chunk_by_offset(field_id_, offset);
+                // chunk_data<VectorArrayView> would read the wrong layout:
+                // storage holds VectorArray, and nullable rows may be compacted.
+                // Use chunk_view to build logical VectorArrayView rows.
+                auto pw = segment_->chunk_view<VectorArrayView>(
+                    op_ctx_,
+                    field_id_,
+                    chunk_id,
+                    std::make_pair(chunk_offset, int64_t{1}));
+                const auto& [data_vec, valid_data] = pw.get();
+                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
+                    func.template operator()<FilterType::random>(
+                        data_vec.data(),
+                        valid_data.data(),
+                        nullptr,
+                        1,
+                        res + processed_size,
+                        valid_res + processed_size,
+                        values...);
+                } else {
+                    ApplyValidData(valid_data.data(),
+                                   res + processed_size,
+                                   valid_res + processed_size,
+                                   1);
+                }
+                processed_size++;
+            }
+            return input->size();
+        }
+
         // raw data scan
         // sealed segment
         if (segment_->type() == SegmentType::Sealed) {
@@ -1254,40 +1288,36 @@ class SegmentExpr : public Expr {
                 continue;  //do not go empty-loop at the bound of the chunk
 
             auto& skip_index = segment_->GetSkipIndex();
-            auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
-            auto chunk = pw.get();
-            const bool* valid_data = chunk.valid_data();
-            if (valid_data != nullptr) {
-                valid_data += data_pos;
-            }
-            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
-                const T* data = chunk.data() + data_pos;
-
-                if constexpr (NeedSegmentOffsets) {
-                    // For GIS functions: construct segment offsets array
-                    std::vector<int32_t> segment_offsets_array(size);
-                    for (int64_t j = 0; j < size; ++j) {
-                        segment_offsets_array[j] = static_cast<int32_t>(
-                            size_per_chunk_ * i + data_pos + j);
+            auto process_chunk = [&](const T* data, const bool* valid_data) {
+                auto skipped = skip_func && skip_func(skip_index, field_id_, i);
+                if (!skipped) {
+                    if constexpr (NeedSegmentOffsets) {
+                        // For GIS functions: construct segment offsets array
+                        std::vector<int32_t> segment_offsets_array(size);
+                        for (int64_t j = 0; j < size; ++j) {
+                            segment_offsets_array[j] = static_cast<int32_t>(
+                                size_per_chunk_ * i + data_pos + j);
+                        }
+                        func(data,
+                             valid_data,
+                             nullptr,
+                             segment_offsets_array.data(),
+                             size,
+                             res + processed_size,
+                             valid_res + processed_size,
+                             values...);
+                    } else {
+                        func(data,
+                             valid_data,
+                             nullptr,
+                             size,
+                             res + processed_size,
+                             valid_res + processed_size,
+                             values...);
                     }
-                    func(data,
-                         valid_data,
-                         nullptr,
-                         segment_offsets_array.data(),
-                         size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                } else {
-                    func(data,
-                         valid_data,
-                         nullptr,
-                         size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
+                    return;
                 }
-            } else {
+
                 // Chunk is skipped by SkipIndex.
                 // We still need to:
                 // 1. Apply valid_data to handle nullable fields
@@ -1297,7 +1327,6 @@ class SegmentExpr : public Expr {
                                res + processed_size,
                                valid_res + processed_size,
                                size);
-                // Call func with nullptr to update internal cursors
                 if constexpr (NeedSegmentOffsets) {
                     std::vector<int32_t> segment_offsets_array(size);
                     for (int64_t j = 0; j < size; ++j) {
@@ -1321,6 +1350,24 @@ class SegmentExpr : public Expr {
                          valid_res + processed_size,
                          values...);
                 }
+            };
+
+            if constexpr (std::is_same_v<T, VectorArrayView>) {
+                // chunk_data<VectorArrayView> would read the wrong layout:
+                // storage holds VectorArray, and nullable rows may be compacted.
+                // Use chunk_view to build logical VectorArrayView rows.
+                auto pw = segment_->chunk_view<VectorArrayView>(
+                    op_ctx_, field_id_, i, std::make_pair(data_pos, size));
+                const auto& [data_vec, valid_data] = pw.get();
+                process_chunk(data_vec.data(), valid_data.data());
+            } else {
+                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
+                auto chunk = pw.get();
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_data += data_pos;
+                }
+                process_chunk(chunk.data() + data_pos, valid_data);
             }
 
             processed_size += size;
@@ -1380,7 +1427,8 @@ class SegmentExpr : public Expr {
                 bool is_seal = false;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
-                              std::is_same_v<T, ArrayView>) {
+                              std::is_same_v<T, ArrayView> ||
+                              std::is_same_v<T, VectorArrayView>) {
                     if (segment_->type() == SegmentType::Sealed) {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
@@ -1410,33 +1458,40 @@ class SegmentExpr : public Expr {
                         is_seal = true;
                     }
                 }
-                if (!is_seal) {
-                    auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
-                    auto chunk = pw.get();
-                    const T* data = chunk.data() + data_pos;
-                    const bool* valid_data = chunk.valid_data();
-                    if (valid_data != nullptr) {
-                        valid_data += data_pos;
-                    }
+                if constexpr (std::is_same_v<T, VectorArrayView>) {
+                    AssertInfo(is_seal,
+                               "VectorArrayView must be read through chunk "
+                               "views");
+                } else {
+                    if (!is_seal) {
+                        auto pw =
+                            segment_->chunk_data<T>(op_ctx_, field_id_, i);
+                        auto chunk = pw.get();
+                        const T* data = chunk.data() + data_pos;
+                        const bool* valid_data = chunk.valid_data();
+                        if (valid_data != nullptr) {
+                            valid_data += data_pos;
+                        }
 
-                    if constexpr (NeedSegmentOffsets) {
-                        // For GIS functions: construct segment offsets array
-                        func(data,
-                             valid_data,
-                             nullptr,
-                             segment_offsets_array.data(),
-                             size,
-                             res + processed_size,
-                             valid_res + processed_size,
-                             values...);
-                    } else {
-                        func(data,
-                             valid_data,
-                             nullptr,
-                             size,
-                             res + processed_size,
-                             valid_res + processed_size,
-                             values...);
+                        if constexpr (NeedSegmentOffsets) {
+                            // For GIS functions: construct segment offsets array
+                            func(data,
+                                 valid_data,
+                                 nullptr,
+                                 segment_offsets_array.data(),
+                                 size,
+                                 res + processed_size,
+                                 valid_res + processed_size,
+                                 values...);
+                        } else {
+                            func(data,
+                                 valid_data,
+                                 nullptr,
+                                 size,
+                                 res + processed_size,
+                                 valid_res + processed_size,
+                                 values...);
+                        }
                     }
                 }
             } else {
@@ -1448,7 +1503,8 @@ class SegmentExpr : public Expr {
                 const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
-                              std::is_same_v<T, ArrayView>) {
+                              std::is_same_v<T, ArrayView> ||
+                              std::is_same_v<T, VectorArrayView>) {
                     auto pw = segment_->get_batch_views<T>(
                         op_ctx_, field_id_, i, data_pos, size);
                     valid_data = pw.get().second.data();
