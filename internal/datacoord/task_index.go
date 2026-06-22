@@ -61,6 +61,8 @@ type indexBuildTask struct {
 
 var _ globalTask.Task = (*indexBuildTask)(nil)
 
+var errVectorArrayFieldBinlogNotFound = errors.New("vector array field binlog not found")
+
 func newIndexBuildTask(segIndex *model.SegmentIndex,
 	taskSlot int64,
 	meta *meta,
@@ -185,7 +187,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
 					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
 					if isVectorArrayIndex {
-						estimatedVectorArrayVectors, err = estimateVectorArrayElementCount(segment.SegmentInfo, f)
+						estimate, err := estimateVectorArrayElementCountForIndexBuild(segment.SegmentInfo, collectionInfo.Schema, f)
 						if err != nil {
 							failReason := "failed to estimate vector array element count, count is unknown: " + err.Error()
 							log.Warn("failed to estimate vector array element count",
@@ -199,6 +201,15 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 									zap.Error(updateErr))
 							}
 							return
+						}
+						estimatedVectorArrayVectors = estimate.vectorCount
+						if estimate.emptyOnStaleSchema {
+							effectiveRows = 0
+							log.Info("vector array field binlog is absent on stale schema segment, treating as empty field",
+								zap.Int64("fieldID", f.GetFieldID()),
+								zap.String("fieldName", f.GetName()),
+								zap.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
+								zap.Int32("collectionSchemaVersion", collectionInfo.Schema.GetVersion()))
 						}
 					}
 					break
@@ -290,6 +301,25 @@ func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {
 	}
 }
 
+type vectorArrayElementCountEstimate struct {
+	vectorCount        int64
+	emptyOnStaleSchema bool
+}
+
+func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) (vectorArrayElementCountEstimate, error) {
+	count, err := estimateVectorArrayElementCount(segment, field)
+	if err == nil {
+		return vectorArrayElementCountEstimate{vectorCount: count}, nil
+	}
+	if isMissingVectorArrayFieldOnStaleSchema(err, segment, schema, field) {
+		// A nullable field added after this segment was written has no binlog in the
+		// stale segment. For index build purposes it contributes zero vectors and
+		// should be fake-finished by the threshold check below.
+		return vectorArrayElementCountEstimate{emptyOnStaleSchema: true}, nil
+	}
+	return vectorArrayElementCountEstimate{}, err
+}
+
 func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemapb.FieldSchema) (int64, error) {
 	if segment == nil {
 		return 0, errors.New("segment info is nil")
@@ -328,9 +358,18 @@ func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemap
 	}
 
 	if !seenFieldLog {
-		return 0, errors.Newf("vector array field binlog not found, fieldID=%d", field.GetFieldID())
+		return 0, errors.Wrapf(errVectorArrayFieldBinlogNotFound, "fieldID=%d", field.GetFieldID())
 	}
 	return totalPayloadBytes / elementSize, nil
+}
+
+func isMissingVectorArrayFieldOnStaleSchema(err error, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	return errors.Is(err, errVectorArrayFieldBinlogNotFound) &&
+		segment != nil &&
+		schema != nil &&
+		field != nil &&
+		field.GetNullable() &&
+		segment.GetSchemaVersion() < schema.GetVersion()
 }
 
 func fieldBinlogContainsField(fieldBinlog *datapb.FieldBinlog, fieldID int64) bool {

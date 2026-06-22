@@ -444,6 +444,71 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayEstimateFailureMarksFa
 	s.Contains(it.FailReason, "vector array field binlog not found")
 }
 
+func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSchemaFakeFinishes() {
+	const (
+		dim        = 128
+		enoughRows = int64(10000)
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+
+	mt := &meta{
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				s.segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            s.segID,
+						CollectionID:  s.collID,
+						PartitionID:   s.partID,
+						InsertChannel: "ch1",
+						NumOfRows:     enoughRows,
+						State:         commonpb.SegmentState_Flushed,
+						MaxRowNum:     enoughRows,
+						Level:         datapb.SegmentLevel_L2,
+						SchemaVersion: 0,
+					},
+				},
+			},
+		},
+		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+	}
+	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "HNSW"},
+		{Key: common.MetricTypeKey, Value: "MAX_SIM_COSINE"},
+	}
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.True(ok)
+	segIndex.NumRows = enoughRows
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID,
+		Schema: &schemapb.CollectionSchema{
+			Version: 1,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "array_vector",
+					FieldID:     s.fieldID,
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					Nullable:    true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+					},
+				},
+			},
+		},
+		Partitions: []int64{s.partID},
+	}, nil)
+
+	it := newIndexBuildTask(segIndex, 1, mt, handler, nil, newIndexEngineVersionManager())
+	it.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+
+	s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
+	s.Equal("fake finished index success", it.FailReason)
+}
+
 func (s *indexTaskSuite) TestEstimateVectorArrayElementCountErrors() {
 	field := &schemapb.FieldSchema{
 		FieldID:     s.fieldID,
