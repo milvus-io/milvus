@@ -219,7 +219,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			return nil, nil, nil
 		}
 		vectors := lo.Flatten(arrayData.([][]float32))
-		return vectors, nil, nil
+		return vectors, nil, typeutil.VerifyFloats32(vectors)
 	case schemapb.DataType_SparseFloatVector:
 		if c.field.GetNullable() {
 			return ReadNullableSparseFloatVectorData(c, count)

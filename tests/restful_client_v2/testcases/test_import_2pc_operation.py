@@ -7903,10 +7903,6 @@ class TestImport2PCRestOperation(TestBase):
                 os.remove(file_path)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50459: import currently accepts NaN/Inf FloatVector values",
-        strict=True,
-    )
     def test_import_2pc_vector_nan_inf_fails_with_reason_and_no_visible_rows(self):
         """
         target: FloatVector finite-value validation for manual import
