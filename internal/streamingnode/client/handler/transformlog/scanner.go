@@ -9,7 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
-	transformlogapi "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -96,7 +96,7 @@ func (s *Stream) IsClosing() bool {
 	return s.closing
 }
 
-func (s *Stream) Subscribe(ctx context.Context, opt transformlogapi.ReadOption) (transformlogapi.Scanner, error) {
+func (s *Stream) Subscribe(ctx context.Context, opt wal.TransformLogReadOption) (wal.TransformLogScanner, error) {
 	sub := s.newSubscription(opt)
 	if sub == nil {
 		if err := s.Error(); err != nil {
@@ -110,6 +110,7 @@ func (s *Stream) Subscribe(ctx context.Context, opt transformlogapi.ReadOption) 
 				SubscriptionId:     sub.subscriptionID,
 				Vchannel:           opt.VChannel,
 				StartAfterTimeTick: opt.StartAfterTimeTick,
+				EndTimeTick:        opt.EndTimeTick,
 			},
 		},
 	}); err != nil {
@@ -147,7 +148,7 @@ func (s *Stream) Close() error {
 	return s.Error()
 }
 
-func (s *Stream) newSubscription(opt transformlogapi.ReadOption) *remoteSubscription {
+func (s *Stream) newSubscription(opt wal.TransformLogReadOption) *remoteSubscription {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	select {
@@ -278,7 +279,7 @@ func (s *Stream) handleMessageBatch(resp *streamingpb.TransformMessageBatch) {
 		return
 	}
 	for _, entry := range resp.GetEntries() {
-		sub.sendEvent(transformlogapi.Event{Entry: entry})
+		sub.sendEvent(wal.TransformLogEvent{Entry: entry})
 	}
 }
 
@@ -287,8 +288,8 @@ func (s *Stream) handleCaughtUp(resp *streamingpb.TransformSubscriptionCaughtUp)
 		return
 	}
 	if sub := s.getSubscription(resp.GetSubscriptionId()); sub != nil {
-		sub.sendEvent(transformlogapi.Event{
-			CaughtUp: &transformlogapi.CaughtUp{StartAfterTimeTick: resp.GetStartAfterTimeTick()},
+		sub.sendEvent(wal.TransformLogEvent{
+			CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: resp.GetStartAfterTimeTick()},
 		})
 	}
 }
@@ -347,7 +348,7 @@ type remoteSubscription struct {
 	name           string
 	subscriptionID int64
 	vchannel       string
-	ch             chan transformlogapi.Event
+	ch             chan wal.TransformLogEvent
 	done           chan struct{}
 	created        chan struct{}
 	closeAck       chan struct{}
@@ -360,13 +361,13 @@ type remoteSubscription struct {
 	finishOnce   sync.Once
 }
 
-func newRemoteSubscription(stream *Stream, subscriptionID int64, opt transformlogapi.ReadOption) *remoteSubscription {
+func newRemoteSubscription(stream *Stream, subscriptionID int64, opt wal.TransformLogReadOption) *remoteSubscription {
 	return &remoteSubscription{
 		stream:         stream,
 		name:           opt.Name,
 		subscriptionID: subscriptionID,
 		vchannel:       opt.VChannel,
-		ch:             make(chan transformlogapi.Event, 16),
+		ch:             make(chan wal.TransformLogEvent, 16),
 		done:           make(chan struct{}),
 		created:        make(chan struct{}),
 		closeAck:       make(chan struct{}),
@@ -377,7 +378,7 @@ func (s *remoteSubscription) Name() string {
 	return s.name
 }
 
-func (s *remoteSubscription) Chan() <-chan transformlogapi.Event {
+func (s *remoteSubscription) Chan() <-chan wal.TransformLogEvent {
 	return s.ch
 }
 
@@ -407,7 +408,7 @@ func (s *remoteSubscription) Close() error {
 	return s.Error()
 }
 
-func (s *remoteSubscription) sendEvent(event transformlogapi.Event) {
+func (s *remoteSubscription) sendEvent(event wal.TransformLogEvent) {
 	select {
 	case s.ch <- event:
 	case <-s.done:

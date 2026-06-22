@@ -1015,6 +1015,7 @@ message TransformRequest {
 }
 
 message CreateTransformSubscriptionRequest {
+    uint64 end_time_tick = 4;
     int64 subscription_id = 1;
     string vchannel = 2;
 
@@ -1042,6 +1043,7 @@ message TransformResponse {
 }
 
 message CreateTransformSubscriptionResponse {
+    uint64 end_time_tick = 5;
     int64 subscription_id = 1;
     string vchannel = 2;
     uint64 start_after_time_tick = 3;

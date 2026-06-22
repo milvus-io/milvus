@@ -8,7 +8,7 @@ import (
 	consumer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 
 	handler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
-	transformlog "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	mock "github.com/stretchr/testify/mock"
 
 	producer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
@@ -123,19 +123,19 @@ func (_c *MockHandlerClient_CreateConsumer_Call) RunAndReturn(run func(context.C
 }
 
 // ReadTransformLog provides a mock function with given fields: ctx, opts
-func (_m *MockHandlerClient) ReadTransformLog(ctx context.Context, opts transformlog.ReadOption) transformlog.Scanner {
+func (_m *MockHandlerClient) ReadTransformLog(ctx context.Context, opts wal.TransformLogReadOption) wal.TransformLogScanner {
 	ret := _m.Called(ctx, opts)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ReadTransformLog")
 	}
 
-	var r0 transformlog.Scanner
-	if rf, ok := ret.Get(0).(func(context.Context, transformlog.ReadOption) transformlog.Scanner); ok {
+	var r0 wal.TransformLogScanner
+	if rf, ok := ret.Get(0).(func(context.Context, wal.TransformLogReadOption) wal.TransformLogScanner); ok {
 		r0 = rf(ctx, opts)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(transformlog.Scanner)
+			r0 = ret.Get(0).(wal.TransformLogScanner)
 		}
 	}
 
@@ -149,24 +149,24 @@ type MockHandlerClient_ReadTransformLog_Call struct {
 
 // ReadTransformLog is a helper method to define mock.On call
 //   - ctx context.Context
-//   - opts transformlog.ReadOption
+//   - opts wal.TransformLogReadOption
 func (_e *MockHandlerClient_Expecter) ReadTransformLog(ctx interface{}, opts interface{}) *MockHandlerClient_ReadTransformLog_Call {
 	return &MockHandlerClient_ReadTransformLog_Call{Call: _e.mock.On("ReadTransformLog", ctx, opts)}
 }
 
-func (_c *MockHandlerClient_ReadTransformLog_Call) Run(run func(ctx context.Context, opts transformlog.ReadOption)) *MockHandlerClient_ReadTransformLog_Call {
+func (_c *MockHandlerClient_ReadTransformLog_Call) Run(run func(ctx context.Context, opts wal.TransformLogReadOption)) *MockHandlerClient_ReadTransformLog_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(transformlog.ReadOption))
+		run(args[0].(context.Context), args[1].(wal.TransformLogReadOption))
 	})
 	return _c
 }
 
-func (_c *MockHandlerClient_ReadTransformLog_Call) Return(_a0 transformlog.Scanner) *MockHandlerClient_ReadTransformLog_Call {
+func (_c *MockHandlerClient_ReadTransformLog_Call) Return(_a0 wal.TransformLogScanner) *MockHandlerClient_ReadTransformLog_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockHandlerClient_ReadTransformLog_Call) RunAndReturn(run func(context.Context, transformlog.ReadOption) transformlog.Scanner) *MockHandlerClient_ReadTransformLog_Call {
+func (_c *MockHandlerClient_ReadTransformLog_Call) RunAndReturn(run func(context.Context, wal.TransformLogReadOption) wal.TransformLogScanner) *MockHandlerClient_ReadTransformLog_Call {
 	_c.Call.Return(run)
 	return _c
 }

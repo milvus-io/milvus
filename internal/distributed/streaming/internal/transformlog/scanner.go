@@ -10,23 +10,23 @@ import (
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
-	transformlogapi "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
-type Factory = func(ctx context.Context, opt transformlogapi.ReadOption) transformlogapi.Scanner
+type Factory = func(ctx context.Context, opt wal.TransformLogReadOption) wal.TransformLogScanner
 
-func NewResumableScanner(ctx context.Context, factory Factory, opt transformlogapi.ReadOption) transformlogapi.Scanner {
+func NewResumableScanner(ctx context.Context, factory Factory, opt wal.TransformLogReadOption) wal.TransformLogScanner {
 	ctx, cancel := context.WithCancel(ctx)
 	scanner := &resumableScanner{
 		ctx:       ctx,
 		cancel:    cancel,
 		factory:   factory,
 		opt:       opt,
-		ch:        make(chan transformlogapi.Event, 16),
+		ch:        make(chan wal.TransformLogEvent, 16),
 		finishErr: syncutil.NewFuture[error](),
 		closed:    atomic.NewBool(false),
 		logger: mlog.With(
@@ -43,8 +43,8 @@ type resumableScanner struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	factory   Factory
-	opt       transformlogapi.ReadOption
-	ch        chan transformlogapi.Event
+	opt       wal.TransformLogReadOption
+	ch        chan wal.TransformLogEvent
 	finishErr *syncutil.Future[error]
 	closed    *atomic.Bool
 	logger    *mlog.Logger
@@ -54,7 +54,7 @@ func (s *resumableScanner) Name() string {
 	return s.opt.Name
 }
 
-func (s *resumableScanner) Chan() <-chan transformlogapi.Event {
+func (s *resumableScanner) Chan() <-chan wal.TransformLogEvent {
 	return s.ch
 }
 
@@ -116,7 +116,7 @@ func (s *resumableScanner) resumeLoop() {
 	}
 }
 
-func (s *resumableScanner) forward(underlying transformlogapi.Scanner, nextStartAfter *uint64) error {
+func (s *resumableScanner) forward(underlying wal.TransformLogScanner, nextStartAfter *uint64) error {
 	defer func() {
 		_ = underlying.Close()
 	}()
@@ -140,7 +140,7 @@ func (s *resumableScanner) forward(underlying transformlogapi.Scanner, nextStart
 	}
 }
 
-func (s *resumableScanner) sendEvent(event transformlogapi.Event) bool {
+func (s *resumableScanner) sendEvent(event wal.TransformLogEvent) bool {
 	select {
 	case s.ch <- event:
 		return true
@@ -164,7 +164,7 @@ func isRetryable(err error) bool {
 	if err == nil {
 		return true
 	}
-	if errors.IsAny(err, transformlogapi.ErrInvalidReadOption, transformlogapi.ErrStartPointTruncated, transformlogapi.ErrVChannelUnavailable) {
+	if errors.IsAny(err, wal.ErrTransformLogInvalidReadOption, wal.ErrTransformLogStartPointTruncated, wal.ErrTransformLogVChannelUnavailable) {
 		return false
 	}
 	var streamingErr *streamingstatus.StreamingError
