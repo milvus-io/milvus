@@ -173,3 +173,29 @@ func TestGetIntData(t *testing.T) {
 		})
 	}
 }
+
+func TestParseScalarDataBeginEndClamping(t *testing.T) {
+	// FieldDataColumn must clamp out-of-range begin/end for scalar fields the
+	// same way parseVectorArrayData does, rather than panicking on the slice.
+	fd := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "id",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+				},
+			},
+		},
+	}
+
+	// negative begin clamps to 0; end past the data length clamps to len.
+	col, err := FieldDataColumn(fd, -5, 10)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, col.Len())
+
+	// begin > end collapses to an empty column.
+	col2, err := FieldDataColumn(fd, 10, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, col2.Len())
+}
