@@ -3507,12 +3507,14 @@ func BenchmarkCheckVarcharFormat(b *testing.B) {
 
 func TestCheckAndFlattenStructFieldData(t *testing.T) {
 	createTestSchema := func(name string, structFields []*schemapb.StructArrayFieldSchema, normalFields []*schemapb.FieldSchema) *schemapb.CollectionSchema {
-		return &schemapb.CollectionSchema{
+		schema := &schemapb.CollectionSchema{
 			Name:              name,
 			Description:       "test collection with struct array fields",
 			StructArrayFields: structFields,
 			Fields:            normalFields,
 		}
+		assert.NoError(t, transformStructFieldNames(schema))
+		return schema
 	}
 
 	createTestInsertMsg := func(collectionName string, fieldsData []*schemapb.FieldData) *msgstream.InsertMsg {
@@ -3666,8 +3668,13 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		structField2 := &schemapb.StructArrayFieldSchema{
 			Name: "struct2",
 			Fields: []*schemapb.FieldSchema{
-				{Name: "field2", DataType: schemapb.DataType_Array},
-				{Name: "field3", DataType: schemapb.DataType_ArrayOfVector},
+				{Name: "field2", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				{
+					Name:        "field3",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "1"}},
+				},
 			},
 		}
 		schema := createTestSchema("test_collection", []*schemapb.StructArrayFieldSchema{structField1, structField2}, nil)
@@ -3698,6 +3705,100 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		assert.Contains(t, fieldNames, "struct1[field1]")
 		assert.Contains(t, fieldNames, "struct2[field2]")
 		assert.Contains(t, fieldNames, "struct2[field3]")
+	})
+
+	t.Run("error - vector payload length not divisible by dim", func(t *testing.T) {
+		structField := &schemapb.StructArrayFieldSchema{
+			Name: "test_struct",
+			Fields: []*schemapb.FieldSchema{
+				{Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				{
+					Name:        "field2",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "768"}},
+				},
+			},
+		}
+		schema := createTestSchema("test_collection", []*schemapb.StructArrayFieldSchema{structField}, nil)
+
+		field1Data := createScalarArrayFieldData("field1", []*schemapb.ScalarField{
+			{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1}}}},
+		})
+		field2Data := createVectorArrayFieldData("field2", []*schemapb.VectorField{
+			{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 512)}}},
+		})
+
+		structFieldData := createStructArrayFieldData("test_struct", []*schemapb.FieldData{field1Data, field2Data})
+		insertMsg := createTestInsertMsg("test_collection", []*schemapb.FieldData{structFieldData})
+
+		err := checkAndFlattenStructFieldData(schema, insertMsg)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "payload length 512 is not divisible by vector width 768")
+	})
+
+	t.Run("error - inconsistent struct element count with vector array", func(t *testing.T) {
+		structField := &schemapb.StructArrayFieldSchema{
+			Name: "test_struct",
+			Fields: []*schemapb.FieldSchema{
+				{Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				{
+					Name:        "field2",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "768"}},
+				},
+			},
+		}
+		schema := createTestSchema("test_collection", []*schemapb.StructArrayFieldSchema{structField}, nil)
+
+		field1Data := createScalarArrayFieldData("field1", []*schemapb.ScalarField{
+			{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1}}}},
+		})
+		field2Data := createVectorArrayFieldData("field2", []*schemapb.VectorField{
+			{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 1536)}}},
+		})
+
+		structFieldData := createStructArrayFieldData("test_struct", []*schemapb.FieldData{field1Data, field2Data})
+		insertMsg := createTestInsertMsg("test_collection", []*schemapb.FieldData{structFieldData})
+
+		err := checkAndFlattenStructFieldData(schema, insertMsg)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "inconsistent struct element count")
+		assert.Contains(t, err.Error(), "'field1' has 1, 'field2' has 2")
+	})
+
+	t.Run("success - matching scalar and vector struct element counts", func(t *testing.T) {
+		structField := &schemapb.StructArrayFieldSchema{
+			Name: "test_struct",
+			Fields: []*schemapb.FieldSchema{
+				{Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				{
+					Name:        "field2",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "768"}},
+				},
+			},
+		}
+		schema := createTestSchema("test_collection", []*schemapb.StructArrayFieldSchema{structField}, nil)
+
+		field1Data := createScalarArrayFieldData("field1", []*schemapb.ScalarField{
+			{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}},
+		})
+		field2Data := createVectorArrayFieldData("field2", []*schemapb.VectorField{
+			{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 1536)}}},
+		})
+
+		structFieldData := createStructArrayFieldData("test_struct", []*schemapb.FieldData{field1Data, field2Data})
+		insertMsg := createTestInsertMsg("test_collection", []*schemapb.FieldData{structFieldData})
+
+		err := checkAndFlattenStructFieldData(schema, insertMsg)
+
+		assert.NoError(t, err)
+		assert.Len(t, insertMsg.FieldsData, 2)
 	})
 
 	t.Run("success - mixed normal and struct fields", func(t *testing.T) {

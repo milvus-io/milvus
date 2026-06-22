@@ -1162,6 +1162,23 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 		return merr.WrapErrParameterInvalid(expectStr, "got nil", msg)
 	}
 
+	dim, err := typeutil.GetDim(fieldSchema)
+	if err != nil {
+		return err
+	}
+
+	validateVectorCount := func(payloadLength int, elementsPerVector int) error {
+		if elementsPerVector <= 0 {
+			return merr.WrapErrParameterInvalidMsg("invalid dim %d for array of vector field %s", dim, field.GetFieldName())
+		}
+		if payloadLength%elementsPerVector != 0 {
+			return merr.WrapErrParameterInvalidMsg(
+				"array of vector field %s has invalid payload length %d, should be divisible by vector width %d",
+				field.GetFieldName(), payloadLength, elementsPerVector)
+		}
+		return nil
+	}
+
 	switch fieldSchema.GetElementType() {
 	case schemapb.DataType_FloatVector:
 		for _, vector := range data.GetData() {
@@ -1169,6 +1186,9 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 			if floatVector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need float vector array", "got nil", msg)
+			}
+			if err := validateVectorCount(len(floatVector.GetData()), int(dim)); err != nil {
+				return err
 			}
 			if v.checkNAN {
 				if err := typeutil.VerifyFloats32(floatVector.GetData()); err != nil {
@@ -1184,6 +1204,9 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need binary vector array", "got nil", msg)
 			}
+			if err := validateVectorCount(len(binaryVector), int((dim+7)/8)); err != nil {
+				return err
+			}
 		}
 		return nil
 	case schemapb.DataType_Float16Vector:
@@ -1192,6 +1215,9 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 			if float16Vector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need float16 vector array", "got nil", msg)
+			}
+			if err := validateVectorCount(len(float16Vector), int(dim)*2); err != nil {
+				return err
 			}
 			if v.checkNAN {
 				if err := typeutil.VerifyFloats16(float16Vector); err != nil {
@@ -1207,6 +1233,9 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need bfloat16 vector array", "got nil", msg)
 			}
+			if err := validateVectorCount(len(bfloat16Vector), int(dim)*2); err != nil {
+				return err
+			}
 			if v.checkNAN {
 				if err := typeutil.VerifyBFloats16(bfloat16Vector); err != nil {
 					return err
@@ -1220,6 +1249,9 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 			if int8Vector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return merr.WrapErrParameterInvalid("need int8 vector array", "got nil", msg)
+			}
+			if err := validateVectorCount(len(int8Vector), int(dim)); err != nil {
+				return err
 			}
 		}
 		return nil
