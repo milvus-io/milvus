@@ -3364,66 +3364,98 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 
 func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	jobIDGetter := anyReq.(JobIDGetter)
+	response, err := h.getImportProgress(ctx, c, dbName, jobIDGetter.GetJobID())
+	if err != nil {
+		return response, err
+	}
+	if err := h.checkImportPrivilege(ctx, c, dbName, response.GetCollectionName()); err != nil {
+		return nil, err
+	}
+
+	returnData := make(map[string]interface{})
+	returnData["jobId"] = jobIDGetter.GetJobID()
+	returnData["createTime"] = response.GetCreateTime()
+	returnData["collectionName"] = response.GetCollectionName()
+	returnData["completeTime"] = response.GetCompleteTime()
+	returnData["state"] = response.GetState().String()
+	returnData["progress"] = response.GetProgress()
+	returnData["importedRows"] = response.GetImportedRows()
+	returnData["totalRows"] = response.GetTotalRows()
+	reason := response.GetReason()
+	if reason != "" {
+		returnData["reason"] = reason
+	}
+	details := make([]map[string]interface{}, 0)
+	totalFileSize := int64(0)
+	for _, taskProgress := range response.GetTaskProgresses() {
+		detail := make(map[string]interface{})
+		detail["fileName"] = taskProgress.GetFileName()
+		detail["fileSize"] = taskProgress.GetFileSize()
+		detail["progress"] = taskProgress.GetProgress()
+		detail["completeTime"] = taskProgress.GetCompleteTime()
+		detail["state"] = taskProgress.GetState()
+		detail["importedRows"] = taskProgress.GetImportedRows()
+		detail["totalRows"] = taskProgress.GetTotalRows()
+		reason = taskProgress.GetReason()
+		if reason != "" {
+			detail["reason"] = reason
+		}
+		details = append(details, detail)
+		totalFileSize += taskProgress.GetFileSize()
+	}
+	returnData["fileSize"] = totalFileSize
+	returnData["details"] = details
+	HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
+	return response, nil
+}
+
+func (h *HandlersV2) getImportProgress(ctx context.Context, c *gin.Context, dbName string, jobID string) (*internalpb.GetImportProgressResponse, error) {
 	req := &internalpb.GetImportProgressRequest{
 		DbName: dbName,
-		JobID:  jobIDGetter.GetJobID(),
+		JobID:  jobID,
 	}
 	c.Set(ContextRequest, req)
 
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/GetImportProgress", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
-	if err == nil {
-		response := resp.(*internalpb.GetImportProgressResponse)
-		if h.checkAuth {
-			err := checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
-				DbName:         dbName,
-				CollectionName: response.GetCollectionName(),
-			})
-			if err != nil {
-				HTTPReturn(c, http.StatusForbidden, gin.H{
-					HTTPReturnCode:    merr.Code(err),
-					HTTPReturnMessage: err.Error(),
-				})
-				return nil, err
-			}
-		}
-		returnData := make(map[string]interface{})
-		returnData["jobId"] = jobIDGetter.GetJobID()
-		returnData["createTime"] = response.GetCreateTime()
-		returnData["collectionName"] = response.GetCollectionName()
-		returnData["completeTime"] = response.GetCompleteTime()
-		returnData["state"] = response.GetState().String()
-		returnData["progress"] = response.GetProgress()
-		returnData["importedRows"] = response.GetImportedRows()
-		returnData["totalRows"] = response.GetTotalRows()
-		reason := response.GetReason()
-		if reason != "" {
-			returnData["reason"] = reason
-		}
-		details := make([]map[string]interface{}, 0)
-		totalFileSize := int64(0)
-		for _, taskProgress := range response.GetTaskProgresses() {
-			detail := make(map[string]interface{})
-			detail["fileName"] = taskProgress.GetFileName()
-			detail["fileSize"] = taskProgress.GetFileSize()
-			detail["progress"] = taskProgress.GetProgress()
-			detail["completeTime"] = taskProgress.GetCompleteTime()
-			detail["state"] = taskProgress.GetState()
-			detail["importedRows"] = taskProgress.GetImportedRows()
-			detail["totalRows"] = taskProgress.GetTotalRows()
-			reason = taskProgress.GetReason()
-			if reason != "" {
-				detail["reason"] = reason
-			}
-			details = append(details, detail)
-			totalFileSize += taskProgress.GetFileSize()
-		}
-		returnData["fileSize"] = totalFileSize
-		returnData["details"] = details
-		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
+	if err != nil {
+		return nil, err
 	}
-	return resp, err
+	return resp.(*internalpb.GetImportProgressResponse), nil
+}
+
+func (h *HandlersV2) checkImportPrivilege(ctx context.Context, c *gin.Context, dbName string, collectionName string) error {
+	if !h.checkAuth {
+		return nil
+	}
+
+	authErr := checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	if authErr != nil {
+		HTTPReturn(c, http.StatusForbidden, gin.H{
+			HTTPReturnCode:    merr.Code(authErr),
+			HTTPReturnMessage: authErr.Error(),
+		})
+		return authErr
+	}
+	return nil
+}
+
+func (h *HandlersV2) checkImportJobAuth(ctx context.Context, c *gin.Context, dbName string, jobID string) error {
+	if !h.checkAuth {
+		return nil
+	}
+
+	// Commit/abort requests only carry jobID. Import privilege is collection-scoped,
+	// so resolve the job's collection before checking PrivilegeImport.
+	response, err := h.getImportProgress(ctx, c, dbName, jobID)
+	if err != nil {
+		return err
+	}
+	return h.checkImportPrivilege(ctx, c, dbName, response.GetCollectionName())
 }
 
 func (h *HandlersV2) refreshExternalCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -3455,6 +3487,9 @@ func (h *HandlersV2) commitImportJob(ctx context.Context, c *gin.Context, anyReq
 		paramErr := merr.WrapErrParameterInvalid("int64 jobId", jobIDGetter.GetJobID(), err.Error())
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
 		return nil, paramErr
+	}
+	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
+		return nil, err
 	}
 	req := &datapb.CommitImportRequest{
 		Base:  commonpbutil.NewMsgBase(),
@@ -3498,6 +3533,9 @@ func (h *HandlersV2) abortImportJob(ctx context.Context, c *gin.Context, anyReq 
 		paramErr := merr.WrapErrParameterInvalid("int64 jobId", jobIDGetter.GetJobID(), err.Error())
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
 		return nil, paramErr
+	}
+	if err := h.checkImportJobAuth(ctx, c, dbName, jobIDGetter.GetJobID()); err != nil {
+		return nil, err
 	}
 	req := &datapb.AbortImportRequest{
 		Base:  commonpbutil.NewMsgBase(),
