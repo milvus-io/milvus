@@ -1100,12 +1100,11 @@ func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) 
 	assert.Equal(t, int64(1), task.result.NumQueries)
 	assert.Equal(t, int64(5), task.result.TopK)
 
-	var data schemapb.SearchResultData
-	if task.result.ResultData != nil {
-		data = *task.result.ResultData
-	} else {
+	data := task.result.ResultData
+	if data == nil {
 		require.NotEmpty(t, task.result.SlicedBlob)
-		require.NoError(t, proto.Unmarshal(task.result.SlicedBlob, &data))
+		data = &schemapb.SearchResultData{}
+		require.NoError(t, proto.Unmarshal(task.result.SlicedBlob, data))
 	}
 
 	assert.Equal(t, int64(1), data.NumQueries)
