@@ -141,7 +141,45 @@ func (action *SegmentAction) GetScope() querypb.DataScope {
 }
 
 func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	return action.rpcReturned.Load()
+	if !action.rpcReturned.Load() {
+		return false
+	}
+	return action.isDistMatched(distMgr)
+}
+
+func (action *SegmentAction) isDistMatched(distMgr *meta.DistributionManager) bool {
+	switch action.Type() {
+	case ActionTypeGrow:
+		return action.segmentInDist(distMgr)
+	case ActionTypeReduce:
+		return !action.segmentInDist(distMgr)
+	default:
+		return true
+	}
+}
+
+func (action *SegmentAction) segmentInDist(distMgr *meta.DistributionManager) bool {
+	if action.GetScope() == querypb.DataScope_Streaming {
+		channels := distMgr.ChannelDistManager.GetByFilter(
+			meta.WithNodeID2Channel(action.Node()),
+			meta.WithChannelName2Channel(action.GetShard()),
+		)
+		for _, channel := range channels {
+			if channel.View == nil {
+				continue
+			}
+			if _, ok := channel.View.GrowingSegments[action.GetSegmentID()]; ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	segments := distMgr.SegmentDistManager.GetByFilter(
+		meta.WithNodeID(action.Node()),
+		meta.WithSegmentID(action.GetSegmentID()),
+	)
+	return len(segments) > 0
 }
 
 func (action *SegmentAction) Desc() string {
