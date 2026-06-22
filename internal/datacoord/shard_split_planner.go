@@ -249,8 +249,19 @@ func (p *rangeSplitPlanner) AssignSegment(ctx context.Context, segment *SegmentI
 	}
 	key, ok := keys[segment.GetPartitionID()]
 	if !ok {
-		return 0, errors.Wrapf(ErrSegmentNamespaceUnrouted, "partition %d of collection %d has no namespace key",
-			segment.GetPartitionID(), segment.GetCollectionID())
+		// The partition may have been created after the cache was built — a
+		// namespace collection adds partitions dynamically as tenants arrive,
+		// and the redistribution window can be long. Refresh from the current
+		// collection meta once before giving up, so the new namespace becomes
+		// routable instead of wedging the task forever.
+		keys, err = p.refreshPartitionKeys(ctx, segment.GetCollectionID())
+		if err != nil {
+			return 0, err
+		}
+		if key, ok = keys[segment.GetPartitionID()]; !ok {
+			return 0, errors.Wrapf(ErrSegmentNamespaceUnrouted, "partition %d of collection %d has no namespace key",
+				segment.GetPartitionID(), segment.GetCollectionID())
+		}
 	}
 	for i, target := range targets {
 		r := routingKeyRange{lower: target.GetRoutingKeyLower(), upper: target.GetRoutingKeyUpper()}
@@ -265,12 +276,18 @@ func (p *rangeSplitPlanner) AssignSegment(ctx context.Context, segment *SegmentI
 // resolving and encoding it on the first access and memoizing the result.
 func (p *rangeSplitPlanner) partitionKeys(ctx context.Context, collectionID int64) (map[int64][]byte, error) {
 	p.mu.Lock()
-	if cached, ok := p.keyCache[collectionID]; ok {
-		p.mu.Unlock()
+	cached, ok := p.keyCache[collectionID]
+	p.mu.Unlock()
+	if ok {
 		return cached, nil
 	}
-	p.mu.Unlock()
+	return p.refreshPartitionKeys(ctx, collectionID)
+}
 
+// refreshPartitionKeys rebuilds the collection's partitionID -> routing key map
+// from the current collection meta and re-caches it, picking up partitions
+// added after the cache was first built.
+func (p *rangeSplitPlanner) refreshPartitionKeys(ctx context.Context, collectionID int64) (map[int64][]byte, error) {
 	names, err := p.resolver(ctx, collectionID)
 	if err != nil {
 		return nil, err

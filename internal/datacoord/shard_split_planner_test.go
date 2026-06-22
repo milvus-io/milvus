@@ -204,3 +204,38 @@ func TestRangeSplitPlannerAssignUnknownPartition(t *testing.T) {
 	_, err := planner.AssignSegment(context.Background(), seg, targets)
 	assert.ErrorIs(t, err, ErrSegmentNamespaceUnrouted)
 }
+
+func TestRangeSplitPlannerAssignRefreshesCacheOnMiss(t *testing.T) {
+	m := newSplitTestMeta(true, "v0", map[int64]int64{10: 100, 11: 100})
+	resolver := &countingResolver{names: map[int64]string{10: "a", 11: "b"}}
+	planner := newRangeSplitPlanner(m, testNamespaceEncoder{}, resolver.resolve)
+	targets := []*datapb.SplitShardTaskTarget{
+		{Vchannel: "v1", RoutingKeyUpper: []byte("b")},
+		{Vchannel: "v2", RoutingKeyLower: []byte("b")},
+	}
+
+	// the first assign builds and memoizes the partition-key cache.
+	idx, err := planner.AssignSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, PartitionID: 10}}, targets)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, idx)
+	assert.Equal(t, 1, resolver.calls)
+
+	// a tenant arrives mid-redistribution: a new partition absent from the cache.
+	// the assign must refresh the cache and route it instead of failing.
+	resolver.names[12] = "c"
+	idx, err = planner.AssignSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, PartitionID: 12}}, targets)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, idx) // namespace "c" >= "b" routes to the right target
+	assert.Equal(t, 2, resolver.calls, "exactly one refresh on the miss")
+
+	// the refreshed cache is reused: a known partition does not re-resolve.
+	idx, err = planner.AssignSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 12}}, targets)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, idx)
+	assert.Equal(t, 2, resolver.calls)
+
+	// a genuinely-unknown partition still fails after the refresh (no fallback
+	// to a wrong shard).
+	_, err = planner.AssignSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, PartitionID: 99}}, targets)
+	assert.ErrorIs(t, err, ErrSegmentNamespaceUnrouted)
+}

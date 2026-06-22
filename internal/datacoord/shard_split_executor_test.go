@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -58,6 +59,9 @@ func (f *fakeVChannelAllocator) AllocVirtualChannels(ctx context.Context, param 
 type fakeSplitPlanner struct {
 	planErr   error
 	assignErr error
+	// failPartition, if non-zero, makes AssignSegment return
+	// ErrSegmentNamespaceUnrouted for that partition only (others still route).
+	failPartition int64
 }
 
 func (f *fakeSplitPlanner) PlanTargets(ctx context.Context, collection *collectionInfo, sourceVChannel string, targetVChannels []string) ([]*datapb.SplitShardTaskTarget, error) {
@@ -80,6 +84,9 @@ func (f *fakeSplitPlanner) PlanTargets(ctx context.Context, collection *collecti
 func (f *fakeSplitPlanner) AssignSegment(ctx context.Context, segment *SegmentInfo, targets []*datapb.SplitShardTaskTarget) (int, error) {
 	if f.assignErr != nil {
 		return 0, f.assignErr
+	}
+	if f.failPartition != 0 && segment.GetPartitionID() == f.failPartition {
+		return 0, ErrSegmentNamespaceUnrouted
 	}
 	return int(segment.GetPartitionID() % int64(len(targets))), nil
 }
@@ -528,6 +535,53 @@ func TestAdvanceRedistributing(t *testing.T) {
 	manager2, _ := newSplitExecutorManager(t, m2, task2, nil, nil, &fakeSplitPlanner{assignErr: errors.New("mock assign error")})
 	manager2.advanceTasks()
 	assert.Len(t, m2.GetSegmentsByChannel("v9"), 1)
+
+	// one unroutable segment must not wedge the others: the routable segment is
+	// relabeled while the unroutable one is skipped (and retried next round).
+	task3 := fencingTask()
+	task3.TaskId = 400
+	task3.SourceVchannel = "v10"
+	task3.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+	task3.Fenced = true
+	m3 := newSplitTestMeta(true, "v10", map[int64]int64{10: 10, 11: 20})
+	manager3, catalog3 := newSplitExecutorManager(t, m3, task3, nil, nil, &fakeSplitPlanner{failPartition: 11})
+	catalog3.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	manager3.advanceTasks()
+	// only the unroutable partition-11 segment remains on the source; the task
+	// is still Redistributing (not wedged, not aborted past the fence).
+	remaining := m3.GetSegmentsByChannel("v10")
+	assert.Len(t, remaining, 1)
+	assert.Equal(t, int64(11), remaining[0].GetPartitionID())
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, manager3.mustGetTask(400).GetState())
+}
+
+func TestReapTerminalTask(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.ShardSplitTaskRetention.Key, "60")
+	defer params.Reset(params.DataCoordCfg.ShardSplitTaskRetention.Key)
+
+	// a terminal task that finished before the retention window is reaped.
+	old := fencingTask()
+	old.State = datapb.SplitShardTaskState_SplitShardTaskDone
+	old.EndTime = uint64(time.Now().Add(-time.Hour).Unix())
+	mOld := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
+	managerOld, catalogOld := newSplitExecutorManager(t, mOld, old, nil, nil, &fakeSplitPlanner{})
+	catalogOld.EXPECT().DropSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+	managerOld.advanceTasks()
+	_, ok := managerOld.tasks.Get(old.GetTaskId())
+	assert.False(t, ok, "terminal task past retention is dropped from the cache")
+
+	// a terminal task still within the retention window is kept (DropSplitShardTask
+	// is never expected, so the mock would fail if it were called).
+	fresh := fencingTask()
+	fresh.State = datapb.SplitShardTaskState_SplitShardTaskAborted
+	fresh.EndTime = uint64(time.Now().Unix())
+	mFresh := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
+	managerFresh, _ := newSplitExecutorManager(t, mFresh, fresh, nil, nil, &fakeSplitPlanner{})
+	managerFresh.advanceTasks()
+	_, ok = managerFresh.tasks.Get(fresh.GetTaskId())
+	assert.True(t, ok, "terminal task within retention is kept")
 }
 
 func TestAdvanceRedistributingWaitsForFlushedFence(t *testing.T) {

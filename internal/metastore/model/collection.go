@@ -446,7 +446,9 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		collSchema.StructArrayFields = structArrayFields
 	}
 
-	shardInfos := make([]*schemapb.CollectionShardInfo, len(coll.ShardInfos))
+	// size by the index domain (vchannel positions), not the map length: the
+	// loop below indexes shardInfos[idx] by VirtualChannelNames position.
+	shardInfos := make([]*schemapb.CollectionShardInfo, len(coll.VirtualChannelNames))
 	for idx, channelName := range coll.VirtualChannelNames {
 		if shard, ok := coll.ShardInfos[channelName]; ok {
 			shardInfos[idx] = shard.ToPB()

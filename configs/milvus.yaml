@@ -726,6 +726,7 @@ dataCoord:
     maxNamespaceCount: 100000 # The namespace (partition) count of one shard that triggers a split.
     maxConcurrentTasks: 1 # The cluster-wide maximum number of concurrent shard split tasks.
     relabelBatchSize: 256 # The number of segments relabeled to the target shards in one batch during shard split redistribution.
+    taskRetention: 1800 # The retention in seconds a terminal (Done/Aborted) shard split task is kept before it is reaped from meta.
   sealPolicy:
     channel:
       # The size threshold in MB, if the total size of growing segments of each shard

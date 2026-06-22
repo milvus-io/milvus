@@ -5194,6 +5194,7 @@ type dataCoordConfig struct {
 	ShardSplitMaxNamespaceCount    ParamItem `refreshable:"true"`
 	ShardSplitMaxConcurrentTasks   ParamItem `refreshable:"true"`
 	ShardSplitRelabelBatchSize     ParamItem `refreshable:"true"`
+	ShardSplitTaskRetention        ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
@@ -5630,6 +5631,15 @@ disabling it stops new split tasks but never interrupts a task already past the 
 		Export:       true,
 	}
 	p.ShardSplitRelabelBatchSize.Init(base.mgr)
+
+	p.ShardSplitTaskRetention = ParamItem{
+		Key:          "dataCoord.shardSplit.taskRetention",
+		Version:      "2.7.0",
+		DefaultValue: "1800",
+		Doc:          "The retention in seconds a terminal (Done/Aborted) shard split task is kept before it is reaped from meta.",
+		Export:       true,
+	}
+	p.ShardSplitTaskRetention.Init(base.mgr)
 
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",
