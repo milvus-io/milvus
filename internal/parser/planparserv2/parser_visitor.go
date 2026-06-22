@@ -1334,6 +1334,7 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 		DataType:    field.DataType,
 		NestedPath:  nestedPath,
 		ElementType: field.GetElementType(),
+		Nullable:    field.GetNullable(),
 	}, nil
 }
 
@@ -1351,6 +1352,7 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 						DataType:    field.GetDataType(),
 						NestedPath:  field.GetNestedPath(),
 						ElementType: field.GetElementType(),
+						Nullable:    field.GetNullable(),
 					},
 				},
 			},
