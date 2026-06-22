@@ -277,6 +277,7 @@ type commonConfig struct {
 	RootShouldBindRole    ParamItem `refreshable:"true"`
 	EnablePublicPrivilege ParamItem `refreshable:"false"`
 	ExprEnabled           ParamItem `refreshable:"false"`
+	ExprAuthMode          ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -934,10 +935,21 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Key:          "common.security.exprEnabled",
 		Version:      "2.6.0",
 		DefaultValue: "false",
-		Doc:          "Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.",
+		Doc:          "Whether to enable the /expr endpoint for debugging.",
 		Export:       true,
 	}
 	p.ExprEnabled.Init(base.mgr)
+
+	p.ExprAuthMode = ParamItem{
+		Key:          "common.security.exprAuthMode",
+		Version:      "2.6.0",
+		DefaultValue: "rootOnly",
+		Doc: "Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. " +
+			"rootOnly accepts only the root credentials via HTTP Basic Auth. " +
+			"rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.",
+		Export: true,
+	}
+	p.ExprAuthMode.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",

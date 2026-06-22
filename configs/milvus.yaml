@@ -1049,7 +1049,8 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
-    exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
+    exprEnabled: false # Whether to enable the /expr endpoint for debugging.
+    exprAuthMode: rootOnly # Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. rootOnly accepts only the root credentials via HTTP Basic Auth. rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.
     internaltlsEnabled: false
     tlsMode: 0
   session:
