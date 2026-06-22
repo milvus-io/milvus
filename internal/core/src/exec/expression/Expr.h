@@ -469,6 +469,20 @@ class SegmentExpr : public Expr {
         return std::max<int64_t>(elapsed_us, 1);
     }
 
+    // The IsNotNull() virtual rebuilds a segment-sized bitmap on every
+    // call (allocation + fill + AND); per-batch callers must reuse one
+    // copy. The all-valid flag short-circuits per-row bitmap reads.
+    template <typename Index>
+    const TargetBitmap&
+    GetCachedIndexValidBitmap(Index* index_ptr) {
+        if (!cached_index_valid_res_) {
+            cached_index_valid_res_ =
+                std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
+            cached_index_all_valid_ = cached_index_valid_res_->all();
+        }
+        return *cached_index_valid_res_;
+    }
+
     int64_t
     GetNextBatchSize() {
         auto current_chunk =
@@ -652,9 +666,13 @@ class SegmentExpr : public Expr {
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         auto* index_ptr = const_cast<Index*>(scalar_index);
 
-        auto valid_result = index_ptr->IsNotNull();
-        for (auto i = 0; i < input->size(); ++i) {
-            valid_res[i] = valid_result[(*input)[i]];
+        const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
+        if (cached_index_all_valid_) {
+            valid_res.set();
+        } else {
+            for (auto i = 0; i < input->size(); ++i) {
+                valid_res[i] = valid_result[(*input)[i]];
+            }
         }
         auto result = std::move(func.template operator()<FilterType::random>(
             index_ptr, values..., input->data()));
@@ -680,7 +698,8 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         auto* index_ptr = const_cast<Index*>(scalar_index);
-        auto valid_result = index_ptr->IsNotNull();
+        const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
+        const bool all_valid = cached_index_all_valid_;
         auto batch_size = input->size();
 
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
@@ -692,7 +711,7 @@ class SegmentExpr : public Expr {
                     continue;
                 }
                 T raw_data = raw.value();
-                bool valid_data = valid_result[offset];
+                bool valid_data = all_valid || valid_result[offset];
                 func.template operator()<FilterType::random>(&raw_data,
                                                              &valid_data,
                                                              nullptr,
@@ -701,10 +720,17 @@ class SegmentExpr : public Expr {
                                                              valid_res + i,
                                                              values...);
             }
+        } else if (all_valid) {
+            res.set(0, batch_size);
+            valid_res.set(0, batch_size);
         } else {
             for (auto i = 0; i < batch_size; ++i) {
                 auto offset = (*input)[i];
-                res[i] = valid_res[i] = valid_result[offset];
+                // materialize the bool once: chaining proxies would read
+                // back the word just stored into valid_res
+                const bool valid = valid_result[offset];
+                valid_res[i] = valid;
+                res[i] = valid;
             }
         }
 
@@ -1902,10 +1928,12 @@ class SegmentExpr : public Expr {
                 auto scalar_index =
                     dynamic_cast<const Index*>(pinned_index_[0].get());
                 auto* index_ptr = const_cast<Index*>(scalar_index);
-                const auto& res = index_ptr->IsNotNull();
-                for (auto i = 0; i < batch_size; ++i) {
-                    valid_result[i] = res[input[i]];
-                }
+                const auto& res = GetCachedIndexValidBitmap(index_ptr);
+                if (!cached_index_all_valid_) {
+                    for (auto i = 0; i < batch_size; ++i) {
+                        valid_result[i] = res[input[i]];
+                    }
+                }  // else: valid_result is already all-set
             } else {
                 apply_field_valid_data();
             }
@@ -2351,6 +2379,11 @@ class SegmentExpr : public Expr {
     // Populated once per segment, then sliced per batch via SliceCachedResult().
     std::shared_ptr<TargetBitmap> cached_result_{nullptr};
     std::shared_ptr<TargetBitmap> cached_valid_result_{nullptr};
+
+    // Cached scalar-index IsNotNull() bitmap for the ByOffsets paths
+    // (single-index-chunk only); see GetCachedIndexValidBitmap().
+    std::shared_ptr<TargetBitmap> cached_index_valid_res_{nullptr};
+    bool cached_index_all_valid_{false};
 
     // Legacy cache fields — TODO: remove after all subclasses migrated to cached_result_.
     int64_t cached_index_chunk_id_{-1};
