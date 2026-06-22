@@ -167,10 +167,10 @@
 	 allSearchCount int64,
 	 groupByOpts *groupByOptions,
  ) error {
-	 // plan.GetTopK() may be reduced by the delegator optimizer. t.topk is the
-	 // task's unity topK across merged slices, preserving the worker reduce
-	 // contract based on the original request topK.
-	 reduceResult, err := heapMergeReduce(defaultAllocator, segDFs, t.topk, groupByOpts)
+	// plan.GetTopK() may be reduced by the delegator optimizer. t.topk is the
+	// task's unity topK across merged slices, preserving the worker reduce
+	// contract based on the original request topK.
+	reduceResult, err := heapMergeReduce(defaultAllocator, segDFs, t.topk, groupByOpts)
 	 if err != nil {
 		 log.Ctx(t.ctx).Warn("failed to heapMergeReduce", zap.Error(err))
 		 return err
