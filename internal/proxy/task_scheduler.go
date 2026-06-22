@@ -669,11 +669,10 @@ func (sched *taskScheduler) queryLoop() {
 			return
 		case <-sched.dqQueue.utChan():
 			for t := sched.dqQueue.FrontUnissuedTask(); t != nil; t = sched.dqQueue.FrontUnissuedTask() {
-				task := t
 				if !sched.dqlBackpressure.Acquire(sched.ctx) {
 					return
 				}
-				task = sched.scheduleDqTask()
+				task := sched.scheduleDqTask()
 				if task == nil {
 					sched.dqlBackpressure.Release()
 					continue
