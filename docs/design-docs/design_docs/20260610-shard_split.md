@@ -114,8 +114,15 @@ list, so the shard routing facts live next to it and are updated in the
 same transaction:
 
 - `etcdpb.CollectionShardInfo` (parallel to `virtual_channel_names`) gains
-  `routing_key_lower`, `routing_key_upper` and a `ShardState`
-  (`Normal / Creating / Splitting / Dropped`).
+  a `ShardState` (`Normal / Creating / Splitting / Dropped`) and a routing
+  predicate carried as a `oneof`: `RangeRouting` — a *list* of
+  byte-comparable `[lower, upper)` ranges — or `HashRouting` — a list of
+  hash buckets (reserved for hash-table split). A shard owns a *list* of
+  pieces, not a single contiguous range, so it can hold multiple disjoint
+  ranges: this is required to carve a hot tenant out of the middle of a
+  shard (leaving the cold remainder as two ranges), and symmetrically to
+  merge non-buddy hash shards. The flat single `lower/upper` form cannot
+  express that. (Defined in milvus-proto #618; `model.ShardInfo` mirrors it.)
 - `etcdpb.CollectionInfo` gains `routing_version` (monotonically increased
   by every routing change) and `routing_mode` (`Hash` for legacy
   collections, `Range` for namespace collections subject to split).
@@ -179,10 +186,11 @@ Four principles work around the constraints of §2 simultaneously:
    message is appended into the old WAL; the StreamingNode that owns it
    auto-flushes and fences the old vchannel on processing it, and its
    TimeTick becomes `T_switch`. Only then are the new vchannels created —
-   each `CreateVChannel` starts its WAL from a fresh TSO sync, which (after
-   the fence, on a monotonic global TSO) is necessarily after `T_switch`,
-   so the new WALs are born strictly after `T_switch` and creation doubles
-   as activation (no separate step, no `T_switch` value to carry). From then on new writes to the old
+   each `CreateVChannel` carries a barrier timetick DataCoord allocates
+   after the fence ack, which (on a monotonic global TSO) is necessarily
+   after `T_switch`, so the new WALs are born strictly after `T_switch` and
+   creation doubles as activation (no separate step; the barrier is a lower
+   bound, not `T_switch`'s value). From then on new writes to the old
    vchannel are rejected and the proxy re-routes them to the new
    vchannels. Each message is sequenced exactly once, in its destination
    WAL.
@@ -194,9 +202,11 @@ Four principles work around the constraints of §2 simultaneously:
   through the streaming client (`SplitShard` to fence the old WAL →
   `CreateVChannel` on the new pchannels → routing commit; there is no
   coordinator→StreamingNode RPC, and no separate flush or activate message
-  — flush is auto-triggered inside the source SN's handler, and the
-  fresh-TSO barrier the target SN applies on `CreateVChannel` doubles as
-  activation. DataCoord neither captures nor persists `T_switch`). It
+  — flush is auto-triggered inside the source SN's handler, and the barrier
+  timetick DataCoord allocates after the fence ack and carries on
+  `CreateVChannel` doubles as activation. DataCoord records `T_switch`
+  (returned on the `SplitShard` ack) on the task, because the
+  redistribution drain gates on it — see §6.3). It
   redistributes segments in rounds, finally makes the new
   shards visible to QueryCoord, and freezes compaction/GC on the source
   shard during the window.
@@ -215,8 +225,8 @@ Four principles work around the constraints of §2 simultaneously:
   writes to the old vchannel. The target vchannels live on whichever
   StreamingNodes own the target pchannels (a node cannot open a WAL for
   another node) and are created by the `CreateVChannel` messages appended
-  there, each starting its WAL from a fresh TSO sync (necessarily past
-  `T_switch`).
+  there, each born at the barrier timetick DataCoord allocates after the
+  fence ack (necessarily past `T_switch`).
 - **delegator0 (old)** consumes up to the split message; from it learns
   the target vchannels and key ranges, fetches their consume start
   positions via a one-shot Coordinator RPC (the positions were persisted
@@ -238,7 +248,7 @@ flowchart LR
     IDLE["Normal"] -->|"split triggered"| PREP["Preparing, target shard meta and vchannel names allocated"]
     PREP -->|"abort, no external side effects"| IDLE
     PREP -->|"append SplitShard, SN auto-flush and fence"| FENCE["Fenced at T_switch, old vchannel rejects writes"]
-    FENCE -->|"forward-only, CreateVChannel fresh-TSO barrier, routing commit"| WIN["Window, in-place children and multi-round redistribute"]
+    FENCE -->|"forward-only, CreateVChannel barrier > T_switch, routing commit"| WIN["Window, in-place children and multi-round redistribute"]
     WIN -->|"all segments processed"| ADOPT["Adopting, new shards visible, watch and load"]
     ADOPT -->|"release source shard, bump routing"| DONE["Done"]
 ```
@@ -282,18 +292,31 @@ interceptor chain.
    vchannel-exclusive lock. The message's TimeTick is `T_switch`.
    Afterwards every new write to vchannel0 is rejected with `SHARD_FENCED`.
 3. **Create targets (after the fence; barrier doubles as activation).**
-   DataCoord appends a `CreateVChannel` message — carrying the collection
-   schema, partition list and key range — to each target pchannel (whose
-   WALs are hosted by whichever StreamingNodes own them; a node cannot open
-   a WAL for another node). The target StreamingNode allocates the genesis
-   timetick from a **fresh TSO sync** (it discards its prefetched batch and
-   re-fetches the latest TSO) rather than from a possibly-stale prefetched
-   batch. The barrier needs no value: because the fence already committed
-   and the global TSO is strictly monotonic, any freshly fetched TSO is
-   necessarily `> T_switch`, so the genesis message and every later message
-   on the new WAL are strictly greater than `T_switch` — **DataCoord never
-   captures or persists `T_switch`; this is entirely a StreamingNode-local
-   operation.** Creation and activation are one step, with no
+   DataCoord **awaits the `SplitShard` append result** (so `T_switch` is
+   allocated and sequenced) and only then allocates a **barrier timetick**
+   from the global TSO and appends a `CreateVChannel` message — carrying the
+   collection schema, partition list, key range and that barrier
+   (`BarrierTimeTick`) — to each target pchannel (whose WALs are hosted by
+   whichever StreamingNodes own them; a node cannot open a WAL for another
+   node). The target StreamingNode floors the genesis timetick at the
+   barrier, so even a node holding a prefetched TSO batch older than
+   `T_switch` cannot place the genesis at or before it. The barrier value
+   matters only as a lower bound: because it is allocated **strictly after**
+   the fence ack and the global TSO is monotonic, it is necessarily
+   `> T_switch`, so the genesis message and every later message on the new
+   WAL are strictly greater than `T_switch`.
+
+   > **The fence ack must precede the `CreateVChannel` append — never
+   > pipelined.** The `> T_switch` guarantee rests entirely on the barrier
+   > being allocated *after* `T_switch`. If the two appends were issued
+   > concurrently, the barrier (or a target's fresh fetch) could be sequenced
+   > before or concurrently with `T_switch`'s allocation on the source
+   > pchannel's AckManager, and `> T_switch` would break silently (an
+   > occasional ghost message `≤ T_switch` on the new WAL). The FSM therefore
+   > serializes: append `SplitShard`, await its ack, allocate the barrier,
+   > then append `CreateVChannel`.
+
+   Creation and activation are one step, with no
    `Creating`/`Activate` two-phase state. Each consumer that special-cases `CreateCollection` as the
    vchannel-genesis message needs a `CreateVChannel` handler; there are
    three: the shard manager (registers the collection for DML and segment
@@ -354,7 +377,7 @@ sequenceDiagram
     DC->>SC: allocate target vchannel names
     DC->>SN0: append SplitShard{targets, ranges} @T_switch
     Note over SN0: handler auto-flushes growing + force-fails txns, vchannel0 fenced
-    DC->>SNT: append CreateVChannel, fresh-TSO barrier (create == activate)
+    DC->>SNT: append CreateVChannel, barrier > T_switch (create == activate)
     SNT-->>DC: start position, persisted into collection meta
     DC->>DC: routing commit: targets routable, routing_version++
     PX->>SN0: write to old vchannel
@@ -445,12 +468,28 @@ sequenceDiagram
    segments, and relabeling mid-import would race with those writes. They
    are picked up once flushed.
 2. Redistribution runs in rounds: each round processes the segments
-   visible at that time. The source shard is "drained" only when **both**
-   DC-local conditions hold: no healthy segment remains on the source
-   vchannel (any state — `isSegmentHealthy` already keeps `Importing`
-   segments visible until they reach a terminal state), **and** no active
-   import job has the source vchannel in its `Vchannels`. The second
-   conjunct closes a blind window: a job still in `Pending`/`PreImporting`
+   visible at that time. The source shard is "drained" only when **all
+   three** DC-local conditions hold: no healthy segment remains on the
+   source vchannel (any state — `isSegmentHealthy` already keeps `Importing`
+   segments visible until they reach a terminal state); the source channel
+   checkpoint has advanced to `≥ T_switch` (`fenceFlushed`); **and** no
+   active import job has the source vchannel in its `Vchannels`.
+
+   The checkpoint conjunct closes the **async-flush window**. The fence only
+   *writes* the `SplitShard` WAL message; the growing segments it sealed are
+   flushed and reported to DataCoord *asynchronously* by the streamingnode
+   flusher. If the drain declared the source drained before those segments
+   reached DataCoord meta, they would orphan on the just-dropped shard. The
+   source channel checkpoint advances past a position only after the
+   segments holding that position's data are durably synced and reported
+   (the write buffer holds the checkpoint at the earliest un-synced
+   position), so `channelCheckpoint(source) ≥ T_switch` proves the entire
+   fence-sealed set is in DataCoord meta and relabelable. This is why
+   DataCoord records `T_switch` (§5): the drain needs its value. (`T_switch`
+   is recovered after a crash that lost it — see §10.)
+
+   The import conjunct closes another blind window: a job still in
+   `Pending`/`PreImporting`
    has not registered any segment in meta yet (`AllocImportSegment` adds
    `SegmentInfo{State: Importing, IsImporting: true}` only when it starts
    writing), so a job planned against the pre-split routing is invisible
@@ -572,19 +611,21 @@ The view of one segment `S` across the phases:
 
 - **Total order.** WAL0 holds only messages ≤ `T_switch`; the new
   vchannels hold *no* message ≤ `T_switch` at all — because their
-  `CreateVChannel` genesis is appended only after the fence committed and
-  the target SN allocates it from a fresh TSO sync, so even the creation
+  `CreateVChannel` genesis is floored at the barrier timetick, which
+  DataCoord allocates strictly after the fence ack, so even the creation
   message is past `T_switch`. Collection DDL cannot interleave with the
   fence→create section because the split task holds the Broadcaster's
   `ExclusiveCollectionName` key (§6.1). All messages sit on the same global
   TSO axis and each is sequenced exactly once. The TSO allocator is a
   per-node singleton with prefetched batches, so a node hosting a new WAL
-  could otherwise hold a batch older than `T_switch`; the fresh TSO sync on
-  `CreateVChannel` (§6.1) closes this hole by discarding that stale batch.
-  Note the boundary needs only `> T_switch`, not the exact value: a fresh
-  fetch is necessarily greater than any earlier-allocated timetick
-  (including `T_switch`) on the monotonic global TSO — which is why the
-  barrier carries no value and DataCoord need not know `T_switch`.
+  could otherwise hold a batch older than `T_switch`; the barrier floor on
+  `CreateVChannel` (§6.1) closes this hole regardless of any stale batch the
+  target node holds. The boundary needs only `> T_switch`, not the exact
+  value, for *this* invariant: the barrier is necessarily greater than any
+  earlier-allocated timetick (including `T_switch`) on the monotonic global
+  TSO. DataCoord does record `T_switch` itself — not for the barrier, which
+  needs only the lower bound, but for the redistribution drain (§6.3), which
+  gates on `channelCheckpoint(source) ≥ T_switch`.
 - **No loss, no duplication.** Writes go directly to their final WAL with
   unchanged ack semantics. The fence rejects in the lock interceptor,
   which runs before TimeTick allocation and the backend append
@@ -710,9 +751,10 @@ by the namespace hard limit instead.
 
 - **Ordering: fence first.** The `SplitShard` fence is the first WAL
   action and the single commit point; the new vchannels are created only
-  *after* it, because the target's fresh-TSO barrier guarantees `>
-  T_switch` only when the fence has already committed (a TSO fetched after
-  the fence is necessarily past `T_switch`). This
+  *after* it, because the barrier (allocated by DataCoord strictly after the
+  fence ack) guarantees `> T_switch` only when the fence has already
+  committed — a timetick allocated after `T_switch` is necessarily past it
+  on the monotonic global TSO (§6.1). This
   does not change write availability: in *either* ordering the new shards
   become routable only at the final routing/meta commit (the proxy cannot
   see a new shard before its collection-meta write lands), so the
@@ -729,14 +771,20 @@ by the namespace hard limit instead.
 - **Before the fence** (state `Preparing`): abort is allowed — drop the
   target shard metadata and the allocated vchannel names; nothing has been
   written to any WAL, so there are no external side effects.
-- **After the fence**: forward-only, and crash recovery needs no special
-  state because **DataCoord never has to recover `T_switch`**. The barrier
-  is value-free (a fresh TSO sync, §6.1/§7), so on restart DataCoord just
-  re-drives the FSM by re-sending the same messages, and the StreamingNode
-  makes each idempotent: a re-sent `SplitShard` is a no-op once the source
-  vchannel is already fenced (persisted `VCHANNEL_STATE_SPLITTED`), and a
-  re-sent `CreateVChannel` is a no-op once the target vchannel exists (a
-  fresh re-create would still barrier past `T_switch`). Target creation,
+- **After the fence**: forward-only. DataCoord records `T_switch` (returned
+  on the fence ack) on the task because the drain gates on it (§6.3). The
+  one window is a crash *after* the `SplitShard` append succeeds but
+  *before* `T_switch` is persisted: on restart DataCoord re-drives the FSM
+  and re-sends `SplitShard`, which hits the already-fenced source and
+  returns `SHARD_FENCED` — **carrying `T_switch` back**. The StreamingNode
+  persists `T_switch` durably in `VChannelMeta.split_time_tick` when it
+  fences (restored into the shard manager on its own restart) and returns it
+  on that error, so DataCoord re-records it and the drain stays correct even
+  across a DataCoord-crash + StreamingNode-restart double fault. The rest of
+  recovery is idempotent re-sends: a re-sent `SplitShard` is a no-op fence
+  (persisted `VCHANNEL_STATE_SPLITTED`), and a re-sent `CreateVChannel` is a
+  no-op once the target vchannel exists (a fresh re-create still floors past
+  `T_switch`). Target creation,
   routing commit and redistribution are all idempotent appends or metadata
   transactions; routing versions never go backwards. DataCoord's only
   persisted state is which FSM step it is on — and even that can be probed
@@ -750,10 +798,10 @@ by the namespace hard limit instead.
 
 | Component | Work |
 |-----------|------|
-| Common | `SplitShard` / `CreateVChannel` message types (codegen; `SplitShard` is `ExclusiveRequired` and its handler auto-flushes growing; `CreateVChannel` triggers a fresh-TSO barrier on the target SN and carries no `T_switch` value); no separate `Activate` or `ManualFlush` message; `SHARD_FENCED` / `ROUTING_STALE` error codes (unrecoverable, `SHARD_FENCED` carries the expected routing version); `etcdpb` shard routing fields; range routing table derived from collection meta |
-| DataCoord | Split task FSM driving the sequence via streaming-client appends (`SplitShard` to fence → `CreateVChannel` → routing commit; no `T_switch` captured or persisted — the barrier is a StreamingNode-local fresh-TSO sync; start positions persisted into the collection meta; Broadcaster `ExclusiveCollectionName` key held across fence→create→routing-commit; recovery re-sends idempotent messages), trigger and split-point selection, batched relabel (segments + L0, skipping `IsImporting`), multi-round redistribution with the segment-and-import-job conjunction drain check, import-job queueing during `Fencing`, source-shard freeze, adoption gate |
+| Common | `SplitShard` / `CreateVChannel` message types (codegen; `SplitShard` is `ExclusiveRequired` and its handler auto-flushes growing; `CreateVChannel` carries a DataCoord-allocated `BarrierTimeTick` lower bound, not `T_switch`'s value); no separate `Activate` or `ManualFlush` message; `SHARD_FENCED` / `ROUTING_STALE` error codes (unrecoverable; `SHARD_FENCED` carries `fenced_time_tick` = `T_switch`, read back on a re-fence to recover it); `etcdpb` shard routing fields; range routing table derived from collection meta |
+| DataCoord | Split task FSM driving the sequence via streaming-client appends (`SplitShard` to fence → `CreateVChannel` → routing commit; `T_switch` recorded on the task for the drain gate and recovered on a re-fence; the barrier is a DataCoord-allocated lower bound carried on `CreateVChannel`; start positions persisted into the collection meta; Broadcaster `ExclusiveCollectionName` key held across fence→create→routing-commit; recovery re-sends idempotent messages), trigger and split-point selection, batched relabel (segments + L0, skipping `IsImporting`), multi-round redistribution with the three-way (no source segment / checkpoint ≥ `T_switch` / no active import job) drain check, import-job queueing during `Fencing`, source-shard freeze, adoption gate |
 | StreamingCoord | vchannel allocation for existing collections (per-collection increasing shard index, distinct pchannels), pchannel headroom and expansion |
-| StreamingNode | Source side: `SplitShard` handler auto-flushes growing segments (embedding their IDs) and fences the vchannel on the lock interceptor, persisted fence state (the `VCHANNEL_STATE_SPLITTED = 3` reservation in `streaming.proto` covers this fenced source vchannel), rejection codes. Target side: `CreateVChannel` handler runs the three genesis paths (shard manager / RecoveryStorage observe / flusher) and allocates the genesis timetick from a fresh TSO sync (discard prefetched batch, re-fetch latest) so the vchannel is born past `T_switch` without carrying its value (no separate `Creating`/`Activate` state); the append's `LastConfirmedMessageID` is returned so DataCoord can persist it as the child start position |
+| StreamingNode | Source side: `SplitShard` handler auto-flushes growing segments (embedding their IDs) and fences the vchannel on the lock interceptor, persisted fence state (the `VCHANNEL_STATE_SPLITTED = 3` reservation in `streaming.proto` covers this fenced source vchannel), rejection codes. Target side: `CreateVChannel` handler runs the three genesis paths (shard manager / RecoveryStorage observe / flusher) and floors the genesis timetick at the `BarrierTimeTick` DataCoord allocates after the fence ack, so the vchannel is born past `T_switch` (the barrier is a lower bound, not `T_switch`'s value; no separate `Creating`/`Activate` state); it also persists `split_time_tick` on the source `VChannelMeta` so a re-fence can return `T_switch`. The append's `LastConfirmedMessageID` is returned so DataCoord can persist it as the child start position |
 | Proxy | Range routing lookup, reject-and-refetch loop, routing-version header, cache invalidation on adoption |
 | QueryNode | In-place child delegator spawn, fronting fan-out + reduce, delete/TimeTick forwarding, `min(tsafe)` serving timestamp, idempotent re-spawn on recovery, in-place handoff |
 | QueryCoord | Splitting flag (balance freeze), one-shot adoption, in-place delegator conversion, source-shard release |
