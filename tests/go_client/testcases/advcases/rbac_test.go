@@ -11,12 +11,11 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -72,7 +71,7 @@ func TestRbacDefault(t *testing.T) {
 	userName := common.GenRandomString("user", 6)
 	pwd := common.GenRandomString("pwd", 6)
 	userDescription := "go client user description"
-	log.Info(t.Name(), zap.String("pwd", pwd))
+	mlog.Info(ctx, t.Name(), mlog.String("pwd", pwd))
 	err := mc.CreateUser(ctx, client.NewCreateUserOption(userName, pwd).WithDescription(userDescription))
 	common.CheckErr(t, err, true)
 	users, err := mc.ListUsers(ctx, client.NewListUserOption())
@@ -93,13 +92,13 @@ func TestRbacDefault(t *testing.T) {
 	// create index not permission deny
 	mcUser := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: userName, Password: pwd})
 	_, errIndex := mcUser.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
-	log.Info("TestRbacDefault", zap.Error(errIndex))
+	mlog.Info(ctx, "TestRbacDefault", mlog.Err(errIndex))
 	common.CheckErr(t, errIndex, false, fmt.Sprintf("permission deny to %s in the `default` database", userName))
 
 	// grant privilege to role
 	errGrant = mc.GrantPrivilege(ctx, client.NewGrantPrivilegeOption(roleName, CollectionObjectType, "CreateIndex", AllObjectName))
 	common.CheckErr(t, errGrant, true)
-	log.Info("TestRbacDefault", zap.Error(errGrant))
+	mlog.Info(ctx, "TestRbacDefault", mlog.Err(errGrant))
 
 	// describe role
 	role, _ := mc.DescribeRole(ctx, client.NewDescribeRoleOption(roleName))
@@ -167,7 +166,7 @@ func TestRbacDefaultV2(t *testing.T) {
 	// describe collection but permission deny
 	mcUser := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: userName, Password: pwd})
 	_, errFlush := mcUser.Flush(ctx, client.NewFlushOption(schema.CollectionName))
-	log.Info("TestRbacDefault", zap.Error(errFlush))
+	mlog.Info(ctx, "TestRbacDefault", mlog.Err(errFlush))
 	common.CheckErr(t, errFlush, false, fmt.Sprintf("permission deny to %s in the `default` database", userName))
 
 	// grant privilege to role
@@ -220,7 +219,7 @@ func TestCreateInvalidUser(t *testing.T) {
 	invalidUserNames = append(invalidUserNames, common.RootUser)
 	// create user & list user
 	for _, invalidName := range invalidUserNames {
-		log.Info("name", zap.String("name", invalidName))
+		mlog.Info(ctx, "name", mlog.String("name", invalidName))
 		err := mc.CreateUser(ctx, client.NewCreateUserOption(invalidName, "ccccccc"))
 		common.CheckErr(t, err, false,
 			"username must contain only numbers, letters and underscores",
@@ -291,7 +290,7 @@ func TestUpdatePassword(t *testing.T) {
 	oldPwd := newPwd
 	passwords := []string{"中文", "シャオミン", "샤오밍", "ಸೂರ್ಯ", "myPwd@aa.com", "φεγγάρι", "mặt trăng"}
 	for i := 0; i < len(passwords); i++ {
-		log.Info(t.Name(), zap.String("pwd", passwords[i]))
+		mlog.Info(ctx, t.Name(), mlog.String("pwd", passwords[i]))
 		err = mc.UpdatePassword(ctx, client.NewUpdatePasswordOption(userName, oldPwd, passwords[i]))
 		common.CheckErr(t, err, true)
 		oldPwd = passwords[i]
@@ -392,7 +391,7 @@ func TestCreateInvalidRole(t *testing.T) {
 
 	// create user & list user
 	for _, invalidName := range invalidNames {
-		log.Info("name", zap.String("name", invalidName))
+		mlog.Info(ctx, "name", mlog.String("name", invalidName))
 		err := mc.CreateRole(ctx, client.NewCreateRoleOption(invalidName))
 		common.CheckErr(t, err, false,
 			"role name can only contain numbers, letters, dollars and underscores",
