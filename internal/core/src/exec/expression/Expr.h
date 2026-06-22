@@ -760,8 +760,7 @@ class SegmentExpr : public Expr {
                                 valid_res + processed_size,
                                 values...);
                         } else {
-                            if (valid_data.size() > processed_size &&
-                                !valid_data[processed_size]) {
+                            if (!valid_data.empty() && !valid_data[0]) {
                                 res[processed_size] =
                                     valid_res[processed_size] = false;
                             }

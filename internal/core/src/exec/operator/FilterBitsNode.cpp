@@ -53,6 +53,20 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
     return key;
 }
 
+void
+ConvertPredicateToFilteredBitset(TargetBitmapView data,
+                                 TargetBitmapView valid,
+                                 const size_t size) {
+    // FilterBitsNode outputs a filtered-row bitset: 1 means excluded. A SQL-style
+    // predicate passes only when it is definitely TRUE, so UNKNOWN/NULL must be
+    // excluded together with FALSE.
+    data.flip();
+    TargetBitmap invalid(valid);
+    invalid.flip();
+    data.inplace_or(invalid, size);
+    valid.set();
+}
+
 }  // namespace
 
 PhyFilterBitsNode::PhyFilterBitsNode(
@@ -159,9 +173,9 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result should be bitmap ColumnVector");
 
         auto col_vec_size = col_vec->size();
-        // flip in-place on the result bitmap, no extra copy
         TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-        view.flip();
+        TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec_size);
+        ConvertPredicateToFilteredBitset(view, valid_view, col_vec_size);
         num_processed_rows_ = col_vec_size;
 
         AssertInfo(col_vec_size == need_process_rows_,
@@ -170,8 +184,6 @@ PhyFilterBitsNode::GetOutput() {
                    need_process_rows_);
 
         if (can_use_cache) {
-            TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                        col_vec_size);
             ExprResCacheManager::Key key{cache_segment->get_segment_id(),
                                          expr_cache_key_};
             ExprResCacheManager::Value v;
@@ -221,7 +233,10 @@ PhyFilterBitsNode::GetOutput() {
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }
-    bitset.flip();
+    TargetBitmapView bitset_view(bitset);
+    TargetBitmapView valid_bitset_view(valid_bitset);
+    ConvertPredicateToFilteredBitset(
+        bitset_view, valid_bitset_view, bitset.size());
 
     AssertInfo(bitset.size() == need_process_rows_,
                "bitset size: {}, need_process_rows_: {}",

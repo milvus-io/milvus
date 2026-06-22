@@ -918,8 +918,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         offset = (offsets) ? offsets[i] : i;
                     }
                     if (valid_data != nullptr && !valid_data[offset]) {
-                        valid_res[i] = false;
-                        res[i] = true;
+                        res[i] = valid_res[i] = false;
                         continue;
                     }
                     if (has_bitmap_input &&
@@ -1087,33 +1086,54 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index.get() != nullptr);
-        cached_index_chunk_res_ =
-            (op_type == proto::plan::OpType::NotEqual)
-                ? std::make_shared<TargetBitmap>(active_count_, true)
-                : std::make_shared<TargetBitmap>(active_count_);
+        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_, true);
         TargetBitmapView res_view(*cached_index_chunk_res_);
         TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        int64_t valid_processed_size = 0;
+        for (size_t i = 0;
+             i < num_data_chunk_ && valid_processed_size < active_count_;
+             ++i) {
+            int64_t size = segment_->is_chunked()
+                               ? segment_->chunk_size(field_id_, i)
+                               : (i == num_data_chunk_ - 1
+                                      ? active_count_ - valid_processed_size
+                                      : size_per_chunk_);
+            size =
+                std::min<int64_t>(size, active_count_ - valid_processed_size);
+            if (size <= 0) {
+                continue;
+            }
+            segment_->ApplyFieldValidData(
+                op_ctx_,
+                field_id_,
+                i,
+                0,
+                size,
+                valid_res_view + valid_processed_size);
+            valid_processed_size += size;
+        }
 
         // process shredding data
         auto try_execute = [&](milvus::index::JSONType json_type,
-                               TargetBitmapView& res_view,
-                               TargetBitmapView& valid_res_view,
                                auto GetType,
                                auto ValType) {
             auto target_field = index->GetShreddingField(pointer, json_type);
             if (!target_field.empty()) {
                 using ColType = decltype(GetType);
                 using ValType = decltype(ValType);
+                TargetBitmap target_res(active_count_, false);
+                TargetBitmapView target_res_view(target_res);
                 ShreddingExecutor<ColType, ValType> executor(
                     op_type, pointer, val);
                 index->ExecutorForShreddingData<ColType>(op_ctx_,
                                                          target_field,
                                                          executor,
                                                          nullptr,
-                                                         res_view,
-                                                         valid_res_view);
+                                                         target_res_view,
+                                                         target_res_view);
+                res_view.inplace_or_with_count(target_res_view, active_count_);
                 LOG_DEBUG(
                     "using shredding data's field: {} with value {}, count {} "
                     "for segment {}",
@@ -1130,71 +1150,42 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 [this](double us) { json_stats_shredding_latency_us_ += us; });
 
             if constexpr (std::is_same_v<GetType, bool>) {
-                try_execute(milvus::index::JSONType::BOOL,
-                            res_view,
-                            valid_res_view,
-                            bool{},
-                            bool{});
+                try_execute(milvus::index::JSONType::BOOL, bool{}, bool{});
             } else if constexpr (std::is_same_v<GetType, int64_t>) {
-                try_execute(milvus::index::JSONType::INT64,
-                            res_view,
-                            valid_res_view,
-                            int64_t{},
-                            int64_t{});
+                try_execute(
+                    milvus::index::JSONType::INT64, int64_t{}, int64_t{});
 
                 // and double compare
-                TargetBitmap res_double(active_count_, false);
-                TargetBitmapView res_double_view(res_double);
-                TargetBitmap res_double_valid(active_count_, true);
-                TargetBitmapView valid_res_double_view(res_double_valid);
-                try_execute(milvus::index::JSONType::DOUBLE,
-                            res_double_view,
-                            valid_res_double_view,
-                            double{},
-                            int64_t{});
-                res_view.inplace_or_with_count(res_double_view, active_count_);
-                valid_res_view.inplace_or_with_count(valid_res_double_view,
-                                                     active_count_);
+                try_execute(
+                    milvus::index::JSONType::DOUBLE, double{}, int64_t{});
             } else if constexpr (std::is_same_v<GetType, double>) {
-                try_execute(milvus::index::JSONType::DOUBLE,
-                            res_view,
-                            valid_res_view,
-                            double{},
-                            double{});
+                try_execute(
+                    milvus::index::JSONType::DOUBLE, double{}, double{});
 
                 // add int64 compare
-                TargetBitmap res_int64(active_count_, false);
-                TargetBitmapView res_int64_view(res_int64);
-                TargetBitmap res_int64_valid(active_count_, true);
-                TargetBitmapView valid_res_int64_view(res_int64_valid);
-                try_execute(milvus::index::JSONType::INT64,
-                            res_int64_view,
-                            valid_res_int64_view,
-                            int64_t{},
-                            double{});
-                res_view.inplace_or_with_count(res_int64_view, active_count_);
-                valid_res_view.inplace_or_with_count(valid_res_int64_view,
-                                                     active_count_);
+                try_execute(
+                    milvus::index::JSONType::INT64, int64_t{}, double{});
             } else if constexpr (std::is_same_v<GetType, std::string> ||
                                  std::is_same_v<GetType, std::string_view>) {
-                try_execute(milvus::index::JSONType::STRING,
-                            res_view,
-                            valid_res_view,
-                            GetType{},
-                            GetType{});
+                try_execute(
+                    milvus::index::JSONType::STRING, GetType{}, GetType{});
             } else if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                 // ARRAY shredding data: stored as BSON binary in binary column
                 auto target_field = index->GetShreddingField(
                     pointer, milvus::index::JSONType::ARRAY);
                 if (!target_field.empty()) {
+                    TargetBitmap target_res(active_count_, false);
+                    TargetBitmapView target_res_view(target_res);
                     ShreddingArrayBsonExecutor executor(op_type, pointer, val);
                     index->ExecutorForShreddingData<std::string_view>(
                         op_ctx_,
                         target_field,
                         executor,
                         nullptr,
-                        res_view,
-                        valid_res_view);
+                        target_res_view,
+                        target_res_view);
+                    res_view.inplace_or_with_count(target_res_view,
+                                                   active_count_);
                     LOG_DEBUG("using shredding array field: {}, count {}",
                               target_field,
                               res_view.count());
@@ -1222,50 +1213,51 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                                    milvus::BsonView bson,
                                    uint32_t row_id,
                                    uint32_t value_offset) {
+            auto set_unknown = [&](uint32_t row_id) {
+                res_view[row_id] = false;
+            };
+            auto set_known = [&](uint32_t row_id, bool value) {
+                res_view[row_id] = value;
+            };
             if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                 Assert(op_type == proto::plan::OpType::Equal ||
                        op_type == proto::plan::OpType::NotEqual);
                 if (array_index != INVALID_ARRAY_INDEX) {
                     auto array_value = bson.ParseAsArrayAtOffset(value_offset);
                     if (!array_value.has_value()) {
-                        // For NotEqual: path not exists means "not equal", keep true
-                        // For Equal: path not exists means no match, set false
-                        res_view[row_id] =
-                            (op_type == proto::plan::OpType::NotEqual);
+                        set_unknown(row_id);
                         return;
                     }
                     auto sub_array = milvus::BsonView::GetNthElementInArray<
                         milvus::bson::array_view>(array_value.value().data(),
                                                   array_index);
                     if (!sub_array.has_value()) {
-                        res_view[row_id] =
-                            (op_type == proto::plan::OpType::NotEqual);
+                        set_unknown(row_id);
                         return;
                     }
-                    res_view[row_id] =
+                    set_known(
+                        row_id,
                         op_type == proto::plan::OpType::Equal
                             ? CompareTwoJsonArray(sub_array.value(), val)
-                            : !CompareTwoJsonArray(sub_array.value(), val);
+                            : !CompareTwoJsonArray(sub_array.value(), val));
                 } else {
                     auto array_value = bson.ParseAsArrayAtOffset(value_offset);
                     if (!array_value.has_value()) {
-                        res_view[row_id] =
-                            (op_type == proto::plan::OpType::NotEqual);
+                        set_unknown(row_id);
                         return;
                     }
-                    res_view[row_id] =
+                    set_known(
+                        row_id,
                         op_type == proto::plan::OpType::Equal
                             ? CompareTwoJsonArray(array_value.value(), val)
-                            : !CompareTwoJsonArray(array_value.value(), val);
+                            : !CompareTwoJsonArray(array_value.value(), val));
                 }
             } else {
                 std::optional<GetType> get_value;
                 if (array_index != INVALID_ARRAY_INDEX) {
                     auto array_value = bson.ParseAsArrayAtOffset(value_offset);
                     if (!array_value.has_value()) {
-                        // Path not exists: NotEqual->true, others->false
-                        res_view[row_id] =
-                            (op_type == proto::plan::OpType::NotEqual);
+                        set_unknown(row_id);
                         return;
                     }
                     get_value = milvus::BsonView::GetNthElementInArray<GetType>(
@@ -1277,12 +1269,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                                 milvus::BsonView::GetNthElementInArray<double>(
                                     array_value.value().data(), array_index);
                             if (get_value.has_value()) {
-                                res_view[row_id] = UnaryCompare(
-                                    get_value.value(), val, op_type);
+                                set_known(row_id,
+                                          UnaryCompare(
+                                              get_value.value(), val, op_type));
                             } else {
-                                // Type mismatch: NotEqual->true, others->false
-                                res_view[row_id] =
-                                    (op_type == proto::plan::OpType::NotEqual);
+                                set_unknown(row_id);
                             }
                             return;
                         }
@@ -1292,11 +1283,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                                 milvus::BsonView::GetNthElementInArray<int64_t>(
                                     array_value.value().data(), array_index);
                             if (get_value.has_value()) {
-                                res_view[row_id] = UnaryCompare(
-                                    get_value.value(), val, op_type);
+                                set_known(row_id,
+                                          UnaryCompare(
+                                              get_value.value(), val, op_type));
                             } else {
-                                res_view[row_id] =
-                                    (op_type == proto::plan::OpType::NotEqual);
+                                set_unknown(row_id);
                             }
                             return;
                         }
@@ -1310,11 +1301,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                             auto get_value =
                                 bson.ParseAsValueAtOffset<double>(value_offset);
                             if (get_value.has_value()) {
-                                res_view[row_id] = UnaryCompare(
-                                    get_value.value(), val, op_type);
+                                set_known(row_id,
+                                          UnaryCompare(
+                                              get_value.value(), val, op_type));
                             } else {
-                                res_view[row_id] =
-                                    (op_type == proto::plan::OpType::NotEqual);
+                                set_unknown(row_id);
                             }
                             return;
                         }
@@ -1323,23 +1314,23 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                             auto get_value = bson.ParseAsValueAtOffset<int64_t>(
                                 value_offset);
                             if (get_value.has_value()) {
-                                res_view[row_id] = UnaryCompare(
-                                    get_value.value(), val, op_type);
+                                set_known(row_id,
+                                          UnaryCompare(
+                                              get_value.value(), val, op_type));
                             } else {
-                                res_view[row_id] =
-                                    (op_type == proto::plan::OpType::NotEqual);
+                                set_unknown(row_id);
                             }
                             return;
                         }
                     }
                 }
                 if (!get_value.has_value()) {
-                    res_view[row_id] =
-                        (op_type == proto::plan::OpType::NotEqual);
+                    set_unknown(row_id);
                     return;
                 }
-                res_view[row_id] =
-                    UnaryCompare(get_value.value(), val, op_type, &context);
+                set_known(
+                    row_id,
+                    UnaryCompare(get_value.value(), val, op_type, &context));
             }
         };
 
@@ -1367,12 +1358,15 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         if (expr_->op_type_ == proto::plan::OpType::NotEqual) {
             cached_index_chunk_res_->flip();
         }
+        res_view.inplace_and(valid_res_view, active_count_);
         cached_index_chunk_id_ = 0;
         CachePut(CacheElapsedUs(cache_compute_start));
     }
 
-    auto res = MoveOrSliceBitmap(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    auto res = MoveOrSliceBitmap(*cached_index_chunk_res_,
+                                 *cached_index_chunk_valid_res_,
+                                 current_data_global_pos_,
+                                 real_batch_size);
     MoveCursor();
     return res;
 }
