@@ -345,8 +345,8 @@ proxy:
     recoverStep: 4 # The DQL dispatch concurrency increment for each Proxy backpressure recovery.
     recoverQuietPeriod: 5s # The quiet period after a Proxy DQL backpressure slowdown before recover is allowed.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
-  maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
+  maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
   # If the number of result entries exceeds this limit, the search will be rejected.
