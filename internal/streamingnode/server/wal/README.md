@@ -6,8 +6,10 @@
 ## Project arrangement
 
 - `wal`
-    - `/`: only define exposed interfaces.
+    - `/`: only define exposed interfaces, including WAL scanners and TransformLog read contracts.
     - `/adaptor/`: adaptors to implement `wal` interface from `walimpls` interface
+    - `/snview/`: PChannel-local StreamingNode QueryView state machine.
+    - `/transformlog/`: RecoveryStorage-owned TransformLog implementation.
     - `/utility/`: A utility code for common logic or data structure.
 - `github.com/milvus-io/milvus/pkg/streaming/walimpls`
     - `/`: define the underlying message system interfaces need to be implemented.

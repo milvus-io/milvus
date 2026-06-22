@@ -37,6 +37,7 @@ func TestInit(t *testing.T) {
 	assert.NotNil(t, Resource().TSOAllocator())
 	assert.NotNil(t, Resource().ETCD())
 	assert.NotNil(t, Resource().MixCoordClient())
+	assert.NotNil(t, Resource().QueryViewRouter())
 	Release()
 }
 

@@ -2,13 +2,20 @@ package segment
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+)
+
+const (
+	statusExtraInfoDataViewStreamingVersion = "data_view_streaming_version"
+	statusExtraInfoDataViewCompactVersion   = "data_view_compact_version"
 )
 
 type segmentLifecycleWriter struct {
@@ -31,12 +38,36 @@ func (w *segmentLifecycleWriter) EnsureGrowingSegment(ctx context.Context, meta 
 	}, retry.AttemptAlways())
 }
 
-func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
+func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
 	req := buildCommitL1SegmentRequest(w.serverID, meta)
-	return retry.Do(ctx, func() error {
+	var version *viewpb.DataVersion
+	err := retry.Do(ctx, func() error {
 		resp, err := w.coord.SaveBinlogPaths(ctx, req)
-		return merr.CheckRPCCall(resp, err)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		version = dataVersionFromStatus(resp.GetExtraInfo())
+		return nil
 	}, retry.AttemptAlways())
+	return version, err
+}
+
+func dataVersionFromStatus(extraInfo map[string]string) *viewpb.DataVersion {
+	if len(extraInfo) == 0 {
+		return nil
+	}
+	streamingVersion, err := strconv.ParseInt(extraInfo[statusExtraInfoDataViewStreamingVersion], 10, 64)
+	if err != nil {
+		return nil
+	}
+	compactVersion, err := strconv.ParseInt(extraInfo[statusExtraInfoDataViewCompactVersion], 10, 64)
+	if err != nil {
+		return nil
+	}
+	return &viewpb.DataVersion{
+		StreamingVersion: streamingVersion,
+		CompactVersion:   compactVersion,
+	}
 }
 
 func buildEnsureGrowingSegmentRequest(meta *streamingpb.SegmentAssignmentMeta) *datapb.AllocSegmentRequest {

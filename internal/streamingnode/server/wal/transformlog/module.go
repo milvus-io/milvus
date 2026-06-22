@@ -8,9 +8,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
-	transformlogapi "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -158,15 +158,23 @@ func (m *Module) Recover(ctx context.Context) error {
 	return nil
 }
 
-func (m *Module) Read(ctx context.Context, opt transformlogapi.ReadOption) transformlogapi.Scanner {
+func (m *Module) Read(ctx context.Context, opt wal.TransformLogReadOption) wal.TransformLogScanner {
 	if opt.VChannel == "" {
-		return transformlogapi.NewErrorScanner(opt.Name, errors.Wrap(transformlogapi.ErrInvalidReadOption, "vchannel is empty"))
+		return wal.NewTransformLogErrorScanner(opt.Name, errors.Wrap(wal.ErrTransformLogInvalidReadOption, "vchannel is empty"))
 	}
 	log := m.getLog(opt.VChannel)
 	if log == nil {
-		return transformlogapi.NewErrorScanner(opt.Name, errors.Wrap(transformlogapi.ErrVChannelUnavailable, "transform log is not found"))
+		return wal.NewTransformLogErrorScanner(opt.Name, errors.Wrap(wal.ErrTransformLogVChannelUnavailable, "transform log is not found"))
 	}
 	return log.log.Read(ctx, opt)
+}
+
+func (m *Module) LatestTransformTimeTick(vchannel string) uint64 {
+	log := m.getLog(vchannel)
+	if log == nil {
+		return 0
+	}
+	return log.log.LatestTimeTick()
 }
 
 func (m *Module) DataFrontier(scope moduleapi.Scope) walcheckpoint.Barrier {
@@ -550,6 +558,6 @@ func composeBarrier(left walcheckpoint.Barrier, right walcheckpoint.Barrier) wal
 var (
 	_ moduleapi.Module           = (*Module)(nil)
 	_ moduleapi.DataFrontierView = (*Module)(nil)
-	_ transformlogapi.Accesser   = (*Module)(nil)
+	_ wal.TransformLogAccesser   = (*Module)(nil)
 	_ walcheckpoint.Barrier      = transformLogFrontierOwners{}
 )

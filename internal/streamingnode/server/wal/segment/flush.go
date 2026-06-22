@@ -5,11 +5,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 type packWriter interface {
@@ -27,13 +26,7 @@ type flushPack struct {
 	Schema       *schemapb.CollectionSchema
 	Rows         uint64
 	BinarySize   uint64
-	Inserts      []insertEntry
-}
-
-type insertEntry struct {
-	timeTick   uint64
-	assignment *messagespb.PartitionSegmentAssignment
-	request    *msgpb.InsertRequest
+	Inserts      []message.ImmutableMessage
 }
 
 type flushResult struct {
@@ -63,18 +56,4 @@ func cloneFieldBinlog(value *datapb.FieldBinlog) *datapb.FieldBinlog {
 		return nil
 	}
 	return proto.Clone(value).(*datapb.FieldBinlog)
-}
-
-func clonePartitionSegmentAssignment(value *messagespb.PartitionSegmentAssignment) *messagespb.PartitionSegmentAssignment {
-	if value == nil {
-		return nil
-	}
-	return proto.Clone(value).(*messagespb.PartitionSegmentAssignment)
-}
-
-func cloneInsertRequest(value *msgpb.InsertRequest) *msgpb.InsertRequest {
-	if value == nil {
-		return nil
-	}
-	return proto.Clone(value).(*msgpb.InsertRequest)
 }

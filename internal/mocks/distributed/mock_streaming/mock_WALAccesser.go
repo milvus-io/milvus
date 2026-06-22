@@ -9,7 +9,7 @@ import (
 	mock "github.com/stretchr/testify/mock"
 
 	streaming "github.com/milvus-io/milvus/internal/distributed/streaming"
-	transformlog "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -445,19 +445,19 @@ func (_c *MockWALAccesser_Read_Call) RunAndReturn(run func(context.Context, stre
 }
 
 // TransformLog provides a mock function with no fields
-func (_m *MockWALAccesser) TransformLog() transformlog.Accesser {
+func (_m *MockWALAccesser) TransformLog() wal.TransformLogAccesser {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for TransformLog")
 	}
 
-	var r0 transformlog.Accesser
-	if rf, ok := ret.Get(0).(func() transformlog.Accesser); ok {
+	var r0 wal.TransformLogAccesser
+	if rf, ok := ret.Get(0).(func() wal.TransformLogAccesser); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(transformlog.Accesser)
+			r0 = ret.Get(0).(wal.TransformLogAccesser)
 		}
 	}
 
@@ -481,12 +481,12 @@ func (_c *MockWALAccesser_TransformLog_Call) Run(run func()) *MockWALAccesser_Tr
 	return _c
 }
 
-func (_c *MockWALAccesser_TransformLog_Call) Return(_a0 transformlog.Accesser) *MockWALAccesser_TransformLog_Call {
+func (_c *MockWALAccesser_TransformLog_Call) Return(_a0 wal.TransformLogAccesser) *MockWALAccesser_TransformLog_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALAccesser_TransformLog_Call) RunAndReturn(run func() transformlog.Accesser) *MockWALAccesser_TransformLog_Call {
+func (_c *MockWALAccesser_TransformLog_Call) RunAndReturn(run func() wal.TransformLogAccesser) *MockWALAccesser_TransformLog_Call {
 	_c.Call.Return(run)
 	return _c
 }

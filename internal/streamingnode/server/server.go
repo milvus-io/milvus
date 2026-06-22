@@ -14,8 +14,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -93,4 +95,5 @@ func (s *Server) initService() {
 func (s *Server) registerGRPCService(grpcServer *grpc.Server) {
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(grpcServer, s.handlerService)
 	streamingpb.RegisterStreamingNodeManagerServiceServer(grpcServer, s.managerService)
+	viewpb.RegisterViewSyncServiceServer(grpcServer, worknodehandler.NewViewSyncServer(resource.Resource().QueryViewRouter()))
 }

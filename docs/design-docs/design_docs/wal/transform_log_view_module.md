@@ -641,10 +641,10 @@ The storage owner and the subscription/truncation users are deliberately split.
 `TransformLogModule` exposes a vchannel lookup layer; callers do not operate on
 module internals or `VChannelModule` directly.
 
-The TransformLog domain API lives in an independent `transformlog` package. It
-contains only TransformLog read/truncate contracts, scanner events, errors, and
-proto conversion helpers. It does not own assignment discovery, gRPC dialing, or
-StreamingNode client retry logic.
+The TransformLog read API lives in the root `wal` package because it is a WAL
+read capability. The `wal/transformlog` package contains the RecoveryStorage
+owned implementation. These contracts do not own assignment discovery, gRPC
+dialing, or StreamingNode client retry logic.
 
 ```go
 type TransformLogProvider interface {
@@ -661,32 +661,14 @@ The reader interface follows the WAL `Read` / `Scanner` style:
 
 ```go
 type TransformLogReader interface {
-    Read(ctx context.Context, opt transformlog.ReadOption) transformlog.Scanner
-}
-
-type ReadOption struct {
-    Name string
-    VChannel string
-    StartAfterTimeTick uint64
-}
-
-type Scanner interface {
-    Name() string
-    Chan() <-chan Event
-    Error() error
-    Done() <-chan struct{}
-    Close() error
-}
-
-type Event struct {
-    Entry *streamingpb.TransformLogEntry
-    CaughtUp *CaughtUp
-}
-
-type CaughtUp struct {
-    StartAfterTimeTick uint64
+    Read(ctx context.Context, opt wal.TransformLogReadOption) wal.TransformLogScanner
 }
 ```
+
+The public `TransformLogReadOption`, `TransformLogScanner`,
+`TransformLogEvent`, and `TransformLogCaughtUp` contracts are defined directly
+in the root `internal/streamingnode/server/wal` package because TransformLog
+subscription is a WAL read capability.
 
 `Read` creates a vchannel-level scanner. The scanner first emits retained
 entries with `entry.time_tick > StartAfterTimeTick`, then emits one `CaughtUp`
@@ -711,7 +693,7 @@ QueryNode consumes one flattened access interface, modeled after WAL
 
 ```go
 type TransformLogAccesser interface {
-    Read(ctx context.Context, opt transformlog.ReadOption) transformlog.Scanner
+    Read(ctx context.Context, opt wal.TransformLogReadOption) wal.TransformLogScanner
 }
 ```
 
@@ -720,7 +702,7 @@ The public entry is a sub-capability of the existing WAL accesser:
 ```go
 type WALAccesser interface {
     // Existing WAL methods omitted.
-    TransformLog() transformlog.Accesser
+    TransformLog() wal.TransformLogAccesser
 }
 ```
 
@@ -749,7 +731,7 @@ ReadTransformLog(ctx, opt)
       -> try local WAL registry
           -> local TransformLog accesser from the WAL TransformLog module
       -> otherwise use remote StreamingNodeHandlerService
-          -> open SubscribeTransform and wrap it as transformlog.Scanner
+          -> open SubscribeTransform and wrap it as wal.TransformLogScanner
 ```
 
 There are two underlying scanner implementations behind this access path:
@@ -760,20 +742,17 @@ There are two underlying scanner implementations behind this access path:
 - remote scanner: the target vchannel is owned by another StreamingNode, so
   `handlerClient` uses the existing handler service client to open
   `SubscribeTransform` and wrap the gRPC stream as the same
-  `transformlog.Scanner`.
+  `wal.TransformLogScanner`.
 
 QueryNode does not depend on whether the scanner is local or remote. This keeps
 the first implementation compatible with a gRPC stream and leaves room for a
 future local optimization that skips the gRPC stream layer.
 
-The implementation packages follow existing WAL client boundaries:
+The packages follow existing WAL client boundaries:
 
 ```text
-internal/streamingnode/transformlog/
-    accesser.go    // Accesser, ReadOption, Scanner
-    event.go       // Event, CaughtUp, batch/error event variants
-    errors.go      // truncated range, unavailable, closed errors
-    codec.go       // streamingpb conversion helpers
+internal/streamingnode/server/wal/
+    transform_log.go  // TransformLogAccesser, read option, scanner, events, errors
 
 internal/distributed/streaming/internal/transformlog/
     scanner.go       // resumable scanner interface wrapper
@@ -829,7 +808,7 @@ them to sealed segments.
      WAL TransformLog module's accesser;
    - remote: open `SubscribeTransform` through the existing
      `StreamingNodeHandlerService` client and wrap the gRPC stream as a
-     `transformlog.Scanner`.
+     `wal.TransformLogScanner`.
 5. The serving side validates vchannel ownership and truncated range:
    - if `S < truncate_time_tick`, the scanner is unavailable;
    - otherwise entries with `entry.time_tick > S` are sent.
@@ -1039,7 +1018,7 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 | `VChannelModule` | Owns vchannel metadata, schema, partition lifecycle, vchannel tombstones, dirty snapshots, and exposes only narrow read-only schema lookup to `SegmentModule`. |
 | `SegmentModule` | Owns Insert data, segment assignment metadata, segment tombstones, L1 output, and segment data checkpoint. It may read `SchemaAt` from `VChannelModule` when creating segment state. |
 | `TransformLogModule` | Owns Delete and Txn(Delete) data, transform-log chunks, retained chunk replay, scanner fanout, transform-log meta, transform-log tombstones, truncation, L0 materialization, and delete data checkpoint. |
-| `internal/streamingnode/transformlog` | Defines the independent TransformLog Accesser, ReadOption, Scanner, events, errors, and proto conversion helpers. |
+| `internal/streamingnode/server/wal` | Defines the root WAL contracts, including `TransformLogAccesser`, `TransformLogReadOption`, `TransformLogScanner`, events, and errors. |
 | `WALAccesser.TransformLog()` | Provides the public WAL-Read-style TransformLog access entry. It creates a resumable scanner and reuses the existing WAL `handlerClient`. |
 | `handlerClient.ReadTransformLog` | Reuses WAL assignment discovery, local registry, wait-for-ready, server-id picker, gRPC service client, and rebalance error reporting to choose local or remote scanner creation. |
 | `SubscribeTransform` server | Remote transport adapter: resolves the assigned WAL from stream metadata, opens a TransformLog scanner, sends retained entries, emits caught-up, then forwards live entries. |
@@ -1084,7 +1063,7 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 16. QueryNode subscribes at vchannel granularity.
 17. Local and remote TransformLog subscriptions are flattened behind the same
     WAL-Read-style scanner interface.
-18. TransformLog uses an independent package for the domain interface, but
+18. TransformLog exposes its read contract through the root `wal` package and
     reuses the existing WAL accesser and StreamingNode handler client
     infrastructure for assignment, local/remote selection, retry, and gRPC.
 19. `SubscribeTransform` carries pchannel assignment in stream metadata, while
@@ -1125,9 +1104,8 @@ It does not expose a latest TimeTick. It is not an idle progress message.
 
 ### Stage 2: TransformLog Read Interface And QN Buffer
 
-- Add an independent `internal/streamingnode/transformlog` package with
-  `Accesser`, `ReadOption`, `Scanner`, events, errors, and proto conversion
-  helpers.
+- Add TransformLog read contracts directly to the root
+  `internal/streamingnode/server/wal` package.
 - Add `WALAccesser.TransformLog().Read`, modeled after current
   `WALAccesser.Read`.
 - Add `handlerClient.ReadTransformLog` and implement it with the existing

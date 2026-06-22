@@ -6,15 +6,16 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	transformlogapi "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 type scanner struct {
 	name       string
 	startAfter uint64
+	end        uint64
 	liveAfter  uint64
-	ch         chan transformlogapi.Event
+	ch         chan wal.TransformLogEvent
 	done       chan struct{}
 	close      chan struct{}
 	errMu      sync.Mutex
@@ -22,15 +23,16 @@ type scanner struct {
 	closed     sync.Once
 	liveMu     sync.Mutex
 	caughtUp   bool
-	pending    []transformlogapi.Event
+	pending    []wal.TransformLogEvent
 }
 
-func newScanner(name string, startAfter uint64, liveAfter uint64) *scanner {
+func newScanner(name string, startAfter uint64, end uint64, liveAfter uint64) *scanner {
 	return &scanner{
 		name:       name,
 		startAfter: startAfter,
+		end:        end,
 		liveAfter:  liveAfter,
-		ch:         make(chan transformlogapi.Event, 16),
+		ch:         make(chan wal.TransformLogEvent, 16),
 		done:       make(chan struct{}),
 		close:      make(chan struct{}),
 	}
@@ -40,7 +42,7 @@ func (s *scanner) Name() string {
 	return s.name
 }
 
-func (s *scanner) Chan() <-chan transformlogapi.Event {
+func (s *scanner) Chan() <-chan wal.TransformLogEvent {
 	return s.ch
 }
 
@@ -70,15 +72,21 @@ func (s *scanner) send(ctx context.Context, transformLog *transformLog, chunks [
 			if entry.GetTimeTick() <= s.startAfter {
 				continue
 			}
-			if !s.sendEvent(ctx, transformlogapi.Event{Entry: proto.Clone(entry).(*streamingpb.TransformLogEntry)}) {
+			if s.exceedsEnd(entry.GetTimeTick()) {
+				return
+			}
+			if !s.sendEvent(ctx, wal.TransformLogEvent{Entry: proto.Clone(entry).(*streamingpb.TransformLogEntry)}) {
 				return
 			}
 		}
 	}
-	if !s.sendEvent(ctx, transformlogapi.Event{CaughtUp: &transformlogapi.CaughtUp{StartAfterTimeTick: s.startAfter}}) {
+	if !s.sendEvent(ctx, wal.TransformLogEvent{CaughtUp: &wal.TransformLogCaughtUp{StartAfterTimeTick: s.startAfter}}) {
 		return
 	}
 	if !s.drainPending(ctx) {
+		return
+	}
+	if s.end > 0 {
 		return
 	}
 	select {
@@ -88,7 +96,7 @@ func (s *scanner) send(ctx context.Context, transformLog *transformLog, chunks [
 	}
 }
 
-func (s *scanner) sendEvent(ctx context.Context, event transformlogapi.Event) bool {
+func (s *scanner) sendEvent(ctx context.Context, event wal.TransformLogEvent) bool {
 	select {
 	case s.ch <- event:
 		return true
@@ -104,7 +112,10 @@ func (s *scanner) publishEntry(entry *streamingpb.TransformLogEntry) {
 	if entry.GetTimeTick() <= s.liveAfter {
 		return
 	}
-	event := transformlogapi.Event{Entry: proto.Clone(entry).(*streamingpb.TransformLogEntry)}
+	if s.exceedsEnd(entry.GetTimeTick()) {
+		return
+	}
+	event := wal.TransformLogEvent{Entry: proto.Clone(entry).(*streamingpb.TransformLogEntry)}
 	s.liveMu.Lock()
 	defer s.liveMu.Unlock()
 	if !s.caughtUp {
@@ -112,6 +123,10 @@ func (s *scanner) publishEntry(entry *streamingpb.TransformLogEntry) {
 		return
 	}
 	_ = s.sendEvent(context.Background(), event)
+}
+
+func (s *scanner) exceedsEnd(timeTick uint64) bool {
+	return s.end > 0 && timeTick > s.end
 }
 
 func (s *scanner) drainPending(ctx context.Context) bool {

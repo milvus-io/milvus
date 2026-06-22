@@ -96,6 +96,10 @@ func (m *Module) ObserveMessage(_ context.Context, msg message.ImmutableMessage)
 		return m.observeDropPartitionMessage(message.MustAsImmutableDropPartitionMessageV1(msg))
 	case message.MessageTypeTruncateCollection:
 		return m.observeTruncateCollectionMessage(message.MustAsImmutableTruncateCollectionMessageV2(msg))
+	case message.MessageTypeAlterLoadConfig:
+		return m.observeAlterLoadConfigMessage(message.MustAsImmutableAlterLoadConfigMessageV2(msg))
+	case message.MessageTypeDropLoadConfig:
+		return m.observeDropLoadConfigMessage(message.MustAsImmutableDropLoadConfigMessageV2(msg))
 	default:
 		return moduleapi.ObserveResult{}
 	}
@@ -177,6 +181,14 @@ func (m *Module) SchemaAt(vchannel string, partitionID int64, timetick uint64) (
 	return proto.Clone(schema).(*schemapb.CollectionSchema), true
 }
 
+func (m *Module) VChannelMeta(vchannel string) *streamingpb.VChannelMeta {
+	view := m.retainedVChannel(vchannel)
+	if view == nil {
+		return nil
+	}
+	return view.AssignmentMeta()
+}
+
 func (m *Module) observeCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) moduleapi.ObserveResult {
 	if vchannel := m.retainedVChannel(msg.VChannel()); vchannel != nil {
 		decision, result := vchannel.ObserveExistingCreateCollectionMessageV1(msg)
@@ -239,6 +251,22 @@ func (m *Module) observeTruncateCollectionMessage(msg message.ImmutableTruncateC
 		return moduleapi.ObserveResult{}
 	}
 	return vchannel.ObserveTruncateCollectionMessageV2(msg)
+}
+
+func (m *Module) observeAlterLoadConfigMessage(msg message.ImmutableAlterLoadConfigMessageV2) moduleapi.ObserveResult {
+	vchannel := m.retainedVChannel(msg.VChannel())
+	if vchannel == nil || !vchannel.CanObserveActiveAt(msg.TimeTick()) {
+		return moduleapi.ObserveResult{}
+	}
+	return vchannel.ObserveAlterLoadConfigMessageV2(msg)
+}
+
+func (m *Module) observeDropLoadConfigMessage(msg message.ImmutableDropLoadConfigMessageV2) moduleapi.ObserveResult {
+	vchannel := m.retainedVChannel(msg.VChannel())
+	if vchannel == nil || !vchannel.CanObserveActiveAt(msg.TimeTick()) {
+		return moduleapi.ObserveResult{}
+	}
+	return vchannel.ObserveDropLoadConfigMessageV2(msg)
 }
 
 func (m *Module) addVChannel(meta *streamingpb.VChannelMeta) *vChannelView {

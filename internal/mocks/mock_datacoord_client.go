@@ -2958,6 +2958,80 @@ func (_c *MockDataCoordClient_GetRecoveryInfoV2_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// GetStreamingNodeQueryViewResources provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) GetStreamingNodeQueryViewResources(ctx context.Context, in *datapb.GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStreamingNodeQueryViewResources")
+	}
+
+	var r0 *datapb.GetStreamingNodeQueryViewResourcesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest, ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest, ...grpc.CallOption) *datapb.GetStreamingNodeQueryViewResourcesResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetStreamingNodeQueryViewResourcesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_GetStreamingNodeQueryViewResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStreamingNodeQueryViewResources'
+type MockDataCoordClient_GetStreamingNodeQueryViewResources_Call struct {
+	*mock.Call
+}
+
+// GetStreamingNodeQueryViewResources is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.GetStreamingNodeQueryViewResourcesRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) GetStreamingNodeQueryViewResources(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetStreamingNodeQueryViewResources_Call {
+	return &MockDataCoordClient_GetStreamingNodeQueryViewResources_Call{Call: _e.mock.On("GetStreamingNodeQueryViewResources",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_GetStreamingNodeQueryViewResources_Call) Run(run func(ctx context.Context, in *datapb.GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption)) *MockDataCoordClient_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.GetStreamingNodeQueryViewResourcesRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_GetStreamingNodeQueryViewResources_Call) Return(_a0 *datapb.GetStreamingNodeQueryViewResourcesResponse, _a1 error) *MockDataCoordClient_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_GetStreamingNodeQueryViewResources_Call) RunAndReturn(run func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest, ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error)) *MockDataCoordClient_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRefreshExternalCollectionProgress provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataCoordClient) GetRefreshExternalCollectionProgress(ctx context.Context, in *datapb.GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
 	_va := make([]interface{}, len(opts))

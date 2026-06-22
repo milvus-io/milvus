@@ -88,6 +88,7 @@ func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 				snapshot.VChannels = typed.VChannels
 			case *moduleapi.SegmentModuleSnapshot:
 				snapshot.SegmentAssignments = typed.Segments
+				snapshot.SegmentDataVersionSummaries = typed.DataVersionSummaries
 			}
 		}
 	}

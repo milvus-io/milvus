@@ -49,6 +49,7 @@ type Manager interface {
 	OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error)
 
 	RecoverCollection(ctx context.Context, collectionID int64) error
+	DataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (*viewpb.DataViewOfCollection, error)
 	LatestVisibleDataView(ctx context.Context, collectionID int64) (*viewpb.DataViewOfCollection, error)
 	Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error)
 	ShardTimeTicks(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewShardTimeTick, error)
@@ -436,6 +437,35 @@ func (m *dataViewManager) LatestVisibleDataView(ctx context.Context, collectionI
 		return nil, nil
 	}
 	return m.withDeleteTimetick(ctx, state.latestVisible), nil
+}
+
+func (m *dataViewManager) DataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (*viewpb.DataViewOfCollection, error) {
+	if dataVersion == nil {
+		return nil, nil
+	}
+	state := m.getOrCreateState(collectionID)
+	state.mu.RLock()
+	if state.dropped {
+		state.mu.RUnlock()
+		return nil, nil
+	}
+	if state.latestVisible != nil && compareDataVersion(state.latestVisible.GetDataVersion(), dataVersion) == 0 {
+		view := m.withDeleteTimetick(ctx, state.latestVisible)
+		state.mu.RUnlock()
+		return view, nil
+	}
+	state.mu.RUnlock()
+
+	views, err := m.catalog.ListDataViews(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	for _, view := range views {
+		if compareDataVersion(view.GetDataVersion(), dataVersion) == 0 {
+			return m.withDeleteTimetick(ctx, view), nil
+		}
+	}
+	return nil, nil
 }
 
 func (m *dataViewManager) Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error) {

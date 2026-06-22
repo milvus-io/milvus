@@ -614,7 +614,7 @@ visible DataView snapshot.
 ```
 DataCoord DataViewManager
         |
-        | GetDataView / watch / refresh
+        | in-process snapshot / watch / refresh
         v
 QueryCoord DataViewProvider
         |

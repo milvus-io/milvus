@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "view.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -52,6 +53,8 @@ service DataCoord {
   rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
   rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
   rpc GetRecoveryInfoV2(GetRecoveryInfoRequestV2) returns (GetRecoveryInfoResponseV2){}
+  rpc GetStreamingNodeQueryViewResources(GetStreamingNodeQueryViewResourcesRequest)
+      returns (GetStreamingNodeQueryViewResourcesResponse) {}
   rpc GetChannelRecoveryInfo(GetChannelRecoveryInfoRequest) returns (GetChannelRecoveryInfoResponse){}
   rpc GetFlushedSegments(GetFlushedSegmentsRequest) returns(GetFlushedSegmentsResponse){}
   rpc GetSegmentsByStates(GetSegmentsByStatesRequest) returns(GetSegmentsByStatesResponse){}
@@ -684,6 +687,31 @@ message GetRecoveryInfoRequestV2 {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   repeated int64 partitionIDs = 3;
+}
+
+message GetStreamingNodeQueryViewResourcesRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  string vchannel = 3;
+  view.DataVersion data_version = 4;
+  uint64 load_info_version = 5;
+  repeated int64 partition_ids = 6;
+}
+
+message GetStreamingNodeQueryViewResourcesResponse {
+  common.Status status = 1;
+  int64 collection_id = 2;
+  string vchannel = 3;
+  view.DataVersion data_version = 4;
+  repeated StreamingNodeBM25Resource bm25_resources = 5;
+}
+
+message StreamingNodeBM25Resource {
+  int64 segment_id = 1;
+  int64 partition_id = 2;
+  repeated FieldBinlog bm25_binlogs = 3;
+  int64 storage_version = 4;
+  string manifest_path = 5;
 }
 
 message GetChannelRecoveryInfoRequest {

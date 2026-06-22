@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
@@ -64,6 +63,17 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return struct{}{}, nil
 	})
 
+	var segmentDataVersionSummaries map[string]*streamingpb.SegmentDataVersionSummary
+	fSegmentDataVersionSummary := conc.Go(func() (struct{}, error) {
+		var err error
+		segmentDataVersionSummaries, err = catalog.ListSegmentDataVersionSummaries(ctx, channelInfo.Name)
+		if err != nil {
+			return struct{}{}, errors.Wrap(err, "failed to get segment data version summary from catalog")
+		}
+		r.Logger().Info(context.TODO(), "recover segment data version summary done", mlog.Int("summaries", len(segmentDataVersionSummaries)))
+		return struct{}{}, nil
+	})
+
 	var transformLogMetas map[string]*streamingpb.VChannelTransformLogMeta
 	fTransformLog := conc.Go(func() (struct{}, error) {
 		metas, err := catalog.ListTransformLogMeta(ctx, channelInfo.Name)
@@ -75,7 +85,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return struct{}{}, nil
 	})
 
-	if err := conc.BlockOnAll(fVChannel, fSegment, fTransformLog); err != nil {
+	if err := conc.BlockOnAll(fVChannel, fSegment, fSegmentDataVersionSummary, fTransformLog); err != nil {
 		return err
 	}
 	if err := r.ensureDataCheckpoint(); err != nil {
@@ -85,7 +95,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return err
 	}
 	r.Logger().Info(context.TODO(), "recover segment info done", mlog.Int("segments", len(segmentMetas)))
-	return r.initRecoveryModules(ctx, vchannelMetas, segmentMetas, transformLogMetas)
+	return r.initRecoveryModules(ctx, vchannelMetas, segmentMetas, segmentDataVersionSummaries, transformLogMetas)
 }
 
 func vchannelMetaMap(vchannels []*streamingpb.VChannelMeta) (map[string]*streamingpb.VChannelMeta, error) {
@@ -144,9 +154,6 @@ func validateRecoveredViewMeta(
 			streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED:
 		default:
 			return errors.Errorf("unknown vchannel state in recovery meta: %s", vchannelName)
-		}
-		if vchannel.GetGrowingSegmentMode() != streamingpb.GrowingSegmentMode_GROWING_SEGMENT_MODE_WRITE_ONLY {
-			return errors.Errorf("unknown growing segment mode in recovery meta: %s", vchannelName)
 		}
 		if vchannel.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED {
 			if vchannel.GetTombstoneTimeTick() == 0 {
@@ -256,14 +263,6 @@ func normalizeRecoveredViewMeta(
 	vchannels map[string]*streamingpb.VChannelMeta,
 	segments map[int64]*streamingpb.SegmentAssignmentMeta,
 ) {
-	for _, vchannel := range vchannels {
-		if vchannel.GetLatestDataVersion() == nil {
-			vchannel.LatestDataVersion = &viewpb.DataVersion{}
-		}
-		if vchannel.GetGrowingSegmentMode() == streamingpb.GrowingSegmentMode_GROWING_SEGMENT_MODE_UNKNOWN {
-			vchannel.GrowingSegmentMode = streamingpb.GrowingSegmentMode_GROWING_SEGMENT_MODE_WRITE_ONLY
-		}
-	}
 	for _, segment := range segments {
 		if segment.GetPersistedStorage() == nil {
 			segment.PersistedStorage = &streamingpb.L1SegmentPersistedStorage{}

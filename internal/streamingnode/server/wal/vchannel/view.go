@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 )
@@ -67,8 +66,6 @@ func newVChannelMetaFromCreateCollectionMessage(msg message.ImmutableCreateColle
 			},
 		},
 		CheckpointTimeTick: msg.TimeTick(),
-		LatestDataVersion:  &viewpb.DataVersion{},
-		GrowingSegmentMode: streamingpb.GrowingSegmentMode_GROWING_SEGMENT_MODE_WRITE_ONLY,
 	}
 }
 
@@ -462,6 +459,44 @@ func (info *vChannelView) ObserveTruncateCollectionMessageV2(msg message.Immutab
 	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return emptyObserveResult()
 	}
+	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.dirty = true
+	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+}
+
+func (info *vChannelView) ObserveAlterLoadConfigMessageV2(msg message.ImmutableAlterLoadConfigMessageV2) moduleapi.ObserveResult {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
+		return emptyObserveResult()
+	}
+	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+		return emptyObserveResult()
+	}
+	if info.meta.GetCollectionInfo().GetCollectionId() != msg.Header().GetCollectionId() {
+		return emptyObserveResult()
+	}
+	info.meta.LoadConfig = &streamingpb.VChannelLoadConfig{
+		Header: proto.Clone(msg.Header()).(*message.AlterLoadConfigMessageHeader),
+	}
+	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.dirty = true
+	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
+}
+
+func (info *vChannelView) ObserveDropLoadConfigMessageV2(msg message.ImmutableDropLoadConfigMessageV2) moduleapi.ObserveResult {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if msg.TimeTick() <= info.meta.CheckpointTimeTick {
+		return emptyObserveResult()
+	}
+	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+		return emptyObserveResult()
+	}
+	if info.meta.GetCollectionInfo().GetCollectionId() != msg.Header().GetCollectionId() {
+		return emptyObserveResult()
+	}
+	info.meta.LoadConfig = nil
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
 	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}

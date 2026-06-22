@@ -177,11 +177,20 @@ func (rs *recoveryStorageImpl) persistModuleDirtySnapshot(ctx context.Context, s
 		case moduleapi.ModuleNameSegment:
 			switch snapshot.Op() {
 			case moduleapi.SnapshotOpUpsert:
-				meta, ok := snapshot.Payload().(*streamingpb.SegmentAssignmentMeta)
-				if !ok || meta == nil {
-					return errors.New("segment dirty snapshot payload is not SegmentAssignmentMeta")
+				switch payload := snapshot.Payload().(type) {
+				case *streamingpb.SegmentAssignmentMeta:
+					if payload == nil {
+						return errors.New("segment dirty snapshot payload is nil SegmentAssignmentMeta")
+					}
+					return catalog.SaveSegmentAssignments(ctx, key.PChannel, map[int64]*streamingpb.SegmentAssignmentMeta{key.SegmentID: payload})
+				case *streamingpb.SegmentDataVersionSummary:
+					if payload == nil {
+						return errors.New("segment dirty snapshot payload is nil SegmentDataVersionSummary")
+					}
+					return catalog.SaveSegmentDataVersionSummaries(ctx, key.PChannel, map[string]*streamingpb.SegmentDataVersionSummary{key.VChannel: payload})
+				default:
+					return errors.New("segment dirty snapshot payload is not SegmentAssignmentMeta or SegmentDataVersionSummary")
 				}
-				return catalog.SaveSegmentAssignments(ctx, key.PChannel, map[int64]*streamingpb.SegmentAssignmentMeta{key.SegmentID: meta})
 			case moduleapi.SnapshotOpDelete:
 				return catalog.DropSegmentAssignments(ctx, key.PChannel, []int64{key.SegmentID})
 			default:

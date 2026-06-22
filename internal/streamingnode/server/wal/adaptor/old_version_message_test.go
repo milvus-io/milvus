@@ -21,6 +21,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
+type oldVersionMixCoordClient struct {
+	*mocks.MockMixCoordClient
+}
+
 func TestNewOldVersionImmutableMessage(t *testing.T) {
 	rc := mocks.NewMockMixCoordClient(t)
 	rc.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -30,7 +34,7 @@ func TestNewOldVersionImmutableMessage(t *testing.T) {
 		VirtualChannelNames:  []string{"test1-v0", "test2-v0"},
 	}, nil)
 	rcf := syncutil.NewFuture[types.MixCoordClient]()
-	rcf.Set(rc)
+	rcf.Set(oldVersionMixCoordClient{MockMixCoordClient: rc})
 	resource.InitForTest(t, resource.OptMixCoordClient(rcf))
 
 	ctx := context.Background()

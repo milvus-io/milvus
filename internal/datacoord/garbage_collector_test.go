@@ -137,6 +137,10 @@ func (m *fakeGCDataViewManager) LatestVisibleDataView(ctx context.Context, colle
 	return nil, nil
 }
 
+func (m *fakeGCDataViewManager) DataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (*viewpb.DataViewOfCollection, error) {
+	return nil, nil
+}
+
 func (m *fakeGCDataViewManager) Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error) {
 	m.snapshotRequested = append([]int64(nil), collectionIDs...)
 	return m.snapshotViews, nil

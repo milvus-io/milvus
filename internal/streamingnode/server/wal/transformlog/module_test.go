@@ -44,6 +44,18 @@ func TestModuleDirtySnapshotAdvancesDataBarrierAfterMarkPersisted(t *testing.T) 
 	assert.Equal(t, uint64(10), result.Data.TimeTick())
 }
 
+func TestLatestTransformTimeTickIncludesUnflushedBuffer(t *testing.T) {
+	ctx := context.Background()
+	module := NewModule("p1", nil, newMemoryStore())
+	module.SwitchIntoMetaAndData()
+
+	assert.Equal(t, uint64(0), module.LatestTransformTimeTick("v1"))
+
+	module.ObserveMessage(ctx, newModuleTestDeleteMessage(t, 10))
+
+	assert.Equal(t, uint64(10), module.LatestTransformTimeTick("v1"))
+}
+
 type memoryStore struct {
 	chunks map[string]map[uint64]*streamingpb.TransformLogChunk
 }

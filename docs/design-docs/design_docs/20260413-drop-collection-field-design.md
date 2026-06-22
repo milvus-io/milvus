@@ -833,4 +833,4 @@ Support dropping a field while migrating its data to another field (e.g., renami
 
 - Add Function Field Design: [20260129-add-function-field-design.md](./20260129-add-function-field-design.md)
 - AlterCollectionSchema RPC: PR [#48810](https://github.com/milvus-io/milvus/pull/48810)
-- Milvus Architecture: [docs/architecture.md](../architecture.md)
+- Milvus Architecture: [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md)

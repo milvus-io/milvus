@@ -10,7 +10,7 @@ import (
 )
 
 type writeOnlyInsertBuffer struct {
-	entries      []insertEntry
+	entries      []message.ImmutableMessage
 	fromTimeTick uint64
 	toTimeTick   uint64
 	rows         uint64
@@ -18,25 +18,29 @@ type writeOnlyInsertBuffer struct {
 }
 
 func (b *writeOnlyInsertBuffer) append(msg message.ImmutableInsertMessageV1, assignment *messagespb.PartitionSegmentAssignment) {
-	b.appendWithTimeTick(msg, assignment, msg.TimeTick())
+	b.appendMessage(msg, assignment.GetRows(), assignment.GetBinarySize())
 }
 
-func (b *writeOnlyInsertBuffer) appendWithTimeTick(msg message.ImmutableInsertMessageV1, assignment *messagespb.PartitionSegmentAssignment, timetick uint64) {
+func (b *writeOnlyInsertBuffer) appendMessage(msg message.ImmutableMessage, rows uint64, binarySize uint64) {
+	timetick := msg.TimeTick()
 	if len(b.entries) == 0 {
 		b.fromTimeTick = timetick
 	}
 	b.toTimeTick = timetick
-	b.rows += assignment.GetRows()
-	b.binarySize += assignment.GetBinarySize()
-	b.entries = append(b.entries, insertEntry{
-		timeTick:   timetick,
-		assignment: clonePartitionSegmentAssignment(assignment),
-		request:    cloneInsertRequest(msg.MustBody()),
-	})
+	b.rows += rows
+	b.binarySize += binarySize
+	b.entries = append(b.entries, msg)
 }
 
 func (b writeOnlyInsertBuffer) DataTimeTick() uint64 {
 	return b.toTimeTick
+}
+
+func (b writeOnlyInsertBuffer) Messages() []message.ImmutableMessage {
+	if len(b.entries) == 0 {
+		return nil
+	}
+	return cloneGrowingSegmentInsertMessages(b.entries)
 }
 
 func (b *writeOnlyInsertBuffer) flushPack(meta *streamingpb.SegmentAssignmentMeta, schema *schemapb.CollectionSchema) *flushPack {
@@ -51,7 +55,7 @@ func (b *writeOnlyInsertBuffer) flushPack(meta *streamingpb.SegmentAssignmentMet
 		Schema:       schema,
 		Rows:         b.rows,
 		BinarySize:   b.binarySize,
-		Inserts:      cloneGrowingSegmentInsertEntries(b.entries),
+		Inserts:      b.entries,
 	}
 }
 
@@ -65,17 +69,11 @@ func (b *writeOnlyInsertBuffer) takeAll() writeOnlyInsertBuffer {
 	return chunk
 }
 
-func cloneGrowingSegmentInsertEntries(entries []insertEntry) []insertEntry {
+func cloneGrowingSegmentInsertMessages(entries []message.ImmutableMessage) []message.ImmutableMessage {
 	if len(entries) == 0 {
 		return nil
 	}
-	cloned := make([]insertEntry, 0, len(entries))
-	for _, entry := range entries {
-		cloned = append(cloned, insertEntry{
-			timeTick:   entry.timeTick,
-			assignment: clonePartitionSegmentAssignment(entry.assignment),
-			request:    cloneInsertRequest(entry.request),
-		})
-	}
+	cloned := make([]message.ImmutableMessage, len(entries))
+	copy(cloned, entries)
 	return cloned
 }
