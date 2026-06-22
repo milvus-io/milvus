@@ -944,6 +944,61 @@ func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
 }
 
+func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      11,
+			State:      internalpb.ImportJobState_Importing,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(11))
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
+
+	updatedJob := importMeta.GetJob(ctx, 11)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Importing, updatedJob.GetState())
+}
+
+func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      12,
+			State:      internalpb.ImportJobState_Importing,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(12))
+	assert.Error(t, err)
+
+	err = importMeta.UpdateJob(ctx, 12, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	assert.NoError(t, err)
+
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(12))
+	assert.NoError(t, err)
+
+	updatedJob := importMeta.GetJob(ctx, 12)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+}
+
 func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -243,6 +244,12 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		impl.lastDispatchTimeTick = timetick
 	}()
 
+	if msg.MessageType() == message.MessageTypeCommitImport {
+		// CommitImport must not be observed until DataCoord accepts the commit
+		// fence; otherwise replay can skip the only retry signal for this vchannel.
+		return impl.dispatchCommitImport(msg)
+	}
+
 	// TODO: should be removed at 3.0, after merge the flusher logic into recovery storage.
 	// Only truncate collection needs to observe before the flusher handles the message.
 	// Other messages should keep the deferred order so lifecycle cleanup such as
@@ -282,45 +289,6 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		defer func() {
 			impl.flusherComponents.WhenDropCollection(msg.VChannel())
 		}()
-	case message.MessageTypeCommitImport:
-		commitMsg, err := message.AsImmutableCommitImportMessageV2(msg)
-		if err != nil {
-			impl.logger.DPanic(context.TODO(), "failed to parse CommitImportMessage", mlog.Err(err))
-			return nil
-		}
-		vchannel := msg.VChannel()
-		jobID := commitMsg.Header().GetJobId()
-
-		// Flush DML data before this commit fence. Panic on failure so WAL replays the message.
-		if err := resource.Resource().WriteBufferManager().
-			FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
-			if errors.Is(err, merr.ErrChannelNotFound) {
-				impl.logger.Info(context.TODO(), "CommitImport targets stale vchannel, skip local flush and continue commit ack",
-					mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID), mlog.Err(err))
-			} else {
-				impl.logger.Panic(context.TODO(), "FlushChannel on CommitImport failed, panicking to retry from WAL",
-					mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID), mlog.Err(err))
-			}
-		}
-
-		// Notify DataCoord that this vchannel has committed.
-		mixCoord, err := resource.Resource().MixCoordClient().GetWithContext(impl.notifier.Context())
-		if err != nil {
-			return errors.Wrap(err, "failed to get MixCoordClient for HandleCommitVchannel")
-		}
-		resp, err := mixCoord.HandleCommitVchannel(impl.notifier.Context(), &datapb.HandleCommitVchannelRequest{
-			Base:            commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
-			JobId:           jobID,
-			Vchannel:        vchannel,
-			CommitTimestamp: msg.TimeTick(),
-		})
-		if err := merr.CheckRPCCall(resp, err); err != nil {
-			impl.logger.Panic(context.TODO(), "HandleCommitVchannel RPC failed, panicking to retry from WAL",
-				mlog.FieldJobID(jobID), mlog.FieldVChannel(vchannel), mlog.Err(err))
-		}
-		impl.logger.Info(context.TODO(), "CommitImportMessage handled: vchannel committed",
-			mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID))
-		return nil // don't forward to flusherComponents
 	case message.MessageTypeRollbackImport:
 		// No-op: DataCoord DDL ack callback handles all state changes.
 		impl.logger.Info(context.TODO(), "RollbackImportMessage consumed (no-op in flusher)",
@@ -328,4 +296,72 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		return nil // don't forward to flusherComponents
 	}
 	return impl.flusherComponents.HandleMessage(impl.notifier.Context(), msg)
+}
+
+func (impl *WALFlusherImpl) dispatchCommitImport(msg message.ImmutableMessage) error {
+	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
+		return impl.ObserveMessage(impl.notifier.Context(), msg)
+	}
+
+	commitMsg, err := message.AsImmutableCommitImportMessageV2(msg)
+	if err != nil {
+		impl.logger.DPanic(context.TODO(), "failed to parse CommitImportMessage", mlog.Err(err))
+		return nil
+	}
+	vchannel := msg.VChannel()
+	jobID := commitMsg.Header().GetJobId()
+
+	// Flush DML data before this commit fence. Panic on failure so WAL replays the message.
+	if err := resource.Resource().WriteBufferManager().
+		FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
+		if errors.Is(err, merr.ErrChannelNotFound) {
+			impl.logger.Info(context.TODO(), "CommitImport targets stale vchannel, skip local flush and continue commit ack",
+				mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID), mlog.Err(err))
+		} else {
+			impl.logger.Panic(context.TODO(), "FlushChannel on CommitImport failed, panicking to retry from WAL",
+				mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID), mlog.Err(err))
+		}
+	}
+
+	mixCoord, err := resource.Resource().MixCoordClient().GetWithContext(impl.notifier.Context())
+	if err != nil {
+		return errors.Wrap(err, "failed to get MixCoordClient for HandleCommitVchannel")
+	}
+	// Retry only the DataCoord ack. The local FlushChannel above is a best-effort
+	// fence for this dispatch and must not be repeated on every retry.
+	// This retry blocks the whole pchannel flusher until DataCoord accepts the
+	// commit fence, preserving WAL replay order for later messages on the pchannel.
+	impl.logger.Warn(context.TODO(), "HandleCommitVchannel may block the pchannel flusher until DataCoord accepts the commit fence",
+		mlog.FieldJobID(jobID),
+		mlog.FieldVChannel(vchannel),
+		mlog.Uint64("commitTs", msg.TimeTick()))
+	if err := retry.Do(impl.notifier.Context(), func() error {
+		resp, err := mixCoord.HandleCommitVchannel(impl.notifier.Context(), &datapb.HandleCommitVchannelRequest{
+			Base:            commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+			JobId:           jobID,
+			Vchannel:        vchannel,
+			CommitTimestamp: msg.TimeTick(),
+		})
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			impl.logger.Debug(context.TODO(), "HandleCommitVchannel failed, retry later",
+				mlog.FieldJobID(jobID),
+				mlog.FieldVChannel(vchannel),
+				mlog.Uint64("commitTs", msg.TimeTick()),
+				mlog.Err(err))
+			return err
+		}
+		return nil
+	}, retry.AttemptAlways()); err != nil {
+		return err
+	}
+
+	if err := impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+		impl.logger.Warn(context.TODO(), "failed to observe CommitImport message",
+			mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID), mlog.Err(err))
+		return err
+	}
+
+	impl.logger.Info(context.TODO(), "CommitImportMessage handled: vchannel committed",
+		mlog.FieldVChannel(vchannel), mlog.FieldJobID(jobID))
+	return nil
 }

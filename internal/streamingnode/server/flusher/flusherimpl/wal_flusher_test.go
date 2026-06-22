@@ -329,6 +329,62 @@ func TestDispatch_CommitImportMessage(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestDispatch_CommitImportMessage_RetriesHandleCommitVchannelBeforeObserve(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "test-vchannel"
+		jobID    = int64(42)
+		timeTick = uint64(200)
+	)
+
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 100,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(199))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(200))
+
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel && req.GetCommitTimestamp() == timeTick
+	})).Return(merr.Status(merr.WrapErrImportSysFailedMsg("job not ready")), nil).Once()
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel && req.GetCommitTimestamp() == timeTick
+	})).Return(merr.Status(nil), nil).Once()
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().FlushChannel(mock.Anything, vchannel, timeTick).Return(nil).Once()
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, immutableMsg).Return(nil).Once()
+
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptWriteBufferManager(mockWBMgr),
+	)
+
+	impl := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          mlog.With(mlog.FieldComponent("test-flusher")),
+		RecoveryStorage: rs,
+	}
+
+	require.NotPanics(t, func() {
+		err := impl.dispatch(immutableMsg)
+		require.NoError(t, err)
+	})
+}
+
 func TestDispatch_CommitImportMessage_ChannelNotFoundStillCommitsVchannelNoPanic(t *testing.T) {
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
@@ -414,7 +470,6 @@ func TestDispatch_CommitImportMessage_FlushUnexpectedErrorPanics(t *testing.T) {
 		Once()
 
 	rs := mock_recovery.NewMockRecoveryStorage(t)
-	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
 
 	resource.InitForTest(t, resource.OptWriteBufferManager(mockWBMgr))
 
