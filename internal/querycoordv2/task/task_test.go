@@ -2811,3 +2811,49 @@ func (suite *TaskSuite) TestNodeTaskQueueRangeByNodePriority() {
 	})
 	suite.Equal([]Priority{TaskPriorityHigh, TaskPriorityNormal, TaskPriorityLow}, visited)
 }
+
+func (suite *TaskSuite) TestSegmentMoveStalesWhenDestinationNodeStopping() {
+	const (
+		collectionID = int64(467055916946244779)
+		replicaID    = int64(467055916958089221)
+		segmentID    = int64(467055916977292383)
+		channel      = "milvus-008wbh5tims8-rootcoord-dml_1_467055916946244779v0"
+	)
+
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:            replicaID,
+		CollectionID:  collectionID,
+		Nodes:         []int64{40, 43},
+		RoNodes:       []int64{50},
+		ResourceGroup: meta.DefaultResourceGroupName,
+	})
+	suite.meta.ReplicaManager.Put(suite.ctx, replica)
+
+	for _, nodeID := range []int64{40, 43, 50} {
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+			Version:  common.Version,
+		})
+		suite.nodeMgr.Add(nodeInfo)
+	}
+	suite.nodeMgr.Stopping(40)
+
+	moveTask, err := NewSegmentTask(
+		suite.ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		collectionID,
+		replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(40, ActionTypeGrow, channel, segmentID),
+		NewSegmentAction(50, ActionTypeReduce, channel, segmentID),
+	)
+	suite.Require().NoError(err)
+
+	err = suite.scheduler.checkStale(moveTask)
+	suite.Error(err)
+	suite.ErrorContains(err, "node offline")
+	suite.False(moveTask.Actions()[1].IsFinished(suite.dist))
+}

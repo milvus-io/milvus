@@ -149,7 +149,7 @@ func (f *BalancerFactory) GetStoppingBalancer() *StoppingBalancer {
 	// Use AssignPolicyFactory to get cached policy instance
 	assignPolicy := assign.GetGlobalAssignPolicyFactory().GetPolicy(policyType)
 
-	balancer = NewStoppingBalancer(f.dist, f.targetMgr, assignPolicy, f.nodeManager)
+	balancer = NewStoppingBalancer(f.dist, f.targetMgr, assignPolicy, f.nodeManager, f.scheduler)
 
 	f.stoppingBalancerMap[policyType] = balancer
 	return balancer

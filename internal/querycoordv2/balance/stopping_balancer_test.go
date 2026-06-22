@@ -18,10 +18,12 @@ package balance
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -29,7 +31,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -47,6 +52,7 @@ type StoppingBalancerTestSuite struct {
 	dist        *meta.DistributionManager
 	meta        *meta.Meta
 	targetMgr   *meta.TargetManager
+	scheduler   *task.MockScheduler
 }
 
 func (suite *StoppingBalancerTestSuite) SetupSuite() {
@@ -74,6 +80,8 @@ func (suite *StoppingBalancerTestSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeManager)
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.dist = meta.NewDistributionManager(suite.nodeManager)
+	suite.scheduler = task.NewMockScheduler(suite.T())
+	suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything, mock.Anything).Return(0).Maybe()
 
 	// Create a mock assign policy for testing
 	mockAssignPolicy := assign.NewMockAssignPolicy(suite.T())
@@ -83,7 +91,7 @@ func (suite *StoppingBalancerTestSuite) SetupTest() {
 	mockAssignPolicy.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return([]assign.ChannelAssignPlan{}).Maybe()
 
-	suite.balancer = NewStoppingBalancer(suite.dist, suite.targetMgr, mockAssignPolicy, suite.nodeManager)
+	suite.balancer = NewStoppingBalancer(suite.dist, suite.targetMgr, mockAssignPolicy, suite.nodeManager, suite.scheduler)
 }
 
 func (suite *StoppingBalancerTestSuite) TearDownTest() {
@@ -268,6 +276,155 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 			suite.Equal(replicaID, plan.Replica.GetID())
 		}
 	}
+}
+
+func (suite *StoppingBalancerTestSuite) TestConcurrentStreamingAndQueryNodeScaleDownDefersChannelUntilSegmentBalanceDone() {
+	ctx := context.Background()
+	originalStreamingEnabled := os.Getenv(streamingutil.MilvusStreamingServiceEnabled)
+	streamingutil.SetStreamingServiceEnabled()
+	defer func() {
+		suite.Require().NoError(os.Setenv(streamingutil.MilvusStreamingServiceEnabled, originalStreamingEnabled))
+	}()
+
+	const (
+		collectionID = int64(467055916946244779)
+		replicaID    = int64(467055916958089221)
+		segmentID    = int64(467055916977292383)
+		channel      = "milvus-008wbh5tims8-rootcoord-dml_1_467055916946244779v0"
+	)
+
+	pendingSegmentMove := atomic.NewInt32(0)
+	suite.scheduler.ExpectedCalls = nil
+	suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(...task.TaskFilter) int {
+		return int(pendingSegmentMove.Load())
+	}).Maybe()
+
+	collection := utils.CreateTestCollection(collectionID, 1)
+	collection.Status = querypb.LoadStatus_Loaded
+	collection.LoadPercentage = 100
+	suite.meta.PutCollection(ctx, collection)
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
+
+	targetChannel := &datapb.VchannelInfo{
+		CollectionID:        collectionID,
+		ChannelName:         channel,
+		FlushedSegmentIds:   []int64{segmentID},
+		UnflushedSegmentIds: []int64{},
+	}
+	targetSegment := &datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  collectionID,
+		PartitionID:   collectionID,
+		InsertChannel: channel,
+		NumOfRows:     100,
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{targetChannel},
+		[]*datapb.SegmentInfo{targetSegment},
+		nil,
+	)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+
+	for _, nodeID := range []int64{40, 43, 44, 50, 57, 38} {
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+			Version:  common.Version,
+		})
+		suite.nodeManager.Add(nodeInfo)
+	}
+
+	mockPolicy := suite.balancer.assignPolicy.(*assign.MockAssignPolicy)
+	mockPolicy.ExpectedCalls = nil
+	mockPolicy.EXPECT().AssignSegment(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, segments []*meta.Segment, nodes []int64, _ bool) []assign.SegmentAssignPlan {
+			suite.Require().NotEmpty(segments)
+			suite.Require().NotEmpty(nodes)
+			return []assign.SegmentAssignPlan{{Segment: segments[0], To: nodes[0]}}
+		}).Maybe()
+	channelAssignCalls := atomic.NewInt32(0)
+	mockPolicy.EXPECT().AssignChannel(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, channels []*meta.DmChannel, _ []int64, _ bool) []assign.ChannelAssignPlan {
+			channelAssignCalls.Inc()
+			suite.Require().Len(channels, 1)
+			return []assign.ChannelAssignPlan{{Channel: channels[0], To: 44}}
+		}).Maybe()
+
+	replicaTick1 := meta.NewReplica(&querypb.Replica{
+		ID:            replicaID,
+		CollectionID:  collectionID,
+		Nodes:         []int64{40, 43},
+		RoNodes:       []int64{50},
+		RwSqNodes:     []int64{44, 57},
+		ResourceGroup: meta.DefaultResourceGroupName,
+	})
+	suite.dist.SegmentDistManager.Update(50, &meta.Segment{SegmentInfo: targetSegment, Node: 50})
+
+	segmentPlans, channelPlans := suite.balancer.BalanceReplica(ctx, replicaTick1)
+	suite.Empty(channelPlans)
+	suite.Len(segmentPlans, 1)
+	suite.Equal(segmentID, segmentPlans[0].Segment.GetID())
+	suite.Equal(int64(50), segmentPlans[0].From)
+	suite.Equal(int64(40), segmentPlans[0].To)
+	suite.Equal(int32(0), channelAssignCalls.Load())
+
+	suite.nodeManager.Stopping(40)
+	replicaTick2 := meta.NewReplica(&querypb.Replica{
+		ID:            replicaID,
+		CollectionID:  collectionID,
+		Nodes:         []int64{43},
+		RoNodes:       []int64{50},
+		RwSqNodes:     []int64{44, 57},
+		RoSqNodes:     []int64{38},
+		ResourceGroup: meta.DefaultResourceGroupName,
+	})
+	suite.dist.ChannelDistManager.Update(38, &meta.DmChannel{
+		VchannelInfo: targetChannel,
+		Node:         38,
+		View: &meta.LeaderView{
+			ID:           38,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	segmentPlans, channelPlans = suite.balancer.BalanceReplica(ctx, replicaTick2)
+	suite.Empty(channelPlans)
+	suite.Len(segmentPlans, 1)
+	suite.Equal(segmentID, segmentPlans[0].Segment.GetID())
+	suite.Equal(int64(50), segmentPlans[0].From)
+	suite.Equal(int64(43), segmentPlans[0].To)
+	suite.Equal(int32(0), channelAssignCalls.Load())
+
+	replicaTick3 := meta.NewReplica(&querypb.Replica{
+		ID:            replicaID,
+		CollectionID:  collectionID,
+		Nodes:         []int64{43},
+		RwSqNodes:     []int64{44, 57},
+		RoSqNodes:     []int64{38},
+		ResourceGroup: meta.DefaultResourceGroupName,
+	})
+	suite.dist.SegmentDistManager.Update(50)
+	suite.dist.SegmentDistManager.Update(43, &meta.Segment{SegmentInfo: targetSegment, Node: 43})
+
+	pendingSegmentMove.Store(1)
+	segmentPlans, channelPlans = suite.balancer.BalanceReplica(ctx, replicaTick3)
+	suite.Empty(segmentPlans)
+	suite.Empty(channelPlans)
+	suite.Equal(int32(0), channelAssignCalls.Load())
+
+	pendingSegmentMove.Store(0)
+	segmentPlans, channelPlans = suite.balancer.BalanceReplica(ctx, replicaTick3)
+	suite.Empty(segmentPlans)
+	suite.Len(channelPlans, 1)
+	suite.Equal(channel, channelPlans[0].Channel.GetChannelName())
+	suite.Equal(int64(38), channelPlans[0].From)
+	suite.Equal(int64(44), channelPlans[0].To)
+	suite.Equal(int32(1), channelAssignCalls.Load())
 }
 
 func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRWNodes() {
