@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -618,5 +619,280 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.Equal(t, indexParams["nn_descent_niter"], "20")
 		assert.Equal(t, indexParams["build_algo"], "NN_DESCENT")
 		assert.Equal(t, indexParams["adapt_for_cpu"], "true")
+	})
+}
+
+func TestAppendPrepareLoadParams_OverrideIndexType(t *testing.T) {
+	t.Run("HNSW overridden to GPU_HNSW", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"HNSW.load.override_index_type", "GPU_HNSW")
+
+		indexParams := map[string]string{
+			common.IndexTypeKey: "HNSW",
+			"M":                 "16",
+			"efConstruction":    "200",
+		}
+
+		err := AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", indexParams[paramtable.OverrideIndexTypeKey])
+		assert.Equal(t, "16", indexParams["M"])
+		assert.Equal(t, "200", indexParams["efConstruction"])
+	})
+
+	t.Run("HNSW_int8 overridden to GPU_HNSW", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"HNSW_int8.load.override_index_type", "GPU_HNSW")
+
+		indexParams := map[string]string{
+			common.IndexTypeKey: "HNSW_int8",
+			"M":                 "16",
+		}
+
+		err := AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", indexParams[paramtable.OverrideIndexTypeKey])
+	})
+
+	t.Run("no override configured leaves index_type unchanged", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+
+		indexParams := map[string]string{
+			common.IndexTypeKey: "IVF_FLAT",
+			"nlist":             "1024",
+		}
+
+		err := AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "IVF_FLAT", indexParams[common.IndexTypeKey])
+		assert.Equal(t, "", indexParams[paramtable.OverrideIndexTypeKey])
+	})
+
+	t.Run("idempotency: double call produces same result", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"HNSW.load.override_index_type", "GPU_HNSW")
+
+		indexParams := map[string]string{
+			common.IndexTypeKey: "HNSW",
+			"M":                 "16",
+		}
+
+		err := AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", indexParams[paramtable.OverrideIndexTypeKey])
+
+		// Second call (simulates QueryNode applying override after QueryCoord already did)
+		err = AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", indexParams[paramtable.OverrideIndexTypeKey])
+		assert.Equal(t, "16", indexParams["M"])
+	})
+
+	t.Run("override merges additional load params for override type", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"HNSW.load.override_index_type", "GPU_HNSW")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"GPU_HNSW.load.gpu_cache_size", "4096")
+
+		indexParams := map[string]string{
+			common.IndexTypeKey: "HNSW",
+		}
+
+		err := AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+		assert.Equal(t, "4096", indexParams["gpu_cache_size"])
+	})
+
+	t.Run("existing override_index_type in params is not overwritten", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"HNSW.load.override_index_type", "GPU_HNSW")
+
+		indexParams := map[string]string{
+			common.IndexTypeKey:             "HNSW",
+			paramtable.OverrideIndexTypeKey: "GPU_HNSW",
+		}
+
+		err := AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", indexParams[paramtable.OverrideIndexTypeKey])
+	})
+}
+
+// TestOverrideIndexType_ProtoRoundTrip verifies the override survives the full
+// proto serialization cycle used on every load path:
+//
+//	FieldIndexInfo.IndexParams (proto []*KeyValuePair)
+//	  → KeyValuePair2Map (map[string]string)
+//	  → AppendPrepareLoadParams (applies override_index_type swap)
+//	  → Map2KeyValuePair (back to proto)
+//
+// This is the exact pattern used in:
+//   - segment_loader.go:305 (cold load)
+//   - segment_loader.go:2410 (ReopenSegments)
+//   - executor.go:907 (getLoadInfo)
+//   - services.go:497 (handler-level defense-in-depth)
+func TestOverrideIndexType_ProtoRoundTrip(t *testing.T) {
+	initParams := func() *paramtable.ComponentParam {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"HNSW.load.override_index_type", "GPU_HNSW")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"HNSW_int8.load.override_index_type", "GPU_HNSW")
+		return &params
+	}
+
+	t.Run("FieldIndexInfo round-trip: HNSW → GPU_HNSW", func(t *testing.T) {
+		params := initParams()
+
+		// Simulate proto IndexParams as they come from DataCoord
+		protoParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: "M", Value: "16"},
+			{Key: "efConstruction", Value: "200"},
+		}
+
+		// Convert to map, apply override, convert back (the pattern used in all load paths)
+		indexParams := funcutil.KeyValuePair2Map(protoParams)
+		err := AppendPrepareLoadParams(params, indexParams)
+		assert.NoError(t, err)
+		result := funcutil.Map2KeyValuePair(indexParams)
+
+		// Verify the proto output has the override
+		resultMap := funcutil.KeyValuePair2Map(result)
+		assert.Equal(t, "GPU_HNSW", resultMap[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", resultMap[paramtable.OverrideIndexTypeKey])
+		assert.Equal(t, "16", resultMap["M"])
+		assert.Equal(t, "200", resultMap["efConstruction"])
+	})
+
+	t.Run("FieldIndexInfo round-trip: HNSW_int8 → GPU_HNSW", func(t *testing.T) {
+		params := initParams()
+
+		protoParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW_int8"},
+			{Key: "M", Value: "16"},
+		}
+
+		indexParams := funcutil.KeyValuePair2Map(protoParams)
+		err := AppendPrepareLoadParams(params, indexParams)
+		assert.NoError(t, err)
+		result := funcutil.Map2KeyValuePair(indexParams)
+
+		resultMap := funcutil.KeyValuePair2Map(result)
+		assert.Equal(t, "GPU_HNSW", resultMap[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", resultMap[paramtable.OverrideIndexTypeKey])
+	})
+
+	t.Run("SegmentLoadInfo.IndexInfos: all indexes get override applied", func(t *testing.T) {
+		params := initParams()
+
+		// Simulate a SegmentLoadInfo with multiple FieldIndexInfo entries
+		// (mirrors the loop in segment_loader.go:290 and services.go:501)
+		indexInfos := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: "M", Value: "16"},
+		}
+
+		indexParams := funcutil.KeyValuePair2Map(indexInfos)
+		err := AppendPrepareLoadParams(params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+
+		// Write back and re-read to verify proto round-trip
+		protoResult := funcutil.Map2KeyValuePair(indexParams)
+		verifyMap := funcutil.KeyValuePair2Map(protoResult)
+		assert.Equal(t, "GPU_HNSW", verifyMap[common.IndexTypeKey])
+	})
+
+	t.Run("double application is safe (QueryCoord + QueryNode both apply)", func(t *testing.T) {
+		params := initParams()
+
+		protoParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: "M", Value: "16"},
+		}
+
+		// First application (QueryCoord executor.go:907)
+		indexParams := funcutil.KeyValuePair2Map(protoParams)
+		err := AppendPrepareLoadParams(params, indexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+
+		// Serialize back to proto (as the QueryCoord would do)
+		protoAfterQC := funcutil.Map2KeyValuePair(indexParams)
+
+		// Second application (QueryNode services.go handler or segment_loader.go:305)
+		indexParams2 := funcutil.KeyValuePair2Map(protoAfterQC)
+		err = AppendPrepareLoadParams(params, indexParams2)
+		assert.NoError(t, err)
+
+		// Must be identical to single application
+		assert.Equal(t, "GPU_HNSW", indexParams2[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", indexParams2[paramtable.OverrideIndexTypeKey])
+		assert.Equal(t, "16", indexParams2["M"])
+	})
+
+	t.Run("no override config: proto round-trip preserves original type", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		// No override configured for IVF_FLAT
+
+		protoParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+			{Key: "nlist", Value: "1024"},
+		}
+
+		indexParams := funcutil.KeyValuePair2Map(protoParams)
+		err := AppendPrepareLoadParams(&params, indexParams)
+		assert.NoError(t, err)
+		result := funcutil.Map2KeyValuePair(indexParams)
+
+		resultMap := funcutil.KeyValuePair2Map(result)
+		assert.Equal(t, "IVF_FLAT", resultMap[common.IndexTypeKey])
+		assert.Equal(t, "", resultMap[paramtable.OverrideIndexTypeKey])
+		assert.Equal(t, "1024", resultMap["nlist"])
+	})
+
+	t.Run("handler-level defense: unpatched request gets override at handler", func(t *testing.T) {
+		params := initParams()
+
+		// Simulate a LoadSegmentsRequest arriving at the QueryNode handler WITHOUT
+		// the override already applied (the streamingnode fifth-path scenario).
+		// The handler-level fix (services.go:497) applies the override before
+		// delegating to loader/delegator.
+		protoParams := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW_int8"},
+			{Key: "M", Value: "16"},
+		}
+
+		// No override_index_type in the incoming params (bug scenario)
+		indexParams := funcutil.KeyValuePair2Map(protoParams)
+		assert.Equal(t, "", indexParams[paramtable.OverrideIndexTypeKey])
+
+		// Handler applies override
+		err := AppendPrepareLoadParams(params, indexParams)
+		assert.NoError(t, err)
+
+		// Override is now present
+		assert.Equal(t, "GPU_HNSW", indexParams[common.IndexTypeKey])
+		assert.Equal(t, "GPU_HNSW", indexParams[paramtable.OverrideIndexTypeKey])
 	})
 }

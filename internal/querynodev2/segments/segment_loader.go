@@ -2406,6 +2406,17 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 			configureUseTakeForOutput(info, collection.Schema())
 		}
 
+		// Apply knowhere load-stage overrides (e.g. override_index_type) to index params
+		// before passing to C++. Without this, segments reopened for index updates would
+		// use the original index_type (e.g. HNSW) instead of the configured override (e.g. GPU_HNSW).
+		for _, indexInfo := range info.GetIndexInfos() {
+			indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+				return err
+			}
+			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+		}
+
 		err := segment.Reopen(ctx, info)
 		if err != nil {
 			log.Warn("failed to reopen segment", zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))
