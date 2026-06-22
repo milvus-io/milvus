@@ -350,6 +350,11 @@ enum StreamingCode {
 message StreamingError {
     StreamingCode code = 1;
     string cause       = 2;
+    // fenced_time_tick is set only on a SHARD_FENCED error: it is T_switch, the
+    // time tick at which the source vchannel was fenced by shard split. A re-fence
+    // append is rejected with this error, and the split coordinator reads T_switch
+    // back from here to recover it after a crash that lost the recorded value.
+    uint64 fenced_time_tick = 3;
 }
 
 //
@@ -656,6 +661,7 @@ message VChannelMeta {
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
+    uint64 split_time_tick = 5; // T_switch: the time tick of the SplitShard fence message, set when state becomes SPLITTED. A re-fence reads it back so the split coordinator can recover T_switch after a crash.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.

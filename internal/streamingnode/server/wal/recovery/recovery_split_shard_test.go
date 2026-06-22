@@ -74,6 +74,8 @@ func TestRecoveryStorageHandleSplitShard(t *testing.T) {
 
 	// the vchannel is fenced by shard split and the state is persisted.
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, rs.vchannels["v1"].meta.State)
+	// T_switch is persisted so an already-fenced re-fence can return it after a crash.
+	assert.Equal(t, uint64(100), rs.vchannels["v1"].meta.SplitTimeTick)
 	// the growing segments are flushed defensively.
 	assert.False(t, rs.segments[1001].IsGrowing())
 

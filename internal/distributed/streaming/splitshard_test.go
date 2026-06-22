@@ -52,14 +52,17 @@ func TestSplitShard(t *testing.T) {
 
 func TestSplitShardOnFencedVChannel(t *testing.T) {
 	w := mock_streaming.NewMockWALAccesser(t)
-	// the split message hits the fence of the previous split.
+	// the split message hits the fence of the previous split; the fenced error
+	// carries the recorded T_switch so the caller still recovers it.
 	w.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 		return msg.MessageType() == message.MessageTypeSplitShard
-	})).Return(nil, status.NewShardFenced("v0")).Once()
+	})).Return(nil, status.NewShardFenced("v0", 2000)).Once()
 
 	result, err := streaming.SplitShard(context.Background(), w, newSplitShardParam())
-	assert.Nil(t, result)
 	assert.ErrorIs(t, err, streaming.ErrSourceVChannelFenced)
+	// even on the fenced path the result carries T_switch recovered from the error.
+	assert.NotNil(t, result)
+	assert.Equal(t, uint64(2000), result.SwitchTimeTick)
 }
 
 func TestSplitShardAppendFailure(t *testing.T) {

@@ -248,11 +248,13 @@ func TestAdvanceFencing(t *testing.T) {
 	t.Run("already fenced proceeds to create targets", func(t *testing.T) {
 		m := newSplitTestMeta(true, "v0", map[int64]int64{10: 80, 11: 40})
 		wal := mock_streaming.NewMockWALAccesser(t)
-		// the source was already fenced by a previous attempt: the retry returns
-		// SHARD_FENCED, treated as success, and the task rolls forward.
+		// the source was already fenced by a previous attempt (e.g. a crash lost
+		// the persisted T_switch): the retry returns SHARD_FENCED carrying the
+		// recorded T_switch, treated as success; the task rolls forward and
+		// recovers T_switch.
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeSplitShard
-		})).Return(nil, status.NewShardFenced("v0")).Once()
+		})).Return(nil, status.NewShardFenced("v0", 1900)).Once()
 		wal.EXPECT().RawAppend(mock.Anything, mock.MatchedBy(func(msg message.MutableMessage) bool {
 			return msg.MessageType() == message.MessageTypeCreateVChannel
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
@@ -263,6 +265,8 @@ func TestAdvanceFencing(t *testing.T) {
 		task := manager.mustGetTask(100)
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
 		assert.True(t, task.GetFenced())
+		// T_switch is recovered from the already-fenced re-fence.
+		assert.Equal(t, uint64(1900), task.GetSwitchTimeTick())
 	})
 
 	t.Run("resume after T_switch persisted only initializes targets", func(t *testing.T) {

@@ -134,8 +134,10 @@ func TestShardInterceptorCreateVChannelMessageOnExistingCollection(t *testing.T)
 
 func TestShardInterceptorSplitShardMessageOnFencedVChannel(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
-	// idempotent: the vchannel is already fenced by a previous split message.
+	// idempotent: the vchannel is already fenced by a previous split message;
+	// the recorded T_switch is carried back on the error for crash recovery.
 	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1)).Return(shards.ErrVChannelFenced).Once()
+	shardManager.EXPECT().GetSplitTimeTick(int64(1)).Return(uint64(1900)).Once()
 
 	msgID, err := i.DoAppend(context.Background(), newTestSplitShardMutableMessage(),
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
@@ -143,7 +145,9 @@ func TestShardInterceptorSplitShardMessageOnFencedVChannel(t *testing.T) {
 			return nil, nil
 		})
 	assert.Nil(t, msgID)
-	assert.True(t, status.AsStreamingError(err).IsShardFenced())
+	streamErr := status.AsStreamingError(err)
+	assert.True(t, streamErr.IsShardFenced())
+	assert.Equal(t, uint64(1900), streamErr.FencedTimeTick)
 }
 
 func TestShardInterceptorSplitShardMessageOnUnknownCollection(t *testing.T) {

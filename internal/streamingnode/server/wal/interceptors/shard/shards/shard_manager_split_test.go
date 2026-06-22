@@ -37,7 +37,7 @@ func newTestSplitShardImmutableMessage(vchannel string, collectionID int64, time
 	return message.MustAsImmutableSplitShardMessageV2(msg.IntoImmutableMessage(rmq.NewRmqID(2)))
 }
 
-func newTestShardManagerWithVChannelState(t *testing.T, state streamingpb.VChannelState) ShardManager {
+func newTestShardManagerWithVChannelState(t *testing.T, state streamingpb.VChannelState, splitTimeTick uint64) ShardManager {
 	paramtable.Init()
 	resource.InitForTest(t)
 	w := mock_wal.NewMockWAL(t)
@@ -57,8 +57,9 @@ func newTestShardManagerWithVChannelState(t *testing.T, state streamingpb.VChann
 		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
 			VChannels: map[string]*streamingpb.VChannelMeta{
 				"v1": {
-					Vchannel: "v1",
-					State:    state,
+					Vchannel:      "v1",
+					State:         state,
+					SplitTimeTick: splitTimeTick,
 					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 						CollectionId: 1,
 						Partitions: []*streamingpb.PartitionInfoOfVChannel{
@@ -74,7 +75,7 @@ func newTestShardManagerWithVChannelState(t *testing.T, state streamingpb.VChann
 }
 
 func TestShardManagerSplitShard(t *testing.T) {
-	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL)
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
 
 	// the vchannel accepts DML before the split.
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1))
@@ -85,19 +86,27 @@ func TestShardManagerSplitShard(t *testing.T) {
 	m.SplitShard(newTestSplitShardImmutableMessage("v999", 999, 2000))
 	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1))
 
-	// the split message fences the vchannel.
+	// an unfenced or unknown collection has no T_switch.
+	assert.Zero(t, m.GetSplitTimeTick(1))
+	assert.Zero(t, m.GetSplitTimeTick(999))
+
+	// the split message fences the vchannel and records T_switch.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 2000))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1), ErrVChannelFenced)
+	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1))
 
-	// the fence is idempotent.
+	// the fence is idempotent and T_switch stays at the first fence.
 	m.SplitShard(newTestSplitShardImmutableMessage("v1", 1, 3000))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1), ErrVChannelFenced)
+	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1))
 }
 
 func TestShardManagerRecoverSplittedVChannel(t *testing.T) {
-	// a vchannel recovered in SPLITTED state keeps rejecting DML.
-	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED)
+	// a vchannel recovered in SPLITTED state keeps rejecting DML and restores
+	// T_switch, so an already-fenced re-fence can return it after a crash.
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED, 2000)
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1), ErrVChannelFenced)
+	assert.Equal(t, uint64(2000), m.GetSplitTimeTick(1))
 }
 
 func newTestCreateVChannelImmutableMessage(vchannel string, collectionID int64, partitionIDs []int64, timetick uint64) message.ImmutableCreateVChannelMessageV2 {
@@ -120,7 +129,7 @@ func newTestCreateVChannelImmutableMessage(vchannel string, collectionID int64, 
 }
 
 func TestShardManagerCreateVChannel(t *testing.T) {
-	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL)
+	m := newTestShardManagerWithVChannelState(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, 0)
 	// a shard split target vchannel of a new collection is registered for DML,
 	// exactly as a create collection genesis would register it.
 	m.CreateVChannel(newTestCreateVChannelImmutableMessage("v2", 7, []int64{8}, 2000))
