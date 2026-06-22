@@ -969,6 +969,7 @@ func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
 	updatedJob := importMeta.GetJob(ctx, 2)
 	assert.NotNil(t, updatedJob)
 	assert.Equal(t, internalpb.ImportJobState_Failed, updatedJob.GetState())
+	assert.Equal(t, "aborted by user", updatedJob.GetReason())
 	// UpdateJobState(Failed) also releases disk quota and arms GC eligibility.
 	assert.EqualValues(t, 0, updatedJob.GetRequestedDiskSize(),
 		"Failed transition must release RequestedDiskSize")

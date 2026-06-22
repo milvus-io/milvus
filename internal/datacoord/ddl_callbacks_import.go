@@ -248,7 +248,8 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 }
 
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.
-// It transitions the import job to Failed state.
+// It transitions the import job to Failed state and records that the failure
+// was user-initiated so AbortImport retries can be idempotent.
 // Concurrency safety is guaranteed by the broadcaster framework's resource key lock
 // (exclusive collection-level lock), so no CAS is needed here.
 // Segment cleanup is handled by the import inspector (processFailed), not here.
@@ -271,5 +272,8 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		return nil
 	}
 
-	return c.importMeta.UpdateJob(ctx, jobID, UpdateJobState(internalpb.ImportJobState_Failed))
+	return c.importMeta.UpdateJob(ctx, jobID,
+		UpdateJobState(internalpb.ImportJobState_Failed),
+		UpdateJobReason(importJobReasonAbortedByUser),
+	)
 }
