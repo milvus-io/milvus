@@ -130,8 +130,8 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                                                           buffer_size,
                                                           writer_properties);
         AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create packed writer: " +
-                       result.status().ToString());
+                   "[StorageV2] Failed to create packed writer: {}",
+                   result.status().ToString());
         auto writer = result.ValueOrDie();
         *c_packed_writer =
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
@@ -203,8 +203,8 @@ NewPackedWriter(struct ArrowSchema* schema,
                                                           buffer_size,
                                                           writer_properties);
         AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create packed writer: " +
-                       result.status().ToString());
+                   "[StorageV2] Failed to create packed writer: {}",
+                   result.status().ToString());
         auto writer = result.ValueOrDie();
         *c_packed_writer =
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(

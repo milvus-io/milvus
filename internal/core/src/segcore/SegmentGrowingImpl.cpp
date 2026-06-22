@@ -1019,8 +1019,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
             AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+                       "[StorageV2] Failed to create file row group reader: {}",
+                       result.status().ToString());
             auto reader = result.ValueOrDie();
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();

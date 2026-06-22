@@ -1690,10 +1690,11 @@ class InsertRecordGrowing {
     VectorBase*
     get_data_base(FieldId field_id) const {
         AssertInfo(data_.find(field_id) != data_.end(),
-                   "Cannot find field_data with field_id: " +
-                       std::to_string(field_id.get()));
+                   "Cannot find field_data with field_id: {}",
+                   field_id.get());
         AssertInfo(data_.at(field_id) != nullptr,
-                   "data_ at i is null" + std::to_string(field_id.get()));
+                   "field_id {} data is null",
+                   field_id.get());
         return data_.at(field_id).get();
     }
 
@@ -1720,10 +1721,11 @@ class InsertRecordGrowing {
     ThreadSafeValidDataPtr
     get_valid_data(FieldId field_id) const {
         AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
-                   "Cannot find valid_data with field_id: " +
-                       std::to_string(field_id.get()));
+                   "Cannot find valid_data with field_id: {}",
+                   field_id.get());
         AssertInfo(valid_data_.at(field_id) != nullptr,
-                   "valid_data_ at i is null" + std::to_string(field_id.get()));
+                   "field_id {} valid_data is null",
+                   field_id.get());
         return valid_data_.at(field_id);
     }
 

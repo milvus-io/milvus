@@ -483,9 +483,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info, bool is_replace) {
                  field_id.get(),
                  id_);
     } else {
-        AssertInfo(
-            !get_bit(index_ready_bitset_, field_id),
-            "vector index has been exist at " + std::to_string(field_id.get()));
+        AssertInfo(!get_bit(index_ready_bitset_, field_id),
+                   "vector index has been exist at {}",
+                   field_id.get());
     }
     LOG_INFO(
         "Before setting field_bit for field index, fieldID:{}. "
@@ -555,9 +555,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
                  field_id.get(),
                  id_);
     } else {
-        AssertInfo(
-            !get_bit(index_ready_bitset_, field_id),
-            "scalar index has been exist at " + std::to_string(field_id.get()));
+        AssertInfo(!get_bit(index_ready_bitset_, field_id),
+                   "scalar index has been exist at {}",
+                   field_id.get());
     }
 
     if (field_meta.get_data_type() == DataType::JSON) {
@@ -884,8 +884,8 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
             AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+                       "[StorageV2] Failed to create file row group reader: {}",
+                       result.status().ToString());
 
             auto reader = result.ValueOrDie();
             FileMetadataLoadResult load_result;
@@ -1354,7 +1354,8 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
     const std::vector<int64_t>& chunk_ids) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+               "Can't get bitset element at {}",
+               field_id.get());
     if (auto column = get_column(field_id)) {
         column->PrefetchChunks(op_ctx, chunk_ids);
     }
@@ -1433,7 +1434,8 @@ ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                           int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+               "Can't get bitset element at {}",
+               field_id.get());
     if (auto column = get_column(field_id)) {
         return column->Span(op_ctx, chunk_id);
     }
@@ -1449,7 +1451,8 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+               "Can't get bitset element at {}",
+               field_id.get());
     if (auto column = get_column(field_id)) {
         return column->ArrayViews(op_ctx, chunk_id, offset_len);
     }
@@ -1465,7 +1468,8 @@ ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+               "Can't get bitset element at {}",
+               field_id.get());
     if (auto column = get_column(field_id)) {
         return column->VectorArrayViews(op_ctx, chunk_id, offset_len);
     }
@@ -1481,7 +1485,8 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+               "Can't get bitset element at {}",
+               field_id.get());
     if (auto column = get_column(field_id)) {
         return column->StringViews(op_ctx, chunk_id, offset_len);
     }
@@ -1497,7 +1502,8 @@ ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
     const FixedVector<int32_t>& offsets) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+               "Can't get bitset element at {}",
+               field_id.get());
     if (auto column = get_column(field_id)) {
         return column->StringViewsByOffsets(op_ctx, chunk_id, offsets);
     }
@@ -1513,7 +1519,8 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
     const FixedVector<int32_t>& offsets) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+               "Can't get bitset element at {}",
+               field_id.get());
     if (auto column = get_column(field_id)) {
         return column->ArrayViewsByOffsets(op_ctx, chunk_id, offsets);
     }
@@ -1624,8 +1631,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
             vec_binlog_config_.at(field_id)->GetSearchConf(search_info);
 
         AssertInfo(vector_indexings_.is_ready(field_id),
-                   "vector indexes isn't ready for field " +
-                       std::to_string(field_id.get()));
+                   "vector indexes isn't ready for field {}",
+                   field_id.get());
         query::SearchOnSealedIndex(*schema_,
                                    vector_indexings_,
                                    binlog_search_info,
@@ -1643,8 +1650,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
             search_info.topk_ = GetEffectiveSearchTopk(search_info);
         }
         AssertInfo(vector_indexings_.is_ready(field_id),
-                   "vector indexes isn't ready for field " +
-                       std::to_string(field_id.get()));
+                   "vector indexes isn't ready for field {}",
+                   field_id.get());
         query::SearchOnSealedIndex(*schema_,
                                    vector_indexings_,
                                    search_info,
@@ -1656,9 +1663,9 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    output);
         milvus::tracer::AddEvent("finish_searching_vector_index");
     } else {
-        AssertInfo(
-            get_bit(field_data_ready_bitset_, field_id),
-            "Field Data is not loaded: " + std::to_string(field_id.get()));
+        AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+                   "Field Data is not loaded: {}",
+                   field_id.get());
         AssertInfo(num_rows_.has_value(), "Can't get row count value");
         auto row_count = num_rows_.value();
         auto vec_data = get_column(field_id);
@@ -1974,8 +1981,8 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
 void
 ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
     AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
-               "Field id:" + std::to_string(field_id.get()) +
-                   " isn't one of system type when drop index");
+               "Field id:{} isn't one of system type when drop index",
+               field_id.get());
     if (field_exists_in_schema(schema_, field_id)) {
         auto& field_meta = schema_->operator[](field_id);
         AssertInfo(!field_meta.is_vector(), "vector field cannot drop index");
@@ -4018,16 +4025,16 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
                        "vector index is not ready");
             AssertInfo(
                 index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
-                "index_has_raw_data_ is not set for fieldID: " +
-                    std::to_string(fieldID.get()));
+                "index_has_raw_data_ is not set for fieldID: {}",
+                fieldID.get());
             return index_has_raw_data_.at(fieldID);
         } else if (get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
                        "interim index is not ready");
             AssertInfo(
                 index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
-                "index_has_raw_data_ is not set for fieldID: " +
-                    std::to_string(fieldID.get()));
+                "index_has_raw_data_ is not set for fieldID: {}",
+                fieldID.get());
             return index_has_raw_data_.at(fieldID) ||
                    get_bit(field_data_ready_bitset_, fieldID);
         }
@@ -4040,8 +4047,8 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
         if (has_scalar_index) {
             AssertInfo(
                 index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
-                "index_has_raw_data_ is not set for fieldID: " +
-                    std::to_string(fieldID.get()));
+                "index_has_raw_data_ is not set for fieldID: {}",
+                fieldID.get());
             return index_has_raw_data_.at(fieldID);
         }
     }
