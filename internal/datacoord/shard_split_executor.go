@@ -39,12 +39,32 @@ import (
 // The task FSM is forward-only after the write fence; every step is
 // idempotent so a crash at any point is resumed by the next tick.
 func (m *shardSplitManager) advanceTasks() {
+	retention := paramtable.Get().DataCoordCfg.ShardSplitTaskRetention.GetAsDuration(time.Second)
 	m.tasks.Range(func(_ int64, task *datapb.SplitShardTask) bool {
 		if isSplitShardTaskActive(task) {
 			m.advanceTask(task)
+			return true
 		}
+		m.reapTerminalTask(task, retention)
 		return true
 	})
+}
+
+// reapTerminalTask drops a Done/Aborted task from meta and the in-memory cache
+// once it has been terminal for the retention window, so completed splits do
+// not accumulate as permanent etcd keys (reloaded and iterated on every restart
+// and every tick). Reaping is retried on the next tick if the meta delete fails.
+func (m *shardSplitManager) reapTerminalTask(task *datapb.SplitShardTask, retention time.Duration) {
+	endTime := task.GetEndTime()
+	if endTime == 0 || time.Since(time.Unix(int64(endTime), 0)) < retention {
+		return
+	}
+	if err := m.catalog.DropSplitShardTask(m.ctx, task); err != nil {
+		m.taskLogger(task).Warn("reap the terminal split task failed, will retry", zap.Error(err))
+		return
+	}
+	m.tasks.Remove(task.GetTaskId())
+	m.taskLogger(task).Info("reaped the terminal split task")
 }
 
 func (m *shardSplitManager) advanceTask(task *datapb.SplitShardTask) {
@@ -329,15 +349,22 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 		}
 		idx, err := m.planner.AssignSegment(m.ctx, segment, task.GetTargets())
 		if err != nil {
-			logger.Warn("assign a segment to the split targets failed",
+			// One unroutable segment must not wedge the whole task — abort is
+			// illegal past the fence. Skip it (operator-visible via this warn
+			// and the unblocked-task metric), keep relabeling the rest, and
+			// retry it next round: the planner refreshes its partition-key
+			// cache on a miss, so a namespace added mid-redistribution becomes
+			// routable instead of pinning the task in Redistributing forever.
+			logger.Warn("assign a segment to the split targets failed, skipping it this round",
 				zap.Int64("segmentID", segment.GetID()), zap.Error(err))
-			return
+			skipped++
+			continue
 		}
 		operators = append(operators, UpdateInsertChannelOperator(segment.GetID(), task.GetTargets()[idx].GetVchannel()))
 		relabeled = append(relabeled, segment.GetID())
 	}
 	if skipped > 0 {
-		logger.Warn("skipped compacting/importing segments during relabel, retry on the next round",
+		logger.Warn("skipped compacting/importing/unroutable segments during relabel, retry on the next round",
 			zap.Int("skipped", skipped))
 	}
 	if len(operators) == 0 {
