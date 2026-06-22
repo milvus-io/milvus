@@ -1696,12 +1696,7 @@ class InsertRecordGrowing {
         // Guard the field map against concurrent structural modification
         // (e.g. append_field_meta during schema evolution rehashing data_).
         std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
-        AssertInfo(data_.find(field_id) != data_.end(),
-                   "Cannot find field_data with field_id: " +
-                       std::to_string(field_id.get()));
-        AssertInfo(data_.at(field_id) != nullptr,
-                   "data_ at i is null" + std::to_string(field_id.get()));
-        return data_.at(field_id).get();
+        return get_data_base_unlocked(field_id);
     }
 
     // get field data in given type, const version
@@ -1729,12 +1724,7 @@ class InsertRecordGrowing {
         // Guard the field map against concurrent structural modification
         // (e.g. append_field_meta during schema evolution rehashing valid_data_).
         std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
-        AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
-                   "Cannot find valid_data with field_id: " +
-                       std::to_string(field_id.get()));
-        AssertInfo(valid_data_.at(field_id) != nullptr,
-                   "valid_data_ at i is null" + std::to_string(field_id.get()));
-        return valid_data_.at(field_id);
+        return get_valid_data_unlocked(field_id);
     }
 
     bool
@@ -1746,20 +1736,26 @@ class InsertRecordGrowing {
     bool
     is_valid_data_exist(FieldId field_id) const {
         std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
-        return valid_data_.find(field_id) != valid_data_.end();
+        return is_valid_data_exist_unlocked(field_id);
     }
 
     SpanBase
     get_span_base(FieldId field_id, int64_t chunk_id) const {
-        auto data = get_data_base(field_id);
-        if (is_valid_data_exist(field_id)) {
+        // Take the shared lock once for the whole span resolution instead of
+        // re-locking inside each of get_data_base / is_valid_data_exist /
+        // get_valid_data. This both removes the redundant lock churn on this
+        // hot path and gives a consistent snapshot of the field map across the
+        // three lookups.
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        auto data = get_data_base_unlocked(field_id);
+        if (is_valid_data_exist_unlocked(field_id)) {
             auto size = data->get_chunk_size(chunk_id);
             auto element_offset = data->get_element_offset(chunk_id);
-            return SpanBase(
-                data->get_chunk_data(chunk_id),
-                get_valid_data(field_id)->get_chunk_data(element_offset),
-                size,
-                data->get_element_size());
+            return SpanBase(data->get_chunk_data(chunk_id),
+                            get_valid_data_unlocked(field_id)->get_chunk_data(
+                                element_offset),
+                            size,
+                            data->get_element_size());
         }
         return data->get_span_base(chunk_id);
     }
@@ -1848,6 +1844,34 @@ class InsertRecordGrowing {
     AckResponder ack_responder_;
 
  private:
+    // Unlocked field-map lookups. Callers MUST already hold field_map_mutex_
+    // (at least shared). These let multi-lookup hot paths such as
+    // get_span_base resolve under a single lock acquisition.
+    VectorBase*
+    get_data_base_unlocked(FieldId field_id) const {
+        AssertInfo(data_.find(field_id) != data_.end(),
+                   "Cannot find field_data with field_id: " +
+                       std::to_string(field_id.get()));
+        AssertInfo(data_.at(field_id) != nullptr,
+                   "data_ at i is null" + std::to_string(field_id.get()));
+        return data_.at(field_id).get();
+    }
+
+    ThreadSafeValidDataPtr
+    get_valid_data_unlocked(FieldId field_id) const {
+        AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
+                   "Cannot find valid_data with field_id: " +
+                       std::to_string(field_id.get()));
+        AssertInfo(valid_data_.at(field_id) != nullptr,
+                   "valid_data_ at i is null" + std::to_string(field_id.get()));
+        return valid_data_.at(field_id);
+    }
+
+    bool
+    is_valid_data_exist_unlocked(FieldId field_id) const {
+        return valid_data_.find(field_id) != valid_data_.end();
+    }
+
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
