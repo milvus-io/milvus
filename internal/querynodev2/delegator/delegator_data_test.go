@@ -945,6 +945,148 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		}, segmentEntryCoreFields(sealed[0].Segments))
 	})
 
+	s.Run("reopen_before_publish_when_schema_barrier_stale", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		_, _, currentBarrierTs := s.delegator.collection.SchemaSnapshot()
+		staleBarrierTs := currentBarrierTs - 1
+
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			})
+		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+			return nil
+		})
+
+		worker1 := &cluster.MockWorker{}
+		loadCallCount := 0
+		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).RunAndReturn(
+			func(_ context.Context, req *querypb.LoadSegmentsRequest) error {
+				loadCallCount++
+				switch loadCallCount {
+				case 1:
+					s.Require().NotNil(req.GetLoadMeta())
+					s.Equal(staleBarrierTs, req.GetLoadMeta().GetSchemaBarrierTs())
+				case 2:
+					s.Equal(querypb.LoadScope_Reopen, req.GetLoadScope())
+					s.Require().NotNil(req.GetLoadMeta())
+					s.Equal(currentBarrierTs, req.GetLoadMeta().GetSchemaBarrierTs())
+					s.Equal(s.collectionID, req.GetLoadMeta().GetCollectionID())
+					s.False(req.GetNeedTransfer())
+					s.NotNil(req.GetSchema())
+				default:
+					s.FailNow("unexpected load segments call")
+				}
+				return nil
+			}).Twice()
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			LoadMeta: &querypb.LoadMetaInfo{
+				CollectionID:    s.collectionID,
+				SchemaBarrierTs: staleBarrierTs,
+			},
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     101,
+					PartitionID:   500,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+
+		s.NoError(err)
+		s.Equal(2, loadCallCount)
+		s.delegator.distribution.Flush()
+		sealed, _ := s.delegator.GetSegmentInfo(false)
+		allSegments := lo.FlatMap(sealed, func(view SnapshotItem, _ int) []SegmentEntry { return view.Segments })
+		_, ok := lo.Find(allSegments, func(entry SegmentEntry) bool { return entry.SegmentID == 101 && entry.NodeID == 1 })
+		s.True(ok)
+	})
+
+	s.Run("publish_fails_if_schema_barrier_advances_after_reopen", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		_, _, currentBarrierTs := s.delegator.collection.SchemaSnapshot()
+		staleBarrierTs := currentBarrierTs - 1
+		newerBarrierTs := currentBarrierTs + 100
+		updatedSchema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
+
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+			s.Require().NoError(s.manager.Collection.UpdateSchema(s.collectionID, updatedSchema, newerBarrierTs))
+			s.delegator.schemaChangeMutex.Lock()
+			s.delegator.schemaBarrierTs = newerBarrierTs
+			s.delegator.schemaChangeMutex.Unlock()
+			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+				return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			})
+		}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+			return nil
+		})
+
+		worker1 := &cluster.MockWorker{}
+		loadCallCount := 0
+		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).RunAndReturn(
+			func(_ context.Context, req *querypb.LoadSegmentsRequest) error {
+				loadCallCount++
+				if loadCallCount == 2 {
+					s.Equal(querypb.LoadScope_Reopen, req.GetLoadScope())
+					s.Require().NotNil(req.GetLoadMeta())
+					s.Equal(currentBarrierTs, req.GetLoadMeta().GetSchemaBarrierTs())
+				}
+				return nil
+			}).Twice()
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			LoadMeta: &querypb.LoadMetaInfo{
+				CollectionID:    s.collectionID,
+				SchemaBarrierTs: staleBarrierTs,
+			},
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     102,
+					PartitionID:   500,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.Equal(2, loadCallCount)
+		s.delegator.distribution.Flush()
+		sealed, _ := s.delegator.GetSegmentInfo(false)
+		allSegments := lo.FlatMap(sealed, func(view SnapshotItem, _ int) []SegmentEntry { return view.Segments })
+		_, ok := lo.Find(allSegments, func(entry SegmentEntry) bool { return entry.SegmentID == 102 })
+		s.False(ok)
+	})
+
 	s.Run("load_segments_with_delete", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
