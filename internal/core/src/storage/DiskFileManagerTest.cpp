@@ -1310,6 +1310,61 @@ TEST_F(DiskAnnFileManagerTest, FileCleanupKeepsOtherGeneration) {
     EXPECT_FALSE(local_chunk_manager->Exist(fm2_file));
 }
 
+TEST_F(DiskAnnFileManagerTest, DirectoryLeaseDefersCleanupUntilRelease) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto file_manager = CreateFileManager(cm_, fs_);
+    auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
+    auto local_index_file = local_index_prefix + "index_data";
+
+    {
+        auto lease =
+            file_manager->AcquireLocalDirWriteLease(local_index_prefix);
+        ASSERT_TRUE(lease);
+        local_chunk_manager->CreateFile(local_index_file);
+        ASSERT_TRUE(local_chunk_manager->Exist(local_index_file));
+
+        file_manager->RemoveIndexFiles();
+        EXPECT_TRUE(local_chunk_manager->Exist(local_index_file));
+    }
+
+    EXPECT_FALSE(local_chunk_manager->Exist(local_index_file));
+}
+
+TEST_F(DiskAnnFileManagerTest, DirectoryLeaseRejectsNewWritersAfterCleanup) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto file_manager = CreateFileManager(cm_, fs_);
+    auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
+    auto local_index_file = local_index_prefix + "index_data";
+
+    {
+        auto lease =
+            file_manager->AcquireLocalDirWriteLease(local_index_prefix);
+        ASSERT_TRUE(lease);
+        local_chunk_manager->CreateFile(local_index_file);
+        ASSERT_TRUE(local_chunk_manager->Exist(local_index_file));
+
+        file_manager->RemoveIndexFiles();
+        EXPECT_THROW(
+            {
+                auto blocked =
+                    file_manager->AcquireLocalDirWriteLease(local_index_prefix);
+                (void)blocked;
+            },
+            SegcoreError);
+    }
+
+    EXPECT_THROW(
+        {
+            auto blocked =
+                file_manager->AcquireLocalDirWriteLease(local_index_prefix);
+            (void)blocked;
+        },
+        SegcoreError);
+    EXPECT_FALSE(local_chunk_manager->Exist(local_index_file));
+}
+
 TEST_F(DiskAnnFileManagerTest, FileCleanup) {
     std::string local_index_file_path;
     std::string local_text_index_file_path;

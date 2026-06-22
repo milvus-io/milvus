@@ -19,8 +19,10 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "storage/IndexData.h"
@@ -33,7 +35,36 @@
 namespace milvus::storage {
 
 class DiskFileManagerImpl : public FileManagerImpl {
+ private:
+    struct LocalDirState;
+
  public:
+    class LocalDirWriteLease {
+     public:
+        LocalDirWriteLease() = default;
+        LocalDirWriteLease(LocalDirWriteLease&& other) noexcept = default;
+        LocalDirWriteLease&
+        operator=(LocalDirWriteLease&& other) noexcept;
+        LocalDirWriteLease(const LocalDirWriteLease&) = delete;
+        LocalDirWriteLease&
+        operator=(const LocalDirWriteLease&) = delete;
+        ~LocalDirWriteLease();
+
+        explicit operator bool() const {
+            return state_ != nullptr;
+        }
+
+     private:
+        friend class DiskFileManagerImpl;
+
+        explicit LocalDirWriteLease(std::shared_ptr<LocalDirState> state);
+
+        void
+        Release() noexcept;
+
+        std::shared_ptr<LocalDirState> state_;
+    };
+
     explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext);
 
     ~DiskFileManagerImpl() override;
@@ -177,6 +208,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     RemoveNgramIndexFiles();
 
     void
+    RemoveRawDataFiles();
+
+    LocalDirWriteLease
+    AcquireLocalDirWriteLease(const std::string& dir);
+
+    void
     AddBatchIndexFiles(const std::string& local_file_name,
                        const std::vector<int64_t>& local_file_offsets,
                        const std::vector<std::string>& remote_files,
@@ -225,8 +262,14 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     AppendLocalPathGeneration(const std::string& prefix) const;
 
-    void
+    static void
     RemoveLocalDirBestEffort(const std::string& dir) noexcept;
+
+    void
+    CloseAndRemoveLocalDir(const std::string& dir) noexcept;
+
+    std::shared_ptr<LocalDirState>
+    GetOrCreateLocalDirState(const std::string& dir);
 
     bool
     AddFileInternal(const std::string& file_name,
@@ -282,6 +325,10 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
+
+    mutable std::mutex local_dir_states_mutex_;
+    std::unordered_map<std::string, std::shared_ptr<LocalDirState>>
+        local_dir_states_;
 
     size_t added_total_file_size_ = 0;
 

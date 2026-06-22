@@ -75,6 +75,66 @@ namespace {
 std::atomic<uint64_t> g_file_path_generation{0};
 }
 
+struct DiskFileManagerImpl::LocalDirState {
+    explicit LocalDirState(std::string dir) : dir(std::move(dir)) {
+    }
+
+    std::string dir;
+    std::mutex mutex;
+    bool closed = false;
+    bool delete_on_zero = false;
+    uint64_t active_writers = 0;
+};
+
+DiskFileManagerImpl::LocalDirWriteLease::LocalDirWriteLease(
+    std::shared_ptr<LocalDirState> state)
+    : state_(std::move(state)) {
+}
+
+DiskFileManagerImpl::LocalDirWriteLease&
+DiskFileManagerImpl::LocalDirWriteLease::operator=(
+    LocalDirWriteLease&& other) noexcept {
+    if (this != &other) {
+        Release();
+        state_ = std::move(other.state_);
+    }
+    return *this;
+}
+
+DiskFileManagerImpl::LocalDirWriteLease::~LocalDirWriteLease() {
+    Release();
+}
+
+void
+DiskFileManagerImpl::LocalDirWriteLease::Release() noexcept {
+    auto state = std::exchange(state_, nullptr);
+    if (state == nullptr) {
+        return;
+    }
+
+    bool remove_dir = false;
+    std::string dir;
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->active_writers == 0) {
+            LOG_WARN(
+                "local dir write lease released with no active writers, "
+                "dir: {}",
+                state->dir);
+            return;
+        }
+        --state->active_writers;
+        if (state->active_writers == 0 && state->delete_on_zero) {
+            remove_dir = true;
+            dir = state->dir;
+        }
+    }
+
+    if (remove_dir) {
+        DiskFileManagerImpl::RemoveLocalDirBestEffort(dir);
+    }
+}
+
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
@@ -89,11 +149,11 @@ DiskFileManagerImpl::DiskFileManagerImpl(
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
-    RemoveLocalDirBestEffort(GetLocalIndexObjectPrefix());
-    RemoveLocalDirBestEffort(GetLocalTextIndexPrefix());
-    RemoveLocalDirBestEffort(GetLocalJsonStatsPrefix());
-    RemoveLocalDirBestEffort(GetLocalNgramIndexPrefix());
-    RemoveLocalDirBestEffort(GetLocalRawDataObjectPrefix());
+    RemoveIndexFiles();
+    RemoveTextLogFiles();
+    RemoveJsonStatsFiles();
+    RemoveNgramIndexFiles();
+    RemoveRawDataFiles();
 }
 
 bool
@@ -189,6 +249,56 @@ DiskFileManagerImpl::RemoveLocalDirBestEffort(const std::string& dir) noexcept {
         LOG_WARN("failed to remove local dir {}, error: {}", dir, e.what());
     } catch (...) {
         LOG_WARN("failed to remove local dir {}, unknown error", dir);
+    }
+}
+
+std::shared_ptr<DiskFileManagerImpl::LocalDirState>
+DiskFileManagerImpl::GetOrCreateLocalDirState(const std::string& dir) {
+    std::lock_guard<std::mutex> lock(local_dir_states_mutex_);
+    auto it = local_dir_states_.find(dir);
+    if (it != local_dir_states_.end()) {
+        return it->second;
+    }
+
+    auto state = std::make_shared<LocalDirState>(dir);
+    local_dir_states_.emplace(dir, state);
+    return state;
+}
+
+DiskFileManagerImpl::LocalDirWriteLease
+DiskFileManagerImpl::AcquireLocalDirWriteLease(const std::string& dir) {
+    auto state = GetOrCreateLocalDirState(dir);
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (state->closed) {
+        ThrowInfo(FileWriteFailed,
+                  fmt::format("local dir {} is closed for cleanup", dir));
+    }
+    ++state->active_writers;
+    return LocalDirWriteLease(std::move(state));
+}
+
+void
+DiskFileManagerImpl::CloseAndRemoveLocalDir(const std::string& dir) noexcept {
+    try {
+        auto state = GetOrCreateLocalDirState(dir);
+        bool remove_dir = false;
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->closed = true;
+            if (state->active_writers == 0) {
+                remove_dir = true;
+            } else {
+                state->delete_on_zero = true;
+            }
+        }
+
+        if (remove_dir) {
+            RemoveLocalDirBestEffort(dir);
+        }
+    } catch (const std::exception& e) {
+        LOG_WARN("failed to close local dir {}, error: {}", dir, e.what());
+    } catch (...) {
+        LOG_WARN("failed to close local dir {}, unknown error", dir);
     }
 }
 
@@ -452,32 +562,36 @@ void
 DiskFileManagerImpl::CacheIndexToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
-    return CacheIndexToDiskInternal(
-        remote_files, GetLocalIndexObjectPrefix(), priority);
+    auto local_prefix = GetLocalIndexObjectPrefix();
+    auto lease = AcquireLocalDirWriteLease(local_prefix);
+    CacheIndexToDiskInternal(remote_files, local_prefix, priority);
 }
 
 void
 DiskFileManagerImpl::CacheTextLogToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
-    return CacheIndexToDiskInternal(
-        remote_files, GetLocalTextIndexPrefix(), priority);
+    auto local_prefix = GetLocalTextIndexPrefix();
+    auto lease = AcquireLocalDirWriteLease(local_prefix);
+    CacheIndexToDiskInternal(remote_files, local_prefix, priority);
 }
 
 void
 DiskFileManagerImpl::CacheNgramIndexToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
-    return CacheIndexToDiskInternal(
-        remote_files, GetLocalNgramIndexPrefix(), priority);
+    auto local_prefix = GetLocalNgramIndexPrefix();
+    auto lease = AcquireLocalDirWriteLease(local_prefix);
+    CacheIndexToDiskInternal(remote_files, local_prefix, priority);
 }
 
 void
 DiskFileManagerImpl::CacheJsonStatsSharedIndexToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
-    return CacheIndexToDiskInternal(
-        remote_files, GetLocalJsonStatsSharedIndexPrefix(), priority);
+    auto local_prefix = GetLocalJsonStatsSharedIndexPrefix();
+    auto lease = AcquireLocalDirWriteLease(GetLocalJsonStatsPrefix());
+    CacheIndexToDiskInternal(remote_files, local_prefix, priority);
 }
 
 std::string
@@ -487,6 +601,7 @@ DiskFileManagerImpl::CacheJsonStatsMetaToDisk(
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto local_prefix = GetLocalJsonStatsMetaPrefix();
+    auto lease = AcquireLocalDirWriteLease(GetLocalJsonStatsPrefix());
 
     auto file_name = remote_file.substr(remote_file.find_last_of('/') + 1);
     auto local_file =
@@ -514,6 +629,16 @@ DiskFileManagerImpl::CacheJsonStatsMetaToDisk(
 template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
+    auto raw_data_lease =
+        AcquireLocalDirWriteLease(GetLocalRawDataObjectPrefix());
+    std::optional<LocalDirWriteLease> valid_data_lease;
+    if (index::GetValueFromConfig<std::string>(config,
+                                               index::VALID_DATA_PATH_KEY)
+            .has_value()) {
+        valid_data_lease.emplace(
+            AcquireLocalDirWriteLease(GetLocalIndexObjectPrefix()));
+    }
+
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
@@ -958,37 +1083,32 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
 void
 DiskFileManagerImpl::RemoveIndexFiles() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetLocalIndexObjectPrefix());
+    CloseAndRemoveLocalDir(GetLocalIndexObjectPrefix());
 }
 
 void
 DiskFileManagerImpl::RemoveTextLogFiles() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
+    CloseAndRemoveLocalDir(GetLocalTextIndexPrefix());
 }
 
 void
 DiskFileManagerImpl::RemoveJsonStatsSharedIndexFiles() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetLocalJsonStatsSharedIndexPrefix());
+    CloseAndRemoveLocalDir(GetLocalJsonStatsPrefix());
 }
 
 void
 DiskFileManagerImpl::RemoveJsonStatsFiles() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetLocalJsonStatsPrefix());
+    CloseAndRemoveLocalDir(GetLocalJsonStatsPrefix());
 }
 
 void
 DiskFileManagerImpl::RemoveNgramIndexFiles() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetLocalNgramIndexPrefix());
+    CloseAndRemoveLocalDir(GetLocalNgramIndexPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveRawDataFiles() {
+    CloseAndRemoveLocalDir(GetLocalRawDataObjectPrefix());
 }
 
 template <DataType T>
@@ -1110,6 +1230,13 @@ WriteOptFieldsIvfMeta(
 
 std::string
 DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
+    auto opt_fields =
+        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    if (!opt_fields.has_value() || opt_fields->empty()) {
+        return "";
+    }
+    auto lease = AcquireLocalDirWriteLease(GetLocalRawDataObjectPrefix());
+
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
@@ -1121,16 +1248,9 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
     }
 
     // legacy path
-    auto opt_fields =
-        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
-    if (!opt_fields.has_value()) {
-        return "";
-    }
     auto fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
-    if (0 == num_of_fields) {
-        return "";
-    } else if (num_of_fields > 1) {
+    if (num_of_fields > 1) {
         ThrowInfo(
             ErrorCode::NotImplemented,
             "vector index build with multiple fields is not supported yet");
