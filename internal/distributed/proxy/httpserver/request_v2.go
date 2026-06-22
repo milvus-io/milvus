@@ -25,6 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -258,6 +260,46 @@ type ImportReq struct {
 	PartitionName  string            `json:"partitionName"`
 	Files          [][]string        `json:"files" binding:"required"`
 	Options        map[string]string `json:"options"`
+}
+
+const (
+	autoCommitTrue  = "true"
+	autoCommitFalse = "false"
+)
+
+func (req *ImportReq) UnmarshalJSON(data []byte) error {
+	type importReqAlias struct {
+		DbName         string             `json:"dbName"`
+		CollectionName string             `json:"collectionName" binding:"required"`
+		PartitionName  string             `json:"partitionName"`
+		Files          [][]string         `json:"files" binding:"required"`
+		Options        map[string]*string `json:"options"`
+	}
+	var decoded importReqAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	options := make(map[string]string, len(decoded.Options))
+	for key, value := range decoded.Options {
+		if value == nil {
+			if key == importutilv2.AutoCommitKey {
+				return merr.WrapErrParameterInvalidMsg("options.%s must be one of %q or %q", importutilv2.AutoCommitKey, autoCommitTrue, autoCommitFalse)
+			}
+			return merr.WrapErrParameterInvalidMsg("options.%s must be a string", key)
+		}
+		if key == importutilv2.AutoCommitKey && *value != autoCommitTrue && *value != autoCommitFalse {
+			return merr.WrapErrParameterInvalidMsg("options.%s must be one of %q or %q", importutilv2.AutoCommitKey, autoCommitTrue, autoCommitFalse)
+		}
+		options[key] = *value
+	}
+
+	req.DbName = decoded.DbName
+	req.CollectionName = decoded.CollectionName
+	req.PartitionName = decoded.PartitionName
+	req.Files = decoded.Files
+	req.Options = options
+	return nil
 }
 
 func (req *ImportReq) GetDbName() string {
