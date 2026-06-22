@@ -68,6 +68,8 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 
 	if len(nodeMsg.deleteMsgs) > 0 {
 		deleteDataByTs := make(map[uint64]map[UniqueID]*delegator.DeleteData)
+		// deleteMsgs are ordered by WAL timetick within a vchannel; keep first-seen EndTs order
+		// because the delete buffer expects non-decreasing timestamps on Put.
 		tsOrder := make([]uint64, 0)
 
 		for _, msg := range nodeMsg.deleteMsgs {

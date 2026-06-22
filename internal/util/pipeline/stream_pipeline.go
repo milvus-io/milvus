@@ -268,6 +268,8 @@ func mergeMsgPacks(packs []*msgstream.MsgPack) *msgstream.MsgPack {
 
 	first := packs[0]
 	last := packs[len(packs)-1]
+	// Positions are monotonic within a vchannel; merged packs intentionally keep only
+	// the first start position and the last end position for checkpoint progress.
 	merged := &msgstream.MsgPack{
 		BeginTs:        first.BeginTs,
 		EndTs:          last.EndTs,
