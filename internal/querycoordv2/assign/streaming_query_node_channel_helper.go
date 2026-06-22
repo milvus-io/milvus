@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 )
@@ -55,6 +56,24 @@ func assignChannelToWALLocatedFirstForNodeInfo(
 		}
 	}
 	return notFoundChannels, plans, scoreDelta
+}
+
+func ShouldDeferSQNChannelStoppingBalance(replica *meta.Replica, scheduler task.Scheduler) bool {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		return false
+	}
+
+	if replica.RONodesCount() > 0 {
+		return true
+	}
+
+	return scheduler.GetSegmentTaskNum(
+		task.WithCollectionID2TaskFilter(replica.GetCollectionID()),
+		task.WithTaskTypeFilter(task.TaskTypeMove),
+		func(t task.Task) bool {
+			return t.ReplicaID() == replica.GetID()
+		},
+	) > 0
 }
 
 // filterSQNIfStreamingServiceEnabled filter out the non-sqn querynode.

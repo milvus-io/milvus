@@ -208,6 +208,37 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 	})
 }
 
+func (suite *UtilTestSuite) TestDelegatorDataReadyFailsWhenMovedSegmentMissingFromLeaderView() {
+	const (
+		collectionID = int64(467055916946244779)
+		segmentID    = int64(467055916977292383)
+		channel      = "milvus-008wbh5tims8-rootcoord-dml_1_467055916946244779v0"
+	)
+
+	leaderView := &meta.LeaderView{
+		ID:            44,
+		CollectionID:  collectionID,
+		Channel:       channel,
+		Segments:      map[int64]*querypb.SegmentDist{},
+		TargetVersion: 1011,
+		Status:        &querypb.LeaderViewStatus{Serviceable: true},
+	}
+	targetMgr := meta.NewMockTargetManager(suite.T())
+	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channel, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
+		segmentID: {
+			ID:            segmentID,
+			CollectionID:  collectionID,
+			InsertChannel: channel,
+		},
+	})
+
+	suite.setNodeAvailable(44)
+	err := CheckDelegatorDataReady(suite.nodeMgr, targetMgr, leaderView, meta.CurrentTarget)
+	suite.Error(err)
+	suite.ErrorContains(err, "segment lacks")
+	suite.ErrorContains(err, "467055916977292383")
+}
+
 func (suite *UtilTestSuite) TestGetChannelRWAndRONodesFor260() {
 	nodes := []int64{1, 2, 3, 4, 5}
 	nodeManager := session.NewNodeManager()

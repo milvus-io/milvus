@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -38,6 +39,7 @@ type StoppingBalancer struct {
 	dist         *meta.DistributionManager
 	targetMgr    meta.TargetManagerInterface
 	assignPolicy assign.AssignPolicy
+	scheduler    task.Scheduler
 }
 
 // NewStoppingBalancer creates a new StoppingBalancer instance
@@ -46,12 +48,14 @@ func NewStoppingBalancer(
 	targetMgr meta.TargetManagerInterface,
 	assignPolicy assign.AssignPolicy,
 	nodeManager *session.NodeManager,
+	scheduler task.Scheduler,
 ) *StoppingBalancer {
 	return &StoppingBalancer{
 		BalanceReplicaHelper: BalanceReplicaHelper{nodeManager: nodeManager},
 		dist:                 dist,
 		targetMgr:            targetMgr,
 		assignPolicy:         assignPolicy,
+		scheduler:            scheduler,
 	}
 }
 
@@ -99,6 +103,16 @@ func (b *StoppingBalancer) balanceChannels(ctx context.Context, br *balanceRepor
 	// If there are no RW nodes or no RO nodes, no stopping balance is needed
 	if len(rwNodes) == 0 || len(roNodes) == 0 {
 		br.AddRecord(StrRecordf("no stopping balance needed: rwNodes=%d, roNodes=%d", len(rwNodes), len(roNodes)))
+		return nil
+	}
+
+	if assign.ShouldDeferSQNChannelStoppingBalance(replica, b.scheduler) {
+		log.Ctx(ctx).RatedInfo(10, "defer SQN channel stopping balance until regular querynode segment balance is done",
+			zap.Int64("collectionID", replica.GetCollectionID()),
+			zap.Int64("replicaID", replica.GetID()),
+			zap.Int64s("roNodes", replica.GetRONodes()),
+			zap.Int64s("roSQNodes", replica.GetROSQNodes()))
+		br.AddRecord(StrRecord("defer SQN channel stopping balance until regular querynode segment balance is done"))
 		return nil
 	}
 
