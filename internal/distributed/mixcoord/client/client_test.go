@@ -329,6 +329,9 @@ func Test_NewClient(t *testing.T) {
 		r18, err := client.GetShardLeaders(ctx, nil)
 		retCheck(retNotNil, r18, err)
 
+		r19, err := client.GetStreamingNodeQueryViewResources(ctx, nil)
+		retCheck(retNotNil, r19, err)
+
 		r21, err := client.CreateResourceGroup(ctx, nil)
 		retCheck(retNotNil, r21, err)
 

@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	transformlogclient "github.com/milvus-io/milvus/internal/streamingnode/client/handler/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
@@ -109,7 +108,7 @@ type HandlerClient interface {
 	CreateConsumer(ctx context.Context, opts *ConsumerOptions) (Consumer, error)
 
 	// ReadTransformLog creates a local or remote transform log scanner.
-	ReadTransformLog(ctx context.Context, opts transformlog.ReadOption) transformlog.Scanner
+	ReadTransformLog(ctx context.Context, opts wal.TransformLogReadOption) wal.TransformLogScanner
 
 	// Close closes the handler client.
 	// It will only stop the underlying service discovery, but don't stop the producer and consumer created by it.

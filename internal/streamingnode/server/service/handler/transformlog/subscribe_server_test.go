@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 
-	transformlogapi "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
@@ -61,15 +61,15 @@ func TestSubscribeServerCloseSubscriptionAck(t *testing.T) {
 }
 
 type fakeTransformLogAccesser struct {
-	scanner transformlogapi.Scanner
+	scanner wal.TransformLogScanner
 }
 
-func (a fakeTransformLogAccesser) Read(context.Context, transformlogapi.ReadOption) transformlogapi.Scanner {
+func (a fakeTransformLogAccesser) Read(context.Context, wal.TransformLogReadOption) wal.TransformLogScanner {
 	return a.scanner
 }
 
 type fakeTransformLogScanner struct {
-	ch     chan transformlogapi.Event
+	ch     chan wal.TransformLogEvent
 	done   chan struct{}
 	closed bool
 	once   sync.Once
@@ -77,7 +77,7 @@ type fakeTransformLogScanner struct {
 
 func newFakeTransformLogScanner() *fakeTransformLogScanner {
 	return &fakeTransformLogScanner{
-		ch:   make(chan transformlogapi.Event),
+		ch:   make(chan wal.TransformLogEvent),
 		done: make(chan struct{}),
 	}
 }
@@ -86,7 +86,7 @@ func (s *fakeTransformLogScanner) Name() string {
 	return "fake"
 }
 
-func (s *fakeTransformLogScanner) Chan() <-chan transformlogapi.Event {
+func (s *fakeTransformLogScanner) Chan() <-chan wal.TransformLogEvent {
 	return s.ch
 }
 

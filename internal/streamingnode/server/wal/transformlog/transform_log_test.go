@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	transformlogapi "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
@@ -21,7 +21,7 @@ func TestReadIgnoresDelayedPublishForRetainedEntries(t *testing.T) {
 		{ChunkId: 0, Entries: []*streamingpb.TransformLogEntry{entry}},
 	}
 
-	scanner := transformLog.Read(context.Background(), transformlogapi.ReadOption{
+	scanner := transformLog.Read(context.Background(), wal.TransformLogReadOption{
 		Name:               "test-scanner",
 		VChannel:           "v1",
 		StartAfterTimeTick: 10,
@@ -53,7 +53,7 @@ func TestReadBuffersLiveEntriesUntilCaughtUp(t *testing.T) {
 		{ChunkId: 0, Entries: entries},
 	}
 
-	scanner := transformLog.Read(context.Background(), transformlogapi.ReadOption{
+	scanner := transformLog.Read(context.Background(), wal.TransformLogReadOption{
 		Name:               "test-scanner",
 		VChannel:           "v1",
 		StartAfterTimeTick: 0,
@@ -75,6 +75,47 @@ func TestReadBuffersLiveEntriesUntilCaughtUp(t *testing.T) {
 	liveEvent := <-scanner.Chan()
 	require.NotNil(t, liveEvent.Entry)
 	assert.Equal(t, uint64(21), liveEvent.Entry.GetTimeTick())
+}
+
+func TestReadStopsAtEndTimeTick(t *testing.T) {
+	transformLog := New(Config{VChannel: "v1"}).(*transformLog)
+	transformLog.retainedChunks = []*streamingpb.TransformLogChunk{
+		{ChunkId: 0, Entries: []*streamingpb.TransformLogEntry{
+			testTransformLogEntry(10),
+			testTransformLogEntry(20),
+			testTransformLogEntry(30),
+		}},
+	}
+
+	scanner := transformLog.Read(context.Background(), wal.TransformLogReadOption{
+		Name:               "test-scanner",
+		VChannel:           "v1",
+		StartAfterTimeTick: 1,
+		EndTimeTick:        20,
+	})
+	defer scanner.Close()
+
+	first := <-scanner.Chan()
+	require.NotNil(t, first.Entry)
+	assert.Equal(t, uint64(10), first.Entry.GetTimeTick())
+	second := <-scanner.Chan()
+	require.NotNil(t, second.Entry)
+	assert.Equal(t, uint64(20), second.Entry.GetTimeTick())
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-scanner.Done():
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	select {
+	case event := <-scanner.Chan():
+		t.Fatalf("unexpected event after end timetick: %+v", event)
+	default:
+	}
+	assert.NoError(t, scanner.Error())
 }
 
 func TestSnapshotChunksCopiesSliceOnly(t *testing.T) {

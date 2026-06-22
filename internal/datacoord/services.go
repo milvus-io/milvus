@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -57,6 +58,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+const (
+	statusExtraInfoDataViewStreamingVersion = "data_view_streaming_version"
+	statusExtraInfoDataViewCompactVersion   = "data_view_compact_version"
 )
 
 // GetTimeTickChannel legacy API, returns time tick channel name
@@ -718,13 +724,17 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		mlog.Error(context.TODO(), "save binlog and checkpoints failed", mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	var flushedDataVersion *viewpb.DataVersion
 	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
-		if _, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
+		version, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
 			CollectionID:         req.GetCollectionID(),
 			SegmentIDs:           []int64{req.GetSegmentID()},
 			TemporaryUnavailable: enableSortCompaction(),
-		}); err != nil {
+		})
+		if err != nil {
 			mlog.Warn(ctx, "failed to publish DataView after flush", mlog.Err(err))
+		} else {
+			flushedDataVersion = version
 		}
 	}
 
@@ -748,7 +758,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
 
 		s.compactionTriggerManager.OnCollectionUpdate(req.GetCollectionID())
-		return merr.Success(), nil
+		return successWithFlushedDataVersion(flushedDataVersion), nil
 	}
 
 	// notify building index and compaction for "flushing/flushed" level one segment
@@ -768,7 +778,19 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 	}
 
-	return merr.Success(), nil
+	return successWithFlushedDataVersion(flushedDataVersion), nil
+}
+
+func successWithFlushedDataVersion(version *viewpb.DataVersion) *commonpb.Status {
+	status := merr.Success()
+	if version == nil {
+		return status
+	}
+	status.ExtraInfo = map[string]string{
+		statusExtraInfoDataViewStreamingVersion: strconv.FormatInt(version.GetStreamingVersion(), 10),
+		statusExtraInfoDataViewCompactVersion:   strconv.FormatInt(version.GetCompactVersion(), 10),
+	}
+	return status
 }
 
 func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest, storageVersion int64) error {
@@ -1146,6 +1168,117 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	resp.Channels = channelInfos
 	resp.Segments = segmentInfos
 	return resp, nil
+}
+
+func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	resp := &datapb.GetStreamingNodeQueryViewResourcesResponse{
+		Status:       merr.Success(),
+		CollectionId: req.GetCollectionId(),
+		Vchannel:     req.GetVchannel(),
+		DataVersion:  req.GetDataVersion(),
+	}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	if req.GetCollectionId() == 0 {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("collection id is zero"))
+		return resp, nil
+	}
+	if req.GetVchannel() == "" {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("vchannel is empty"))
+		return resp, nil
+	}
+	if req.GetDataVersion() == nil {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("data version is nil"))
+		return resp, nil
+	}
+	if s.dataViewManager == nil {
+		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("data view manager is nil"))
+		return resp, nil
+	}
+	dataView, err := s.dataViewManager.DataView(ctx, req.GetCollectionId(), req.GetDataVersion())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	shard := dataViewShard(dataView, req.GetVchannel())
+	if shard == nil {
+		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg(
+			"data view shard not found, collectionID=%d, vchannel=%s, dataVersion=(%d,%d)",
+			req.GetCollectionId(),
+			req.GetVchannel(),
+			req.GetDataVersion().GetStreamingVersion(),
+			req.GetDataVersion().GetCompactVersion(),
+		))
+		return resp, nil
+	}
+
+	segmentIDs := dataViewShardSegmentIDs(shard, req.GetSettings())
+	if len(segmentIDs) == 0 {
+		return resp, nil
+	}
+	byID := make(map[int64]*datapb.StreamingNodeBM25Resource, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if segment == nil {
+			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, "missing segment info for data view"))
+			return resp, nil
+		}
+		if segment.GetInsertChannel() != "" && segment.GetInsertChannel() != req.GetVchannel() {
+			resp.Status = merr.Status(merr.WrapErrServiceInternalMsg(
+				"segment channel mismatch, segmentID=%d, expected=%s, actual=%s",
+				segment.GetID(),
+				req.GetVchannel(),
+				segment.GetInsertChannel(),
+			))
+			return resp, nil
+		}
+		byID[segment.GetID()] = &datapb.StreamingNodeBM25Resource{
+			SegmentId:      segment.GetID(),
+			PartitionId:    segment.GetPartitionID(),
+			Bm25Binlogs:    segment.GetBm25Statslogs(),
+			StorageVersion: segment.GetStorageVersion(),
+			ManifestPath:   segment.GetManifestPath(),
+		}
+	}
+	for _, segmentID := range segmentIDs {
+		resource, ok := byID[segmentID]
+		if !ok {
+			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, "missing segment info for data view"))
+			return resp, nil
+		}
+		resp.Bm25Resources = append(resp.Bm25Resources, resource)
+	}
+	return resp, nil
+}
+
+func dataViewShard(dataView *viewpb.DataViewOfCollection, vchannel string) *viewpb.DataViewOfShard {
+	if dataView == nil {
+		return nil
+	}
+	for _, shard := range dataView.GetShards() {
+		if shard.GetVchannel() == vchannel {
+			return shard
+		}
+	}
+	return nil
+}
+
+func dataViewShardSegmentIDs(shard *viewpb.DataViewOfShard, settings *viewpb.QueryViewSettings) []int64 {
+	if shard == nil {
+		return nil
+	}
+	requiredPartitions := typeutil.NewSet(settings.GetRequiredPartitions()...)
+	loadsAllPartitions := len(requiredPartitions) == 0
+	segmentIDs := make([]int64, 0)
+	for _, partition := range shard.GetPartitions() {
+		if !loadsAllPartitions && !requiredPartitions.Contain(partition.GetPartitionId()) {
+			continue
+		}
+		segmentIDs = append(segmentIDs, partition.GetSegmentIds()...)
+	}
+	return segmentIDs
 }
 
 // GetChannelRecoveryInfo get recovery channel info.

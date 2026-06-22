@@ -347,8 +347,11 @@ func (s *stalledRecoveryStorage) GetDataCheckpoint(ctx context.Context) *recover
 	return s.checkpoint
 }
 
-func (s *stalledRecoveryStorage) TransformLog() transformlog.Accesser {
-	return transformlog.NewErrorAccesser(errors.New("transform log unavailable"))
+func (s *stalledRecoveryStorage) TransformLog() wal.TransformLogAccesser {
+	return wal.NewTransformLogErrorAccesser(errors.New("transform log unavailable"))
+}
+
+func (s *stalledRecoveryStorage) DetachLoadConfigListener() {
 }
 
 func (s *stalledRecoveryStorage) Close() {

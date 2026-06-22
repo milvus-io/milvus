@@ -80,14 +80,19 @@ func (t *commitL1SegmentTask) Run(ctx context.Context) error {
 			return err
 		}
 		meta := segment.AssignmentMeta()
-		if err := segment.lifecycle.CommitL1Segment(ctx, meta); err != nil {
+		sealedAt, err := segment.lifecycle.CommitL1Segment(ctx, meta)
+		if err != nil {
 			return err
 		}
 
 		segment.mu.Lock()
 		segment.MarkPendingDataDurable(t.timetick)
+		sealedEvent, sealed := segment.markSealedAtDataVersionLocked(sealedAt)
 		segment.mu.Unlock()
 		segment.NotifyDataUpdated()
+		if sealed {
+			segment.NotifySegmentSealed(sealedEvent)
+		}
 		return nil
 	})
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -42,6 +43,10 @@ import (
 )
 
 const testVChannel = "v1"
+
+type adaptorTestMixCoordClient struct {
+	*mocks.MockMixCoordClient
+}
 
 type walTestFramework struct {
 	b            wal.OpenerBuilder
@@ -91,10 +96,12 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListQueryViews(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
-	fMixCoordClient.Set(rc)
+	fMixCoordClient.Set(adaptorTestMixCoordClient{MockMixCoordClient: rc})
 	resource.InitForTest(
 		t,
 		resource.OptMixCoordClient(fMixCoordClient),

@@ -11,12 +11,13 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/viewresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -93,13 +94,16 @@ func adaptImplsToRWWAL(
 type walAdaptorImpl struct {
 	*roWALAdaptorImpl
 
-	rwWALImpls             walimpls.WALImpls
-	appendExecutionPool    *conc.Pool[struct{}]
-	param                  *interceptors.InterceptorBuildParam
-	interceptorBuildResult interceptorBuildResult
-	writeMetrics           *metricsutil.WriteMetrics
-	isFenced               *atomic.Bool
-	appendRateCounter      *utility.AverageRateCounter // tracks append rate (bytes/sec)
+	rwWALImpls                 walimpls.WALImpls
+	appendExecutionPool        *conc.Pool[struct{}]
+	param                      *interceptors.InterceptorBuildParam
+	interceptorBuildResult     interceptorBuildResult
+	writeMetrics               *metricsutil.WriteMetrics
+	isFenced                   *atomic.Bool
+	appendRateCounter          *utility.AverageRateCounter // tracks append rate (bytes/sec)
+	queryViewHandler           *snview.SNQueryViewHandler
+	viewResourceManager        viewresource.SNQueryRuntimeManager
+	unregisterQueryViewHandler func()
 }
 
 // Metrics returns the metrics of the wal.
@@ -130,9 +134,9 @@ func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel st
 	return currentMVCC.Timetick, nil
 }
 
-func (w *walAdaptorImpl) TransformLog() transformlog.Accesser {
+func (w *walAdaptorImpl) TransformLog() wal.TransformLogAccesser {
 	if w.param == nil || w.param.RecoveryStorage == nil {
-		return transformlog.NewErrorAccesser(status.NewOnShutdownError("recovery storage is unavailable"))
+		return wal.NewTransformLogErrorAccesser(status.NewOnShutdownError("recovery storage is unavailable"))
 	}
 	return w.param.RecoveryStorage.TransformLog()
 }
@@ -360,6 +364,22 @@ func (w *walAdaptorImpl) Close() {
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
+
+	if w.unregisterQueryViewHandler != nil {
+		w.unregisterQueryViewHandler()
+	}
+	if w.param.RecoveryStorage != nil {
+		w.Logger().Info("wal begin to detach query resource load config listener...")
+		w.param.RecoveryStorage.DetachLoadConfigListener()
+	}
+	if w.queryViewHandler != nil {
+		w.Logger().Info("wal begin to close query view state machine...")
+		w.queryViewHandler.CloseForHandoff()
+	}
+	if w.viewResourceManager != nil {
+		w.Logger().Info("wal begin to close query view resources...")
+		w.viewResourceManager.Close()
+	}
 
 	// close the recovery-owned data path.
 	w.Logger().Info(context.TODO(), "wal begin to close recovery data path...")

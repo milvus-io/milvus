@@ -261,6 +261,12 @@ func (m *mockMixCoord) GetRefreshExternalCollectionProgress(ctx context.Context,
 	}, nil
 }
 
+func (m *mockMixCoord) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return &datapb.GetStreamingNodeQueryViewResourcesResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 func (m *mockMixCoord) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
 	return &datapb.ListRefreshExternalCollectionJobsResponse{
 		Status: merr.Success(),

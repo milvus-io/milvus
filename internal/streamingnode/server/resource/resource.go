@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
@@ -73,6 +74,7 @@ func Init(opts ...optResourceInit) {
 	newR.logger = mlog.With(mlog.FieldModule(typeutil.StreamingNodeRole))
 	newR.segmentStatsManager = stats.NewStatsManager()
 	newR.timeTickInspector = tinspector.NewTimeTickSyncInspector()
+	newR.queryViewRouter = snview.NewPChannelQueryViewRouter()
 	newR.syncMgr = syncmgr.NewSyncManager(newR.chunkManager)
 	newR.wbMgr = writebuffer.NewManager(newR.syncMgr)
 	newR.wbMgr.Start()
@@ -84,6 +86,7 @@ func Init(opts ...optResourceInit) {
 	assertNotNil(newR.TimeTickInspector())
 	assertNotNil(newR.SyncManager())
 	assertNotNil(newR.WriteBufferManager())
+	assertNotNil(newR.QueryViewRouter())
 	r = newR
 }
 
@@ -112,6 +115,7 @@ type resourceImpl struct {
 	segmentStatsManager  *stats.StatsManager
 	timeTickInspector    tinspector.TimeTickSyncInspector
 	vchannelTempStorage  *vchantempstore.VChannelTempStorage
+	queryViewRouter      *snview.PChannelQueryViewRouter
 
 	// TODO: Global flusher components, should be removed afteer flushering in wal refactoring.
 	syncMgr syncmgr.SyncManager
@@ -169,6 +173,10 @@ func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {
 // VChannelTempStorage returns the vchannel temp storage.
 func (r *resourceImpl) VChannelTempStorage() *vchantempstore.VChannelTempStorage {
 	return r.vchannelTempStorage
+}
+
+func (r *resourceImpl) QueryViewRouter() *snview.PChannelQueryViewRouter {
+	return r.queryViewRouter
 }
 
 func (r *resourceImpl) Logger() *mlog.Logger {

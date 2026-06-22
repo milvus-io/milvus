@@ -6,8 +6,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
-	transformlogapi "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -16,7 +16,7 @@ import (
 
 type SubscribeServer struct {
 	walManager walmanager.Manager
-	accesser   transformlogapi.Accesser
+	accesser   wal.TransformLogAccesser
 	stream     streamingpb.StreamingNodeHandlerService_SubscribeTransformServer
 	sendMu     sync.Mutex
 	scannersMu sync.Mutex
@@ -26,7 +26,7 @@ type SubscribeServer struct {
 type subscription struct {
 	id       int64
 	vchannel string
-	scanner  transformlogapi.Scanner
+	scanner  wal.TransformLogScanner
 }
 
 func CreateSubscribeServer(
@@ -123,10 +123,11 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 	if req == nil {
 		return status.NewInvalidArgument("create transform subscription request is nil")
 	}
-	scanner := s.accesser.Read(s.stream.Context(), transformlogapi.ReadOption{
+	scanner := s.accesser.Read(s.stream.Context(), wal.TransformLogReadOption{
 		Name:               req.GetVchannel(),
 		VChannel:           req.GetVchannel(),
 		StartAfterTimeTick: req.GetStartAfterTimeTick(),
+		EndTimeTick:        req.GetEndTimeTick(),
 	})
 	if err := scanner.Error(); err != nil {
 		return s.sendSubscriptionError(req.GetSubscriptionId(), req.GetVchannel(), err)
@@ -147,6 +148,7 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 				SubscriptionId:     req.GetSubscriptionId(),
 				Vchannel:           req.GetVchannel(),
 				StartAfterTimeTick: req.GetStartAfterTimeTick(),
+				EndTimeTick:        req.GetEndTimeTick(),
 			},
 		},
 	}); err != nil {
@@ -157,7 +159,7 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 	return nil
 }
 
-func (s *SubscribeServer) forwardSubscription(subscriptionID int64, vchannel string, scanner transformlogapi.Scanner) {
+func (s *SubscribeServer) forwardSubscription(subscriptionID int64, vchannel string, scanner wal.TransformLogScanner) {
 	for {
 		select {
 		case event, ok := <-scanner.Chan():

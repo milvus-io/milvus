@@ -6,10 +6,13 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -25,6 +28,7 @@ type Module struct {
 	mu                      sync.Mutex
 	pchannel                string
 	segments                map[int64]*segmentView
+	dataVersionSummaries    map[string]*streamingpb.SegmentDataVersionSummary
 	lifecycle               segmentLifecycle
 	packWriter              packWriter
 	runtime                 moduleapi.Runtime
@@ -32,17 +36,21 @@ type Module struct {
 	metaAndData             bool
 	schemaProvider          SchemaProvider
 	pendingCleanupSnapshots map[int64]*dirtySnapshot
+	pendingSummarySnapshots map[string]*dirtySnapshot
+	latestInsertTimeTicks   map[string]uint64
 	persistedMetaPhysicalTT uint64
 	persistedDataPhysicalTT uint64
+	onSegmentSealed         func(walview.SegmentSealedEvent)
 }
 
 type runtimeConfig struct {
-	lifecycle     segmentLifecycle
-	packWriter    packWriter
-	runtime       moduleapi.Runtime
-	onDataUpdated func()
-	flushPolicy   flushPolicy
-	metaAndData   bool
+	lifecycle       segmentLifecycle
+	packWriter      packWriter
+	runtime         moduleapi.Runtime
+	onDataUpdated   func()
+	onSegmentSealed func(walview.SegmentSealedEvent)
+	flushPolicy     flushPolicy
+	metaAndData     bool
 }
 
 func firstRuntimeConfig(configs []runtimeConfig) runtimeConfig {
@@ -54,6 +62,12 @@ func firstRuntimeConfig(configs []runtimeConfig) runtimeConfig {
 
 type ModuleOption func(*Module)
 
+func WithDataVersionSummaries(summaries map[string]*streamingpb.SegmentDataVersionSummary) ModuleOption {
+	return func(module *Module) {
+		module.dataVersionSummaries = cloneDataVersionSummaries(summaries)
+	}
+}
+
 func WithPackWriter(writer packWriter) ModuleOption {
 	return func(module *Module) {
 		module.packWriter = writer
@@ -64,6 +78,12 @@ func WithModuleRuntime(logger *mlog.Logger, runtime moduleapi.Runtime) ModuleOpt
 	return func(module *Module) {
 		module.logger = logger
 		module.runtime = runtime
+	}
+}
+
+func WithSegmentSealedNotifier(notifier func(walview.SegmentSealedEvent)) ModuleOption {
+	return func(module *Module) {
+		module.onSegmentSealed = notifier
 	}
 }
 
@@ -80,9 +100,12 @@ func NewModule(
 	module := &Module{
 		pchannel:                pchannel,
 		segments:                make(map[int64]*segmentView, len(segments)),
+		dataVersionSummaries:    make(map[string]*streamingpb.SegmentDataVersionSummary),
 		schemaProvider:          schemaProvider,
 		lifecycle:               lifecycle,
 		pendingCleanupSnapshots: make(map[int64]*dirtySnapshot),
+		pendingSummarySnapshots: make(map[string]*dirtySnapshot),
+		latestInsertTimeTicks:   make(map[string]uint64),
 	}
 	for _, opt := range opts {
 		opt(module)
@@ -99,11 +122,12 @@ func NewModule(
 
 func (m *Module) runtimeConfig() runtimeConfig {
 	return runtimeConfig{
-		lifecycle:     m.lifecycle,
-		packWriter:    m.packWriter,
-		runtime:       m.runtime,
-		onDataUpdated: m.notifyModuleUpdated,
-		metaAndData:   m.metaAndData,
+		lifecycle:       m.lifecycle,
+		packWriter:      m.packWriter,
+		runtime:         m.runtime,
+		onDataUpdated:   m.notifyModuleUpdated,
+		onSegmentSealed: m.onSegmentSealed,
+		metaAndData:     m.metaAndData,
 	}
 }
 
@@ -151,7 +175,10 @@ func (m *Module) SwitchIntoMetaAndData() moduleapi.ModuleSnapshot {
 		segment.SwitchIntoMetaAndData()
 	}
 	m.mu.Unlock()
-	return &moduleapi.SegmentModuleSnapshot{Segments: m.snapshotGrowingSegments()}
+	return &moduleapi.SegmentModuleSnapshot{
+		Segments:             m.snapshotGrowingSegments(),
+		DataVersionSummaries: m.snapshotDataVersionSummaries(),
+	}
 }
 
 func (m *Module) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
@@ -174,6 +201,9 @@ func (m *Module) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
 			continue
 		}
 		if segment.TombstonedCleanupReady(metaPhysical, dataPhysical) {
+			if snapshot := m.dataVersionSummarySnapshotBeforeCleanup(segment); snapshot != nil {
+				snapshots = append(snapshots, snapshot)
+			}
 			snapshots = append(snapshots, m.cleanupSnapshot(segmentID, segment))
 		}
 	}
@@ -239,6 +269,9 @@ func (m *Module) observeInsertMessage(ctx context.Context, msg message.Immutable
 		}
 		result = composeObserveResults(result, segment.ObserveInsertMessageV1(ctx, msg, partition))
 	}
+	if result.Meta != nil || result.Data != nil {
+		m.markLatestInsertTimeTick(msg.VChannel(), msg.TimeTick())
+	}
 	return result
 }
 
@@ -264,6 +297,9 @@ func (m *Module) observeTxnMessage(ctx context.Context, msg message.ImmutableTxn
 		}
 		return nil
 	})
+	if result.Meta != nil || result.Data != nil {
+		m.markLatestInsertTimeTick(msg.VChannel(), msg.TimeTick())
+	}
 	return result
 }
 
@@ -349,6 +385,52 @@ func (m *Module) cleanupSnapshot(segmentID int64, owner *segmentView) moduleapi.
 	return snapshot
 }
 
+func (m *Module) dataVersionSummarySnapshotBeforeCleanup(owner *segmentView) moduleapi.DirtySnapshot {
+	meta := owner.AssignmentMeta()
+	if meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED ||
+		meta.GetSealedAtDataVersion() == nil {
+		return nil
+	}
+	vchannel := meta.GetVchannel()
+	sealedVersion := qviews.FromProtoDataVersion(meta.GetSealedAtDataVersion())
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current := segmentDataVersionSummary(m.dataVersionSummaries[vchannel])
+	if current.GTE(sealedVersion) {
+		return nil
+	}
+	summary := &streamingpb.SegmentDataVersionSummary{
+		DataVersion: sealedVersion.IntoProto(),
+	}
+	m.dataVersionSummaries[vchannel] = summary
+	snapshotSummary := proto.Clone(summary).(*streamingpb.SegmentDataVersionSummary)
+	if snapshot := m.pendingSummarySnapshots[vchannel]; snapshot != nil {
+		snapshot.payload = snapshotSummary
+		snapshot.mark = func() { m.markDataVersionSummaryPersisted(vchannel, snapshotSummary) }
+		return snapshot
+	}
+	snapshot := newDirtySnapshot(
+		moduleapi.SnapshotKey{PChannel: m.pchannel, VChannel: vchannel},
+		moduleapi.SnapshotOpUpsert,
+		snapshotSummary,
+		0,
+		0,
+		func() { m.markDataVersionSummaryPersisted(vchannel, snapshotSummary) },
+	)
+	m.pendingSummarySnapshots[vchannel] = snapshot
+	return snapshot
+}
+
+func (m *Module) markDataVersionSummaryPersisted(vchannel string, summary *streamingpb.SegmentDataVersionSummary) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pending := m.pendingSummarySnapshots[vchannel]
+	if pending != nil && proto.Equal(pending.Payload(), summary) {
+		delete(m.pendingSummarySnapshots, vchannel)
+	}
+}
+
 func (m *Module) markCleanupPersisted(segmentID int64, owner *segmentView) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -383,6 +465,95 @@ func (m *Module) snapshotGrowingSegments() map[int64]*streamingpb.SegmentAssignm
 		}
 	}
 	return snapshot
+}
+
+func (m *Module) snapshotDataVersionSummaries() map[string]*streamingpb.SegmentDataVersionSummary {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return cloneDataVersionSummaries(m.dataVersionSummaries)
+}
+
+func (m *Module) LatestInsertTimeTick(vchannel string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.latestInsertTimeTicks[vchannel]
+}
+
+func (m *Module) VisibleSnapshot(vchannel string, baseGrowingTimeTick uint64) walview.VisibleSegmentSnapshot {
+	segments := m.snapshotSegments()
+	dataVersion := m.segmentSnapshotDataVersion(vchannel, segments)
+	return m.visibleSnapshotAtDataVersion(vchannel, baseGrowingTimeTick, dataVersion, segments)
+}
+
+func (m *Module) VisibleSnapshotAtDataVersion(vchannel string, baseGrowingTimeTick uint64, dataVersion qviews.DataVersion) walview.VisibleSegmentSnapshot {
+	return m.visibleSnapshotAtDataVersion(vchannel, baseGrowingTimeTick, dataVersion, m.snapshotSegments())
+}
+
+func (m *Module) visibleSnapshotAtDataVersion(vchannel string, baseGrowingTimeTick uint64, dataVersion qviews.DataVersion, segments map[int64]*segmentView) walview.VisibleSegmentSnapshot {
+	snapshot := walview.VisibleSegmentSnapshot{
+		VChannel:            vchannel,
+		DataVersion:         dataVersion,
+		BaseGrowingTimeTick: baseGrowingTimeTick,
+	}
+	for _, segment := range segments {
+		visible, ok := segment.VisibleSnapshot(vchannel, dataVersion)
+		if !ok {
+			continue
+		}
+		if snapshot.CollectionID == 0 {
+			snapshot.CollectionID = visible.Assignment.GetCollectionId()
+		}
+		snapshot.Segments = append(snapshot.Segments, visible)
+	}
+	return snapshot
+}
+
+func (m *Module) segmentSnapshotDataVersion(vchannel string, segments map[int64]*segmentView) qviews.DataVersion {
+	m.mu.Lock()
+	dataVersion := segmentDataVersionSummary(m.dataVersionSummaries[vchannel])
+	m.mu.Unlock()
+	for _, segment := range segments {
+		meta := segment.AssignmentMeta()
+		if meta.GetVchannel() != vchannel ||
+			meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED ||
+			meta.GetSealedAtDataVersion() == nil {
+			continue
+		}
+		sealedVersion := qviews.FromProtoDataVersion(meta.GetSealedAtDataVersion())
+		if sealedVersion.GT(dataVersion) {
+			dataVersion = sealedVersion
+		}
+	}
+	return dataVersion
+}
+
+func segmentDataVersionSummary(summary *streamingpb.SegmentDataVersionSummary) qviews.DataVersion {
+	if summary == nil || summary.GetDataVersion() == nil {
+		return qviews.DataVersion{}
+	}
+	return qviews.FromProtoDataVersion(summary.GetDataVersion())
+}
+
+func cloneDataVersionSummaries(summaries map[string]*streamingpb.SegmentDataVersionSummary) map[string]*streamingpb.SegmentDataVersionSummary {
+	cloned := make(map[string]*streamingpb.SegmentDataVersionSummary, len(summaries))
+	for vchannel, summary := range summaries {
+		if summary == nil {
+			continue
+		}
+		cloned[vchannel] = proto.Clone(summary).(*streamingpb.SegmentDataVersionSummary)
+	}
+	return cloned
+}
+
+func (m *Module) markLatestInsertTimeTick(vchannel string, timetick uint64) {
+	if vchannel == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if timetick > m.latestInsertTimeTicks[vchannel] {
+		m.latestInsertTimeTicks[vchannel] = timetick
+	}
 }
 
 func (m *Module) finalizeTombstones() {

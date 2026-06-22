@@ -601,6 +601,10 @@ message CreateTransformSubscriptionRequest {
     // Exclusive. Server sends TransformLog entries with time_tick >
     // start_after_time_tick.
     uint64 start_after_time_tick = 3;
+
+    // Inclusive. When non-zero, server stops after consuming entries with
+    // time_tick <= end_time_tick.
+    uint64 end_time_tick = 4;
 }
 
 // CloseTransformSubscriptionRequest closes one vchannel subscription on a
@@ -630,6 +634,7 @@ message CreateTransformSubscriptionResponse {
     int64 subscription_id = 1;
     string vchannel = 2;
     uint64 start_after_time_tick = 3;
+    uint64 end_time_tick = 5;
 
     // Current SN TransformLog truncation cursor.
     uint64 truncate_time_tick = 4;
@@ -796,15 +801,16 @@ message VChannelMeta {
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
-    view.DataVersion latest_data_version = 5; // latest data version of this vchannel.
-    GrowingSegmentMode growing_segment_mode = 6; // runtime mode of growing segments under this vchannel.
-    uint64 tombstone_time_tick = 8; // The timetick this retained vchannel meta starts filtering replay.
+    VChannelLoadConfig load_config = 5; // latest load config observed by this vchannel.
+    uint64 tombstone_time_tick = 6; // The timetick this retained vchannel meta starts filtering replay.
 }
 
-enum GrowingSegmentMode {
-    GROWING_SEGMENT_MODE_UNKNOWN = 0;
-    GROWING_SEGMENT_MODE_READ_WRITE = 1;
-    GROWING_SEGMENT_MODE_WRITE_ONLY = 2;
+message VChannelLoadConfig {
+    messages.AlterLoadConfigMessageHeader header = 1;
+}
+
+message SegmentDataVersionSummary {
+    view.DataVersion data_version = 1;
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.

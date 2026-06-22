@@ -15,7 +15,6 @@ import (
 	transformlogclient "github.com/milvus-io/milvus/internal/streamingnode/client/handler/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
@@ -306,14 +305,14 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 }
 
 // ReadTransformLog creates a local or remote transform log scanner.
-func (hc *handlerClientImpl) ReadTransformLog(ctx context.Context, opts transformlog.ReadOption) transformlog.Scanner {
+func (hc *handlerClientImpl) ReadTransformLog(ctx context.Context, opts wal.TransformLogReadOption) wal.TransformLogScanner {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return transformlog.NewErrorScanner(opts.Name, ErrClientClosed)
+		return wal.NewTransformLogErrorScanner(opts.Name, ErrClientClosed)
 	}
 	defer hc.lifetime.Done()
 
 	if opts.VChannel == "" {
-		return transformlog.NewErrorScanner(opts.Name, errors.New("vchannel is required"))
+		return wal.NewTransformLogErrorScanner(opts.Name, errors.New("vchannel is required"))
 	}
 	pchannel := funcutil.ToPhysicalChannel(opts.VChannel)
 	logger := mlog.With(mlog.String("pchannel", pchannel), mlog.String("vchannel", opts.VChannel), mlog.String("handler", "transformlog"))
@@ -337,9 +336,9 @@ func (hc *handlerClientImpl) ReadTransformLog(ctx context.Context, opts transfor
 		return stream.Subscribe(ctx, opts)
 	})
 	if err != nil {
-		return transformlog.NewErrorScanner(opts.Name, err)
+		return wal.NewTransformLogErrorScanner(opts.Name, err)
 	}
-	return s.(transformlog.Scanner)
+	return s.(wal.TransformLogScanner)
 }
 
 func (hc *handlerClientImpl) getOrCreateTransformLogStream(

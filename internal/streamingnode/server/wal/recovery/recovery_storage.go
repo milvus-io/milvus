@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/internal/streamingnode/transformlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -17,11 +17,12 @@ type WALCheckpoint = utility.WALCheckpoint
 
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
-	VChannels          map[string]*streamingpb.VChannelMeta
-	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
-	Checkpoint         *WALCheckpoint
-	CheckpointDirty    bool
-	TxnBuffer          *utility.TxnBuffer
+	VChannels                   map[string]*streamingpb.VChannelMeta
+	SegmentAssignments          map[int64]*streamingpb.SegmentAssignmentMeta
+	SegmentDataVersionSummaries map[string]*streamingpb.SegmentDataVersionSummary
+	Checkpoint                  *WALCheckpoint
+	CheckpointDirty             bool
+	TxnBuffer                   *utility.TxnBuffer
 	// Used during WAL alteration process
 	AlterWALInfo *AlterWALInfo
 	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
@@ -99,7 +100,11 @@ type RecoveryStorage interface {
 	GetDataCheckpoint(ctx context.Context) *WALCheckpoint
 
 	// TransformLog returns the TransformLog accesser owned by RecoveryStorage.
-	TransformLog() transformlog.Accesser
+	TransformLog() wal.TransformLogAccesser
+
+	// DetachLoadConfigListener stops WAL load-config callbacks to the
+	// StreamingNode query resource manager during pchannel handoff.
+	DetachLoadConfigListener()
 
 	// Close closes the recovery storage.
 	Close()

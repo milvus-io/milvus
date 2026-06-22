@@ -141,22 +141,30 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 		return nil, err
 	}
 	insertMessages := make([]*msgstream.InsertMsg, 0, len(pack.Inserts))
-	for _, entry := range pack.Inserts {
-		request := cloneInsertRequest(entry.request)
-		if request == nil {
-			return nil, errors.New("growing insert entry has nil request")
+	for _, raw := range pack.Inserts {
+		if err := forEachSegmentInsertMessage(raw, pack.SegmentID, func(insert segmentInsertMessage) error {
+			request := insert.Message.MustBody()
+			if request == nil {
+				return errors.New("growing insert message has nil request")
+			}
+			request.ShardName = pack.VChannel
+			request.CollectionID = pack.CollectionID
+			request.PartitionID = insert.Assignment.GetPartitionId()
+			request.SegmentID = insert.Assignment.GetSegmentAssignment().GetSegmentId()
+			insertMessages = append(insertMessages, &msgstream.InsertMsg{
+				BaseMsg: msgstream.BaseMsg{
+					BeginTimestamp: insert.TimeTick,
+					EndTimestamp:   insert.TimeTick,
+				},
+				InsertRequest: request,
+			})
+			return nil
+		}); err != nil {
+			return nil, err
 		}
-		request.ShardName = pack.VChannel
-		request.CollectionID = pack.CollectionID
-		request.PartitionID = entry.assignment.GetPartitionId()
-		request.SegmentID = entry.assignment.GetSegmentAssignment().GetSegmentId()
-		insertMessages = append(insertMessages, &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				BeginTimestamp: entry.timeTick,
-				EndTimestamp:   entry.timeTick,
-			},
-			InsertRequest: request,
-		})
+	}
+	if len(insertMessages) == 0 {
+		return nil, errors.Newf("growing insert pack has no insert messages, segmentID=%d", pack.SegmentID)
 	}
 	prepared, err := writebuffer.PrepareInsert(schema, pkField, insertMessages)
 	if err != nil {

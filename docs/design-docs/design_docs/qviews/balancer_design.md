@@ -280,19 +280,28 @@ type CollectionLoadManager interface {
 WAL ack → LoadCollectionJob → CollectionManager.PutCollection() + ReplicaManager.Spawn()
 
 // After (new):
-WAL ack → CollectionLoadManager.UpdateLoadConfig(msg.Header())
+WAL ack of collection-vchannel AlterLoadConfig broadcast
+        → CollectionLoadManager.UpdateLoadConfig(msg.Header())
          ├── parse msg → LoadConfig (without Nodes)
          ├── compute replica Nodes (via Node Manager)
          ├── LoadConfigStore.Put(fullCfg)  // full write + orphan cleanup
          ├── ShardViewRegistry.syncShards(cfg)  // create new shards
          └── Balancer.Trigger(DirtyCollections: [collID])
 
-WAL ack → CollectionLoadManager.ReleaseCollection(msg.Header())
+WAL ack of collection-vchannel DropLoadConfig broadcast
+        → CollectionLoadManager.ReleaseCollection(msg.Header())
          ├── LoadConfigStore.Remove(collID)
          └── Balancer.Trigger(DirtyCollections: [collID])
          // ShardViewRegistry cleanup via reconcile: Phase 1
          // sees "desired absent + current exists" → actionRelease
 ```
+
+`AlterLoadConfig` and `DropLoadConfig` are broadcast to all vchannels of the collection,
+not only to CChannel. Coord still uses the broadcast completion callback to update
+`CollectionLoadManager`; StreamingNode uses each vchannel-targeted WAL message to update
+`VChannelMeta.load_config` and prepare or release local latest resources. On one
+pchannel, a collection has at most one vchannel, so the SN consumer mutates exactly the
+vchannel carried by the message.
 
 **Release semantics (Option A)**: `ReleaseCollection` immediately removes the LoadConfig and triggers Balancer. Orphan views (view exists but no config) are naturally detected by reconcile Phase 1 and released via `RequestRelease`. No "releasing" state needed. Crash recovery is handled uniformly by reconcile.
 
@@ -544,7 +553,7 @@ This gives cross-shard coordination without requiring the snapshot to be mutable
 ### 5.2 Load Collection
 
 ```
-1. Load RPC → broadcast AlterLoadConfigMessage → WAL ack
+1. Load RPC → broadcast AlterLoadConfigMessage to all collection vchannels → WAL ack
 2. DDL callback: CollectionLoadManager.UpdateLoadConfig(msg.Header())
    → persist load config + create ShardViewManagers + Trigger(DirtyCollections: [C1])
 3. Balancer loop wakes, snapshot includes new LoadConfig but ShardStats is empty

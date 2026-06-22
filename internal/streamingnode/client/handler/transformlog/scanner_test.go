@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	transformlogapi "github.com/milvus-io/milvus/internal/streamingnode/transformlog"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -167,8 +167,8 @@ func subscribeForTest(
 	return result.scanner
 }
 
-func transformReadOption(vchannel string, startAfter uint64) transformlogapi.ReadOption {
-	return transformlogapi.ReadOption{
+func transformReadOption(vchannel string, startAfter uint64) wal.TransformLogReadOption {
+	return wal.TransformLogReadOption{
 		Name:               vchannel,
 		VChannel:           vchannel,
 		StartAfterTimeTick: startAfter,
