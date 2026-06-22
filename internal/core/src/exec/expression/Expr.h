@@ -664,9 +664,11 @@ class SegmentExpr : public Expr {
         int64_t processed_size = 0;
 
         // index reverse lookup (only for ScalarIndex path)
-        if (UseIndexCursor() && num_data_chunk_ == 0) {
-            return ProcessIndexLookupByOffsets<T>(
-                func, skip_func, input, res, valid_res, values...);
+        if constexpr (!std::is_same_v<T, VectorArrayView>) {
+            if (UseIndexCursor() && num_data_chunk_ == 0) {
+                return ProcessIndexLookupByOffsets<T>(
+                    func, skip_func, input, res, valid_res, values...);
+            }
         }
 
         auto& skip_index = segment_->GetSkipIndex();
@@ -703,11 +705,9 @@ class SegmentExpr : public Expr {
                 processed_size++;
             }
             return input->size();
-        }
-
-        // raw data scan
-        // sealed segment
-        if (segment_->type() == SegmentType::Sealed) {
+        } else if (segment_->type() == SegmentType::Sealed) {
+            // raw data scan
+            // sealed segment
             if (segment_->is_chunked()) {
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||

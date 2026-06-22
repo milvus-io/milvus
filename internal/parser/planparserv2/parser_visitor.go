@@ -2289,7 +2289,7 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			!typeutil.IsArrayType(columnInfo.GetDataType()) &&
 			!typeutil.IsVectorArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
-			"array_length operation are only supported on json, array or array of struct fields now, got: %s", ctx.GetText())
+			"array_length operation are only supported on json, array or array-of-vector fields now, got: %s", ctx.GetText())
 	}
 
 	expr := &planpb.Expr{
