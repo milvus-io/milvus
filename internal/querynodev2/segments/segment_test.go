@@ -7,14 +7,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -680,6 +683,45 @@ func TestLocalSegmentBM25StatsAreCloned(t *testing.T) {
 	gotAgain := segment.GetBM25Stats()
 	assert.Equal(t, int64(1), gotAgain[102].NumRow())
 	assert.NotContains(t, gotAgain, int64(103))
+}
+
+func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
+	paramtable.Init()
+
+	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	schema.Version = 1
+
+	collection := &Collection{}
+	collection.setSchema(schema, 1, 100, 101)
+
+	csegment := mock_segcore.NewMockCSegment(t)
+	csegment.EXPECT().
+		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
+			return request.Schema == schema && request.SchemaVersion == 101
+		})).
+		Return(nil)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  10,
+		SegmentID:     20,
+		PartitionID:   30,
+		InsertChannel: "by-dev-rootcoord-dml_0_10v0",
+	}
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:         collection,
+			loadInfo:           atomic.NewPointer(loadInfo),
+			version:            atomic.NewInt64(0),
+			resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			needUpdatedVersion: atomic.NewInt64(0),
+		},
+		ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:       csegment,
+		fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+	}
+
+	assert.NoError(t, segment.Reopen(context.Background(), loadInfo))
 }
 
 // TestBaseSegment_SkipGrowingBF tests that skipGrowingBF bypasses PK candidate checks.

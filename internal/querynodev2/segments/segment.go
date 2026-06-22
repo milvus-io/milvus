@@ -1471,7 +1471,7 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	}
 	defer s.ptrLock.Unpin()
 
-	schema, schemaVersion := s.collection.SchemaAndVersion()
+	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
 		Schema:        schema,

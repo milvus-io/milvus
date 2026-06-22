@@ -576,12 +576,15 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Uint64("schemaVersion", req.GetVersion()),
+		zap.Uint64("schemaBarrierTs", req.GetSchemaBarrierTs()),
+		zap.Int32("schemaVersion", req.GetSchema().GetVersion()),
 	)
 
 	log.Info("querynode received update schema request")
 
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetVersion())
+	// Pass the barrier timestamp through; collectionManager derives the logical
+	// schema version from the schema payload when it is present.
+	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
 	if err != nil {
 		log.Warn("failed to update schema", zap.Error(err))
 	}

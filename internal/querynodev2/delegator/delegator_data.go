@@ -527,8 +527,7 @@ func (sd *shardDelegator) syncCollectionIndexMeta(ctx context.Context, req *quer
 	loadMeta := req.GetLoadMeta()
 	if loadMeta == nil {
 		loadMeta = &querypb.LoadMetaInfo{
-			CollectionID:  req.GetCollectionID(),
-			SchemaVersion: sd.collection.SchemaVersion(),
+			CollectionID: req.GetCollectionID(),
 		}
 	}
 
@@ -673,7 +672,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Debug("load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, req.GetLoadMeta().GetSchemaVersion())
+			entries, req.GetLoadMeta().GetSchemaBarrierTs())
 		if err != nil {
 			log.Warn("load stream delete failed", zap.Error(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
@@ -705,11 +704,11 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 	return fn()
 }
 
-func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
+func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
-	if version < sd.schemaVersion {
-		return merr.WrapErrServiceInternal("schema version changed")
+	if schemaBarrierTs < sd.schemaBarrierTs {
+		return merr.WrapErrServiceInternal("schema barrier changed")
 	}
 
 	// alter distribution
@@ -924,7 +923,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	targetNodeID int64,
 	worker cluster.Worker,
 	entries []SegmentEntry,
-	schemaVersion uint64,
+	schemaBarrierTs uint64,
 ) error {
 	log := sd.getLogger(ctx)
 
@@ -1037,7 +1036,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	// Atomically add to distribution while still holding RLock.
 	// This guarantees no ProcessDelete can run between catch-up and distribution update,
 	// so there is no gap between "deletes applied" and "segment visible".
-	if err := sd.addDistributionIfVersionOK(schemaVersion, entries...); err != nil {
+	if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
 		return err
 	}
 	log.Info("load stream delete done")
