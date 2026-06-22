@@ -1219,6 +1219,11 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	sd.schemaChangeMutex.Lock()
 	defer sd.schemaChangeMutex.Unlock()
 
+	// This pre-check is a best-effort guard for delegator side effects. Load
+	// paths can still call collectionManager.PutOrRef under collectionManager's
+	// own lock and advance the collection snapshot before the final
+	// collectionManager.UpdateSchema below. The collection manager remains the
+	// source-of-truth freshness gate and will skip that stale final apply.
 	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
 		log.Info("delegator skip stale or no-op schema event",
 			zap.Uint64("schemaVersion", schemaVersion),

@@ -244,9 +244,12 @@ func getLoadMetaSchemaVersion(schema *schemapb.CollectionSchema, loadMeta *query
 }
 
 func initialSegcoreSchemaVersion(logicalSchemaVersion uint64, schemaBarrierTs uint64) uint64 {
-	// Seed from both domains for rolling/legacy compatibility. Older QueryNode
-	// code used the barrier timestamp as the value passed to segcore, while new
-	// code keeps an independent monotonic segcoreSchemaVersion from this point on.
+	// Seed from both domains for rolling/legacy compatibility. C++ creates the
+	// initial CCollection schema from schema.Version, while older QueryNode code
+	// used the barrier timestamp as the value passed to segcore. Starting at the
+	// max keeps the first generated segcoreSchemaVersion above both possible
+	// create-time domains; later updates advance this collection-local token
+	// independently from both logical schema version and barrier timestamp.
 	if schemaBarrierTs > logicalSchemaVersion {
 		return schemaBarrierTs
 	}
