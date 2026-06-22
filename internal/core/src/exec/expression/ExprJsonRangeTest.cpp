@@ -1002,7 +1002,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                 case OpType::NotEqual: {
                     f = [&](int64_t value, bool valid) {
                         if (!valid) {
-                            return true;
+                            return false;
                         }
                         return value != testcase.val;
                     };
@@ -1132,7 +1132,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
     for (const auto& testcase : array_cases) {
         auto check = [&](OpType op, bool valid) {
             if (!valid) {
-                return op == OpType::NotEqual ? true : false;
+                return false;
             }
             if (testcase.nested_path[0] == "array" && op == OpType::Equal) {
                 return true;
