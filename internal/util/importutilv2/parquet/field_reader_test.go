@@ -1163,3 +1163,144 @@ func TestStructFieldReader_NullableArrayOfVector(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "ArrayOfVector does not support nullable")
 }
+
+func TestStructFieldReader_ArrayOfVectorFloat64(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	structType := arrow.StructOf(arrow.Field{
+		Name:     "vector_array",
+		Type:     arrow.ListOf(arrow.PrimitiveTypes.Float64),
+		Nullable: true,
+	})
+	listBuilder := array.NewListBuilder(mem, structType)
+	structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
+	vectorBuilder := structBuilder.FieldBuilder(0).(*array.ListBuilder)
+	floatBuilder := vectorBuilder.ValueBuilder().(*array.Float64Builder)
+
+	appendVector := func(values ...float64) {
+		vectorBuilder.Append(true)
+		floatBuilder.AppendValues(values, nil)
+		structBuilder.Append(true)
+	}
+	listBuilder.Append(true)
+	appendVector(1, 2, 3, 4)
+	appendVector(5, 6, 7, 8)
+	listBuilder.Append(true)
+	appendVector(9, 10, 11, 12)
+
+	arr := listBuilder.NewArray()
+	listBuilder.Release()
+	defer arr.Release()
+
+	chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+	defer chunked.Release()
+
+	reader := &StructFieldReader{
+		field: &schemapb.FieldSchema{
+			Name:        "struct_array[vector_array]",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "20"},
+			},
+		},
+		fieldIndex: 0,
+		dim:        4,
+	}
+
+	data, validData, err := reader.readArrayOfVectorField(chunked)
+	require.NoError(t, err)
+	require.Nil(t, validData)
+	require.Len(t, data, 2)
+
+	vectors := data.([]*schemapb.VectorField)
+	require.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8}, vectors[0].GetFloatVector().GetData())
+	require.Equal(t, []float32{9, 10, 11, 12}, vectors[1].GetFloatVector().GetData())
+}
+
+func TestStructFieldReader_ArrayMaxCapacity(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	structType := arrow.StructOf(arrow.Field{
+		Name: "int_array",
+		Type: arrow.PrimitiveTypes.Int32,
+	})
+	listBuilder := array.NewListBuilder(mem, structType)
+	structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
+	intBuilder := structBuilder.FieldBuilder(0).(*array.Int32Builder)
+
+	appendValue := func(value int32) {
+		intBuilder.Append(value)
+		structBuilder.Append(true)
+	}
+	listBuilder.Append(true)
+	appendValue(1)
+	appendValue(2)
+
+	arr := listBuilder.NewArray()
+	listBuilder.Release()
+	defer arr.Release()
+
+	chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+	defer chunked.Release()
+
+	reader := &StructFieldReader{
+		field: &schemapb.FieldSchema{
+			Name:        "struct_array[int_array]",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int32,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "1"},
+			},
+		},
+		fieldIndex: 0,
+	}
+
+	_, _, err := reader.readArrayField(chunked)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds max_capacity")
+}
+
+func TestStructFieldReader_ArrayOfVectorMaxCapacity(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	structType := arrow.StructOf(arrow.Field{
+		Name:     "vector_array",
+		Type:     arrow.ListOf(arrow.PrimitiveTypes.Float32),
+		Nullable: true,
+	})
+	listBuilder := array.NewListBuilder(mem, structType)
+	structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
+	vectorBuilder := structBuilder.FieldBuilder(0).(*array.ListBuilder)
+	floatBuilder := vectorBuilder.ValueBuilder().(*array.Float32Builder)
+
+	appendVector := func(values ...float32) {
+		vectorBuilder.Append(true)
+		floatBuilder.AppendValues(values, nil)
+		structBuilder.Append(true)
+	}
+	listBuilder.Append(true)
+	appendVector(1, 2, 3, 4)
+	appendVector(5, 6, 7, 8)
+
+	arr := listBuilder.NewArray()
+	listBuilder.Release()
+	defer arr.Release()
+
+	chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+	defer chunked.Release()
+
+	reader := &StructFieldReader{
+		field: &schemapb.FieldSchema{
+			Name:        "struct_array[vector_array]",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "1"},
+			},
+		},
+		fieldIndex: 0,
+		dim:        4,
+	}
+
+	_, _, err := reader.readArrayOfVectorField(chunked)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds max_capacity")
+}
