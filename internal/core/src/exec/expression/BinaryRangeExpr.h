@@ -85,30 +85,45 @@ struct BinaryRangeElementFunc {
     }
 };
 
-#define BinaryRangeJSONCompare(cmp)                                \
-    do {                                                           \
-        if (valid_data != nullptr && !valid_data[offset]) {        \
-            res[i] = valid_res[i] = false;                         \
-            break;                                                 \
-        }                                                          \
-        if (has_bitmap_input && !bitmap_input[i + start_cursor]) { \
-            break;                                                 \
-        }                                                          \
-        auto x = src[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                           \
-            if constexpr (std::is_same_v<GetType, int64_t>) {      \
-                auto x = src[offset].template at<double>(pointer); \
-                if (!x.error()) {                                  \
-                    auto value = x.value();                        \
-                    res[i] = (cmp);                                \
-                    break;                                         \
-                }                                                  \
-            }                                                      \
-            res[i] = false;                                        \
-            break;                                                 \
-        }                                                          \
-        auto value = x.value();                                    \
-        res[i] = (cmp);                                            \
+// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
+// number in a single parse.  Branches on actual type to preserve int64
+// precision; uint64 and double values fall back to double comparison,
+// consistent with the Tantivy index and JSON-stats paths.
+// 'cmp' must reference 'value' (int64_t or double depending on the JSON value).
+#define BinaryRangeJSONCompare(cmp)                                    \
+    do {                                                               \
+        if (valid_data != nullptr && !valid_data[offset]) {            \
+            res[i] = valid_res[i] = false;                             \
+            break;                                                     \
+        }                                                              \
+        if (has_bitmap_input && !bitmap_input[i + start_cursor]) {     \
+            break;                                                     \
+        }                                                              \
+        if constexpr (std::is_same_v<GetType, int64_t>) {              \
+            auto x = src[offset].at_numeric(pointer);                  \
+            if (x.error()) {                                           \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto n = x.value();                                        \
+            if (n.is_int64()) {                                        \
+                auto value = n.get_int64();                            \
+                res[i] = (cmp);                                        \
+            } else {                                                   \
+                auto value = n.is_uint64()                             \
+                                 ? static_cast<double>(n.get_uint64()) \
+                                 : n.get_double();                     \
+                res[i] = (cmp);                                        \
+            }                                                          \
+        } else {                                                       \
+            auto x = src[offset].template at<GetType>(pointer);        \
+            if (x.error()) {                                           \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value();                                    \
+            res[i] = (cmp);                                            \
+        }                                                              \
     } while (false)
 
 template <typename ValueType,
