@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -37,6 +38,15 @@ func NewLazyWith(core zapcore.Core, fields []zapcore.Field) zapcore.Core {
 	d := lazyWithCore{fields: fields}
 	d.corePtr.Store(&core)
 	return &d
+}
+
+func withLazy(logger *zap.Logger, fields []Field) *zap.Logger {
+	if len(fields) == 0 {
+		return logger
+	}
+	return logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+		return NewLazyWith(core, fields)
+	}))
 }
 
 func (d *lazyWithCore) initOnce() zapcore.Core {

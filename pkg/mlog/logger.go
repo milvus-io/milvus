@@ -176,7 +176,7 @@ func WithLazy(fields ...Field) *Logger {
 		}
 	}
 	return &Logger{
-		logger: getLogger().WithLazy(fields...),
+		logger: withLazy(getLogger(), fields),
 		fields: fields,
 	}
 }
@@ -211,7 +211,7 @@ func (l *Logger) WithLazy(fields ...Field) *Logger {
 	copy(newFields, l.fields)
 	copy(newFields[len(l.fields):], fields)
 	return &Logger{
-		logger: l.logger.WithLazy(fields...),
+		logger: withLazy(l.logger, fields),
 		fields: newFields,
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -616,6 +618,41 @@ func TestPackageLevelWithLazy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "lazytest", entry["module"])
 	assert.Equal(t, float64(999), entry["node_id"])
+}
+
+func TestWithLazyConcurrentFirstUse(t *testing.T) {
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewJSONEncoder(zapcore.EncoderConfig{
+			MessageKey: "msg",
+			LevelKey:   "level",
+		}),
+		zapcore.AddSync(io.Discard),
+		zapcore.DebugLevel,
+	))
+	initForTest(logger)
+	defer resetLogger()
+
+	oldLevel := GetLevel()
+	SetLevel(DebugLevel)
+	defer SetLevel(oldLevel)
+
+	componentLogger := WithLazy(String("module", "race-test"))
+	ctx := context.Background()
+
+	const workers = 32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			<-start
+			componentLogger.Debug(ctx, "concurrent lazy logger use", Int("worker", i))
+		}()
+	}
+	close(start)
+	wg.Wait()
 }
 
 // Test package-level WithLazy with empty fields
