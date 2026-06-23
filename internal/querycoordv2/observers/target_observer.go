@@ -460,15 +460,20 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) isNextTargetSyncStarted(ctx context.Context, collectionID int64) bool {
+	startedVersion, hasStartedVersion := ob.nextTargetSyncStarted.Get(collectionID)
+	delegators := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID))
+	if !hasStartedVersion && len(delegators) == 0 {
+		return false
+	}
+
 	nextVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
 	if nextVersion <= 0 {
 		return false
 	}
-	if startedVersion, ok := ob.nextTargetSyncStarted.Get(collectionID); ok && startedVersion == nextVersion {
+	if hasStartedVersion && startedVersion == nextVersion {
 		return true
 	}
 
-	delegators := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID))
 	return lo.ContainsBy(delegators, func(delegator *meta.DmChannel) bool {
 		return delegator != nil &&
 			delegator.View != nil &&
