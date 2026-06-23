@@ -121,7 +121,7 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 	for _, opMsg := range fieldOps {
 		name := opMsg.GetFieldName()
 		if name == "" {
-			return false, merr.WrapErrParameterInvalidMsg("FieldPartialUpdateOp.field_name is required")
+			return false, merr.WrapErrParameterMissingMsg("FieldPartialUpdateOp.field_name is required")
 		}
 		if _, dup := seenOpFields[name]; dup {
 			return false, merr.WrapErrParameterInvalidMsg(
@@ -209,7 +209,7 @@ func findFieldSchemaByName(schema *schemapb.CollectionSchema, name string) (*sch
 			return f, nil
 		}
 	}
-	return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field %q not found in collection schema", name))
+	return nil, merr.WrapErrParameterInvalidMsg("field %q not found in collection schema", name)
 }
 
 // checkArrayAppendPayloadWithinCapacity checks that the per-row payload

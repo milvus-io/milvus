@@ -19,7 +19,6 @@ package pipeline
 import (
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -97,7 +97,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, data *
 	for _, inputFieldId := range inputFieldIds {
 		data, ok := data.Data[inputFieldId]
 		if !ok {
-			return errors.New("BM25 embedding failed: input field data not varchar/text")
+			return merr.WrapErrServiceInternalMsg("BM25 embedding failed: input field data not varchar/text")
 		}
 
 		datas = append(datas, data.GetDataRows())
@@ -110,7 +110,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, data *
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return errors.New("BM25 embedding failed: BM25 runner output not sparse map")
+		return merr.WrapErrServiceInternalMsg("BM25 embedding failed: BM25 runner output not sparse map")
 	}
 
 	meta[outputFieldId].AppendBytes(sparseArray.GetContents()...)
@@ -130,7 +130,7 @@ func (eNode *embeddingNode) embedding(datas []*storage.InsertData) (map[int64]*s
 					return nil, err
 				}
 			default:
-				return nil, fmt.Errorf("unknown function type %s", functionSchema.Type)
+				return nil, merr.WrapErrServiceInternalMsg("unknown function type %s", functionSchema.Type)
 			}
 		}
 	}

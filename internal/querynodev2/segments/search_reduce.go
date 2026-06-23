@@ -2,7 +2,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -48,10 +47,10 @@ func checkElementIndices(searchResultData []*schemapb.SearchResultData) (bool, e
 				data.ElementIndices = &schemapb.LongArray{Data: []int64{}}
 				continue
 			}
-			return false, fmt.Errorf("inconsistent element-level search result: result[%d] has hits but misses element indices", i)
+			return false, merr.WrapErrServiceInternalMsg("inconsistent element-level search result: result[%d] has hits but misses element indices", i)
 		}
 		if len(data.GetElementIndices().GetData()) != len(data.GetScores()) {
-			return false, fmt.Errorf("invalid element-level search result: element indices length %d does not match scores length %d",
+			return false, merr.WrapErrServiceInternalMsg("invalid element-level search result: element indices length %d does not match scores length %d",
 				len(data.GetElementIndices().GetData()), len(data.GetScores()))
 		}
 	}
@@ -65,7 +64,7 @@ func getSearchResultDedupKey(data *schemapb.SearchResultData, idx int64, id inte
 
 	elementIndices := data.GetElementIndices()
 	if elementIndices == nil || idx < 0 || idx >= int64(len(elementIndices.GetData())) {
-		return nil, fmt.Errorf("element-level search result missing element index at offset %d", idx)
+		return nil, merr.WrapErrServiceInternalMsg("element-level search result missing element index at offset %d", idx)
 	}
 	return elementSearchResultKey{
 		pk:           id,
@@ -166,7 +165,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
@@ -289,7 +288,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	ret.GroupByFieldValue = gpFieldBuilder.Build()

@@ -4051,7 +4051,7 @@ class TestCreateImportJobNegative(TestBase):
             }
         }
         rsp = self.import_job_client.create_import_jobs(payload)
-        assert rsp['code'] == 1100 and "invalid" in rsp['message']
+        assert rsp['code'] == 1101 and "partition not specified" in rsp['message']
 
     def test_import_job_with_wrong_file_type(self):
         # create collection

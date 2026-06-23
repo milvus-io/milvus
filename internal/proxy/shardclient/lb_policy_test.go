@@ -652,12 +652,48 @@ func (s *LBPolicySuite) TestExecuteWithRetryNonRetriableErrorReturnsLastError() 
 		Nq:             1,
 		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
 			executed++
-			return errors.Wrapf(merr.ErrParameterInvalid, "fail on QueryNode %d", nodeID)
+			return errors.Wrapf(merr.ErrServiceInternal, "fail on QueryNode %d", nodeID)
 		},
 	})
 
-	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorIs(err, merr.ErrServiceInternal)
 	s.Equal(2, executed)
+}
+
+// TestExecuteWithRetryInputErrorNotRetried verifies that an input error
+// (the request's own fault) is not retried across replicas.
+func (s *LBPolicySuite) TestExecuteWithRetryInputErrorNotRetried() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 3
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	execCount := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			execCount++
+			return errors.Wrapf(merr.ErrParameterInvalid, "bad request on QueryNode %d", nodeID)
+		},
+	})
+
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	// not retried across replicas despite retryOnReplica=3
+	s.Equal(1, execCount)
 }
 
 func (s *LBPolicySuite) TestExecuteOneChannel() {

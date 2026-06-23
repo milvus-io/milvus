@@ -21,12 +21,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -164,7 +164,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 	err error,
 ) {
 	if len(blobs) == 0 {
-		return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, errors.New("blobs is empty")
+		return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, merr.WrapErrDataIntegrityMsg("blobs is empty")
 	}
 	indexParams = make(map[string]string)
 	datas = make([]*Blob, 0)
@@ -250,7 +250,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 
 				// make sure there is one string
 				if len(content) != 1 {
-					err := fmt.Errorf("failed to parse index event because content length is not one %d", len(content))
+					err := merr.WrapErrDataIntegrityMsg("failed to parse index event because content length is not one %d", len(content))
 					eventReader.Close()
 					binlogReader.Close()
 					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
@@ -321,7 +321,7 @@ func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]st
 		break
 	}
 	if file == nil {
-		return nil, nil, "", InvalidUniqueID, errors.New("can not find params blob")
+		return nil, nil, "", InvalidUniqueID, merr.WrapErrDataIntegrityMsg("can not find params blob")
 	}
 	info := struct {
 		Params    map[string]string
@@ -329,7 +329,7 @@ func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]st
 		IndexID   UniqueID
 	}{}
 	if err := json.Unmarshal(file.Value, &info); err != nil {
-		return nil, nil, "", InvalidUniqueID, fmt.Errorf("json unmarshal error: %s", err.Error())
+		return nil, nil, "", InvalidUniqueID, merr.WrapErrSerializationFailed(err, "json unmarshal error")
 	}
 
 	return blobs, info.Params, info.IndexName, info.IndexID, nil

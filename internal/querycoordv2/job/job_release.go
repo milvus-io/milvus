@@ -19,7 +19,6 @@ package job
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type ReleaseCollectionJob struct {
@@ -84,7 +84,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 		if err != nil {
 			msg := "failed to remove collection"
 			log.Warn(msg, zap.Error(err))
-			return errors.Wrap(err, msg)
+			return merr.Wrapf(err, "%s", msg)
 		}
 
 		job.targetObserver.ReleaseCollection(collectionID)
@@ -109,13 +109,13 @@ func (job *ReleaseCollectionJob) Execute() error {
 
 	if err := WaitCollectionReleased(job.ctx, job.dist, job.checkerController, collectionID); err != nil {
 		log.Warn("failed to wait collection released", zap.Error(err))
-		return errors.Wrap(err, "failed to wait collection released")
+		return merr.Wrap(err, "failed to wait collection released")
 	}
 
 	if err := job.meta.ReplicaManager.RemoveCollection(job.ctx, collectionID); err != nil {
 		msg := "failed to remove replicas"
 		log.Warn(msg, zap.Error(err))
-		return errors.Wrap(err, msg)
+		return merr.Wrapf(err, "%s", msg)
 	}
 	log.Info("release collection job done", zap.Int64("collectionID", collectionID))
 	return nil

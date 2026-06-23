@@ -160,7 +160,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 	it.schema = schema.CollectionSchema
 

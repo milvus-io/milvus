@@ -1634,7 +1634,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 99}}}, true),
 		)
-		assert.True(t, errors.Is(err, ErrIgnoredSegmentMetaOperation))
+		assert.NoError(t, err) // stale update is swallowed as a benign no-op; segment must stay unchanged below
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
@@ -1672,7 +1672,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 				[]*datapb.FieldBinlog{}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 12, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}}}, true),
 		)
-		assert.True(t, errors.Is(err, ErrIgnoredSegmentMetaOperation))
+		assert.NoError(t, err) // stale update is swallowed as a benign no-op; segment must stay unchanged below
 
 		updated = meta.GetHealthySegment(context.TODO(), 1)
 		assert.Equal(t, updated.NumOfRows, int64(20))

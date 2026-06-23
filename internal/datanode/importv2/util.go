@@ -52,7 +52,7 @@ import (
 )
 
 func WrapTaskNotFoundError(taskID int64) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find import task with id %d", taskID))
+	return merr.WrapErrImportSysFailedMsg("cannot find import task with id %d", taskID)
 }
 
 func NewSyncTask(ctx context.Context,
@@ -156,7 +156,7 @@ func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, parti
 	})
 
 	if len(candidates) == 0 {
-		return 0, fmt.Errorf("no candidate segments found for channel %s and partition %d",
+		return 0, merr.WrapErrServiceInternalMsg("no candidate segments found for channel %s and partition %d",
 			vchannel, partitionID)
 	}
 
@@ -396,7 +396,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				}
 			}
 		default:
-			return fmt.Errorf("unexpected data type: %d, cannot be filled with default value", dataType)
+			return merr.WrapErrServiceInternalMsg("unexpected data type: %d, cannot be filled with default value", dataType)
 		}
 
 		if err != nil {
@@ -413,7 +413,7 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 	}
 	dynamicField := typeutil.GetDynamicField(schema)
 	if dynamicField == nil {
-		return merr.WrapErrImportFailed("collection schema is illegal, enable_dynamic_field is true but the dynamic field doesn't exist")
+		return merr.WrapErrImportSysFailed("collection schema is illegal, enable_dynamic_field is true but the dynamic field doesn't exist")
 	}
 
 	tempData, ok := data.Data[dynamicField.GetFieldID()]
@@ -533,7 +533,7 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 					},
 				}
 			default:
-				return fmt.Errorf("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
+				return merr.WrapErrImportFailedMsg("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
 			}
 		}
 	}

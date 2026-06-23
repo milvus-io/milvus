@@ -17,13 +17,13 @@ package bloomfilter
 
 import (
 	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/cockroachdb/errors"
 	"github.com/greatroar/blobloom"
 	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type BFType int
@@ -307,20 +307,20 @@ func UnmarshalJSON(data []byte, bfType BFType) (BloomFilterInterface, error) {
 		bf := &blockedBloomFilter{}
 		err := json.Unmarshal(data, bf)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to unmarshal blocked bloom filter")
+			return nil, merr.Wrap(err, "failed to unmarshal blocked bloom filter")
 		}
 		return bf, nil
 	case BasicBF:
 		bf := &basicBloomFilter{}
 		err := json.Unmarshal(data, bf)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to unmarshal blocked bloom filter")
+			return nil, merr.Wrap(err, "failed to unmarshal blocked bloom filter")
 		}
 		return bf, nil
 	case AlwaysTrueBF:
 		return AlwaysTrueBloomFilter, nil
 	default:
-		return nil, errors.Errorf("unsupported bloom filter type: %d", bfType)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported bloom filter type: %d", bfType)
 	}
 }
 

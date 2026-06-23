@@ -255,8 +255,8 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 			Ctx:     c.ctx,
 			Message: msg,
 		}); result.Error != nil {
-			c.logger.Warn("message handle canceled at txn", zap.Error(err))
-			return errors.Wrap(err, "At Handler Of Txn")
+			c.logger.Warn("message handle canceled at txn", zap.Error(result.Error))
+			return errors.Wrapf(result.Error, "At Handler Of Txn")
 		}
 	default:
 		if c.txnBuilder == nil {

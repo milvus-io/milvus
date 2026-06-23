@@ -120,7 +120,7 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 
 	// Import in replicating cluster is not supported yet
 	if channelAssignment.ReplicateConfiguration != nil && len(channelAssignment.ReplicateConfiguration.GetClusters()) > 1 {
-		return merr.WrapErrImportFailed("import in replicating cluster is not supported yet")
+		return merr.WrapErrOperationNotSupportedMsg("import in replicating cluster is not supported yet")
 	}
 
 	return nil
@@ -148,14 +148,14 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
-		return errors.Wrap(err, "failed to validate import request")
+		return merr.Wrap(err, "failed to validate import request")
 	}
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with collection id")
+		return merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
 

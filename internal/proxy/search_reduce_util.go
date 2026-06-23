@@ -2,9 +2,7 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -44,10 +42,10 @@ func checkElementIndices(subSearchResultData []*schemapb.SearchResultData) (bool
 				data.ElementIndices = &schemapb.LongArray{Data: []int64{}}
 				continue
 			}
-			return false, fmt.Errorf("inconsistent element-level search result: result[%d] has hits but misses element indices", i)
+			return false, merr.WrapErrServiceInternalMsg("inconsistent element-level search result: result[%d] has hits but misses element indices", i)
 		}
 		if len(data.GetElementIndices().GetData()) != len(data.GetScores()) {
-			return false, fmt.Errorf("invalid element-level search result: element indices length %d does not match scores length %d",
+			return false, merr.WrapErrServiceInternalMsg("invalid element-level search result: element indices length %d does not match scores length %d",
 				len(data.GetElementIndices().GetData()), len(data.GetScores()))
 		}
 	}
@@ -371,7 +369,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		}
 
 		if realTopK != -1 && realTopK != j {
-			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(merr.WrapErrParameterInvalidMsg("the length (topk) between all result of query is different")))
 		}
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
@@ -379,7 +377,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
@@ -515,15 +513,15 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				cursors[subSearchIdx]++
 			}
 			if realTopK != -1 && realTopK != j {
-				log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
-				// return nil, errors.New("the length (topk) between all result of query is different")
+				log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(merr.WrapErrParameterInvalidMsg("the length (topk) between all result of query is different")))
+				// return nil, merr.WrapErrParameterInvalidMsg("the length (topk) between all result of query is different")
 			}
 			realTopK = j
 			ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 			// limit search result to avoid oom
 			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
 		}
 		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
@@ -562,7 +560,7 @@ func setupIdListForSearchResult(searchResult *milvuspb.SearchResults, pkType sch
 			},
 		}
 	default:
-		return errors.New("unsupported pk type")
+		return merr.WrapErrServiceInternalMsg("unsupported pk type")
 	}
 	return nil
 }
@@ -632,14 +630,16 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 
 func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64, pkHitNum int) error {
 	if data.NumQueries != nq {
-		return fmt.Errorf("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
+		// The result shape comes from querynode/segcore, never from the request:
+		// a mismatch is an internal protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
 	}
 	if data.TopK != topk {
-		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
+		return merr.WrapErrServiceInternalMsg("search result's topk(%d) mis-match with %d", data.TopK, topk)
 	}
 
 	if len(data.Scores) != pkHitNum {
-		return fmt.Errorf("search result's score length invalid, score length=%d, expectedLength=%d",
+		return merr.WrapErrServiceInternalMsg("search result's score length invalid, score length=%d, expectedLength=%d",
 			len(data.Scores), pkHitNum)
 	}
 	return nil

@@ -5,7 +5,6 @@ import (
 	"sort"
 	"unicode/utf8"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -126,11 +125,11 @@ func bytesOffsetToRuneOffset(text string, spans SpanList) error {
 	for i, span := range spans {
 		startOffset, ok := offsetMap[span[0]]
 		if !ok {
-			return errors.Errorf("start offset: %d not found (text: %d bytes)", span[0], len(text))
+			return merr.WrapErrServiceInternalMsg("start offset: %d not found (text: %d bytes)", span[0], len(text))
 		}
 		endOffset, ok := offsetMap[span[1]]
 		if !ok {
-			return errors.Errorf("end offset: %d not found (text: %d bytes)", span[1], len(text))
+			return merr.WrapErrServiceInternalMsg("end offset: %d not found (text: %d bytes)", span[1], len(text))
 		}
 		spans[i][0] = startOffset
 		spans[i][1] = endOffset

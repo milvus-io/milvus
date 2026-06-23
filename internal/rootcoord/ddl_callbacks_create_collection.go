@@ -18,9 +18,7 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -102,13 +100,13 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 		if !funcutil.IsControlChannel(vchannel) {
 			// create shard info when virtual channel is created.
 			if err := c.createCollectionShard(ctx, header, body, vchannel, result); err != nil {
-				return errors.Wrap(err, "failed to create collection shard")
+				return merr.Wrap(err, "failed to create collection shard")
 			}
 		}
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
-		return errors.Wrap(err, "failed to add collection to meta table")
+		return merr.Wrap(err, "failed to add collection to meta table")
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
 		ce.OptLPCMDBName(body.DbName),
@@ -214,7 +212,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 func mustConsumeConsistencyLevel(properties []*commonpb.KeyValuePair) (commonpb.ConsistencyLevel, []*commonpb.KeyValuePair) {
 	ok, consistencyLevel := getConsistencyLevel(properties...)
 	if !ok {
-		panic(fmt.Errorf("consistency level not found in properties"))
+		panic(merr.WrapErrServiceInternalMsg("consistency level not found in properties"))
 	}
 	newProperties := make([]*commonpb.KeyValuePair, 0, len(properties)-1)
 	for _, property := range properties {

@@ -18,13 +18,13 @@ package proxy
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -76,12 +76,12 @@ func validateFloat32ForFloat16(values []float32) error {
 
 		// Check overflow
 		if absV > float16MaxValue {
-			return fmt.Errorf("value at dimension %d (%v) exceeds float16 range [-65504, 65504]", i, v)
+			return merr.WrapErrParameterInvalidMsg("value at dimension %d (%v) exceeds float16 range [-65504, 65504]", i, v)
 		}
 
 		// Check underflow (non-zero values smaller than min positive)
 		if v != 0 && absV < float16MinPositive {
-			return fmt.Errorf("value at dimension %d (%v) underflows float16 precision (min abs value: %v)", i, v, float16MinPositive)
+			return merr.WrapErrParameterInvalidMsg("value at dimension %d (%v) underflows float16 precision (min abs value: %v)", i, v, float16MinPositive)
 		}
 	}
 	return nil
@@ -92,10 +92,10 @@ func validateFloat32ForFloat16(values []float32) error {
 func validateFloat32ForBFloat16(values []float32) error {
 	for i, v := range values {
 		if math.IsInf(float64(v), 0) {
-			return fmt.Errorf("value at dimension %d is infinity, cannot convert to bfloat16", i)
+			return merr.WrapErrParameterInvalidMsg("value at dimension %d is infinity, cannot convert to bfloat16", i)
 		}
 		if math.IsNaN(float64(v)) {
-			return fmt.Errorf("value at dimension %d is NaN, cannot convert to bfloat16", i)
+			return merr.WrapErrParameterInvalidMsg("value at dimension %d is NaN, cannot convert to bfloat16", i)
 		}
 	}
 	return nil
@@ -108,7 +108,7 @@ func validateFloat32ForBFloat16(values []float32) error {
 func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema) ([]byte, error) {
 	var phg commonpb.PlaceholderGroup
 	if err := proto.Unmarshal(phgBytes, &phg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal placeholder group: %w", err)
+		return nil, merr.WrapErrParameterInvalidMsg("failed to unmarshal placeholder group: %v", err)
 	}
 
 	if len(phg.Placeholders) == 0 {
@@ -138,7 +138,7 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 
 	// Check if conversion is supported (fp32 -> fp16/bf16)
 	if placeholder.Type != commonpb.PlaceholderType_FloatVector {
-		return nil, fmt.Errorf("vector type must be the same: field type %s, search type %s",
+		return nil, merr.WrapErrParameterInvalidMsg("vector type must be the same: field type %s, search type %s",
 			fieldType.String(), placeholder.Type.String())
 	}
 
@@ -166,7 +166,7 @@ func convertPlaceholder(
 	for i, valueBytes := range placeholder.Values {
 		floats, err := bytesToFloat32Array(valueBytes)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse float32 vector at index %d: %w", i, err)
+			return nil, merr.WrapErrParameterInvalidMsg("failed to parse float32 vector at index %d: %v", i, err)
 		}
 
 		if err := validateFn(floats); err != nil {
@@ -185,7 +185,7 @@ func convertPlaceholder(
 // bytesToFloat32Array converts byte slice to float32 array.
 func bytesToFloat32Array(data []byte) ([]float32, error) {
 	if len(data)%4 != 0 {
-		return nil, fmt.Errorf("invalid float32 vector data length: %d", len(data))
+		return nil, merr.WrapErrParameterInvalidMsg("invalid float32 vector data length: %d", len(data))
 	}
 
 	dim := len(data) / 4

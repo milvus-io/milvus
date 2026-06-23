@@ -18,12 +18,12 @@ package session
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var errDisposed = errors.New("client is disposed")
@@ -84,7 +84,7 @@ func (n *Session) GetOrCreateClient(ctx context.Context) (types.DataNodeClient, 
 	}
 
 	if n.clientCreator == nil {
-		return nil, fmt.Errorf("unable to create client for %s because of a nil client creator", n.info.Address)
+		return nil, merr.WrapErrServiceInternalMsg("unable to create client for %s because of a nil client creator", n.info.Address)
 	}
 
 	err := n.initClient(ctx)

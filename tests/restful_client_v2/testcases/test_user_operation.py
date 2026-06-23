@@ -167,5 +167,5 @@ class TestUserNegative(TestBase):
             if i == 0:
                 assert rsp['code'] == 0
             else:
-                assert rsp['code'] == 65535
+                assert rsp['code'] == 1100
                 assert "user already exists" in rsp['message']

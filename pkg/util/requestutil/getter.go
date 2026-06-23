@@ -19,6 +19,12 @@
 package requestutil
 
 import (
+	"context"
+
+	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -212,28 +218,69 @@ var retryableCode typeutil.Set[int32] = typeutil.NewSet(
 // 	)
 // }
 
+// ParseMetricLabel determines the final Prometheus status label based on the
+// response and error. It implements the composite-label scheme: the coarse
+// "fail"/"rejected" values are split into fine-grained labels (fail_input /
+// fail_system / rejected_system) so monitoring can tell the responsible party
+// apart. The split is encoded into the existing status label's value domain
+// (additive cardinality) rather than a new dimension label (which would be
+// multiplicative). Retryability takes priority over classification.
 func ParseMetricLabel(resp any, err error) string {
-	// err only returned by interceptors
-	if err != nil {
-		return metrics.RejectedLabel
-	}
-
-	// check response status code
-	var status *commonpb.Status
+	// A response carrying a non-OK status means the request was PROCESSED and
+	// failed (fail_*), and takes priority over a non-nil err: the REST v2
+	// wrappers reconstruct err = merr.Error(status) from that same response,
+	// which previously routed every processed REST failure into the rejected_*
+	// buckets and left the fail_* series blind to the entire REST surface.
+	var st *commonpb.Status
 	switch resp := resp.(type) {
 	case interface{ GetStatus() *commonpb.Status }:
-		status = resp.GetStatus()
+		st = resp.GetStatus()
 	case *commonpb.Status:
-		status = resp
+		st = resp
 	}
-
-	// check if retry
-	if !merr.Ok(status) {
-		// TODO use retriable if all set
-		if retryableCode.Contain(status.GetCode()) {
+	if st != nil && !merr.Ok(st) {
+		// Client cancellation is neither party's failure.
+		if st.GetCode() == merr.CanceledCode {
+			return metrics.CancelLabel
+		}
+		// Retryability takes priority over input/system classification.
+		if retryableCode.Contain(st.GetCode()) {
 			return metrics.RetryLabel
 		}
-		return metrics.FailLabel
+
+		// Hard failure: classify by responsible party. merr.Status already
+		// stamps the InputError flag into ExtraInfo, so read it directly instead
+		// of reconstructing the whole milvusError (this is the proxy hot path).
+		if st.GetExtraInfo()[merr.InputErrorFlagKey] == "true" {
+			return metrics.FailInputLabel
+		}
+		return metrics.FailSystemLabel
+	}
+
+	// No usable response status: err is the interceptor-level outcome (context
+	// cancellation, flow control, transport issues, auth/privilege rejection)
+	// — the request was rejected around processing. Classify merr first: a
+	// merr error has no GRPCStatus(), so status.Code(err) degrades to
+	// codes.Unknown and would misbucket user input errors as system
+	// rejections. The auth/privilege interceptors deliberately return raw gRPC
+	// codes (not merr, to keep SDK retry behavior correct); those are the
+	// caller's fault, so bucket them as a user-side rejection. Everything else
+	// is a system-side rejection.
+	if err != nil {
+		// Client cancellation is neither party's failure; don't count it as a
+		// system rejection.
+		if errors.Is(err, context.Canceled) {
+			return metrics.CancelLabel
+		}
+		if merr.GetErrorType(err) == merr.InputError {
+			return metrics.RejectedUserLabel
+		}
+		switch status.Code(err) {
+		case codes.Unauthenticated, codes.PermissionDenied, codes.InvalidArgument:
+			return metrics.RejectedUserLabel
+		default:
+			return metrics.RejectedSystemLabel
+		}
 	}
 	return metrics.SuccessLabel
 }

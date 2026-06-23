@@ -155,7 +155,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.collectionName = collectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil { // err is not nil if collection not exists
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 
 	t.DbID = 0 // todo
@@ -181,7 +181,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
-		return errors.New("not support manually specifying the partition names if partition key mode is used")
+		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
 	if t.mustUsePartitionKey && !t.partitionKeyMode {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("must use partition key in the search request " +
@@ -207,7 +207,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	if t.GetIsAdvanced() {
 		if len(t.request.GetSubReqs()) > defaultMaxSearchRequest {
-			return errors.New(fmt.Sprintf("maximum of ann search requests is %d", defaultMaxSearchRequest))
+			return merr.WrapErrParameterInvalidMsg("maximum of ann search requests is %d", defaultMaxSearchRequest)
 		}
 	}
 
@@ -291,7 +291,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL))
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
 		}
 	}
 
@@ -357,7 +357,7 @@ func (t *searchTask) checkNq(ctx context.Context) (int64, error) {
 	// Check if nq is valid:
 	// https://milvus.io/docs/limitations.md
 	if err := validateNQLimit(nq); err != nil {
-		return 0, fmt.Errorf("%s [%d] is invalid, %w", NQKey, nq, err)
+		return 0, merr.WrapErrParameterInvalidMsg("%s [%d] is invalid, %v", NQKey, nq, err)
 	}
 	return nq, nil
 }
@@ -391,7 +391,7 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *pl
 			}
 			queryInfo.MaterializedViewInvolved = true
 		} else {
-			return errors.New("partition key field data type is not supported in materialized view")
+			return merr.WrapErrParameterInvalidMsg("partition key field data type is not supported in materialized view")
 		}
 	}
 	return nil
@@ -655,7 +655,9 @@ func (t *searchTask) fillResult() {
 
 func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(placeholder, pb)
+	if err := proto.Unmarshal(placeholder, pb); err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("failed to unmarshal BM25 search placeholder group: %v", err)
+	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
@@ -663,7 +665,7 @@ func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 
 	holder := pb.Placeholders[0]
 	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String())
 	}
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
@@ -902,11 +904,11 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, nil, 0, false, errors.New(AnnsFieldKey + " not found in schema")
+			return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg(AnnsFieldKey + " not found in schema")
 		}
 
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return nil, nil, 0, false, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
+			return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("multiple anns_fields exist, please specify a anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
 	}
@@ -921,7 +923,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
 	if searchInfo.planInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
-		return nil, nil, 0, false, errors.New("not support search_group_by operation based on binary vector column")
+		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("not support search_group_by operation based on binary vector column")
 	}
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
@@ -1228,7 +1230,7 @@ func (t *searchTask) collectSearchResults(ctx context.Context) ([]*internalpb.Se
 	select {
 	case <-t.TraceCtx().Done():
 		log.Ctx(ctx).Warn("search task wait to finish timeout!")
-		return nil, fmt.Errorf("search task wait to finish timeout, msgID=%d", t.ID())
+		return nil, merr.Wrapf(t.TraceCtx().Err(), "search task wait to finish timeout, msgID=%d", t.ID())
 	default:
 		toReduceResults := make([]*internalpb.SearchResults, 0)
 		log.Ctx(ctx).Debug("all searches are finished or canceled")

@@ -32,6 +32,8 @@ class Base:
     field_schema_wrap = None
     database_wrap = None
     tear_down_collection_names = []
+    tear_down_role_names = []
+    tear_down_user_names = []
     resource_group_list = []
     async_milvus_client_wrap = None
     skip_connection = False

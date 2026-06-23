@@ -27,7 +27,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
@@ -93,7 +92,7 @@ func (w *timeoutResponseRecorder) Write(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
-		return 0, errors.New("response writer closed")
+		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
 	}
 	if !w.written() {
 		w.size = 0
@@ -107,7 +106,7 @@ func (w *timeoutResponseRecorder) WriteString(s string) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
-		return 0, errors.New("response writer closed")
+		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
 	}
 	if !w.written() {
 		w.size = 0
@@ -161,7 +160,7 @@ func (w *timeoutResponseRecorder) Written() bool {
 func (w *timeoutResponseRecorder) Flush() {}
 
 func (w *timeoutResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return nil, nil, errors.New("response writer does not support hijack")
+	return nil, nil, merr.WrapErrServiceInternalMsg("response writer does not support hijack")
 }
 
 func (w *timeoutResponseRecorder) CloseNotify() <-chan bool {
@@ -176,7 +175,7 @@ func (w *timeoutResponseRecorder) CommitTo(realWriter gin.ResponseWriter) error 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
-		return errors.New("response writer closed")
+		return merr.WrapErrServiceInternalMsg("response writer closed")
 	}
 
 	dst := realWriter.Header()

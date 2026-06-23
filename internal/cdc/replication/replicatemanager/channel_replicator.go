@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -202,7 +203,7 @@ func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoi
 	}
 	replicateInfo, err := r.targetClient.GetReplicateInfo(ctx, req)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get replicate info")
+		return nil, merr.Wrap(err, "failed to get replicate info")
 	}
 
 	checkpoint := replicateInfo.GetCheckpoint()

@@ -513,8 +513,8 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name2, default_dim, consistency_level="Bounded")
         
         # 4. try to rename collection2 to alias name
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"cannot rename collection to an existing alias: {alias_name}"}
+        error = {ct.err_code: 1601,
+                 ct.err_msg: "alias and collection name conflict"}
         self.rename_collection(client, collection_name2, alias_name,
                                check_task=CheckTasks.err_res,
                                check_items=error)

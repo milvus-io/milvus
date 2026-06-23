@@ -1,9 +1,9 @@
 package planparserv2
 
 import (
-	"fmt"
-
 	"github.com/antlr4-go/antlr/v4"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type errorListener interface {
@@ -17,7 +17,7 @@ type errorListenerImpl struct {
 }
 
 func (l *errorListenerImpl) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
-	l.err = fmt.Errorf("line %d:%d %s", line, column, msg)
+	l.err = merr.WrapErrQueryPlanMsg("line %d:%d %s", line, column, msg)
 }
 
 func (l *errorListenerImpl) Error() error {

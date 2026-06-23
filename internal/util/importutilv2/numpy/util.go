@@ -174,12 +174,12 @@ func stringLen(dtype string) (int, bool, error) {
 		return v, utf, nil
 	}
 
-	return 0, false, merr.WrapErrImportFailed(fmt.Sprintf("dtype '%s' of numpy file is not varchar data type", dtype))
+	return 0, false, merr.WrapErrImportFailedMsg("dtype '%s' of numpy file is not varchar data type", dtype)
 }
 
 func decodeUtf32(src []byte, order binary.ByteOrder) (string, error) {
 	if len(src)%4 != 0 {
-		return "", merr.WrapErrImportFailed(fmt.Sprintf("invalid utf32 bytes length %d, the byte array length should be multiple of 4", len(src)))
+		return "", merr.WrapErrImportFailedMsg("invalid utf32 bytes length %d, the byte array length should be multiple of 4", len(src))
 	}
 
 	var str string
@@ -208,7 +208,7 @@ func decodeUtf32(src []byte, order binary.ByteOrder) (string, error) {
 				decoder := unicode.UTF16(uOrder, unicode.IgnoreBOM).NewDecoder()
 				res, err := decoder.Bytes(src[lowbytesPosition : lowbytesPosition+2])
 				if err != nil {
-					return "", merr.WrapErrImportFailed(fmt.Sprintf("failed to decode utf32 binary bytes, error: %v", err))
+					return "", merr.WrapErrImportFailedMsg("failed to decode utf32 binary bytes, error: %v", err)
 				}
 				str += string(res)
 			}
@@ -225,7 +225,7 @@ func decodeUtf32(src []byte, order binary.ByteOrder) (string, error) {
 			utf8Code := make([]byte, 4)
 			utf8.EncodeRune(utf8Code, r)
 			if r == utf8.RuneError {
-				return "", merr.WrapErrImportFailed(fmt.Sprintf("failed to convert 4 bytes unicode %d to utf8 rune", x))
+				return "", merr.WrapErrImportFailedMsg("failed to convert 4 bytes unicode %d to utf8 rune", x)
 			}
 			str += string(utf8Code)
 		}
@@ -261,30 +261,30 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 			// Note: JSON field and VARCHAR field are using string type numpy
 			return schemapb.DataType_VarChar, nil
 		}
-		return schemapb.DataType_None, fmt.Errorf("the numpy file dtype '%s' is not supported", typeStr)
+		return schemapb.DataType_None, merr.WrapErrParameterInvalidMsg("the numpy file dtype '%s' is not supported", typeStr)
 	}
 }
 
 func wrapElementTypeError(eleType schemapb.DataType, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected element type '%s' for field '%s', got type '%s'",
-		field.GetDataType().String(), field.GetName(), eleType.String()))
+	return merr.WrapErrImportFailedMsg("expected element type '%s' for field '%s', got type '%s'",
+		field.GetDataType().String(), field.GetName(), eleType.String())
 }
 
 func wrapDimError(actualDim int, expectDim int, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected dim '%d' for %s field '%s', got dim '%d'",
-		expectDim, field.GetDataType().String(), field.GetName(), actualDim))
+	return merr.WrapErrImportFailedMsg("expected dim '%d' for %s field '%s', got dim '%d'",
+		expectDim, field.GetDataType().String(), field.GetName(), actualDim)
 }
 
 func wrapShapeError(actualShape int, expectShape int, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected shape '%d' for %s field '%s', got shape '%d'",
-		expectShape, field.GetDataType().String(), field.GetName(), actualShape))
+	return merr.WrapErrImportFailedMsg("expected shape '%d' for %s field '%s', got shape '%d'",
+		expectShape, field.GetDataType().String(), field.GetName(), actualShape)
 }
 
 func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int) error {
 	elementType, err := convertNumpyType(npyReader.Header.Descr.Type)
 	if err != nil {
-		return merr.WrapErrImportFailed(fmt.Sprintf("unexpected numpy header for field '%s': '%s'",
-			field.GetName(), err.Error()))
+		return merr.WrapErrImportFailedMsg("unexpected numpy header for field '%s': '%s'",
+			field.GetName(), err.Error())
 	}
 	shape := npyReader.Header.Descr.Shape
 
@@ -338,7 +338,7 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 			return wrapShapeError(len(shape), 1, field)
 		}
 	case schemapb.DataType_None, schemapb.DataType_SparseFloatVector, schemapb.DataType_Array:
-		return merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", field.GetDataType().String()))
+		return merr.WrapErrImportFailedMsg("unsupported data type: %s", field.GetDataType().String())
 
 	default:
 		if elementType != field.GetDataType() {

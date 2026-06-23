@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/tls"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -52,7 +52,7 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 	// Build TLS config from per-cluster paramtable config.
 	tlsConfig, err := buildCDCTLSConfig(cluster.GetClusterId())
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to build CDC TLS config")
+		return nil, merr.Wrap(err, "failed to build CDC TLS config")
 	}
 	if tlsConfig != nil {
 		config.WithTLSConfig(tlsConfig)
@@ -67,7 +67,7 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 
 	cli, err := milvusclient.New(ctx, config)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create milvus client")
+		return nil, merr.Wrap(err, "failed to create milvus client")
 	}
 	return cli, nil
 }

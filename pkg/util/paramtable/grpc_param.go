@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -616,7 +617,7 @@ func (p *InternalTLSConfig) GetClientCreds(ctx context.Context) (credentials.Tra
 	creds, err := credentials.NewClientTLSFromFile(caPemPath, sni)
 	if err != nil {
 		log.Ctx(ctx).Error("Failed to create internal TLS credentials", zap.Error(err))
-		return nil, fmt.Errorf("failed to create internal TLS credentials: %w", err)
+		return nil, merr.Wrap(err, "failed to create internal TLS credentials")
 	}
 	return creds, nil
 }

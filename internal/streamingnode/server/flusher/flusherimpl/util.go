@@ -89,7 +89,7 @@ func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string
 			return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 		}
 		return nil
-	}, retry.AttemptAlways())
+	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 	return resp, err
 }
 

@@ -17,7 +17,6 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -220,7 +219,7 @@ func (s *cSegmentImpl) Insert(ctx context.Context, request *InsertRequest) (*Ins
 
 	insertRecordBlob, err := proto.Marshal(request.Record)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal insert record: %s", err)
+		return nil, merr.Wrap(err, "failed to marshal insert record")
 	}
 
 	numOfRow := len(request.RowIDs)
@@ -262,7 +261,7 @@ func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*Del
 
 	dataBlob, err := proto.Marshal(ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ids: %s", err)
+		return nil, merr.Wrap(err, "failed to marshal ids")
 	}
 	status := C.Delete(s.ptr,
 		cSize,
@@ -283,7 +282,7 @@ func (s *cSegmentImpl) LoadFieldData(ctx context.Context, request *LoadFieldData
 
 	status := C.LoadFieldData(s.ptr, creq.cLoadFieldDataInfo)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "failed to load field data")
+		return nil, merr.Wrap(err, "failed to load field data")
 	}
 	return &LoadFieldDataResult{}, nil
 }
@@ -298,7 +297,7 @@ func (s *cSegmentImpl) AddFieldDataInfo(ctx context.Context, request *AddFieldDa
 
 	status := C.AddFieldDataInfoForSealed(s.ptr, creq.cLoadFieldDataInfo)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "failed to add field data info")
+		return nil, merr.Wrap(err, "failed to add field data info")
 	}
 	return &AddFieldDataInfoResult{}, nil
 }
@@ -307,7 +306,7 @@ func (s *cSegmentImpl) AddFieldDataInfo(ctx context.Context, request *AddFieldDa
 func (s *cSegmentImpl) FinishLoad() error {
 	status := C.FinishLoad(s.ptr)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to finish load segment")
+		return merr.Wrap(err, "failed to finish load segment")
 	}
 	return nil
 }
@@ -360,7 +359,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
 	status := C.DropSealedSegmentIndex(s.ptr, C.int64_t(fieldID))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to drop index")
+		return merr.Wrap(err, "failed to drop index")
 	}
 	return nil
 }
@@ -368,7 +367,7 @@ func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
 func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error {
 	status := C.DropSealedSegmentJSONIndex(s.ptr, C.int64_t(fieldID), C.CString(nestedPath))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to drop json index")
+		return merr.Wrap(err, "failed to drop json index")
 	}
 	return nil
 }

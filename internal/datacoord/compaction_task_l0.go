@@ -316,7 +316,7 @@ func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.Com
 	for _, info := range flushedSegments {
 		// Sealed is unexpected, fail fast
 		if info.GetState() == commonpb.SegmentState_Sealed {
-			return nil, nil, fmt.Errorf("L0 compaction selected invalid sealed segment %d", info.GetID())
+			return nil, nil, merr.WrapErrServiceInternalMsg("L0 compaction selected invalid sealed segment %d", info.GetID())
 		}
 
 		sealedSegBinlogs = append(sealedSegBinlogs, &datapb.CompactionSegmentBinlogs{

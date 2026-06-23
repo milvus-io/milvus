@@ -236,8 +236,7 @@ class TestInsertParams(TestcaseBase):
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb, dim=dim)
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"the dim ({dim}) of field data(binary_vector) is not equal to schema dim "
-            f"({ct.default_dim}): invalid parameter[expected={ct.default_dim}][actual={dim}]",
+            ct.err_msg: f"of all bits should divide the dim({ct.default_dim}): invalid parameter",
         }
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -2144,7 +2143,7 @@ class TestUpsertInvalid(TestcaseBase):
         data = cf.gen_default_binary_dataframe_data(dim=dim)[0]
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"the dim ({dim}) of field data(binary_vector) is not equal to schema dim ({ct.default_dim})",
+            ct.err_msg: f"of all bits should divide the dim({ct.default_dim}): invalid parameter",
         }
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
