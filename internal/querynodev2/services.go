@@ -594,6 +594,8 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 		return merr.Status(err), nil
 	}
 
+	// Only reopen segments already loaded on this QueryNode. Load-time refreshes stay
+	// on the delegator publish path so the service gate remains in one place.
 	infos := node.collectLoadedSealedSegmentLoadInfos(req.GetCollectionID())
 	if len(infos) == 0 {
 		return merr.Success(), nil
