@@ -34,7 +34,7 @@ type lazyWithCore struct {
 
 var _ zapcore.Core = (*lazyWithCore)(nil)
 
-func NewLazyWith(core zapcore.Core, fields []zapcore.Field) zapcore.Core {
+func newLazyWith(core zapcore.Core, fields []zapcore.Field) zapcore.Core {
 	d := lazyWithCore{fields: fields}
 	d.corePtr.Store(&core)
 	return &d
@@ -45,7 +45,7 @@ func withLazy(logger *zap.Logger, fields []Field) *zap.Logger {
 		return logger
 	}
 	return logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
-		return NewLazyWith(core, fields)
+		return newLazyWith(core, fields)
 	}))
 }
 
