@@ -1015,8 +1015,12 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                segment_id_);
 
     auto enable_mmap = !mmap_filepath_.empty();
-    auto column_group_info =
-        FieldDataInfo(column_group_id, field_id_, num_rows, mmap_filepath_);
+    auto column_group_info = FieldDataInfo(column_group_id,
+                                           field_id_,
+                                           num_rows,
+                                           mmap_filepath_,
+                                           false,
+                                           shard_);
     LOG_INFO(
         "loads column group {} with num_rows {} for segment "
         "{}",
@@ -1122,6 +1126,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     load_info.index_size = index_size;
     load_info.load_priority = load_priority_;
     load_info.warmup_policy = warmup_policy;
+    load_info.shard = shard_;
     std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
         translator = std::make_unique<
             segcore::storagev1translator::BsonInvertedIndexTranslator>(
@@ -1156,6 +1161,8 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LOG_INFO("load json stats for segment {} with load priority: {}",
              segment_id_,
              static_cast<int>(load_priority_));
+    shard_ = GetValueFromConfig<std::string>(config, JSON_STATS_CACHE_SHARD_KEY)
+                 .value_or("");
 
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");

@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -47,7 +48,9 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
             milvus::segcore::getCacheWarmupPolicy(load_info_.warmup_policy,
                                                   /* is_vector */ false,
                                                   /* is_index */ true),
-            /* support_eviction */ true) {
+            /* support_eviction */ true,
+            std::nullopt,
+            load_info_.shard) {
 }
 
 size_t

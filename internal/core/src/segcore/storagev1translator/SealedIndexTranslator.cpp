@@ -1,6 +1,7 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 
 #include <filesystem>
+#include <optional>
 #include <utility>
 
 #include "cachinglayer/LoadingOverheadTracker.h"
@@ -75,7 +76,9 @@ SealedIndexTranslator::SealedIndexTranslator(
           // currently only vector index is possible to support lazy load
           !(IsVectorDataType(load_index_info->field_type) &&
             knowhere::IndexFactory::Instance().FeatureCheck(
-                index_info_.index_type, knowhere::feature::LAZY_LOAD))) {
+                index_info_.index_type, knowhere::feature::LAZY_LOAD)),
+          std::nullopt,
+          load_index_info->shard) {
     load_resource_request_ = EstimateLoadResource();
 
     auto scalar_version =

@@ -1001,6 +1001,8 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
+		LoadPriority:   s.LoadInfo().GetPriority(),
+		Shard:          s.LoadInfo().GetInsertChannel(),
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
@@ -1177,6 +1179,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		mlog.Warn(ctx, "fail to append load index info", mlog.Err(err))
 		return err
 	}
+	loadIndexInfo.setShard(loadInfo.GetInsertChannel())
 	return f(loadIndexInfo)
 }
 

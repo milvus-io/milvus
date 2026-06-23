@@ -126,7 +126,8 @@ GroupChunkTranslator::GroupChunkTranslator(
                     return false;
                 }(),
                 /* is_index */ false),
-            /* support_eviction */ true),
+            /* support_eviction */ true,
+            column_group_info.shard),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
       has_array_field_(std::any_of(field_metas_.begin(),

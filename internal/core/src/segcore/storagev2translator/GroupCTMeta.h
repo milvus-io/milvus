@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -94,12 +96,15 @@ struct GroupCTMeta : public milvus::cachinglayer::Meta {
                 milvus::cachinglayer::CellIdMappingMode cell_id_mapping_mode,
                 milvus::cachinglayer::CellDataType cell_data_type,
                 CacheWarmupPolicy cache_warmup_policy,
-                bool support_eviction)
+                bool support_eviction,
+                std::string shard = "")
         : milvus::cachinglayer::Meta(storage_type,
                                      cell_id_mapping_mode,
                                      cell_data_type,
                                      cache_warmup_policy,
-                                     support_eviction),
+                                     support_eviction,
+                                     std::nullopt,
+                                     std::move(shard)),
           num_fields_(num_fields),
           total_row_groups_(0) {
     }

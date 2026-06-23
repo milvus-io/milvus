@@ -995,8 +995,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
         auto insert_files = info.insert_files;
         storage::SortByPath(insert_files);
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-        auto column_group_info =
-            FieldDataInfo(column_group_id.get(), num_rows, "");
+        auto column_group_info = FieldDataInfo(column_group_id.get(),
+                                               num_rows,
+                                               "",
+                                               false,
+                                               infos.shard);
         column_group_info.arrow_reader_channel->set_capacity(parallel_degree);
 
         LOG_INFO(
@@ -2509,6 +2512,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     // Set load priority
     field_data_info.load_priority = load_info_.priority();
+    field_data_info.shard = load_info_.insert_channel();
 
     auto manifest_path = load_info_.manifest_path();
     if (manifest_path != "") {
