@@ -1064,7 +1064,7 @@ func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) 
 	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	defer pool.AssertSize(t, 0)
 
-	// Simulate three per-segment result sets produced after delegator reduced
+	// Simulate three per-segment result sets produced after the delegator reduced
 	// plan topK to 2. The worker can still assemble 5 rows from all segment
 	// candidates, matching the original request topK.
 	segDFs := []*chain.DataFrame{
@@ -1077,6 +1077,25 @@ func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) 
 			df.Release()
 		}
 	}()
+
+	schema := mock_segcore.GenTestCollectionSchema("test-reduced-plan-topk", schemapb.DataType_Int64, true)
+	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
+	manager := segments.NewManager()
+	require.NoError(t, manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: testCollectionID,
+		PartitionIDs: []int64{testPartitionID},
+	}))
+	collection := manager.Collection.Get(testCollectionID)
+	require.NotNil(t, collection)
+	defer manager.Collection.Unref(collection.ID(), 1)
+
+	reducedPlanReq, err := mock_segcore.GenSearchPlanAndRequestsWithTopK(
+		collection.GetCCollection(), []int64{1, 2, 3}, 1, 2)
+	require.NoError(t, err)
+	defer reducedPlanReq.Delete()
+	reducedPlan := reducedPlanReq.Plan()
+	require.Equal(t, int64(2), reducedPlan.GetTopK())
 
 	mocker := mockey.Mock(lateMaterializeOutputFields).To(
 		func(ctx context.Context, results []*segments.SearchResult, plan *segcore.SearchPlan, sources [][]segmentSource, searchResultData *schemapb.SearchResultData) error {
@@ -1094,7 +1113,7 @@ func TestExecuteGoReduceFastPathUsesOriginTopKWhenPlanTopKReduced(t *testing.T) 
 	}
 
 	tr := timerecord.NewTimeRecorder("reduced-plan-topk-test")
-	require.NoError(t, task.executeGoReduceFastPath(segDFs, nil, nil, "IP", tr, 0, 6, nil))
+	require.NoError(t, task.executeGoReduceFastPath(segDFs, nil, reducedPlan, "IP", tr, 0, 6, nil))
 
 	require.NotNil(t, task.result)
 	assert.Equal(t, int64(1), task.result.NumQueries)
