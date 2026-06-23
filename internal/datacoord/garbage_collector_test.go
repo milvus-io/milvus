@@ -2597,6 +2597,30 @@ func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *tes
 	mu.Unlock()
 }
 
+func TestGarbageCollector_recycleDroppedSegments_SkipsSplittingChannel(t *testing.T) {
+	ctx := context.Background()
+	m, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli:                cm,
+		dropTolerance:      0,
+		isChannelSplitting: func(channel string) bool { return channel == segment.GetInsertChannel() },
+	})
+
+	// the channel is splitting, so the dropped segment is kept.
+	gc.recycleDroppedSegments(ctx, nil)
+	assert.NotNil(t, m.GetSegment(ctx, segment.ID), "a dropped segment of a splitting channel is not GCed")
+
+	// once the split finishes, the same segment is collected on the next round.
+	gc.option.isChannelSplitting = func(channel string) bool { return false }
+	gc.recycleDroppedSegments(ctx, nil)
+	assert.Nil(t, m.GetSegment(ctx, segment.ID), "the segment is GCed once its channel stops splitting")
+}
+
 func TestGarbageCollector_recycleDroppedSegments_FileDeleteFailureKeepsMeta(t *testing.T) {
 	ctx := context.Background()
 	m, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)

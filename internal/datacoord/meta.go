@@ -172,6 +172,27 @@ type collectionInfo struct {
 	DatabaseName   string
 	DatabaseID     int64
 	VChannelNames  []string
+	// RoutingMode and ShardInfos carry the collection's authoritative routing
+	// topology, read from DescribeCollection. ShardInfos is keyed by vchannel.
+	// They are needed by the shard split planner (the source shard's real key
+	// range) and the routing commit (the other shards' ranges).
+	RoutingMode schemapb.RoutingMode
+	ShardInfos  map[string]*schemapb.CollectionShardInfo
+}
+
+// buildShardInfoMap zips the parallel vchannel and shard-info arrays of a
+// DescribeCollection response into a map keyed by vchannel.
+func buildShardInfoMap(vchannels []string, shardInfos []*schemapb.CollectionShardInfo) map[string]*schemapb.CollectionShardInfo {
+	if len(shardInfos) == 0 {
+		return nil
+	}
+	out := make(map[string]*schemapb.CollectionShardInfo, len(vchannels))
+	for i, vchannel := range vchannels {
+		if i < len(shardInfos) {
+			out[vchannel] = shardInfos[i]
+		}
+	}
+	return out
 }
 
 const (
@@ -466,6 +487,8 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 				DatabaseName:   descResp.GetDbName(),
 				DatabaseID:     descResp.GetDbId(),
 				VChannelNames:  descResp.GetVirtualChannelNames(),
+				RoutingMode:    descResp.GetRoutingMode(),
+				ShardInfos:     buildShardInfoMap(descResp.GetVirtualChannelNames(), descResp.GetShardInfos()),
 			}
 			m.AddCollection(collection)
 		}
@@ -523,6 +546,8 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		DatabaseName:   coll.DatabaseName,
 		DatabaseID:     coll.DatabaseID,
 		VChannelNames:  coll.VChannelNames,
+		RoutingMode:    coll.RoutingMode,
+		ShardInfos:     coll.ShardInfos,
 	}
 
 	return cloneColl
@@ -1009,6 +1034,26 @@ func UpdateStorageVersionOperator(segmentID int64, version int64) UpdateOperator
 		}
 
 		segment.StorageVersion = version
+		return true
+	}
+}
+
+// UpdateInsertChannelOperator relabels a segment to another vchannel.
+// It is used by shard split redistribution: the segment keeps its ID and
+// data, only the shard ownership changes.
+func UpdateInsertChannelOperator(segmentID int64, channel string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update insert channel failed - segment not found",
+				zap.Int64("segmentID", segmentID),
+				zap.String("channel", channel))
+			return false
+		}
+		if segment.GetInsertChannel() == channel {
+			return false
+		}
+		segment.InsertChannel = channel
 		return true
 	}
 }

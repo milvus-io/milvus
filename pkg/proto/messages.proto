@@ -68,6 +68,11 @@ enum MessageType {
     DropSnapshotsByCollection    = 44;
     CommitImport                 = 45;
     RollbackImport               = 46;
+    SplitShard                   = 47;
+    // CreateVChannel is the genesis entry of a shard split target vchannel.
+    // It carries BarrierTimeTick = T_switch, so the new WAL is born strictly
+    // after the fence and creation doubles as activation.
+    CreateVChannel               = 48;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -208,11 +213,69 @@ message ManualFlushMessageHeader {
     repeated int64 segment_ids   = 3; // the segment ids to be flushed, will be filled by wal shard manager.
 }
 
+// KeyRange is a byte-comparable routing key range [lower, upper).
+// The routing key encoding must be order-preserving (byte order = logical order).
+message KeyRange {
+    bytes lower = 1; // inclusive lower bound, an empty value means unbounded.
+    bytes upper = 2; // exclusive upper bound, an empty value means unbounded.
+}
+
+// SplitShardTarget describes one target shard of a shard split.
+message SplitShardTarget {
+    // the vchannel name of the target shard.
+    string vchannel = 1;
+    // the routing key range owned by the target shard after the split.
+    KeyRange key_range = 2;
+}
+
+// SplitShardMessageHeader is the header of the split shard message.
+// The message is appended to the source shard's vchannel as the write fence:
+// its time tick is T_switch, after this message the source vchannel never
+// accepts new DML messages, and the new writes of the source key range are
+// served by the target shards.
+message SplitShardMessageHeader {
+    int64 collection_id = 1;
+    // the unique split task id allocated by the coordinator,
+    // used for idempotency and split task correlation.
+    int64 split_task_id = 2;
+    // the target shards that the source shard splits into.
+    // the key ranges of all targets are disjoint and their union is exactly
+    // the key range owned by the source shard.
+    repeated SplitShardTarget targets = 3;
+    // the growing segments the source streamingnode auto-flushed while
+    // processing this message (embedded by the handler, the same way the
+    // AlterCollection schema-change path embeds its flushed segments).
+    repeated int64 flushed_segment_ids = 4;
+}
+
+// SplitShardMessageBody is the body of the split shard message.
+message SplitShardMessageBody {
+}
+
 // CreateCollectionMessageHeader is the header of create collection message.
 message CreateCollectionMessageHeader {
     int64 collection_id          = 1;
     repeated int64 partition_ids = 2;
     int64 db_id                  = 3;
+}
+
+// CreateVChannelMessageHeader is the header of the create-vchannel message,
+// the genesis entry of a shard split target vchannel. It reuses the
+// CreateCollection body shape (schema), so consumers share the existing
+// schema parser, and adds the split correlation and the key range the target
+// owns. The append carries BarrierTimeTick = T_switch, so the new WAL is born
+// strictly after the fence and creation doubles as activation.
+message CreateVChannelMessageHeader {
+    int64 collection_id          = 1;
+    repeated int64 partition_ids = 2;
+    int64 db_id                  = 3;
+    // the unique split task id allocated by the coordinator, for idempotency
+    // and split task correlation.
+    int64 split_task_id          = 4;
+    // the fenced source vchannel of the split.
+    string split_source_vchannel = 5;
+    // the routing key range this target vchannel owns.
+    KeyRange key_range           = 6;
 }
 
 // DropCollectionMessageHeader is the header of drop collection message.
@@ -309,6 +372,14 @@ message AlterCollectionMessageUpdates {
     common.ConsistencyLevel consistency_level = 6; // consistency level should be updated.
     repeated common.KeyValuePair properties   = 7; // collection properties should be updated.
     AlterLoadConfigOfAlterCollection alter_load_config = 8; // alter load config of alter collection.
+    // Shard-split routing commit: the full post-split vchannel topology and routing
+    // facts, applied atomically under the shard-split routing field masks. The
+    // virtual/physical channel lists are the complete new lists (existing shards plus
+    // the split targets), and shard_infos is parallel to virtual_channel_names.
+    repeated string virtual_channel_names      = 9;
+    repeated string physical_channel_names     = 10;
+    repeated schema.CollectionShardInfo shard_infos = 11;
+    schema.RoutingMode routing_mode            = 12; // hash for legacy, range after a split.
 }
 
 // AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.

@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -1241,6 +1242,19 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp
 	resp.UpdateTimestampStr = strconv.FormatUint(collInfo.UpdateTimestamp, 10)
+
+	// Routing facts, parallel to virtual_channel_names so consumers (the proxy
+	// router, datacoord) read the topology and the schema in one response.
+	resp.RoutingMode = collInfo.RoutingMode
+	shardInfos := make([]*schemapb.CollectionShardInfo, len(collInfo.VirtualChannelNames))
+	for i, vchannel := range collInfo.VirtualChannelNames {
+		info := &schemapb.CollectionShardInfo{}
+		if shard, ok := collInfo.ShardInfos[vchannel]; ok {
+			info = shard.ToPB()
+		}
+		shardInfos[i] = info
+	}
+	resp.ShardInfos = shardInfos
 	return resp
 }
 
@@ -1457,6 +1471,44 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Info("done to alter collection")
+	return merr.Success(), nil
+}
+
+// CommitShardSplitRouting commits a shard-split routing change into the
+// collection meta as a DDL: it grows the vchannel list with the split targets
+// and sets every shard's routing key range and lifecycle state, all atomically.
+// Called by datacoord at the routing-commit and at the adoption flip of a split.
+// The call is idempotent by shard state: a retry whose shard states already
+// match the meta is a no-op.
+func (c *Core) CommitShardSplitRouting(ctx context.Context, in *rootcoordpb.CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("CommitShardSplitRouting")
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()),
+		zap.Int64("collectionID", in.GetCollectionId()),
+	)
+	log.Info("received request to commit shard split routing")
+
+	if err := c.broadcastCommitShardSplitRouting(ctx, in); err != nil {
+		if errors.Is(err, errIgnoredAlterCollection) {
+			log.Info("shard split routing already committed at this version, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
+		log.Warn("failed to commit shard split routing", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("CommitShardSplitRouting").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info("done to commit shard split routing")
 	return merr.Success(), nil
 }
 

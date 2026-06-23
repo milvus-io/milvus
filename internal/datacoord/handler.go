@@ -130,6 +130,23 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 	}
 }
 
+// getRealSegmentsForSplitFamily returns the channel's segments, and — when
+// the channel is the source of an active shard split — the segments already
+// relabeled to the split targets (including the ones flushed from the
+// target WALs during the window). This merged recovery view guarantees a
+// target refresh never sees a segment disappear mid-window, so no release
+// task can be produced against a segment still serving on the source
+// delegator.
+func (h *ServerHandler) getRealSegmentsForSplitFamily(channelName string) []*SegmentInfo {
+	segments := h.s.meta.GetRealSegmentsForChannel(channelName)
+	if manager := h.s.shardSplitManager; manager != nil {
+		for _, target := range manager.SplitTargetsOfSource(channelName) {
+			segments = append(segments, h.s.meta.GetRealSegmentsForChannel(target)...)
+		}
+	}
+	return segments
+}
+
 // GetQueryVChanPositions gets vchannel latest positions with provided dml channel names for QueryCoord.
 // unflushend segmentIDs ---> L1, growing segments
 // flushend segmentIDs   ---> L1&L2, flushed segments, including indexed or unindexed
@@ -160,7 +177,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	)
 
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
+	segments := h.getRealSegmentsForSplitFamily(channel.GetName())
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)

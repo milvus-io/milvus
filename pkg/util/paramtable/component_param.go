@@ -2095,6 +2095,7 @@ type proxyConfig struct {
 	PartitionNameRegexp               ParamItem `refreshable:"true"`
 	MustUsePartitionKey               ParamItem `refreshable:"true"`
 	SkipAutoIDCheck                   ParamItem `refreshable:"true"`
+	EnableRoutingTable                ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck             ParamItem `refreshable:"true"`
 	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
 	MaxVarCharLength                  ParamItem `refreshable:"false"`
@@ -2563,6 +2564,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip auto id check when inserting data",
 	}
 	p.SkipAutoIDCheck.Init(base.mgr)
+
+	p.EnableRoutingTable = ParamItem{
+		Key:          "proxy.enableRoutingTable",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "kill-switch for shard-split routing abstraction; when false, fall back to legacy HashPK2Channels",
+		Export:       false,
+	}
+	p.EnableRoutingTable.Init(base.mgr)
 
 	p.SkipPartitionKeyCheck = ParamItem{
 		Key:          "proxy.skipPartitionKeyCheck",
@@ -5113,8 +5123,18 @@ type dataCoordConfig struct {
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
-	SegmentMaxSize                 ParamItem `refreshable:"false"`
-	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
+	SegmentMaxSize     ParamItem `refreshable:"false"`
+	DiskSegmentMaxSize ParamItem `refreshable:"true"`
+
+	// shard split
+	ShardSplitEnable               ParamItem `refreshable:"true"`
+	ShardSplitCheckInterval        ParamItem `refreshable:"true"`
+	ShardSplitMaxShardSize         ParamItem `refreshable:"true"`
+	ShardSplitMaxShardRows         ParamItem `refreshable:"true"`
+	ShardSplitMaxNamespaceCount    ParamItem `refreshable:"true"`
+	ShardSplitMaxConcurrentTasks   ParamItem `refreshable:"true"`
+	ShardSplitRelabelBatchSize     ParamItem `refreshable:"true"`
+	ShardSplitTaskRetention        ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
@@ -5487,6 +5507,79 @@ Compaction merges small-size segments into a large segment, and clears the entit
 		Export: true,
 	}
 	p.EnableCompaction.Init(base.mgr)
+
+	p.ShardSplitEnable = ParamItem{
+		Key:          "dataCoord.shardSplit.enable",
+		Version:      "2.7.0",
+		DefaultValue: "false",
+		Doc: `Master switch of online shard split. It gates the split trigger (automatic and manual);
+disabling it stops new split tasks but never interrupts a task already past the write fence.`,
+		Export: true,
+	}
+	p.ShardSplitEnable.Init(base.mgr)
+
+	p.ShardSplitCheckInterval = ParamItem{
+		Key:          "dataCoord.shardSplit.checkInterval",
+		Version:      "2.7.0",
+		DefaultValue: "3600",
+		Doc:          "The interval in seconds the shard split trigger inspects the per-shard statistics.",
+		Export:       true,
+	}
+	p.ShardSplitCheckInterval.Init(base.mgr)
+
+	p.ShardSplitMaxShardSize = ParamItem{
+		Key:          "dataCoord.shardSplit.maxShardSize",
+		Version:      "2.7.0",
+		DefaultValue: "2048",
+		Doc:          "The data size of one shard that triggers a split, unit: GB.",
+		Export:       true,
+	}
+	p.ShardSplitMaxShardSize.Init(base.mgr)
+
+	p.ShardSplitMaxShardRows = ParamItem{
+		Key:          "dataCoord.shardSplit.maxShardRows",
+		Version:      "2.7.0",
+		DefaultValue: "500000000",
+		Doc:          "The row count of one shard that triggers a split.",
+		Export:       true,
+	}
+	p.ShardSplitMaxShardRows.Init(base.mgr)
+
+	p.ShardSplitMaxNamespaceCount = ParamItem{
+		Key:          "dataCoord.shardSplit.maxNamespaceCount",
+		Version:      "2.7.0",
+		DefaultValue: "100000",
+		Doc:          "The namespace (partition) count of one shard that triggers a split.",
+		Export:       true,
+	}
+	p.ShardSplitMaxNamespaceCount.Init(base.mgr)
+
+	p.ShardSplitMaxConcurrentTasks = ParamItem{
+		Key:          "dataCoord.shardSplit.maxConcurrentTasks",
+		Version:      "2.7.0",
+		DefaultValue: "1",
+		Doc:          "The cluster-wide maximum number of concurrent shard split tasks.",
+		Export:       true,
+	}
+	p.ShardSplitMaxConcurrentTasks.Init(base.mgr)
+
+	p.ShardSplitRelabelBatchSize = ParamItem{
+		Key:          "dataCoord.shardSplit.relabelBatchSize",
+		Version:      "2.7.0",
+		DefaultValue: "256",
+		Doc:          "The number of segments relabeled to the target shards in one batch during shard split redistribution.",
+		Export:       true,
+	}
+	p.ShardSplitRelabelBatchSize.Init(base.mgr)
+
+	p.ShardSplitTaskRetention = ParamItem{
+		Key:          "dataCoord.shardSplit.taskRetention",
+		Version:      "2.7.0",
+		DefaultValue: "1800",
+		Doc:          "The retention in seconds a terminal (Done/Aborted) shard split task is kept before it is reaped from meta.",
+		Export:       true,
+	}
+	p.ShardSplitTaskRetention.Init(base.mgr)
 
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",

@@ -10,7 +10,8 @@
         "FieldMaskCollectionDescription": "description",
         "FieldMaskCollectionSchema": "schema",
         "FieldMaskCollectionProperties": "properties",
-        "FieldMaskCollectionConsistencyLevel": "consistency_level"
+        "FieldMaskCollectionConsistencyLevel": "consistency_level",
+        "FieldMaskCollectionShardSplitRouting": "shard_split_routing"
     },
     "ExtraExportTypes": [
         "messagespb.PartitionSegmentAssignment",
@@ -22,7 +23,9 @@
         "messagespb.AlterCollectionMessageUpdates",
         "messagespb.CacheExpirations",
         "messagespb.CacheExpiration",
-        "messagespb.LegacyProxyCollectionMetaCache"
+        "messagespb.LegacyProxyCollectionMetaCache",
+        "messagespb.SplitShardTarget",
+        "messagespb.KeyRange"
     ],
     "messageReflectInfoTable": [
         {
@@ -132,6 +135,26 @@
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeRollbackImport",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.SplitShardMessageHeader",
+                "BodyType": "messagespb.SplitShardMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeSplitShard",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreateVChannelMessageHeader",
+                "BodyType": "msgpb.CreateCollectionRequest"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreateVChannel",
                 "Version": 2
             }
         },

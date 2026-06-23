@@ -1762,3 +1762,54 @@ message HandleCommitVchannelRequest {
   // This becomes the segment's commit_timestamp for MVCC/TTL/delete correctness.
   uint64         commit_timestamp = 4;
 }
+
+// SplitShardTaskState is the state of a shard split task.
+// The task rolls forward only: before the fence (Preparing) it can be
+// aborted, after the fence it can only advance.
+enum SplitShardTaskState {
+  SplitShardTaskUnknown        = 0;
+  SplitShardTaskPreparing      = 1; // target shards allocated, before the write fence; abortable.
+  SplitShardTaskFencing        = 2; // appending the ManualFlush + SplitShard messages to the source vchannel.
+  SplitShardTaskRedistributing = 3; // window: targets initialized, relabel rounds in progress.
+  SplitShardTaskAdopting       = 4; // every segment redistributed, waiting for the adoption of the target shards.
+  SplitShardTaskDone           = 5;
+  SplitShardTaskAborted        = 6;
+}
+
+// SplitShardTaskTarget is one target shard of a shard split task.
+// The routing key range is byte-comparable, an empty bound means unbounded.
+// (datapb cannot import messages.proto, so the range is flattened here.)
+message SplitShardTaskTarget {
+  string vchannel          = 1;
+  bytes  routing_key_lower = 2;
+  bytes  routing_key_upper = 3;
+  // start_position is the marshaled consume start position (the
+  // LastConfirmedMessageID of the target's CreateVChannel append). The child
+  // delegators consume the new WAL from here. Empty until the target is created.
+  string start_position    = 4;
+}
+
+// SplitShardTask is the persisted state of a shard split task,
+// driven by the datacoord shard split manager.
+message SplitShardTask {
+  int64  task_id                       = 1;
+  int64  collection_id                 = 2;
+  string source_vchannel               = 3;
+  repeated SplitShardTaskTarget targets = 4;
+  SplitShardTaskState state            = 5;
+  // fenced is set once the SplitShard fence has been appended to the source
+  // vchannel (the append succeeded or returned already-fenced). A fenced task
+  // is forward-only and can no longer be aborted. The target vchannels are
+  // created with a freshly allocated barrier (always greater than T_switch),
+  // and what is recorded for the redistribution drain is switch_time_tick below.
+  bool fenced                          = 6;
+  uint64 start_time                    = 7; // unix seconds.
+  uint64 end_time                      = 8; // unix seconds.
+  string fail_reason                   = 9;
+  // switch_time_tick is T_switch: the time tick of the SplitShard fence
+  // message. The source shard is drained only once its channel checkpoint has
+  // reached this time tick, which proves the flusher has flushed and reported
+  // every segment the fence sealed (all data <= T_switch) to datacoord, so the
+  // redistribution cannot finish before those segments become relabelable.
+  uint64 switch_time_tick              = 10;
+}

@@ -41,20 +41,33 @@ type flusherComponents struct {
 
 // WhenCreateCollection handles the create collection message.
 func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.ImmutableCreateCollectionMessageV1) {
+	impl.spawnGenesisDataSyncService(createCollectionMsg, createCollectionMsg.Header().GetCollectionId())
+}
+
+// WhenCreateVChannel handles the create-vchannel message, the genesis of a
+// shard split target vchannel: it spawns a data sync service for the new
+// vchannel exactly as a create collection genesis does.
+func (impl *flusherComponents) WhenCreateVChannel(createVChannelMsg message.ImmutableCreateVChannelMessageV2) {
+	impl.spawnGenesisDataSyncService(createVChannelMsg, createVChannelMsg.Header().GetCollectionId())
+}
+
+// spawnGenesisDataSyncService spawns the data sync service of a freshly created
+// vchannel from its genesis message (create collection or create vchannel).
+func (impl *flusherComponents) spawnGenesisDataSyncService(genesisMsg message.ImmutableMessage, collectionID int64) {
 	// because we need to get the schema from the recovery storage, we need to observe the message at recovery storage first.
-	impl.rs.ObserveMessage(context.Background(), createCollectionMsg)
-	if _, ok := impl.dataServices[createCollectionMsg.VChannel()]; ok {
-		impl.logger.Info("the data sync service of current vchannel is built, skip it", zap.String("vchannel", createCollectionMsg.VChannel()))
+	impl.rs.ObserveMessage(context.Background(), genesisMsg)
+	if _, ok := impl.dataServices[genesisMsg.VChannel()]; ok {
+		impl.logger.Info("the data sync service of current vchannel is built, skip it", zap.String("vchannel", genesisMsg.VChannel()))
 		// May repeated consumed, so we ignore the message.
 		return
 	}
-	if createCollectionMsg.TimeTick() <= impl.recoveryCheckPointTimeTick {
+	if genesisMsg.TimeTick() <= impl.recoveryCheckPointTimeTick {
 		// It should already be recovered from the recovery storage.
-		// if it's not in recovery storage, it means the createCollection is already dropped.
+		// if it's not in recovery storage, it means the genesis is already dropped.
 		// so we can skip it.
-		impl.logger.Info("the create collection message is older than the recovery checkpoint, skip it",
-			zap.String("vchannel", createCollectionMsg.VChannel()),
-			zap.Uint64("timeTick", createCollectionMsg.TimeTick()),
+		impl.logger.Info("the vchannel genesis message is older than the recovery checkpoint, skip it",
+			zap.String("vchannel", genesisMsg.VChannel()),
+			zap.Uint64("timeTick", genesisMsg.TimeTick()),
 			zap.Uint64("recoveryCheckPointTimeTick", impl.recoveryCheckPointTimeTick))
 		return
 	}
@@ -71,19 +84,19 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 			CheckpointUpdater:  impl.cpUpdater,
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
-			SchemaManager:      newVersionedSchemaManager(createCollectionMsg.VChannel(), impl.rs),
+			SchemaManager:      newVersionedSchemaManager(genesisMsg.VChannel(), impl.rs),
 		},
 		msgChan,
 		&datapb.VchannelInfo{
-			CollectionID: createCollectionMsg.Header().GetCollectionId(),
-			ChannelName:  createCollectionMsg.VChannel(),
+			CollectionID: collectionID,
+			ChannelName:  genesisMsg.VChannel(),
 			SeekPosition: &msgpb.MsgPosition{
-				ChannelName: createCollectionMsg.VChannel(),
+				ChannelName: genesisMsg.VChannel(),
 				// from the last confirmed message id, you can read all messages which timetick is greater or equal than current message id.
-				MsgID:     adaptor.MustGetMQWrapperIDFromMessage(createCollectionMsg.LastConfirmedMessageID()).Serialize(),
+				MsgID:     adaptor.MustGetMQWrapperIDFromMessage(genesisMsg.LastConfirmedMessageID()).Serialize(),
 				MsgGroup:  "", // Not important any more.
-				Timestamp: createCollectionMsg.TimeTick(),
-				WALName:   commonpb.WALName(createCollectionMsg.WALName()),
+				Timestamp: genesisMsg.TimeTick(),
+				WALName:   commonpb.WALName(genesisMsg.WALName()),
 			},
 		},
 		func(t syncmgr.Task, err error) {
@@ -100,7 +113,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 		},
 		nil,
 	)
-	impl.addNewDataSyncService(createCollectionMsg, msgChan, ds)
+	impl.addNewDataSyncService(genesisMsg, msgChan, ds)
 }
 
 // WhenDropCollection handles the drop collection message.
@@ -141,14 +154,14 @@ func (impl *flusherComponents) broadcastToAllDataSyncService(ctx context.Context
 
 // addNewDataSyncService adds a new data sync service to the components when new collection is created.
 func (impl *flusherComponents) addNewDataSyncService(
-	createCollectionMsg message.ImmutableCreateCollectionMessageV1,
+	genesisMsg message.ImmutableMessage,
 	input chan<- *msgstream.MsgPack,
 	ds *pipeline.DataSyncService,
 ) {
-	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds, createCollectionMsg.TimeTick())
+	newDS := newDataSyncServiceWrapper(genesisMsg.VChannel(), input, ds, genesisMsg.TimeTick())
 	newDS.Start()
-	impl.dataServices[createCollectionMsg.VChannel()] = newDS
-	impl.logger.Info("create data sync service done", zap.String("vchannel", createCollectionMsg.VChannel()))
+	impl.dataServices[genesisMsg.VChannel()] = newDS
+	impl.logger.Info("create data sync service done", zap.String("vchannel", genesisMsg.VChannel()))
 }
 
 // Close release all the resources of components.

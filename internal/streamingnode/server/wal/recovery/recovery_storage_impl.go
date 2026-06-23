@@ -326,6 +326,7 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	}
 
 	if msg.VChannel() != "" && !msg.IsPChannelLevel() && msg.MessageType() != message.MessageTypeCreateCollection &&
+		msg.MessageType() != message.MessageTypeCreateVChannel &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(msg, "vchannel not found")
 	}
@@ -352,6 +353,9 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	case message.MessageTypeCreateCollection:
 		immutableMsg := message.MustAsImmutableCreateCollectionMessageV1(msg)
 		r.handleCreateCollection(immutableMsg)
+	case message.MessageTypeCreateVChannel:
+		immutableMsg := message.MustAsImmutableCreateVChannelMessageV2(msg)
+		r.handleCreateVChannel(immutableMsg)
 	case message.MessageTypeDropCollection:
 		immutableMsg := message.MustAsImmutableDropCollectionMessageV1(msg)
 		r.handleDropCollection(immutableMsg)
@@ -376,12 +380,29 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	case message.MessageTypeTruncateCollection:
 		immutableMsg := message.MustAsImmutableTruncateCollectionMessageV2(msg)
 		r.handleTruncateCollection(immutableMsg)
+	case message.MessageTypeSplitShard:
+		immutableMsg := message.MustAsImmutableSplitShardMessageV2(msg)
+		r.handleSplitShard(immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
 	case message.MessageTypeAlterWAL:
 		immutableMsg := message.MustAsImmutableAlterWALMessageV2(msg)
 		r.handleAlterWAL(immutableMsg)
 	}
+}
+
+// handleSplitShard handles the split shard message.
+// The split shard message fences the source vchannel: no new DML is appended
+// after it, so only the vchannel state flips here. The growing segments have
+// been sealed by the ManualFlush message written right before it; flush them
+// defensively anyway so the replay stays idempotent even if the two messages
+// were not persisted atomically.
+func (r *recoveryStorageImpl) handleSplitShard(msg message.ImmutableSplitShardMessageV2) {
+	r.flushAllSegmentOfCollection(msg, msg.Header().CollectionId)
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
+		vchannelInfo.ObserveSplitShard(msg)
+	}
+	r.Logger().Info("split shard", log.FieldMessage(msg))
 }
 
 // handleAlterWAL handles the alter WAL message.
@@ -514,6 +535,17 @@ func (r *recoveryStorageImpl) handleCreateCollection(msg message.ImmutableCreate
 	}
 	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateCollectionMessage(msg)
 	r.Logger().Info("create collection", log.FieldMessage(msg))
+}
+
+// handleCreateVChannel handles the create-vchannel message, the genesis of a
+// shard split target vchannel: it seeds the vchannel meta exactly as create
+// collection does so the new vchannel survives a streamingnode restart.
+func (r *recoveryStorageImpl) handleCreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
+	if _, ok := r.vchannels[msg.VChannel()]; ok {
+		return
+	}
+	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateVChannelMessage(msg)
+	r.Logger().Info("create vchannel", log.FieldMessage(msg))
 }
 
 // handleDropCollection handles the drop collection message.

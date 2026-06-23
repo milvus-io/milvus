@@ -311,6 +311,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save("proxy.maxPasswordLength", "-10")
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 
+		t.Run("test enableRoutingTable", func(t *testing.T) {
+			assert.True(t, Params.EnableRoutingTable.GetAsBool()) // default on
+		})
 		assert.Equal(t, int64(4096), Params.MaxArrayCapacity.GetAsInt64())
 		params.Save("proxy.maxArrayCapacity", "5000")
 		assert.Equal(t, int64(5000), Params.MaxArrayCapacity.GetAsInt64())

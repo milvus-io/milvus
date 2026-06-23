@@ -601,6 +601,98 @@ func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) RunAndReturn(run fun
 	return _c
 }
 
+// GetSplitTimeTick provides a mock function with given fields: collectionID
+func (_m *MockShardManager) GetSplitTimeTick(collectionID int64) uint64 {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSplitTimeTick")
+	}
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func(int64) uint64); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	return r0
+}
+
+// MockShardManager_GetSplitTimeTick_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSplitTimeTick'
+type MockShardManager_GetSplitTimeTick_Call struct {
+	*mock.Call
+}
+
+// GetSplitTimeTick is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *MockShardManager_Expecter) GetSplitTimeTick(collectionID interface{}) *MockShardManager_GetSplitTimeTick_Call {
+	return &MockShardManager_GetSplitTimeTick_Call{Call: _e.mock.On("GetSplitTimeTick", collectionID)}
+}
+
+func (_c *MockShardManager_GetSplitTimeTick_Call) Run(run func(collectionID int64)) *MockShardManager_GetSplitTimeTick_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_GetSplitTimeTick_Call) Return(_a0 uint64) *MockShardManager_GetSplitTimeTick_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardManager_GetSplitTimeTick_Call) RunAndReturn(run func(int64) uint64) *MockShardManager_GetSplitTimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfVChannelCanBeWritten provides a mock function with given fields: collectionID
+func (_m *MockShardManager) CheckIfVChannelCanBeWritten(collectionID int64) error {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfVChannelCanBeWritten")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64) error); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardManager_CheckIfVChannelCanBeWritten_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfVChannelCanBeWritten'
+type MockShardManager_CheckIfVChannelCanBeWritten_Call struct {
+	*mock.Call
+}
+
+// CheckIfVChannelCanBeWritten is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *MockShardManager_Expecter) CheckIfVChannelCanBeWritten(collectionID interface{}) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
+	return &MockShardManager_CheckIfVChannelCanBeWritten_Call{Call: _e.mock.On("CheckIfVChannelCanBeWritten", collectionID)}
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeWritten_Call) Run(run func(collectionID int64)) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeWritten_Call) Return(_a0 error) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardManager_CheckIfVChannelCanBeWritten_Call) RunAndReturn(run func(int64) error) *MockShardManager_CheckIfVChannelCanBeWritten_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with no fields
 func (_m *MockShardManager) Close() {
 	_m.Called()
@@ -728,6 +820,39 @@ func (_c *MockShardManager_CreateSegment_Call) Return() *MockShardManager_Create
 }
 
 func (_c *MockShardManager_CreateSegment_Call) RunAndReturn(run func(message.ImmutableCreateSegmentMessageV2)) *MockShardManager_CreateSegment_Call {
+	_c.Run(run)
+	return _c
+}
+
+// CreateVChannel provides a mock function with given fields: msg
+func (_m *MockShardManager) CreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
+	_m.Called(msg)
+}
+
+// MockShardManager_CreateVChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateVChannel'
+type MockShardManager_CreateVChannel_Call struct {
+	*mock.Call
+}
+
+// CreateVChannel is a helper method to define mock.On call
+//   - msg message.ImmutableCreateVChannelMessageV2
+func (_e *MockShardManager_Expecter) CreateVChannel(msg interface{}) *MockShardManager_CreateVChannel_Call {
+	return &MockShardManager_CreateVChannel_Call{Call: _e.mock.On("CreateVChannel", msg)}
+}
+
+func (_c *MockShardManager_CreateVChannel_Call) Run(run func(msg message.ImmutableCreateVChannelMessageV2)) *MockShardManager_CreateVChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(message.ImmutableCreateVChannelMessageV2))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_CreateVChannel_Call) Return() *MockShardManager_CreateVChannel_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardManager_CreateVChannel_Call) RunAndReturn(run func(message.ImmutableCreateVChannelMessageV2)) *MockShardManager_CreateVChannel_Call {
 	_c.Run(run)
 	return _c
 }
@@ -992,6 +1117,39 @@ func (_c *MockShardManager_Logger_Call) Return(_a0 *log.MLogger) *MockShardManag
 
 func (_c *MockShardManager_Logger_Call) RunAndReturn(run func() *log.MLogger) *MockShardManager_Logger_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// SplitShard provides a mock function with given fields: msg
+func (_m *MockShardManager) SplitShard(msg message.ImmutableSplitShardMessageV2) {
+	_m.Called(msg)
+}
+
+// MockShardManager_SplitShard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SplitShard'
+type MockShardManager_SplitShard_Call struct {
+	*mock.Call
+}
+
+// SplitShard is a helper method to define mock.On call
+//   - msg message.ImmutableSplitShardMessageV2
+func (_e *MockShardManager_Expecter) SplitShard(msg interface{}) *MockShardManager_SplitShard_Call {
+	return &MockShardManager_SplitShard_Call{Call: _e.mock.On("SplitShard", msg)}
+}
+
+func (_c *MockShardManager_SplitShard_Call) Run(run func(msg message.ImmutableSplitShardMessageV2)) *MockShardManager_SplitShard_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(message.ImmutableSplitShardMessageV2))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_SplitShard_Call) Return() *MockShardManager_SplitShard_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardManager_SplitShard_Call) RunAndReturn(run func(message.ImmutableSplitShardMessageV2)) *MockShardManager_SplitShard_Call {
+	_c.Run(run)
 	return _c
 }
 
