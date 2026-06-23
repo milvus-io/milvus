@@ -24,10 +24,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storagev2"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -128,7 +127,7 @@ func (queue *IndexTaskQueue) AddActiveTask(t Task) {
 	tName := t.Name()
 	_, ok := queue.activeTasks[tName]
 	if ok {
-		log.Ctx(context.TODO()).Debug("task already in active task list", zap.String("TaskID", tName))
+		mlog.Debug(context.TODO(), "task already in active task list", mlog.String("TaskID", tName))
 	}
 
 	queue.activeTasks[tName] = t
@@ -145,7 +144,7 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) Task {
 		queue.usingSlot.Sub(t.GetSlot())
 		return t
 	}
-	log.Ctx(queue.sched.ctx).Debug("task was not found in the active task list", zap.String("TaskName", tName))
+	mlog.Debug(queue.sched.ctx, "task was not found in the active task list", mlog.String("TaskName", tName))
 	return nil
 }
 
@@ -243,11 +242,11 @@ func (sched *TaskScheduler) processTask(t Task) {
 	}()
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
-	log.Ctx(t.Ctx()).Debug("process task", zap.String("task", t.Name()))
+	mlog.Debug(t.Ctx(), "process task", mlog.String("task", t.Name()))
 	pipelines := []func(context.Context) error{t.PreExecute, t.Execute, t.PostExecute}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
-			log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err))
+			mlog.Warn(t.Ctx(), "process task failed", mlog.Err(err))
 			t.SetState(getStateFromError(err), err.Error())
 			return
 		}
@@ -263,7 +262,7 @@ func (sched *TaskScheduler) processTask(t Task) {
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {
-	log.Ctx(sched.ctx).Debug("TaskScheduler start build loop ...")
+	mlog.Debug(sched.ctx, "TaskScheduler start build loop ...")
 	defer sched.wg.Done()
 	for {
 		select {

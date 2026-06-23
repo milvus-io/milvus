@@ -17,13 +17,13 @@
 package proxy
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func Test_parseDummyRequestType(t *testing.T) {
@@ -41,8 +41,8 @@ func Test_parseDummyRequestType(t *testing.T) {
 	m1[otherField] = otherFieldValue
 	bs1, err := json.Marshal(m1)
 	assert.NoError(t, err)
-	log.Info("Test_parseDummyRequestType",
-		zap.String("json", string(bs1)))
+	mlog.Info(context.TODO(), "Test_parseDummyRequestType",
+		mlog.String("json", string(bs1)))
 	ret1, err := parseDummyRequestType(string(bs1))
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(ret1.RequestType))
@@ -54,8 +54,8 @@ func Test_parseDummyRequestType(t *testing.T) {
 	m2[key] = value
 	bs2, err := json.Marshal(m2)
 	assert.NoError(t, err)
-	log.Info("Test_parseDummyRequestType",
-		zap.String("json", string(bs2)))
+	mlog.Info(context.TODO(), "Test_parseDummyRequestType",
+		mlog.String("json", string(bs2)))
 	ret2, err := parseDummyRequestType(string(bs2))
 	assert.NoError(t, err)
 	assert.Equal(t, value, ret2.RequestType)
@@ -66,8 +66,8 @@ func Test_parseDummyRequestType(t *testing.T) {
 	m3[otherField] = otherFieldValue
 	bs3, err := json.Marshal(m3)
 	assert.NoError(t, err)
-	log.Info("Test_parseDummyRequestType",
-		zap.String("json", string(bs3)))
+	mlog.Info(context.TODO(), "Test_parseDummyRequestType",
+		mlog.String("json", string(bs3)))
 	ret3, err := parseDummyRequestType(string(bs3))
 	assert.NoError(t, err)
 	assert.Equal(t, value, ret3.RequestType)
@@ -87,8 +87,8 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	m1 := make(map[string]interface{})
 	m1[otherField] = otherFieldValue
 	bs1, err := json.Marshal(m1)
-	log.Info("Test_parseDummyQueryRequest",
-		zap.String("json", string(bs1)))
+	mlog.Info(context.TODO(), "Test_parseDummyQueryRequest",
+		mlog.String("json", string(bs1)))
 	assert.NoError(t, err)
 	ret1, err := parseDummyQueryRequest(string(bs1))
 	assert.NoError(t, err)
@@ -121,8 +121,8 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	m2[exprKey] = exprValue
 	m2[outputFieldsKey] = outputFieldsValue
 	bs2, err := json.Marshal(m2)
-	log.Info("Test_parseDummyQueryRequest",
-		zap.String("json", string(bs2)))
+	mlog.Info(context.TODO(), "Test_parseDummyQueryRequest",
+		mlog.String("json", string(bs2)))
 	assert.NoError(t, err)
 	ret2, err := parseDummyQueryRequest(string(bs2))
 	assert.NoError(t, err)
@@ -143,8 +143,8 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	m3[exprKey] = exprValue
 	m3[outputFieldsKey] = outputFieldsValue
 	bs3, err := json.Marshal(m3)
-	log.Info("Test_parseDummyQueryRequest",
-		zap.String("json", string(bs3)))
+	mlog.Info(context.TODO(), "Test_parseDummyQueryRequest",
+		mlog.String("json", string(bs3)))
 	assert.NoError(t, err)
 	ret3, err := parseDummyQueryRequest(string(bs3))
 	assert.NoError(t, err)
@@ -160,8 +160,8 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	m4[requestTypeKey] = requestTypeValue
 	m4[dbNameKey] = dbNameValue
 	bs4, err := json.Marshal(m4)
-	log.Info("Test_parseDummyQueryRequest",
-		zap.String("json", string(bs4)))
+	mlog.Info(context.TODO(), "Test_parseDummyQueryRequest",
+		mlog.String("json", string(bs4)))
 	assert.NoError(t, err)
 	ret4, err := parseDummyQueryRequest(string(bs4))
 	assert.NoError(t, err)
@@ -178,8 +178,8 @@ func Test_parseDummyQueryRequest(t *testing.T) {
 	m5[requestTypeKey] = requestTypeValue
 	m5[dbNameKey] = dbNameValue
 	bs5, err := json.Marshal(m5)
-	log.Info("Test_parseDummyQueryRequest",
-		zap.String("json", string(bs5)))
+	mlog.Info(context.TODO(), "Test_parseDummyQueryRequest",
+		mlog.String("json", string(bs5)))
 	assert.NoError(t, err)
 	ret5, err := parseDummyQueryRequest(string(bs5))
 	assert.NoError(t, err)

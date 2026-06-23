@@ -1,13 +1,13 @@
-# mlog — AI Agent Logging Guide
+# mlog - AI Agent Logging Guide
 
-- ALWAYS USE `github.com/milvus-io/milvus/pkg/v2/mlog` PACKAGE TO LOG.
+- ALWAYS USE `github.com/milvus-io/milvus/pkg/v3/mlog` PACKAGE TO LOG.
 - NEVER USE `zap` OR `log` PACKAGE DIRECTLY.
 
 ## Rules
 
-1. Every log call must receive a `ctx context.Context`. Never pass `nil`. Choose ctx by priority: function parameter ctx > struct-level ctx (e.g. `s.ctx`) > `context.TODO()`.
+1. Every log call must receive a `ctx context.Context`. Never pass `nil`. Choose ctx by priority: function parameter ctx > struct-level ctx (e.g. `s.ctx`) > `context.TODO()`. Use `context.TODO()` only when no request/component context is available, and do not use `context.Background()` for logging.
 2. If the current struct has a `*mlog.Logger` field, use it. Otherwise use package-level functions like `mlog.Info(ctx, ...)`.
-3. When a predefined `FieldXxx` exists for a key, always use `FieldXxx(val)`. Never write `mlog.Int64("segment_id", v)`.
+3. When a predefined `FieldXxx` exists for a key, always use `FieldXxx(val)`. Never write `mlog.Int64("segmentID", v)`.
 4. In loops or hot paths, use `Rated` variants: `mlog.RatedInfo(ctx, limit, msg, fields...)`.
 5. For Debug logs on hot paths where field construction is expensive (`fmt.Sprintf`, serialization, iteration), guard with `LevelEnabled`.
 6. `mlog.Any` has poor performance. Use only when the type is unknown.
@@ -51,26 +51,26 @@ Priority: `FieldXxx(val)` > typed constructor like `mlog.String(key, val)` > `ml
 
 | Function | Type | Built-in Key |
 |---|---|---|
-| `FieldNodeID(v)` | int64 | `node_id` |
+| `FieldNodeID(v)` | int64 | `nodeID` |
 | `FieldModule(v)` | string | `module` |
-| `FieldTraceID(v)` | string | `trace_id` |
-| `FieldSpanID(v)` | string | `span_id` |
-| `FieldDbID(v)` | int64 | `db_id` |
-| `FieldDbName(v)` | string | `db_name` |
-| `FieldCollectionID(v)` | int64 | `collection_id` |
-| `FieldCollectionName(v)` | string | `collection_name` |
-| `FieldPartitionID(v)` | int64 | `partition_id` |
-| `FieldPartitionName(v)` | string | `partition_name` |
-| `FieldSegmentID(v)` | int64 | `segment_id` |
-| `FieldIndexID(v)` | int64 | `index_id` |
-| `FieldFieldID(v)` | int64 | `field_id` |
-| `FieldTaskID(v)` | int64 | `task_id` |
-| `FieldBroadcastID(v)` | int64 | `broadcast_id` |
-| `FieldJobID(v)` | int64 | `job_id` |
-| `FieldBuildID(v)` | int64 | `build_id` |
+| `FieldTraceID(v)` | string | `traceID` |
+| `FieldSpanID(v)` | string | `spanID` |
+| `FieldDbID(v)` | int64 | `dbID` |
+| `FieldDbName(v)` | string | `dbName` |
+| `FieldCollectionID(v)` | int64 | `collectionID` |
+| `FieldCollectionName(v)` | string | `collectionName` |
+| `FieldPartitionID(v)` | int64 | `partitionID` |
+| `FieldPartitionName(v)` | string | `partitionName` |
+| `FieldSegmentID(v)` | int64 | `segmentID` |
+| `FieldIndexID(v)` | int64 | `indexID` |
+| `FieldFieldID(v)` | int64 | `fieldID` |
+| `FieldTaskID(v)` | int64 | `taskID` |
+| `FieldBroadcastID(v)` | int64 | `broadcastID` |
+| `FieldJobID(v)` | int64 | `jobID` |
+| `FieldBuildID(v)` | int64 | `buildID` |
 | `FieldVChannel(v)` | string | `vchannel` |
 | `FieldPChannel(v)` | string | `pchannel` |
-| `FieldMessageID(v)` | ObjectMarshaler | `message_id` |
+| `FieldMessageID(v)` | ObjectMarshaler | `messageID` |
 | `FieldMessage(v)` | ObjectMarshaler | `message` |
 
 **Generic typed constructors** (use when no predefined FieldXxx exists; function names match Go types):

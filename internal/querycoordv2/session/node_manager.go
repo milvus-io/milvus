@@ -25,8 +25,8 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -359,7 +359,7 @@ func (m *NodeManager) cleanupLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("cleanupLoop stopped")
+			mlog.Info(context.TODO(), "cleanupLoop stopped")
 			return
 		case <-ticker.C:
 			m.ClearExpiredResourceExhaustion()

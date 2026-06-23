@@ -21,9 +21,8 @@ import (
 	"io"
 
 	"github.com/minio/minio-go/v7"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -63,7 +62,7 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 		}
 		err := opts.SetRange(offset, end)
 		if err != nil {
-			log.Warn("failed to set range", zap.String("bucket", bucketName), zap.String("path", objectName), zap.Error(err))
+			mlog.Warn(ctx, "failed to set range", mlog.String("bucket", bucketName), mlog.String("path", objectName), mlog.Err(err))
 			return nil, mapObjectStorageError(objectName, err)
 		}
 	}

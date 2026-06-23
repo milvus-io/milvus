@@ -25,7 +25,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -34,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -154,13 +153,13 @@ func (w *MultiSegmentWriter) closeWriter() error {
 
 		w.res = append(w.res, result)
 
-		log.Info("created new segment",
-			zap.Int64("segmentID", w.currentSegmentID),
-			zap.String("channel", w.channel),
-			zap.Int64("totalRows", rowNum),
-			zap.Uint64("totalSize", writtenUncompressed),
-			zap.Int64("expected segment size", w.segmentSize),
-			zap.Int64("storageVersion", w.storageVersion))
+		mlog.Info(w.ctx, "created new segment",
+			mlog.FieldSegmentID(w.currentSegmentID),
+			mlog.String("channel", w.channel),
+			mlog.Int64("totalRows", rowNum),
+			mlog.Uint64("totalSize", writtenUncompressed),
+			mlog.Int64("expected segment size", w.segmentSize),
+			mlog.Int64("storageVersion", w.storageVersion))
 	}
 	return nil
 }
@@ -216,14 +215,14 @@ func (w *MultiSegmentWriter) rotateWriterOrGrowCurrent() error {
 
 		w.allocator.markSegmentIDBudgetExhausted()
 		writtenUncompressed := w.writer.GetWrittenUncompressed()
-		log.Warn("pre-allocated compaction segment IDs exhausted, continue writing current segment",
-			zap.Int64("collectionID", w.collectionID),
-			zap.Int64("partitionID", w.partitionID),
-			zap.String("channel", w.channel),
-			zap.Int64("segmentID", w.currentSegmentID),
-			zap.Uint64("currentSize", writtenUncompressed),
-			zap.Int64("expectedSegmentSize", w.segmentSize),
-			zap.Error(err))
+		mlog.Warn(w.ctx, "pre-allocated compaction segment IDs exhausted, continue writing current segment",
+			mlog.Int64("collectionID", w.collectionID),
+			mlog.Int64("partitionID", w.partitionID),
+			mlog.String("channel", w.channel),
+			mlog.Int64("segmentID", w.currentSegmentID),
+			mlog.Uint64("currentSize", writtenUncompressed),
+			mlog.Int64("expectedSegmentSize", w.segmentSize),
+			mlog.Err(err))
 	}
 	return nil
 }
@@ -501,7 +500,7 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, batchSize 
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(sch)
 	if err != nil {
-		log.Warn("failed to get pk field from schema")
+		mlog.Warn(context.TODO(), "failed to get pk field from schema")
 		return nil, err
 	}
 
@@ -543,5 +542,5 @@ func newBinlogWriter(collID, partID, segID int64, schema *schemapb.CollectionSch
 		closers = append(closers, w.Finalize)
 	}
 	writer, err = storage.NewBinlogSerializeWriter(schema, partID, segID, fieldWriters, batchSize)
-	return
+	return writer, closers, err
 }

@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -209,8 +208,8 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
-		log.Info("schema autoID", zap.Bool("schemaAuto", coll.Schema.AutoID))
-		log.Info("field autoID", zap.Bool("fieldAuto", coll.Schema.Fields[0].AutoID))
+		mlog.Info(context.TODO(), "schema autoID", mlog.Bool("schemaAuto", coll.Schema.AutoID))
+		mlog.Info(context.TODO(), "field autoID", mlog.Bool("fieldAuto", coll.Schema.Fields[0].AutoID))
 
 		// insert
 		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewDataOption())
@@ -243,8 +242,8 @@ func TestCreateAutoIdCollection(t *testing.T) {
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
-		log.Info("schema autoID", zap.Bool("schemaAuto", coll.Schema.AutoID))
-		log.Info("field autoID", zap.Bool("fieldAuto", coll.Schema.Fields[0].AutoID))
+		mlog.Info(context.TODO(), "schema autoID", mlog.Bool("schemaAuto", coll.Schema.AutoID))
+		mlog.Info(context.TODO(), "field autoID", mlog.Bool("fieldAuto", coll.Schema.Fields[0].AutoID))
 
 		// insert
 		vecColumn := hp.GenColumnData(common.DefaultNb, vecField.DataType, *hp.TNewDataOption())
@@ -437,7 +436,7 @@ func TestCreateCollectionDynamic(t *testing.T) {
 	require.True(t, has)
 
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
-	log.Info("collection dynamic", zap.Bool("collectionSchema", coll.Schema.EnableDynamicField))
+	mlog.Info(context.TODO(), "collection dynamic", mlog.Bool("collectionSchema", coll.Schema.EnableDynamicField))
 	common.CheckErr(t, err, true)
 	// require.True(t, coll.Schema.Fields[0].IsDynamic)
 
@@ -569,7 +568,7 @@ func TestCreateCollectionWithInvalidFieldName(t *testing.T) {
 
 	// create collection with invalid field name
 	for _, invalidName := range common.GenInvalidNames() {
-		log.Debug("TestCreateCollectionWithInvalidFieldName", zap.String("fieldName", invalidName))
+		mlog.Debug(context.TODO(), "TestCreateCollectionWithInvalidFieldName", mlog.String("fieldName", invalidName))
 		pkField := entity.NewField().WithName(invalidName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 		vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(128)
 		schema := entity.NewSchema().WithName("aaa").WithField(pkField).WithField(vecField)
@@ -631,7 +630,7 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 
 	// create collection with invalid schema name
 	for _, invalidName := range common.GenInvalidNames() {
-		log.Debug("TestCreateCollectionWithInvalidCollectionName", zap.String("collectionName", invalidName))
+		mlog.Debug(context.TODO(), "TestCreateCollectionWithInvalidCollectionName", mlog.FieldCollectionName(invalidName))
 
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(invalidName, schema))
 		common.CheckErr(t, err, false, "collection name should not be empty",
@@ -737,7 +736,7 @@ func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
 	collName := common.GenRandomString(prefix, 6)
 
 	for _, fieldType := range hp.GetInvalidPartitionKeyFieldType() {
-		log.Debug("TestCreateCollectionInvalidPartitionKeyType", zap.Any("partitionKeyFieldType", fieldType))
+		mlog.Debug(context.TODO(), "TestCreateCollectionInvalidPartitionKeyType", mlog.Any("partitionKeyFieldType", fieldType))
 		partitionKeyField := entity.NewField().WithName("parKey").WithDataType(fieldType).WithIsPartitionKey(true)
 		if fieldType == entity.FieldTypeArray {
 			partitionKeyField.WithElementType(entity.FieldTypeInt64)
@@ -837,7 +836,7 @@ func TestCreateCollectionInconsistentAutoId(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, autoId := range []bool{true, false} {
-		log.Debug("TestCreateCollectionInconsistentAutoId", zap.Bool("autoId", autoId))
+		mlog.Debug(context.TODO(), "TestCreateCollectionInconsistentAutoId", mlog.Bool("autoId", autoId))
 		collName := common.GenRandomString(prefix, 6)
 		// field and schema have opposite autoID
 		schema := entity.NewSchema().WithField(
@@ -918,7 +917,7 @@ func TestCreateBinaryCollectionInvalidDim(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, invalidDim := range invalidDims {
-		log.Debug("TestCreateBinaryCollectionInvalidDim", zap.Int64("dim", invalidDim.dim))
+		mlog.Debug(context.TODO(), "TestCreateBinaryCollectionInvalidDim", mlog.Int64("dim", invalidDim.dim))
 		collName := common.GenRandomString(prefix, 6)
 		// field and schema have opposite autoID
 		schema := entity.NewSchema().WithField(
@@ -954,7 +953,7 @@ func TestCreateFloatCollectionInvalidDim(t *testing.T) {
 
 	for _, vecType := range []entity.FieldType{entity.FieldTypeFloatVector, entity.FieldTypeFloat16Vector, entity.FieldTypeBFloat16Vector} {
 		for _, invalidDim := range invalidDims {
-			log.Debug("TestCreateBinaryCollectionInvalidDim", zap.String("dim", invalidDim.dim))
+			mlog.Debug(context.TODO(), "TestCreateBinaryCollectionInvalidDim", mlog.String("dim", invalidDim.dim))
 			collName := common.GenRandomString(prefix, 6)
 
 			schema := entity.NewSchema().WithField(
@@ -1252,7 +1251,7 @@ func TestRenameCollectionInvalidName(t *testing.T) {
 
 	// rename collection with invalid name
 	for _, invalidName := range common.GenInvalidNames() {
-		log.Debug("TestCreateCollectionWithInvalidFieldName", zap.String("fieldName", invalidName))
+		mlog.Debug(context.TODO(), "TestCreateCollectionWithInvalidFieldName", mlog.String("fieldName", invalidName))
 		err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(collectionName, invalidName))
 		common.CheckErr(t, err, false, "collection name should not be empty",
 			"the first character of a collection name must be an underscore or letter",
@@ -1343,7 +1342,7 @@ func TestCollectionWithPropertyAlterMmap(t *testing.T) {
 
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
 	require.Subset(t, coll.Properties, map[string]string{common.MmapEnabled: "false"})
-	log.Info("TestCollectionPropertyMmap.DescribeCollection", zap.Any("properties", coll.Properties))
+	mlog.Info(context.TODO(), "TestCollectionPropertyMmap.DescribeCollection", mlog.Any("properties", coll.Properties))
 
 	// alter properties
 	err := mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(schema.CollectionName).WithProperty(common.MmapEnabled, true))

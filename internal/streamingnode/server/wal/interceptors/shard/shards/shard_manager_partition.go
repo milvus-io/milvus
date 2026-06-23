@@ -1,10 +1,8 @@
 package shards
 
 import (
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -53,20 +51,20 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 	collectionID := msg.Header().CollectionId
 	partitionID := msg.Header().PartitionId
 	tiemtick := msg.TimeTick()
-	logger := m.Logger().With(log.FieldMessage(msg))
+	logger := m.Logger().With(mlog.FieldMessage(msg))
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	uniquePartitionKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 	if err := m.checkIfPartitionCanBeCreated(uniquePartitionKey); err != nil {
-		logger.Warn("partition can not be created", zap.Error(err))
+		logger.Warn(m.ctx, "partition can not be created", mlog.Err(err))
 		return
 	}
 
 	m.collections[collectionID].PartitionIDs[partitionID] = struct{}{}
 	if _, ok := m.partitionManagers[uniquePartitionKey]; ok {
-		logger.Warn("partition manager already exists")
+		logger.Warn(m.ctx, "partition manager already exists")
 		return
 	}
 	m.partitionManagers[uniquePartitionKey] = newPartitionSegmentManager(
@@ -82,7 +80,7 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 		tiemtick,
 		m.metrics,
 	)
-	m.Logger().Info("partition created")
+	m.Logger().Info(m.ctx, "partition created")
 	m.updateMetrics()
 }
 
@@ -91,26 +89,26 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 func (m *shardManagerImpl) DropPartition(msg message.ImmutableDropPartitionMessageV1) {
 	collectionID := msg.Header().CollectionId
 	partitionID := msg.Header().PartitionId
-	logger := m.Logger().With(log.FieldMessage(msg))
+	logger := m.Logger().With(mlog.FieldMessage(msg))
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	uniquePartitionKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
-		logger.Warn("partition can not be dropped", zap.Error(err))
+		logger.Warn(m.ctx, "partition can not be dropped", mlog.Err(err))
 		return
 	}
 	delete(m.collections[collectionID].PartitionIDs, partitionID)
 
 	pm, ok := m.partitionManagers[uniquePartitionKey]
 	if !ok {
-		logger.Warn("partition not exists", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
+		logger.Warn(m.ctx, "partition not exists", mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(partitionID))
 		return
 	}
 
 	delete(m.partitionManagers, uniquePartitionKey)
 	segmentIDs := pm.FlushAndDropPartition(policy.PolicyPartitionRemoved())
-	m.Logger().Info("partition removed", zap.Int64s("segmentIDs", segmentIDs))
+	m.Logger().Info(m.ctx, "partition removed", mlog.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()
 }

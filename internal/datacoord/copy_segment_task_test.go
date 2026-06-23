@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -36,6 +35,7 @@ import (
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -329,9 +329,9 @@ func (s *CopySegmentTaskSuite) TestWrapCopySegmentTaskLog() {
 	s.True(fieldNames["state"])
 
 	// Test with extra fields
-	extraFields := []zap.Field{
-		zap.String("extra", "value"),
-		zap.Int64("number", 123),
+	extraFields := []mlog.Field{
+		mlog.String("extra", "value"),
+		mlog.Int64("number", 123),
 	}
 	fieldsWithExtra := WrapCopySegmentTaskLog(task, extraFields...)
 	s.Len(fieldsWithExtra, 6)

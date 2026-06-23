@@ -24,7 +24,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -34,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -223,7 +222,7 @@ func (mt *MetaTable) reload() error {
 		return err
 	}
 
-	log.Ctx(mt.ctx).Info("recover databases", zap.Int("num of dbs", len(dbs)))
+	mlog.Info(mt.ctx, "recover databases", mlog.Int("num of dbs", len(dbs)))
 	for _, db := range dbs {
 		mt.dbName2Meta[db.Name] = db
 	}
@@ -259,12 +258,12 @@ func (mt *MetaTable) reload() error {
 		}
 		for _, collection := range collections {
 			if collection.DBName != "" && collection.DBName != dbName {
-				log.Ctx(mt.ctx).Warn(
+				mlog.Warn(mt.ctx,
 					"collection dbname is not correct, it will be fixed",
-					zap.Int64("collection_id", collection.CollectionID),
-					zap.String("db_name", dbName),
-					zap.String("collection_name", collection.Name),
-					zap.String("collection_dbname", collection.DBName),
+					mlog.Int64("collection_id", collection.CollectionID),
+					mlog.String("db_name", dbName),
+					mlog.String("collection_name", collection.Name),
+					mlog.String("collection_dbname", collection.DBName),
 				)
 			}
 			collection.DBName = dbName // some collections may not have db name or its dbname is not correct, we should fix it here.
@@ -292,10 +291,10 @@ func (mt *MetaTable) reload() error {
 		metrics.RootCoordNumOfDatabases.Inc()
 		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Add(float64(collectionNum))
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
-		log.Ctx(mt.ctx).Info("collections recovered from db", zap.String("db_name", dbName),
-			zap.Int64("collection_num", collectionNum),
-			zap.Int64("partition_num", partitionNum),
-			zap.Duration("dur", time.Since(start)))
+		mlog.Info(mt.ctx, "collections recovered from db", mlog.String("db_name", dbName),
+			mlog.Int64("collection_num", collectionNum),
+			mlog.Int64("partition_num", partitionNum),
+			mlog.Duration("dur", time.Since(start)))
 	}
 
 	// recover aliases from db namespace
@@ -310,7 +309,7 @@ func (mt *MetaTable) reload() error {
 		}
 	}
 
-	log.Ctx(mt.ctx).Info("rootcoord start to recover the channel stats for streaming coord balancer")
+	mlog.Info(mt.ctx, "rootcoord start to recover the channel stats for streaming coord balancer")
 	vchannels := make([]string, 0, len(mt.collID2Meta)*2)
 	for _, coll := range mt.collID2Meta {
 		if coll.Available() {
@@ -332,7 +331,7 @@ func (mt *MetaTable) reload() error {
 	}
 	mt.fileResourceVersion = version
 
-	log.Ctx(mt.ctx).Info("RootCoord meta table reload done", zap.Duration("duration", record.ElapseSpan()))
+	mlog.Info(mt.ctx, "RootCoord meta table reload done", mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -361,7 +360,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 	}
 
 	if collectionNum > 0 {
-		log.Ctx(mt.ctx).Info("recover collections without db", zap.Int64("collection_num", collectionNum), zap.Int64("partition_num", partitionNum))
+		mlog.Info(mt.ctx, "recover collections without db", mlog.Int64("collection_num", collectionNum), mlog.Int64("partition_num", partitionNum))
 	}
 
 	aliases, err := mt.catalog.ListAliases(mt.ctx, util.NonDBID, typeutil.MaxTimestamp)
@@ -445,7 +444,7 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	mt.aliases.createDbIfNotExist(dbName)
 	mt.dbName2Meta[dbName] = db
 
-	log.Ctx(ctx).Info("create database", zap.String("db", dbName), zap.Uint64("ts", ts))
+	mlog.Info(ctx, "create database", mlog.String("db", dbName), mlog.Uint64("ts", ts))
 	return nil
 }
 
@@ -458,7 +457,7 @@ func (mt *MetaTable) AlterDatabase(ctx context.Context, newDB *model.Database, t
 		return err
 	}
 	mt.dbName2Meta[newDB.Name] = newDB
-	log.Ctx(ctx).Info("alter database finished", zap.String("dbName", newDB.Name), zap.Uint64("ts", ts))
+	mlog.Info(ctx, "alter database finished", mlog.String("dbName", newDB.Name), mlog.Uint64("ts", ts))
 	return nil
 }
 
@@ -472,7 +471,7 @@ func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb
 	}
 
 	if _, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp); err != nil {
-		log.Ctx(ctx).Warn("not found database", zap.String("db", dbName))
+		mlog.Warn(ctx, "not found database", mlog.String("db", dbName))
 		return err
 	}
 
@@ -492,7 +491,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 
 	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
 	if err != nil {
-		log.Ctx(ctx).Warn("not found database", zap.String("db", dbName))
+		mlog.Warn(ctx, "not found database", mlog.String("db", dbName))
 		return nil
 	}
 	if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
@@ -504,7 +503,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	delete(mt.dbName2Meta, dbName)
 
 	metrics.RootCoordNumOfDatabases.Dec()
-	log.Ctx(ctx).Info("drop database", zap.String("db", dbName), zap.Uint64("ts", ts))
+	mlog.Info(ctx, "drop database", mlog.String("db", dbName), mlog.Uint64("ts", ts))
 	return nil
 }
 
@@ -539,7 +538,7 @@ func (mt *MetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Ti
 func (mt *MetaTable) getDatabaseByNameInternal(ctx context.Context, dbName string, _ Timestamp) (*model.Database, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
-		log.Ctx(ctx).Warn("db name is empty")
+		mlog.Warn(ctx, "db name is empty")
 		dbName = util.DefaultDBName
 	}
 
@@ -565,7 +564,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	// check if there's a collection meta with the same collection id.
 	// merge the collection meta together.
 	if _, ok := mt.collID2Meta[coll.CollectionID]; ok {
-		log.Ctx(ctx).Info("collection already created, skip add collection to meta table", zap.Int64("collectionID", coll.CollectionID))
+		mlog.Info(ctx, "collection already created, skip add collection to meta table", mlog.Int64("collectionID", coll.CollectionID))
 		return nil
 	}
 
@@ -590,11 +589,11 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
 
 	channel.StaticPChannelStatsManager.MustGet().AddVChannel(coll.VirtualChannelNames...)
-	log.Ctx(ctx).Info("add collection to meta table",
-		zap.Int64("dbID", coll.DBID),
-		zap.String("collection", coll.Name),
-		zap.Int64("id", coll.CollectionID),
-		zap.Uint64("ts", coll.CreateTime),
+	mlog.Info(ctx, "add collection to meta table",
+		mlog.Int64("dbID", coll.DBID),
+		mlog.String("collection", coll.Name),
+		mlog.Int64("id", coll.CollectionID),
+		mlog.Uint64("ts", coll.CreateTime),
 	)
 	return nil
 }
@@ -624,14 +623,14 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		if mt.fileResourceRefCnt[fileResourceID] > 0 {
 			mt.fileResourceRefCnt[fileResourceID]--
 		} else {
-			log.Warn("DropCollection: file resource refCnt underflow",
-				zap.Int64("collectionID", collectionID), zap.Int64("fileResourceID", fileResourceID))
+			mlog.Warn(context.TODO(), "DropCollection: file resource refCnt underflow",
+				mlog.Int64("collectionID", collectionID), mlog.Int64("fileResourceID", fileResourceID))
 		}
 	}
 
-	log.Ctx(ctx).Info("update coll state to dropping",
-		zap.Int64("collectionID", collectionID),
-		zap.String("state", clone.State.String()),
+	mlog.Info(ctx, "update coll state to dropping",
+		mlog.Int64("collectionID", collectionID),
+		mlog.String("state", clone.State.String()),
 	)
 
 	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
@@ -646,14 +645,14 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
 
-	log.Ctx(ctx).Info("drop collection from meta table", zap.Int64("collection", collectionID),
-		zap.String("state", coll.State.String()), zap.Uint64("ts", ts))
+	mlog.Info(ctx, "drop collection from meta table", mlog.Int64("collection", collectionID),
+		mlog.String("state", coll.State.String()), mlog.Uint64("ts", ts))
 
 	// Delete all grants referencing this collection immediately so they don't
 	// linger until the tombstone sweeper runs (which can take minutes).
 	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, db.Name, coll.Name); err != nil {
-		log.Ctx(ctx).Warn("failed to delete grants for dropped collection, skipping",
-			zap.String("dbName", db.Name), zap.String("collectionName", coll.Name), zap.Error(err))
+		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
+			mlog.String("dbName", db.Name), mlog.String("collectionName", coll.Name), mlog.Err(err))
 	}
 
 	return nil
@@ -662,10 +661,10 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 func (mt *MetaTable) removeIfNameMatchedInternal(ctx context.Context, collectionID UniqueID, name string) {
 	mt.names.removeIf(func(db string, collection string, id UniqueID) bool {
 		if collectionID == id {
-			log.Ctx(ctx).Info("remove from names",
-				zap.String("dbName", db),
-				zap.String("collectionName", collection),
-				zap.Int64("collectionID", id),
+			mlog.Info(ctx, "remove from names",
+				mlog.String("dbName", db),
+				mlog.String("collectionName", collection),
+				mlog.Int64("collectionID", id),
 			)
 			return true
 		}
@@ -676,10 +675,10 @@ func (mt *MetaTable) removeIfNameMatchedInternal(ctx context.Context, collection
 func (mt *MetaTable) removeIfAliasMatchedInternal(ctx context.Context, collectionID UniqueID, alias string) {
 	mt.aliases.removeIf(func(db string, collection string, id UniqueID) bool {
 		if collectionID == id {
-			log.Ctx(ctx).Info("remove from aliases",
-				zap.String("dbName", db),
-				zap.String("alias", collection),
-				zap.Int64("collectionID", id),
+			mlog.Info(ctx, "remove from aliases",
+				mlog.String("dbName", db),
+				mlog.String("alias", collection),
+				mlog.Int64("collectionID", id),
 			)
 			return true
 		}
@@ -701,8 +700,8 @@ func (mt *MetaTable) removeAllNamesIfMatchedInternal(ctx context.Context, collec
 func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectionID UniqueID) {
 	delete(mt.collID2Meta, collectionID)
 	delete(mt.partitionName2ID, collectionID)
-	log.Ctx(ctx).Info("delete from collID2Meta",
-		zap.Int64("collectionID", collectionID),
+	mlog.Info(ctx, "delete from collID2Meta",
+		mlog.Int64("collectionID", collectionID),
 	)
 }
 
@@ -714,7 +713,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	// which is bigger than `ts1`. So we assume that ts should always be the latest.
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok {
-		log.Ctx(ctx).Warn("not found collection, skip remove", zap.Int64("collectionID", collectionID))
+		mlog.Warn(ctx, "not found collection, skip remove", mlog.Int64("collectionID", collectionID))
 		return nil
 	}
 	if coll.State != pb.CollectionState_CollectionDropping {
@@ -736,8 +735,8 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	}
 
 	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, coll.DBName, coll.Name); err != nil {
-		log.Ctx(ctx).Warn("failed to delete grants for dropped collection, skipping",
-			zap.String("dbName", coll.DBName), zap.String("collectionName", coll.Name), zap.Error(err))
+		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
+			mlog.String("dbName", coll.DBName), mlog.String("collectionName", coll.Name), mlog.Err(err))
 	}
 
 	allNames := common.CloneStringList(aliases)
@@ -747,11 +746,11 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	mt.removeAllNamesIfMatchedInternal(ctx, collectionID, allNames)
 	mt.removeCollectionByIDInternal(ctx, collectionID)
 
-	log.Ctx(ctx).Info("remove collection",
-		zap.Int64("dbID", coll.DBID),
-		zap.String("name", coll.Name),
-		zap.Int64("id", collectionID),
-		zap.Strings("aliases", aliases),
+	mlog.Info(ctx, "remove collection",
+		mlog.Int64("dbID", coll.DBID),
+		mlog.String("name", coll.Name),
+		mlog.Int64("id", collectionID),
+		mlog.Strings("aliases", aliases),
 	)
 	return nil
 }
@@ -776,7 +775,7 @@ func filterUnavailablePartition(coll *model.Collection) *model.Collection {
 func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowUnavailable bool) (*model.Collection, error) {
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || coll == nil {
-		log.Warn("not found collection", zap.Int64("collectionID", collectionID))
+		mlog.Warn(context.TODO(), "not found collection", mlog.Int64("collectionID", collectionID))
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	if allowUnavailable {
@@ -850,7 +849,7 @@ func (mt *MetaTable) GetCollectionID(ctx context.Context, dbName string, collect
 
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
-		log.Warn("db name is empty", zap.String("collectionName", collectionName))
+		mlog.Warn(context.TODO(), "db name is empty", mlog.String("collectionName", collectionName))
 		dbName = util.DefaultDBName
 	}
 
@@ -876,7 +875,7 @@ func (mt *MetaTable) GetCollectionID(ctx context.Context, dbName string, collect
 func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
-		log.Ctx(ctx).Warn("db name is empty", zap.String("collectionName", collectionName), zap.Uint64("ts", ts))
+		mlog.Warn(ctx, "db name is empty", mlog.String("collectionName", collectionName), mlog.Uint64("ts", ts))
 		dbName = util.DefaultDBName
 	}
 
@@ -1008,7 +1007,7 @@ func (mt *MetaTable) ListCollections(ctx context.Context, dbName string, ts Time
 func (mt *MetaTable) listCollectionFromCache(ctx context.Context, dbName string, onlyAvail bool) ([]*model.Collection, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
-		log.Ctx(ctx).Warn("db name is empty")
+		mlog.Warn(ctx, "db name is empty")
 		dbName = util.DefaultDBName
 	}
 
@@ -1086,26 +1085,26 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 
 	if oldColl.Name != newColl.Name || oldColl.DBName != newColl.DBName {
 		if err := mt.catalog.MigrateGrantCollectionName(ctx1, util.DefaultTenant, oldColl.DBName, oldColl.Name, newColl.DBName, newColl.Name); err != nil {
-			log.Ctx(ctx).Warn("failed to migrate grants for renamed collection, skipping",
-				zap.String("oldDBName", oldColl.DBName), zap.String("oldName", oldColl.Name),
-				zap.String("newDBName", newColl.DBName), zap.String("newName", newColl.Name), zap.Error(err))
+			mlog.Warn(ctx, "failed to migrate grants for renamed collection, skipping",
+				mlog.String("oldDBName", oldColl.DBName), mlog.String("oldName", oldColl.Name),
+				mlog.String("newDBName", newColl.DBName), mlog.String("newName", newColl.Name), mlog.Err(err))
 		}
 	}
 
 	mt.names.remove(oldColl.DBName, oldColl.Name)
 	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
 	mt.collID2Meta[header.CollectionId] = newColl
-	log.Ctx(ctx).Info("alter collection finished",
-		zap.String("oldDBName", oldColl.DBName),
-		zap.String("newDBName", newColl.DBName),
-		zap.String("oldCollectionName", oldColl.Name),
-		zap.String("newCollectionName", newColl.Name),
-		zap.Int64("headerCollectionID", header.CollectionId),
-		zap.Int64("newCollectionID", newColl.CollectionID),
-		zap.Int64("oldCollectionID", oldColl.CollectionID),
-		zap.Bool("dbChanged", dbChanged),
-		zap.Uint64("ts", newColl.UpdateTimestamp),
-		zap.Int32("schemaVersion", newColl.SchemaVersion),
+	mlog.Info(ctx, "alter collection finished",
+		mlog.String("oldDBName", oldColl.DBName),
+		mlog.String("newDBName", newColl.DBName),
+		mlog.String("oldCollectionName", oldColl.Name),
+		mlog.String("newCollectionName", newColl.Name),
+		mlog.Int64("headerCollectionID", header.CollectionId),
+		mlog.Int64("newCollectionID", newColl.CollectionID),
+		mlog.Int64("oldCollectionID", oldColl.CollectionID),
+		mlog.Bool("dbChanged", dbChanged),
+		mlog.Uint64("ts", newColl.UpdateTimestamp),
+		mlog.Int32("schemaVersion", newColl.SchemaVersion),
 	)
 	return nil
 }
@@ -1135,8 +1134,8 @@ func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID U
 		return err
 	}
 	mt.collID2Meta[coll.CollectionID] = newColl
-	log.Ctx(ctx).Info("update collID2Meta for begin truncate collection",
-		zap.Int64("collectionID", coll.CollectionID),
+	mlog.Info(ctx, "update collID2Meta for begin truncate collection",
+		mlog.Int64("collectionID", coll.CollectionID),
 	)
 	return nil
 }
@@ -1166,8 +1165,8 @@ func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.Broa
 		return err
 	}
 	mt.collID2Meta[coll.CollectionID] = newColl
-	log.Ctx(ctx).Info("update collID2Meta for truncate collection",
-		zap.Int64("collectionID", coll.CollectionID),
+	mlog.Info(ctx, "update collID2Meta for truncate collection",
+		mlog.Int64("collectionID", coll.CollectionID),
 	)
 	return nil
 }
@@ -1177,12 +1176,6 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 	defer mt.ddLock.RUnlock()
 
 	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	log := log.Ctx(ctx).With(
-		zap.String("oldDBName", dbName),
-		zap.String("newDBName", newDBName),
-		zap.String("oldName", oldName),
-		zap.String("newName", newName),
-	)
 
 	// DB name already filled in rename collection task prepare
 	// get target db
@@ -1194,31 +1187,31 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 	// old collection should not be an alias
 	_, ok = mt.aliases.get(dbName, oldName)
 	if ok {
-		log.Warn("unsupported use a alias to rename collection")
+		mlog.Warn(context.TODO(), "unsupported use a alias to rename collection")
 		return merr.WrapErrParameterInvalidMsg("unsupported use an alias to rename collection, alias:%s", oldName)
 	}
 
 	_, ok = mt.aliases.get(newDBName, newName)
 	if ok {
-		log.Warn("cannot rename collection to an existing alias")
+		mlog.Warn(context.TODO(), "cannot rename collection to an existing alias")
 		return merr.WrapErrAsInputError(merr.WrapErrAliasCollectionNameConflict(newDBName, newName))
 	}
 
 	// check new collection already exists
 	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp, false)
 	if coll != nil {
-		log.Warn("duplicated new collection name, already taken by another collection or alias.")
+		mlog.Warn(context.TODO(), "duplicated new collection name, already taken by another collection or alias.")
 		return merr.WrapErrParameterInvalidMsg("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
 	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
-		log.Warn("fail to check if new collection name is already taken", zap.Error(err))
+		mlog.Warn(context.TODO(), "fail to check if new collection name is already taken", mlog.Err(err))
 		return err
 	}
 
 	// get old collection meta
 	oldColl, err := mt.getCollectionByNameInternal(ctx, dbName, oldName, typeutil.MaxTimestamp, false)
 	if err != nil {
-		log.Warn("fail to find collection with old name", zap.Error(err))
+		mlog.Warn(context.TODO(), "fail to find collection with old name", mlog.Err(err))
 		return err
 	}
 
@@ -1291,7 +1284,7 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	// idempotency check here.
 	for _, part := range coll.Partitions {
 		if part.PartitionID == partition.PartitionID {
-			log.Ctx(ctx).Info("partition already exists, ignore the operation", zap.Int64("collection", partition.CollectionID), zap.Int64("partition", partition.PartitionID))
+			mlog.Info(ctx, "partition already exists, ignore the operation", mlog.Int64("collection", partition.CollectionID), mlog.Int64("partition", partition.PartitionID))
 			return nil
 		}
 	}
@@ -1311,9 +1304,9 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	}
 	mt.partitionName2ID[partition.CollectionID][partition.PartitionName] = partition.PartitionID
 
-	log.Ctx(ctx).Info("add partition to meta table",
-		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
-		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
+	mlog.Info(ctx, "add partition to meta table",
+		mlog.Int64("collection", partition.CollectionID), mlog.String("partition", partition.PartitionName),
+		mlog.Int64("partitionid", partition.PartitionID), mlog.Uint64("ts", partition.PartitionCreatedTimestamp))
 	mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
 	// support Dynamic load/release partitions
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
@@ -1367,9 +1360,9 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 				delete(mt.partitionName2ID[collectionID], part.PartitionName)
 			}
 
-			log.Ctx(ctx).Info("drop partition", zap.Int64("collection", collectionID),
-				zap.Int64("partition", partitionID),
-				zap.Uint64("ts", ts))
+			mlog.Info(ctx, "drop partition", mlog.Int64("collection", collectionID),
+				mlog.Int64("partition", partitionID),
+				mlog.Uint64("ts", ts))
 
 			mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
 			metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
@@ -1397,7 +1390,7 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID,
 		}
 	}
 	if loc == -1 {
-		log.Ctx(ctx).Warn("not found partition, skip remove", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID))
+		mlog.Warn(ctx, "not found partition, skip remove", mlog.Int64("collection", collectionID), mlog.Int64("partition", partitionID))
 		return nil
 	}
 	partition := coll.Partitions[loc]
@@ -1421,7 +1414,7 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID,
 		delete(mt.partitionName2ID[collectionID], partition.PartitionName)
 	}
 
-	log.Ctx(ctx).Info("remove partition", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID), zap.Uint64("ts", ts))
+	mlog.Info(ctx, "remove partition", mlog.Int64("collection", collectionID), mlog.Int64("partition", partitionID), mlog.Uint64("ts", ts))
 	return nil
 }
 
@@ -1430,7 +1423,7 @@ func (mt *MetaTable) CheckIfAliasCreatable(ctx context.Context, dbName string, a
 	defer mt.ddLock.RUnlock()
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
-		log.Ctx(ctx).Warn("db name is empty", zap.String("alias", alias), zap.String("collection", collectionName))
+		mlog.Warn(ctx, "db name is empty", mlog.String("alias", alias), mlog.String("collection", collectionName))
 		dbName = util.DefaultDBName
 	}
 
@@ -1461,7 +1454,7 @@ func (mt *MetaTable) CheckIfAliasCreatable(ctx context.Context, dbName string, a
 	// check if alias exists.
 	aliasedCollectionID, ok := mt.aliases.get(dbName, alias)
 	if ok && aliasedCollectionID == collectionID {
-		log.Ctx(ctx).Warn("add duplicate alias", zap.String("alias", alias), zap.String("collection", collectionName))
+		mlog.Warn(ctx, "add duplicate alias", mlog.String("alias", alias), mlog.String("collection", collectionName))
 		return errIgnoredAlterAlias
 	} else if ok {
 		// TODO: better to check if aliasedCollectionID exist or is available, though not very possible.
@@ -1501,10 +1494,10 @@ func (mt *MetaTable) DropAlias(ctx context.Context, result message.BroadcastResu
 	}
 	mt.aliases.remove(header.DbName, header.Alias)
 
-	log.Ctx(ctx).Info("drop alias",
-		zap.String("db", header.DbName),
-		zap.String("alias", header.Alias),
-		zap.Uint64("ts", result.GetControlChannelResult().TimeTick),
+	mlog.Info(ctx, "drop alias",
+		mlog.String("db", header.DbName),
+		mlog.String("alias", header.Alias),
+		mlog.Uint64("ts", result.GetControlChannelResult().TimeTick),
 	)
 	return nil
 }
@@ -1527,12 +1520,12 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, result message.BroadcastRes
 	// alias switch to another collection anyway.
 	mt.aliases.insert(header.DbName, header.Alias, header.CollectionId)
 
-	log.Ctx(ctx).Info("alter alias",
-		zap.String("db", header.DbName),
-		zap.String("alias", header.Alias),
-		zap.String("collectionName", header.CollectionName),
-		zap.Int64("collectionID", header.CollectionId),
-		zap.Uint64("ts", result.GetControlChannelResult().TimeTick),
+	mlog.Info(ctx, "alter alias",
+		mlog.String("db", header.DbName),
+		mlog.String("alias", header.Alias),
+		mlog.String("collectionName", header.CollectionName),
+		mlog.Int64("collectionID", header.CollectionId),
+		mlog.Uint64("ts", result.GetControlChannelResult().TimeTick),
 	)
 	return nil
 }
@@ -1542,7 +1535,7 @@ func (mt *MetaTable) CheckIfAliasAlterable(ctx context.Context, dbName string, a
 	defer mt.ddLock.RUnlock()
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
-		log.Ctx(ctx).Warn("db name is empty", zap.String("alias", alias), zap.String("collection", collectionName))
+		mlog.Warn(ctx, "db name is empty", mlog.String("alias", alias), mlog.String("collection", collectionName))
 		dbName = util.DefaultDBName
 	}
 
@@ -1589,7 +1582,7 @@ func (mt *MetaTable) DescribeAlias(ctx context.Context, dbName string, alias str
 	defer mt.ddLock.Unlock()
 
 	if dbName == "" {
-		log.Ctx(ctx).Warn("db name is empty", zap.String("alias", alias))
+		mlog.Warn(ctx, "db name is empty", mlog.String("alias", alias))
 		dbName = util.DefaultDBName
 	}
 
@@ -1619,7 +1612,7 @@ func (mt *MetaTable) ListAliases(ctx context.Context, dbName string, collectionN
 	defer mt.ddLock.Unlock()
 
 	if dbName == "" {
-		log.Ctx(ctx).Warn("db name is empty", zap.String("collection", collectionName))
+		mlog.Warn(ctx, "db name is empty", mlog.String("collection", collectionName))
 		dbName = util.DefaultDBName
 	}
 
@@ -1696,16 +1689,16 @@ func (mt *MetaTable) InitCredential(ctx context.Context) error {
 	}
 	encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
 	if err != nil {
-		log.Ctx(ctx).Warn("RootCoord init user root failed", zap.Error(err))
+		mlog.Warn(ctx, "RootCoord init user root failed", mlog.Err(err))
 		return err
 	}
-	log.Ctx(ctx).Info("RootCoord init user root")
+	mlog.Info(ctx, "RootCoord init user root")
 	err = mt.catalog.AlterCredential(ctx, &model.Credential{
 		Username:          util.UserRoot,
 		EncryptedPassword: encryptedRootPassword,
 	})
 	if err != nil {
-		log.Ctx(ctx).Warn("RootCoord init user root failed", zap.Error(err))
+		mlog.Warn(ctx, "RootCoord init user root failed", mlog.Err(err))
 		return err
 	}
 	return nil
@@ -1733,7 +1726,7 @@ func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *interna
 	maxUserNum := Params.ProxyCfg.MaxUserNum.GetAsInt()
 	if len(usernames) >= maxUserNum {
 		errMsg := "unable to add user because the number of users has reached the limit"
-		log.Ctx(ctx).Error(errMsg, zap.Int("maxUserNum", maxUserNum))
+		mlog.Error(ctx, errMsg, mlog.Int("maxUserNum", maxUserNum))
 		return merr.WrapErrServiceQuotaExceeded(errMsg)
 	}
 	return nil
@@ -1777,10 +1770,10 @@ func (mt *MetaTable) AlterCredential(ctx context.Context, result message.Broadca
 	}
 	// if the credential already exists and the version is not greater than the current timetick.
 	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
-		log.Ctx(ctx).Info("credential already exists and the version is not greater than the current timetick",
-			zap.String("username", body.CredentialInfo.Username),
-			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
-			zap.Uint64("current", existsCredential.TimeTick),
+		mlog.Info(ctx, "credential already exists and the version is not greater than the current timetick",
+			mlog.String("username", body.CredentialInfo.Username),
+			mlog.Uint64("incoming", result.GetControlChannelResult().TimeTick),
+			mlog.Uint64("current", existsCredential.TimeTick),
 		)
 		return nil
 	}
@@ -1840,10 +1833,10 @@ func (mt *MetaTable) DeleteCredential(ctx context.Context, result message.Broadc
 	}
 	// if the credential already exists and the version is not greater than the current timetick.
 	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
-		log.Ctx(ctx).Info("credential already exists and the version is not greater than the current timetick",
-			zap.String("username", result.Message.Header().UserName),
-			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
-			zap.Uint64("current", existsCredential.TimeTick),
+		mlog.Info(ctx, "credential already exists and the version is not greater than the current timetick",
+			mlog.String("username", result.Message.Header().UserName),
+			mlog.Uint64("incoming", result.GetControlChannelResult().TimeTick),
+			mlog.Uint64("current", existsCredential.TimeTick),
 		)
 		return nil
 	}
@@ -1875,18 +1868,18 @@ func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateR
 
 	results, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to list roles", zap.Error(err))
+		mlog.Warn(ctx, "fail to list roles", mlog.Err(err))
 		return err
 	}
 	for _, result := range results {
 		if result.GetRole().GetName() == in.GetEntity().GetName() {
-			log.Ctx(ctx).Info("role already exists", zap.String("role", in.GetEntity().GetName()))
+			mlog.Info(ctx, "role already exists", mlog.String("role", in.GetEntity().GetName()))
 			return errRoleAlreadyExists
 		}
 	}
 	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
 		errMsg := "unable to create role because the number of roles has reached the limit"
-		log.Ctx(ctx).Warn(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
+		mlog.Warn(ctx, errMsg, mlog.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
 		return merr.WrapErrServiceQuotaExceeded(errMsg)
 	}
 	return nil
@@ -2358,7 +2351,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string
 	// merge with current privileges
 	group, err := mt.catalog.GetPrivilegeGroup(ctx, groupName)
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to get privilege group", zap.String("privilege_group", groupName), zap.Error(err))
+		mlog.Warn(ctx, "fail to get privilege group", mlog.String("privilege_group", groupName), mlog.Err(err))
 		return err
 	}
 	privSet := lo.SliceToMap(group.Privileges, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
@@ -2374,7 +2367,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string
 			delete(privSet, p.Name)
 		}
 	default:
-		log.Ctx(ctx).Warn("unsupported operate type", zap.Any("operate_type", operateType))
+		mlog.Warn(ctx, "unsupported operate type", mlog.Any("operate_type", operateType))
 		return merr.WrapErrParameterInvalidMsg("unsupported operate type: %v", operateType)
 	}
 
@@ -2500,7 +2493,7 @@ func (mt *MetaTable) DecFileResourceRefCnt(ids []int64) {
 		if mt.fileResourceRefCnt[id] > 0 {
 			mt.fileResourceRefCnt[id]--
 		} else {
-			log.Warn("DecFileResourceRefCnt underflow", zap.Int64("id", id))
+			mlog.Warn(context.TODO(), "DecFileResourceRefCnt underflow", mlog.Int64("id", id))
 		}
 	}
 }
@@ -2519,8 +2512,8 @@ func (mt *MetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]in
 			if _, ok := mt.fileResourceID2Meta[id]; ok {
 				mt.fileResourceRefCnt[id]++
 			} else {
-				log.Warn("RecoverFileResourceRefCnt: pending task references missing file resource",
-					zap.Int64("collectionID", collID), zap.Int64("resourceID", id))
+				mlog.Warn(context.TODO(), "RecoverFileResourceRefCnt: pending task references missing file resource",
+					mlog.Int64("collectionID", collID), mlog.Int64("resourceID", id))
 			}
 		}
 	}

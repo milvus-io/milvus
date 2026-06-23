@@ -17,16 +17,16 @@
 package delegator
 
 import (
+	"context"
 	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -221,11 +221,11 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	}
 
 	if !isServiceable {
-		log.Warn("channel distribution is not serviceable",
-			zap.String("channel", d.channelName),
-			zap.Float64("requiredLoadRatio", requiredLoadRatio),
-			zap.Float64("currentLoadRatio", d.queryView.GetLoadedRatio()),
-			zap.Bool("serviceable", d.queryView.Serviceable()),
+		mlog.Warn(context.TODO(), "channel distribution is not serviceable",
+			mlog.String("channel", d.channelName),
+			mlog.Float64("requiredLoadRatio", requiredLoadRatio),
+			mlog.Float64("currentLoadRatio", d.queryView.GetLoadedRatio()),
+			mlog.Bool("serviceable", d.queryView.Serviceable()),
 		)
 		return nil, nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName, "channel distribution is not serviceable")
 	}
@@ -269,7 +269,7 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 		})
 	}
 
-	return
+	return sealed, growing, sealedRowCount, version, err
 }
 
 func (d *distribution) PinOnlineSegments(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64) {
@@ -283,7 +283,7 @@ func (d *distribution) PinOnlineSegments(partitions ...int64) (sealed []Snapshot
 	}
 	sealed, growing = d.filterSegments(sealed, growing, filterOnline)
 	version = current.version
-	return
+	return sealed, growing, version
 }
 
 func (d *distribution) filterSegments(sealed []SnapshotItem, growing []SegmentEntry, filter func(SegmentEntry, int) bool) ([]SnapshotItem, []SegmentEntry) {
@@ -308,10 +308,10 @@ func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed 
 		targetVersion := current.GetTargetVersion()
 		filterReadable := d.readableFilter(targetVersion)
 		sealed, growing = d.filterSegments(sealed, growing, filterReadable)
-		return
+		return sealed, growing
 	}
 
-	return
+	return sealed, growing
 }
 
 // IsReadableSealedSegment reuses PeekSegments(readable=true) semantics for Reopen activation.
@@ -374,15 +374,15 @@ func (d *distribution) updateServiceable(triggerAction string) {
 
 	serviceable := loadedRatio >= 1.0
 	if serviceable != d.queryView.Serviceable() {
-		log.Info("channel distribution serviceable changed",
-			zap.String("channel", d.channelName),
-			zap.Bool("serviceable", serviceable),
-			zap.Float64("loadedRatio", loadedRatio),
-			zap.Int64("loadedSealedRowCount", loadedSealedSegments),
-			zap.Int64("totalSealedRowCount", totalSealedRowCount),
-			zap.Int("unloadedSealedSegmentNum", len(unloadedSealedSegments)),
-			zap.Int("totalSealedSegmentNum", len(d.queryView.sealedSegmentRowCount)),
-			zap.String("action", triggerAction))
+		mlog.Info(context.TODO(), "channel distribution serviceable changed",
+			mlog.String("channel", d.channelName),
+			mlog.Bool("serviceable", serviceable),
+			mlog.Float64("loadedRatio", loadedRatio),
+			mlog.Int64("loadedSealedRowCount", loadedSealedSegments),
+			mlog.Int64("totalSealedRowCount", totalSealedRowCount),
+			mlog.Int("unloadedSealedSegmentNum", len(unloadedSealedSegments)),
+			mlog.Int("totalSealedSegmentNum", len(d.queryView.sealedSegmentRowCount)),
+			mlog.String("action", triggerAction))
 	}
 
 	d.queryView.loadedRatio.Store(loadedRatio)
@@ -406,12 +406,12 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	for _, entry := range entries {
 		oldEntry, ok := d.sealedSegments[entry.SegmentID]
 		if ok && oldEntry.Version >= entry.Version {
-			log.Warn("Invalid segment distribution changed, skip it",
-				zap.Int64("segmentID", entry.SegmentID),
-				zap.Int64("oldVersion", oldEntry.Version),
-				zap.Int64("oldNode", oldEntry.NodeID),
-				zap.Int64("newVersion", entry.Version),
-				zap.Int64("newNode", entry.NodeID),
+			mlog.Warn(context.TODO(), "Invalid segment distribution changed, skip it",
+				mlog.FieldSegmentID(entry.SegmentID),
+				mlog.Int64("oldVersion", oldEntry.Version),
+				mlog.Int64("oldNode", oldEntry.NodeID),
+				mlog.Int64("newVersion", entry.Version),
+				mlog.Int64("newNode", entry.NodeID),
 			)
 			if entry.Candidate != nil {
 				toRefund = append(toRefund, entry.Candidate)
@@ -474,9 +474,9 @@ func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 	d.mut.Unlock()
 
 	if updated {
-		log.Info("mark sealed segment offline from distribution",
-			zap.String("channelName", d.channelName),
-			zap.Int64s("segmentIDs", segmentIDs))
+		mlog.Info(context.TODO(), "mark sealed segment offline from distribution",
+			mlog.String("channelName", d.channelName),
+			mlog.Int64s("segmentIDs", segmentIDs))
 		d.notifySnapshotUpdate()
 	}
 }
@@ -507,9 +507,9 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		// sealed segment already exists or dropped, make growing segment redundant
 		if sealedSet.Contain(s.SegmentID) || droppedSet.Contain(s.SegmentID) {
 			s.TargetVersion = redundantTargetVersion
-			log.Info("set growing segment redundant, wait for release",
-				zap.Int64("segmentID", s.SegmentID),
-				zap.Int64("targetVersion", s.TargetVersion),
+			mlog.Info(context.TODO(), "set growing segment redundant, wait for release",
+				mlog.FieldSegmentID(s.SegmentID),
+				mlog.Int64("targetVersion", s.TargetVersion),
 			)
 			d.growingSegments[s.SegmentID] = s
 			redundantGrowings = append(redundantGrowings, s.SegmentID)
@@ -519,8 +519,8 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 	d.queryView.growingSegments.Range(func(s UniqueID) bool {
 		entry, ok := d.growingSegments[s]
 		if !ok {
-			log.Warn("readable growing segment lost, consume from dml seems too slow",
-				zap.Int64("segmentID", s))
+			mlog.Warn(context.TODO(), "readable growing segment lost, consume from dml seems too slow",
+				mlog.FieldSegmentID(s))
 			return true
 		}
 		entry.TargetVersion = action.GetTargetVersion()
@@ -546,15 +546,15 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 	}
 	d.updateServiceable("SyncTargetVersion")
 
-	log.Info("Update channel query view",
-		zap.String("channel", d.channelName),
-		zap.Int64s("partitions", partitions),
-		zap.Int64("oldVersion", oldValue),
-		zap.Int64("newVersion", action.GetTargetVersion()),
-		zap.Bool("serviceable", d.queryView.Serviceable()),
-		zap.Float64("loadedRatio", d.queryView.GetLoadedRatio()),
-		zap.Int("growingSegmentNum", len(action.GetGrowingInTarget())),
-		zap.Int("sealedSegmentNum", len(action.GetSealedInTarget())),
+	mlog.Info(context.TODO(), "Update channel query view",
+		mlog.String("channel", d.channelName),
+		mlog.Int64s("partitions", partitions),
+		mlog.Int64("oldVersion", oldValue),
+		mlog.Int64("newVersion", action.GetTargetVersion()),
+		mlog.Bool("serviceable", d.queryView.Serviceable()),
+		mlog.Float64("loadedRatio", d.queryView.GetLoadedRatio()),
+		mlog.Int("growingSegmentNum", len(action.GetGrowingInTarget())),
+		mlog.Int("sealedSegmentNum", len(action.GetSealedInTarget())),
 	)
 }
 
@@ -605,11 +605,11 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 	}
 	d.mut.Unlock()
 
-	log.Info("remove segments from distribution",
-		zap.String("channelName", d.channelName),
-		zap.Int64s("growing", lo.Map(growingSegments, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
-		zap.Int64s("sealed", lo.Map(sealedSegments, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
-		zap.Int("sealedCandidatesRefunded", len(toRefund)),
+	mlog.Info(context.TODO(), "remove segments from distribution",
+		mlog.String("channelName", d.channelName),
+		mlog.Int64s("growing", lo.Map(growingSegments, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
+		mlog.Int64s("sealed", lo.Map(sealedSegments, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
+		mlog.Int("sealedCandidatesRefunded", len(toRefund)),
 	)
 
 	d.notifySnapshotUpdate()

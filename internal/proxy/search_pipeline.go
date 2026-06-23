@@ -28,7 +28,6 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -39,8 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -2152,8 +2151,8 @@ func (op *orderByOperator) sortResultsByOrderByFields(result *milvuspb.SearchRes
 			if field == nil {
 				// This should never happen if validateOrderByFields passed.
 				// Log and skip rather than panic to avoid crashing on edge cases.
-				log.Warn("order_by field not found in fieldMap after validation, skipping",
-					zap.String("fieldName", orderBy.FieldName))
+				mlog.Warn(context.TODO(), "order_by field not found in fieldMap after validation, skipping",
+					mlog.String("fieldName", orderBy.FieldName))
 				continue
 			}
 			cmp, err := compareOrderByField(field, orderBy, idxI, idxJ, cache)
@@ -2238,8 +2237,8 @@ func (op *orderByOperator) sortGroupsByOrderByFields(result *milvuspb.SearchResu
 			if field == nil {
 				// This should never happen if validateOrderByFields passed.
 				// Log and skip rather than panic to avoid crashing on edge cases.
-				log.Warn("order_by field not found in fieldMap after validation, skipping",
-					zap.String("fieldName", orderBy.FieldName))
+				mlog.Warn(context.TODO(), "order_by field not found in fieldMap after validation, skipping",
+					mlog.String("fieldName", orderBy.FieldName))
 				continue
 			}
 			cmp, err := compareOrderByField(field, orderBy, dataIdxI, dataIdxJ, cache)
@@ -2890,17 +2889,17 @@ func (p *pipeline) AddNodes(t *searchTask, nodes ...*nodeDef) error {
 }
 
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
-	log.Ctx(ctx).Debug("SearchPipeline run", zap.Stringer("pipeline", p))
+	mlog.Debug(ctx, "SearchPipeline run", mlog.Stringer("pipeline", p))
 	pTrace := newPipelineTrace(p.traceEnabled)
 	msg := opMsg{}
 	msg[pipelineInput] = toReduceResults
 	msg[pipelineStorageCost] = storageCost
 	for _, node := range p.nodes {
 		var err error
-		log.Ctx(ctx).Debug("SearchPipeline run node", zap.String("node", node.name))
+		mlog.Debug(ctx, "SearchPipeline run node", mlog.String("node", node.name))
 		msg, err = node.Run(ctx, span, msg)
 		if err != nil {
-			log.Ctx(ctx).Error("Run node failed: ", zap.String("err", err.Error()))
+			mlog.Error(ctx, "Run node failed: ", mlog.String("err", err.Error()))
 			return nil, storageCost, err
 		}
 		pTrace.TraceMsg(node.opName, msg)

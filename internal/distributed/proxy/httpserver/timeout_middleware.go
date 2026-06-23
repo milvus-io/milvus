@@ -28,11 +28,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -299,7 +298,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			}
 			gCtx.Next()
 			if err := recorder.CommitTo(realWriter); err != nil {
-				log.Warn("failed to write response body", zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to write response body", mlog.Err(err))
 				recorder.Close()
 				bufPool.Put(buffer)
 				return

@@ -17,19 +17,19 @@
 package segments
 
 import (
+	"context"
 	"encoding/base64"
 	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -117,12 +117,12 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 				return err
 			}
 			collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
-			log.Info("update collection schema",
-				zap.Int64("collectionID", collectionID),
-				zap.Uint64("schemaVersion", plan.logicalSchemaVersion),
-				zap.Uint64("schemaBarrierTs", plan.schemaBarrierTs),
-				zap.Uint64("segcoreSchemaVersion", plan.segcoreSchemaVersion),
-				zap.Any("schema", schema),
+			mlog.Info(context.TODO(), "update collection schema",
+				mlog.Int64("collectionID", collectionID),
+				mlog.Uint64("schemaVersion", plan.logicalSchemaVersion),
+				mlog.Uint64("schemaBarrierTs", plan.schemaBarrierTs),
+				mlog.Uint64("segcoreSchemaVersion", plan.segcoreSchemaVersion),
+				mlog.Any("schema", schema),
 			)
 		}
 		// Always update index meta to ensure newly indexed fields are visible
@@ -136,9 +136,9 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		return nil
 	}
 
-	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
+	mlog.Info(context.TODO(), "put new collection", mlog.Int64("collectionID", collectionID), mlog.Any("schema", schema))
 	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
-	log.Info("new collection created", zap.Int64("collectionID", collectionID), zap.Any("schema", schema), zap.Error(err))
+	mlog.Info(context.TODO(), "new collection created", mlog.Int64("collectionID", collectionID), mlog.Any("schema", schema), mlog.Err(err))
 	if err != nil {
 		return err
 	}
@@ -278,8 +278,8 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 
 	if collection, ok := m.collections[collectionID]; ok {
 		if collection.Unref(count) == 0 {
-			log.Info("release collection due to ref count to 0",
-				zap.Int64("nodeID", paramtable.GetNodeID()), zap.Int64("collectionID", collectionID))
+			mlog.Info(context.TODO(), "release collection due to ref count to 0",
+				mlog.Int64("nodeID", paramtable.GetNodeID()), mlog.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
 			DeleteCollection(collection)
 			// Run metrics cleanup in background; DeletePartialMatch is CPU-heavy and should not block Unref.
@@ -417,13 +417,13 @@ func (c *Collection) AddPartition(partitions ...int64) {
 	for i := range partitions {
 		c.partitions.Insert(partitions[i])
 	}
-	log.Info("add partitions", zap.Int64("collection", c.ID()), zap.Int64s("partitions", partitions))
+	mlog.Info(context.TODO(), "add partitions", mlog.Int64("collection", c.ID()), mlog.Int64s("partitions", partitions))
 }
 
 // removePartitionID removes the partition id from partition id list of collection
 func (c *Collection) RemovePartition(partitionID int64) {
 	c.partitions.Remove(partitionID)
-	log.Info("remove partition", zap.Int64("collection", c.ID()), zap.Int64("partition", partitionID))
+	mlog.Info(context.TODO(), "remove partition", mlog.Int64("collection", c.ID()), mlog.Int64("partition", partitionID))
 }
 
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
@@ -481,7 +481,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 
 	ccollection, err := segcore.CreateCCollection(req)
 	if err != nil {
-		log.Warn("create collection failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "create collection failed", mlog.Err(err))
 		return nil, err
 	}
 	coll := &Collection{
@@ -544,7 +544,7 @@ func DeleteCollection(collection *Collection) {
 		ez := hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collection.ID())
 		if ez != nil {
 			if err := segcore.UnRefPluginContext(ez); err != nil {
-				log.Error("failed to unref plugin context", zap.Int64("collectionID", collection.ID()), zap.Error(err))
+				mlog.Error(context.TODO(), "failed to unref plugin context", mlog.Int64("collectionID", collection.ID()), mlog.Err(err))
 			}
 		}
 	}
@@ -563,7 +563,7 @@ func putOrUpdateStorageContext(properties []*commonpb.KeyValuePair, collectionID
 			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
 			err := segcore.PutOrRefPluginContext(ez, base64.StdEncoding.EncodeToString(key))
 			if err != nil {
-				log.Error("failed to put or update plugin context", zap.Int64("collectionID", collectionID), zap.Error(err))
+				mlog.Error(context.TODO(), "failed to put or update plugin context", mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			}
 		}
 	}

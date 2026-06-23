@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"os"
@@ -25,10 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -318,7 +317,7 @@ We recommend using version 1.2 and above.`,
 	p.EtcdEnableAuth.Init(base.mgr)
 
 	if p.UseEmbedEtcd.GetAsBool() && p.EtcdEnableAuth.GetAsBool() {
-		log.Warn("embedded etcd does not support auth, disabling etcd auth automatically")
+		mlog.Warn(context.TODO(), "embedded etcd does not support auth, disabling etcd auth automatically")
 		p.EtcdEnableAuth.SwapTempValue("false")
 	}
 
@@ -1137,7 +1136,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Formatter: func(add string) string {
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
-				log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
+				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
 				return ""
 			}
 			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()

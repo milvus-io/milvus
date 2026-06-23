@@ -17,13 +17,14 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -70,7 +71,7 @@ func NewInt8FieldValue(v int8) *Int8FieldValue {
 func (ifv *Int8FieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int8FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value > v.Value {
@@ -83,7 +84,7 @@ func (ifv *Int8FieldValue) GT(obj ScalarFieldValue) bool {
 func (ifv *Int8FieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int8FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value >= v.Value {
@@ -96,7 +97,7 @@ func (ifv *Int8FieldValue) GE(obj ScalarFieldValue) bool {
 func (ifv *Int8FieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int8FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -110,7 +111,7 @@ func (ifv *Int8FieldValue) LT(obj ScalarFieldValue) bool {
 func (ifv *Int8FieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int8FieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -124,7 +125,7 @@ func (ifv *Int8FieldValue) LE(obj ScalarFieldValue) bool {
 func (ifv *Int8FieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int8FieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -156,7 +157,7 @@ func (ifv *Int8FieldValue) UnmarshalJSON(data []byte) error {
 func (ifv *Int8FieldValue) SetValue(data interface{}) error {
 	value, ok := data.(int8)
 	if !ok {
-		log.Warn("wrong type value when setValue for Int64FieldValue")
+		mlog.Warn(context.TODO(), "wrong type value when setValue for Int64FieldValue")
 		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for Int64FieldValue")
 	}
 
@@ -190,7 +191,7 @@ func NewInt16FieldValue(v int16) *Int16FieldValue {
 func (ifv *Int16FieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int16FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value > v.Value {
@@ -203,7 +204,7 @@ func (ifv *Int16FieldValue) GT(obj ScalarFieldValue) bool {
 func (ifv *Int16FieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int16FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value >= v.Value {
@@ -216,7 +217,7 @@ func (ifv *Int16FieldValue) GE(obj ScalarFieldValue) bool {
 func (ifv *Int16FieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int16FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -230,7 +231,7 @@ func (ifv *Int16FieldValue) LT(obj ScalarFieldValue) bool {
 func (ifv *Int16FieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int16FieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -244,7 +245,7 @@ func (ifv *Int16FieldValue) LE(obj ScalarFieldValue) bool {
 func (ifv *Int16FieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int16FieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -276,7 +277,7 @@ func (ifv *Int16FieldValue) UnmarshalJSON(data []byte) error {
 func (ifv *Int16FieldValue) SetValue(data interface{}) error {
 	value, ok := data.(int16)
 	if !ok {
-		log.Warn("wrong type value when setValue for Int64FieldValue")
+		mlog.Warn(context.TODO(), "wrong type value when setValue for Int64FieldValue")
 		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for Int64FieldValue")
 	}
 
@@ -310,7 +311,7 @@ func NewInt32FieldValue(v int32) *Int32FieldValue {
 func (ifv *Int32FieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int32FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value > v.Value {
@@ -323,7 +324,7 @@ func (ifv *Int32FieldValue) GT(obj ScalarFieldValue) bool {
 func (ifv *Int32FieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int32FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value >= v.Value {
@@ -336,7 +337,7 @@ func (ifv *Int32FieldValue) GE(obj ScalarFieldValue) bool {
 func (ifv *Int32FieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int32FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -350,7 +351,7 @@ func (ifv *Int32FieldValue) LT(obj ScalarFieldValue) bool {
 func (ifv *Int32FieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int32FieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -364,7 +365,7 @@ func (ifv *Int32FieldValue) LE(obj ScalarFieldValue) bool {
 func (ifv *Int32FieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int32FieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -396,7 +397,7 @@ func (ifv *Int32FieldValue) UnmarshalJSON(data []byte) error {
 func (ifv *Int32FieldValue) SetValue(data interface{}) error {
 	value, ok := data.(int32)
 	if !ok {
-		log.Warn("wrong type value when setValue for Int64FieldValue")
+		mlog.Warn(context.TODO(), "wrong type value when setValue for Int64FieldValue")
 		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for Int64FieldValue")
 	}
 
@@ -430,7 +431,7 @@ func NewInt64FieldValue(v int64) *Int64FieldValue {
 func (ifv *Int64FieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int64FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value > v.Value {
@@ -443,7 +444,7 @@ func (ifv *Int64FieldValue) GT(obj ScalarFieldValue) bool {
 func (ifv *Int64FieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int64FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value >= v.Value {
@@ -456,7 +457,7 @@ func (ifv *Int64FieldValue) GE(obj ScalarFieldValue) bool {
 func (ifv *Int64FieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int64FieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -470,7 +471,7 @@ func (ifv *Int64FieldValue) LT(obj ScalarFieldValue) bool {
 func (ifv *Int64FieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int64FieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -484,7 +485,7 @@ func (ifv *Int64FieldValue) LE(obj ScalarFieldValue) bool {
 func (ifv *Int64FieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*Int64FieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -516,7 +517,7 @@ func (ifv *Int64FieldValue) UnmarshalJSON(data []byte) error {
 func (ifv *Int64FieldValue) SetValue(data interface{}) error {
 	value, ok := data.(int64)
 	if !ok {
-		log.Warn("wrong type value when setValue for Int64FieldValue")
+		mlog.Warn(context.TODO(), "wrong type value when setValue for Int64FieldValue")
 		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for Int64FieldValue")
 	}
 
@@ -551,7 +552,7 @@ func NewFloatFieldValue(v float32) *FloatFieldValue {
 func (ifv *FloatFieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*FloatFieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value > v.Value {
@@ -564,7 +565,7 @@ func (ifv *FloatFieldValue) GT(obj ScalarFieldValue) bool {
 func (ifv *FloatFieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*FloatFieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value >= v.Value {
@@ -577,7 +578,7 @@ func (ifv *FloatFieldValue) GE(obj ScalarFieldValue) bool {
 func (ifv *FloatFieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*FloatFieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -591,7 +592,7 @@ func (ifv *FloatFieldValue) LT(obj ScalarFieldValue) bool {
 func (ifv *FloatFieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*FloatFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -605,7 +606,7 @@ func (ifv *FloatFieldValue) LE(obj ScalarFieldValue) bool {
 func (ifv *FloatFieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*FloatFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -637,7 +638,7 @@ func (ifv *FloatFieldValue) UnmarshalJSON(data []byte) error {
 func (ifv *FloatFieldValue) SetValue(data interface{}) error {
 	value, ok := data.(float32)
 	if !ok {
-		log.Warn("wrong type value when setValue for FloatFieldValue")
+		mlog.Warn(context.TODO(), "wrong type value when setValue for FloatFieldValue")
 		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for FloatFieldValue")
 	}
 
@@ -671,7 +672,7 @@ func NewDoubleFieldValue(v float64) *DoubleFieldValue {
 func (ifv *DoubleFieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*DoubleFieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value > v.Value {
@@ -684,7 +685,7 @@ func (ifv *DoubleFieldValue) GT(obj ScalarFieldValue) bool {
 func (ifv *DoubleFieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*DoubleFieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ifv.Value >= v.Value {
@@ -697,7 +698,7 @@ func (ifv *DoubleFieldValue) GE(obj ScalarFieldValue) bool {
 func (ifv *DoubleFieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*DoubleFieldValue)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -711,7 +712,7 @@ func (ifv *DoubleFieldValue) LT(obj ScalarFieldValue) bool {
 func (ifv *DoubleFieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*DoubleFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -725,7 +726,7 @@ func (ifv *DoubleFieldValue) LE(obj ScalarFieldValue) bool {
 func (ifv *DoubleFieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*DoubleFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not int64")
+		mlog.Warn(context.TODO(), "type of compared obj is not int64")
 		return false
 	}
 
@@ -757,7 +758,7 @@ func (ifv *DoubleFieldValue) UnmarshalJSON(data []byte) error {
 func (ifv *DoubleFieldValue) SetValue(data interface{}) error {
 	value, ok := data.(float64)
 	if !ok {
-		log.Warn("wrong type value when setValue for DoubleFieldValue")
+		mlog.Warn(context.TODO(), "wrong type value when setValue for DoubleFieldValue")
 		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for DoubleFieldValue")
 	}
 
@@ -790,7 +791,7 @@ func NewStringFieldValue(v string) *StringFieldValue {
 func (sfv *StringFieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*StringFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 
@@ -800,7 +801,7 @@ func (sfv *StringFieldValue) GT(obj ScalarFieldValue) bool {
 func (sfv *StringFieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*StringFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 	return strings.Compare(sfv.Value, v.Value) >= 0
@@ -809,7 +810,7 @@ func (sfv *StringFieldValue) GE(obj ScalarFieldValue) bool {
 func (sfv *StringFieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*StringFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 	return strings.Compare(sfv.Value, v.Value) < 0
@@ -818,7 +819,7 @@ func (sfv *StringFieldValue) LT(obj ScalarFieldValue) bool {
 func (sfv *StringFieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*StringFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 	return strings.Compare(sfv.Value, v.Value) <= 0
@@ -827,7 +828,7 @@ func (sfv *StringFieldValue) LE(obj ScalarFieldValue) bool {
 func (sfv *StringFieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*StringFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 	return strings.Compare(sfv.Value, v.Value) == 0
@@ -886,7 +887,7 @@ func NewVarCharFieldValue(v string) *VarCharFieldValue {
 func (vcfv *VarCharFieldValue) GT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 
@@ -896,7 +897,7 @@ func (vcfv *VarCharFieldValue) GT(obj ScalarFieldValue) bool {
 func (vcfv *VarCharFieldValue) GE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 	return strings.Compare(vcfv.Value, v.Value) >= 0
@@ -905,7 +906,7 @@ func (vcfv *VarCharFieldValue) GE(obj ScalarFieldValue) bool {
 func (vcfv *VarCharFieldValue) LT(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 	return strings.Compare(vcfv.Value, v.Value) < 0
@@ -914,7 +915,7 @@ func (vcfv *VarCharFieldValue) LT(obj ScalarFieldValue) bool {
 func (vcfv *VarCharFieldValue) LE(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 	return strings.Compare(vcfv.Value, v.Value) <= 0
@@ -923,7 +924,7 @@ func (vcfv *VarCharFieldValue) LE(obj ScalarFieldValue) bool {
 func (vcfv *VarCharFieldValue) EQ(obj ScalarFieldValue) bool {
 	v, ok := obj.(*VarCharFieldValue)
 	if !ok {
-		log.Warn("type of compared obj is not varchar")
+		mlog.Warn(context.TODO(), "type of compared obj is not varchar")
 		return false
 	}
 	return strings.Compare(vcfv.Value, v.Value) == 0
@@ -1011,7 +1012,7 @@ func (ifv *FloatVectorFieldValue) UnmarshalJSON(data []byte) error {
 func (ifv *FloatVectorFieldValue) SetValue(data interface{}) error {
 	value, ok := data.([]float32)
 	if !ok {
-		log.Warn("wrong type value when setValue for FloatVectorFieldValue")
+		mlog.Warn(context.TODO(), "wrong type value when setValue for FloatVectorFieldValue")
 		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for FloatVectorFieldValue")
 	}
 

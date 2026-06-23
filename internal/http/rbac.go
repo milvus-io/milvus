@@ -23,11 +23,10 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -110,17 +109,17 @@ func checkExprRootAuth(ctx context.Context, req *http.Request) error {
 		return &ErrAuthentication{msg: "authentication required. Use HTTP Basic Auth with root credentials"}
 	}
 	if username != util.UserRoot {
-		log.Warn("non-root user attempted to access /expr", zap.String("username", username))
+		mlog.Warn(ctx, "non-root user attempted to access /expr", mlog.String("username", username))
 		return &ErrPermissionDenied{msg: "only root user can access /expr endpoint"}
 	}
 	if passwordVerifyFunc == nil {
 		return &ErrServiceUnavailable{msg: "password verification not available"}
 	}
 	if !passwordVerifyFunc(ctx, username, password) {
-		log.Warn("invalid root password for /expr access")
+		mlog.Warn(ctx, "invalid root password for /expr access")
 		return &ErrAuthentication{msg: "invalid root password"}
 	}
-	log.Info("root user authenticated for /expr access")
+	mlog.Info(ctx, "root user authenticated for /expr access")
 	return nil
 }
 
@@ -144,13 +143,13 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 		return &ErrServiceUnavailable{msg: "password verification not available"}
 	}
 	if !passwordVerifyFunc(ctx, username, password) {
-		log.Warn("invalid credentials for HTTP RBAC check", zap.String("username", username))
+		mlog.Warn(ctx, "invalid credentials for HTTP RBAC check", mlog.String("username", username))
 		return &ErrAuthentication{msg: "invalid credentials"}
 	}
 
 	// Root bypass (unless RootShouldBindRole is enabled)
 	if !paramtable.Get().CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
-		log.Info("root user authenticated for HTTP access", zap.String("privilege", objectPrivilege))
+		mlog.Info(ctx, "root user authenticated for HTTP access", mlog.String("privilege", objectPrivilege))
 		return nil
 	}
 
@@ -160,7 +159,7 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 	}
 	roleNames, err := getUserRoleFunc(username)
 	if err != nil {
-		log.Warn("failed to get user roles", zap.String("username", username), zap.Error(err))
+		mlog.Warn(ctx, "failed to get user roles", mlog.String("username", username), mlog.Err(err))
 		return &ErrServiceUnavailable{msg: fmt.Sprintf("failed to get user roles: %v", err)}
 	}
 	roleNames = append(roleNames, util.RolePublic)
@@ -183,7 +182,7 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 		// Enforce with Casbin
 		isPermit, err := e.Enforce(roleName, object, privilegeName)
 		if err != nil {
-			log.Warn("privilege check failed", zap.Error(err))
+			mlog.Warn(ctx, "privilege check failed", mlog.Err(err))
 			return errors.Wrapf(err, "privilege check failed")
 		}
 		privilege.SetResultCache(roleName, object, privilegeName, isPermit, version)
@@ -192,10 +191,10 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 		}
 	}
 
-	log.Info("HTTP permission denied",
-		zap.String("username", username),
-		zap.Strings("roles", roleNames),
-		zap.String("privilege", util.MetaStore2API(privilegeName)))
+	mlog.Info(ctx, "HTTP permission denied",
+		mlog.String("username", username),
+		mlog.Strings("roles", roleNames),
+		mlog.String("privilege", util.MetaStore2API(privilegeName)))
 
 	return &ErrPermissionDenied{
 		msg: fmt.Sprintf("permission denied: user %s requires %s privilege", username, util.MetaStore2API(privilegeName)),

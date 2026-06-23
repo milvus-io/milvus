@@ -32,9 +32,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -46,13 +45,13 @@ func Init() error {
 
 	exp, err := CreateTracerExporter(params)
 	if err != nil {
-		log.Warn("Init tracer failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "Init tracer failed", mlog.Err(err))
 		return err
 	}
 
 	SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	log.Info("Init tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
+	mlog.Info(context.TODO(), "Init tracer finished", mlog.String("Exporter", params.TraceCfg.Exporter.GetValue()))
 	return nil
 }
 
@@ -91,13 +90,13 @@ func parseHeaders(headers string) map[string]string {
 	// Try to decode as base64 first
 	decodeheaders, err := base64.StdEncoding.DecodeString(headers)
 	if err != nil {
-		log.Warn("Failed to decode base64 headers, trying to parse as JSON directly", zap.Error(err))
+		mlog.Warn(context.TODO(), "Failed to decode base64 headers, trying to parse as JSON directly", mlog.Err(err))
 		// Try to parse headers as JSON directly
 		var headersMap map[string]string
 		if jsonErr := json.Unmarshal([]byte(headers), &headersMap); jsonErr == nil {
 			return headersMap
 		}
-		log.Warn("Failed to parse headers as JSON", zap.Error(err))
+		mlog.Warn(context.TODO(), "Failed to parse headers as JSON", mlog.Err(err))
 		return nil
 	}
 
@@ -106,7 +105,7 @@ func parseHeaders(headers string) map[string]string {
 	if jsonErr := json.Unmarshal(decodeheaders, &headersMap); jsonErr == nil {
 		return headersMap
 	}
-	log.Warn("Failed to parse decoded headers as JSON", zap.Error(err))
+	mlog.Warn(context.TODO(), "Failed to parse decoded headers as JSON", mlog.Err(err))
 	return nil
 }
 

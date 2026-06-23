@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -219,7 +219,7 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
 		"rg2": newResourceGroupConfig(0, 0),
 	})
-	log.Info("xxxxx")
+	mlog.Info(suite.ctx, "xxxxx")
 	// RemoveResourceGroup will remove all nodes from the resource group.
 	err = suite.manager.RemoveResourceGroup(ctx, "rg2")
 	suite.NoError(err)
@@ -859,7 +859,7 @@ func (suite *ResourceManagerSuite) TestNodeLabels_NodeAssign() {
 		},
 	})
 
-	log.Info("test swap rg's label")
+	mlog.Info(suite.ctx, "test swap rg's label")
 	for i := 0; i < 4; i++ {
 		suite.manager.AutoRecoverResourceGroup(ctx, "rg1")
 		suite.manager.AutoRecoverResourceGroup(ctx, "rg2")

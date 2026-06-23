@@ -23,13 +23,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -134,7 +133,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(ctx, "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// create index
@@ -148,7 +147,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	err = merr.Error(createIndexStatus)
 	s.NoError(err)
 	s.WaitForIndexBuilt(context.TODO(), s.collectionName, integration.FloatVecField)
-	log.Info("=========================Index created=========================")
+	mlog.Info(ctx, "=========================Index created=========================")
 
 	// load
 	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -159,7 +158,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	err = merr.Error(loadStatus)
 	s.NoError(err)
 	s.WaitForLoad(context.TODO(), s.collectionName)
-	log.Info("=========================Collection loaded=========================")
+	mlog.Info(ctx, "=========================Collection loaded=========================")
 }
 
 func (s *ExpressionSuite) setupData() {
@@ -225,7 +224,8 @@ func (s *ExpressionSuite) searchWithExpression() {
 		err = merr.Error(searchResult.GetStatus())
 		s.NoError(err)
 		s.Equal(c.resNum, len(searchResult.GetResults().GetScores()))
-		log.Info(fmt.Sprintf("=========================Search done with expr:%s =========================", c.expr))
+		mlog.Info(context.TODO(),
+			fmt.Sprintf("=========================Search done with expr:%s =========================", c.expr))
 	}
 }
 
@@ -281,9 +281,9 @@ func (s *ExpressionSuite) TestDivisionByZeroError() {
 					fmt.Sprintf("Error message should contain '%s' for expr: %s",
 						c.expectedInReason, c.expr))
 			}
-			log.Info("Got expected error",
-				zap.String("expr", c.expr),
-				zap.String("reason", status.GetReason()))
+			mlog.Info(context.TODO(), "Got expected error",
+				mlog.String("expr", c.expr),
+				mlog.String("reason", status.GetReason()))
 		} else {
 			// For valid cases, check successful execution
 			err = merr.Error(searchResult.GetStatus())

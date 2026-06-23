@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -66,8 +66,7 @@ type distHandler struct {
 
 func (dh *distHandler) start(ctx context.Context) {
 	defer dh.wg.Done()
-	log := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qcv2.distHandler", 1, 60)
-	log.Info("start dist handler")
+	mlog.Info(ctx, "start dist handler", mlog.Int64("nodeID", dh.nodeID))
 
 	var loopWG sync.WaitGroup
 	loopWG.Add(2)
@@ -90,10 +89,10 @@ func (dh *distHandler) startPullDistLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Ctx(ctx).Info("close dist pull loop due to context done", zap.Int64("nodeID", dh.nodeID))
+			mlog.Info(ctx, "close dist pull loop due to context done", mlog.Int64("nodeID", dh.nodeID))
 			return
 		case <-dh.c:
-			log.Ctx(ctx).Info("close dist pull loop", zap.Int64("nodeID", dh.nodeID))
+			mlog.Info(ctx, "close dist pull loop", mlog.Int64("nodeID", dh.nodeID))
 			return
 		case <-ticker.C:
 			dh.pullDist(ctx, &failures)
@@ -118,10 +117,10 @@ func (dh *distHandler) startDispatchLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Ctx(ctx).Info("close dist dispatch loop due to context done", zap.Int64("nodeID", dh.nodeID))
+			mlog.Info(ctx, "close dist dispatch loop due to context done", mlog.Int64("nodeID", dh.nodeID))
 			return
 		case <-dh.c:
-			log.Ctx(ctx).Info("close dist dispatch loop", zap.Int64("nodeID", dh.nodeID))
+			mlog.Info(ctx, "close dist dispatch loop", mlog.Int64("nodeID", dh.nodeID))
 			return
 		case <-ticker.C:
 			dh.scheduler.Dispatch(dh.nodeID)
@@ -145,20 +144,18 @@ func (dh *distHandler) pullDist(ctx context.Context, failures *int) {
 	if err != nil {
 		node := dh.nodeManager.Get(dh.nodeID)
 		*failures = *failures + 1
-		fields := []zap.Field{zap.Int("times", *failures)}
+		fields := []mlog.Field{mlog.Int("times", *failures)}
 		if node != nil {
-			fields = append(fields, zap.Time("lastHeartbeat", node.LastHeartbeat()))
+			fields = append(fields, mlog.Time("lastHeartbeat", node.LastHeartbeat()))
 		}
-		fields = append(fields, zap.Error(err))
-		log.Ctx(ctx).WithRateGroup("distHandler.pullDist", 1, 60).
-			RatedWarn(30.0, "failed to get data distribution", fields...)
+		fields = append(fields, mlog.Err(err))
+		mlog.RatedWarn(ctx, rate.Limit(30.0), "failed to get data distribution", fields...)
 	} else {
 		*failures = 0
 		dh.handleDistResp(ctx, resp)
 	}
-	log.Ctx(ctx).WithRateGroup("distHandler.pullDist", 1, 120).
-		RatedInfo(120.0, "pull and handle distribution done",
-			zap.Int("respSize", proto.Size(resp)), zap.Duration("pullDur", d1), zap.Duration("handleDur", tr.RecordSpan()))
+	mlog.RatedInfo(ctx, rate.Limit(120.0), "pull and handle distribution done",
+		mlog.Int("respSize", proto.Size(resp)), mlog.Duration("pullDur", d1), mlog.Duration("handleDur", tr.RecordSpan()))
 }
 
 func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetDataDistributionResponse) {
@@ -168,8 +165,8 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 	}
 
 	if time.Since(node.LastHeartbeat()) > paramtable.Get().QueryCoordCfg.HeartBeatWarningLag.GetAsDuration(time.Millisecond) {
-		log.Warn("node last heart beat time lag too behind", zap.Time("now", time.Now()),
-			zap.Time("lastHeartBeatTime", node.LastHeartbeat()), zap.Int64("nodeID", node.ID()))
+		mlog.Warn(context.TODO(), "node last heart beat time lag too behind", mlog.Time("now", time.Now()),
+			mlog.Time("lastHeartBeatTime", node.LastHeartbeat()), mlog.Int64("nodeID", node.ID()))
 	}
 	now := time.Now()
 	node.SetLastHeartbeat(now)
@@ -177,7 +174,7 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 
 	// skip  update dist if no distribution change happens in query node
 	if resp.GetLastModifyTs() != 0 && resp.GetLastModifyTs() <= dh.lastUpdateTs {
-		log.RatedInfo(30, "skip update dist due to no distribution change", zap.Int64("lastModifyTs", resp.GetLastModifyTs()), zap.Int64("lastUpdateTs", dh.lastUpdateTs))
+		mlog.RatedInfo(context.TODO(), rate.Limit(30), "skip update dist due to no distribution change", mlog.Int64("lastModifyTs", resp.GetLastModifyTs()), mlog.Int64("lastUpdateTs", dh.lastUpdateTs))
 	} else {
 		dh.lastUpdateTs = resp.GetLastModifyTs()
 
@@ -240,10 +237,9 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 		channel, ok := channelMap[lview.GetChannel()]
 		if !ok {
 			// unreachable path, querynode should return leader view and channel dist at same time
-			log.Ctx(ctx).WithRateGroup("distHandler.updateChannelsDistribution", 1, 60).
-				RatedInfo(30, "channel not found in distribution",
-					zap.Int64("collectionID", lview.GetCollection()),
-					zap.String("channel", lview.GetChannel()))
+			mlog.RatedInfo(ctx, rate.Limit(30), "channel not found in distribution",
+				mlog.Int64("collectionID", lview.GetCollection()),
+				mlog.String("channel", lview.GetChannel()))
 			continue
 		}
 		delegatorVersion := channel.GetVersion()
@@ -319,25 +315,16 @@ func checkDelegatorServiceable(ctx context.Context, dh *distHandler, view *meta.
 			return true
 		}
 		// Only create log when not serviceable
-		log.Ctx(ctx).
-			WithRateGroup(fmt.Sprintf("distHandler.updateChannelsDistribution.%s", view.Channel), 1, 60).
-			With(
-				zap.Int64("nodeID", view.ID),
-				zap.String("channel", view.Channel),
-			).RatedInfo(10, "delegator is not serviceable", zap.Int64("queryViewVersion", view.TargetVersion))
+		mlog.With(
+			mlog.Int64("nodeID", view.ID),
+			mlog.String("channel", view.Channel),
+		).RatedInfo(ctx, rate.Limit(10), "delegator is not serviceable", mlog.Int64("queryViewVersion", view.TargetVersion))
 		return false
 	}
 
-	log := log.Ctx(ctx).
-		WithRateGroup(fmt.Sprintf("distHandler.updateChannelsDistribution.%s", view.Channel), 1, 60).
-		With(
-			zap.Int64("nodeID", view.ID),
-			zap.String("channel", view.Channel),
-		)
-
 	// check leader data ready for version before 2.5.8
 	if err := utils.CheckDelegatorDataReady(dh.nodeManager, dh.target, view, meta.CurrentTarget); err != nil {
-		log.RatedInfo(10, "delegator is not serviceable due to distribution not ready", zap.Error(err))
+		mlog.RatedInfo(context.TODO(), rate.Limit(10), "delegator is not serviceable due to distribution not ready", mlog.Err(err))
 		view.Status = &querypb.LeaderViewStatus{
 			Serviceable: false,
 		}
@@ -348,9 +335,9 @@ func checkDelegatorServiceable(ctx context.Context, dh *distHandler, view *meta.
 	// so shard leader should be unserviceable until target version is synced
 	currentTargetVersion := dh.target.GetCollectionTargetVersion(ctx, view.CollectionID, meta.CurrentTarget)
 	if view.TargetVersion <= 0 {
-		log.RatedInfo(10, "delegator is not serviceable due to target version not ready",
-			zap.Int64("currentTargetVersion", currentTargetVersion),
-			zap.Int64("leaderTargetVersion", view.TargetVersion))
+		mlog.RatedInfo(context.TODO(), rate.Limit(10), "delegator is not serviceable due to target version not ready",
+			mlog.Int64("currentTargetVersion", currentTargetVersion),
+			mlog.Int64("leaderTargetVersion", view.TargetVersion))
 		view.Status = &querypb.LeaderViewStatus{
 			Serviceable: false,
 		}

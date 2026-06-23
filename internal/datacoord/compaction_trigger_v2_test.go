@@ -13,14 +13,13 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -258,7 +257,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	cView, ok := levelZeroViews[0].(*LevelZeroCompactionView)
 	s.True(ok)
 	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
+	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
@@ -301,7 +300,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	cView, ok := levelZeroViews[0].(*LevelZeroCompactionView)
 	s.True(ok)
 	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
+	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.inspector.EXPECT().enqueueCompaction(mock.Anything).

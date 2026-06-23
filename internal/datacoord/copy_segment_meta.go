@@ -19,12 +19,11 @@ package datacoord
 import (
 	"context"
 
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -474,7 +473,7 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 	}
 	if prevJob == nil {
 		m.mu.Unlock()
-		log.Warn("UpdateJobStateAndReleaseRef: job not found", zap.Int64("jobID", jobID))
+		mlog.Warn(ctx, "UpdateJobStateAndReleaseRef: job not found", mlog.FieldJobID(jobID))
 		return nil
 	}
 
@@ -501,24 +500,24 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 		// Pins carry a TTL (dataCoord.snapshot.restorePinTTLSeconds) so an orphan
 		// left here will self-heal; we still log loudly so operators can detect
 		// a broken unpin path early instead of waiting for TTL expiry.
-		log.Warn("failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL",
-			zap.Int64("jobID", jobID),
-			zap.Int64("pinID", pinID),
-			zap.Int64("sourceCollectionID", sourceCollectionID),
-			zap.String("snapshot", snapshotName),
-			zap.Error(unpinErr))
+		mlog.Warn(ctx, "failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL",
+			mlog.FieldJobID(jobID),
+			mlog.Int64("pinID", pinID),
+			mlog.Int64("sourceCollectionID", sourceCollectionID),
+			mlog.String("snapshot", snapshotName),
+			mlog.Err(unpinErr))
 		return nil
 	}
 	if unpinName != "" {
 		setSnapshotActivePinsGauge(unpinCollID, unpinName, remaining)
 	}
-	log.Info("unpinned source snapshot on job completion",
-		zap.Int64("jobID", jobID),
-		zap.Int64("pinID", pinID),
-		zap.Int64("sourceCollectionID", sourceCollectionID),
-		zap.String("snapshot", snapshotName),
-		zap.String("previousState", previousState.String()),
-		zap.String("newState", newState.String()))
+	mlog.Info(ctx, "unpinned source snapshot on job completion",
+		mlog.FieldJobID(jobID),
+		mlog.Int64("pinID", pinID),
+		mlog.Int64("sourceCollectionID", sourceCollectionID),
+		mlog.String("snapshot", snapshotName),
+		mlog.String("previousState", previousState.String()),
+		mlog.String("newState", newState.String()))
 	return nil
 }
 
@@ -550,8 +549,8 @@ func (m *copySegmentMeta) RemoveJob(ctx context.Context, jobID int64) error {
 		// Note: Snapshot restore reference was already decremented when the job
 		// transitioned to a terminal state (Completed/Failed), not here at removal.
 		// This decouples reference lifetime from job metadata cleanup.
-		log.Info("removed copy segment job",
-			zap.Int64("jobID", jobID))
+		mlog.Info(ctx, "removed copy segment job",
+			mlog.FieldJobID(jobID))
 
 		// Remove from in-memory cache
 		delete(m.jobs, jobID)

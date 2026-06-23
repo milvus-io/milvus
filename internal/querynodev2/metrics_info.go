@@ -22,7 +22,6 @@ import (
 	"math"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -31,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -211,7 +210,7 @@ func getChannelJSON(node *QueryNode, collectionID int64) string {
 	stats := node.pipelineManager.GetChannelStats(collectionID)
 	ret, err := json.Marshal(stats)
 	if err != nil {
-		log.Warn("failed to marshal channels", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to marshal channels", mlog.Err(err))
 		return ""
 	}
 	return string(ret)
@@ -253,7 +252,7 @@ func getSegmentJSON(node *QueryNode, collectionID int64) string {
 
 	ret, err := json.Marshal(ms)
 	if err != nil {
-		log.Warn("failed to marshal segments", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to marshal segments", mlog.Err(err))
 		return ""
 	}
 	return string(ret)
@@ -266,12 +265,12 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 
 	usedDiskGB, totalDiskGB, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
-		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+		mlog.Warn(ctx, "get disk usage failed", mlog.Err(err))
 	}
 
 	ioWait, err := hardware.GetIOWait()
 	if err != nil {
-		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+		mlog.Warn(ctx, "get iowait failed", mlog.Err(err))
 	}
 
 	// Get jemalloc memory statistics

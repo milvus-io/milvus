@@ -21,13 +21,12 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -54,12 +53,12 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 	deleteData.Timestamps = append(deleteData.Timestamps, msg.Timestamps...)
 	deleteData.RowCount += int64(len(pks))
 
-	log.Info("pipeline fetch delete msg",
-		zap.Int64("collectionID", dNode.collectionID),
-		zap.Int64("partitionID", msg.PartitionID),
-		zap.Int("deleteRowNum", len(pks)),
-		zap.Uint64("timestampMin", msg.BeginTimestamp),
-		zap.Uint64("timestampMax", msg.EndTimestamp))
+	mlog.Info(context.TODO(), "pipeline fetch delete msg",
+		mlog.FieldCollectionID(dNode.collectionID),
+		mlog.FieldPartitionID(msg.PartitionID),
+		mlog.Int("deleteRowNum", len(pks)),
+		mlog.Uint64("timestampMin", msg.BeginTimestamp),
+		mlog.Uint64("timestampMax", msg.EndTimestamp))
 }
 
 func (dNode *deleteNode) Operate(in Msg) Msg {
@@ -78,13 +77,14 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	if nodeMsg.schema != nil {
-		if err := dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
-			log.Warn("failed to update schema in delete node",
-				zap.Int64("collectionID", dNode.collectionID),
-				zap.String("channel", dNode.channel),
-				zap.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
-				zap.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
-				zap.Error(err))
+		ctx := context.TODO()
+		if err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
+			mlog.Warn(ctx, "failed to update schema in delete node",
+				mlog.Int64("collectionID", dNode.collectionID),
+				mlog.String("channel", dNode.channel),
+				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
+				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
+				mlog.Err(err))
 		}
 	}
 

@@ -22,11 +22,10 @@ import (
 	"context"
 	"path"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
@@ -36,28 +35,28 @@ func TraceLogInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInf
 		return handler(ctx, req)
 	case 1: // simple info
 		fields := GetRequestBaseInfo(ctx, req, info, false)
-		log.Ctx(ctx).Info("trace info: simple", fields...)
+		mlog.Info(ctx, "trace info: simple", fields...)
 		return handler(ctx, req)
 	case 2: // detail info
 		fields := GetRequestBaseInfo(ctx, req, info, true)
 		fields = append(fields, GetRequestFieldWithoutSensitiveInfo(req))
-		log.Ctx(ctx).Info("trace info: detail", fields...)
+		mlog.Info(ctx, "trace info: detail", fields...)
 		return handler(ctx, req)
 	case 3: // detail info with request and response
 		fields := GetRequestBaseInfo(ctx, req, info, true)
 		fields = append(fields, GetRequestFieldWithoutSensitiveInfo(req))
-		log.Ctx(ctx).Info("trace info: all request", fields...)
+		mlog.Info(ctx, "trace info: all request", fields...)
 		resp, err := handler(ctx, req)
 		if err != nil {
-			log.Ctx(ctx).Info("trace info: all, error", zap.Error(err))
+			mlog.Info(ctx, "trace info: all, error", mlog.Err(err))
 			return resp, err
 		}
 		if status, ok := requestutil.GetStatusFromResponse(resp); ok {
 			if status.Code != 0 {
-				log.Ctx(ctx).Info("trace info: all, fail", zap.Any("resp", resp))
+				mlog.Info(ctx, "trace info: all, fail", mlog.Any("resp", resp))
 			}
 		} else {
-			log.Ctx(ctx).Info("trace info: all, unknown", zap.Any("resp", resp))
+			mlog.Info(ctx, "trace info: all, unknown", mlog.Any("resp", resp))
 		}
 		return resp, nil
 	default:
@@ -65,15 +64,15 @@ func TraceLogInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInf
 	}
 }
 
-func GetRequestBaseInfo(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, skipBaseRequestInfo bool) []zap.Field {
-	var fields []zap.Field
+func GetRequestBaseInfo(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, skipBaseRequestInfo bool) []mlog.Field {
+	var fields []mlog.Field
 
 	_, requestName := path.Split(info.FullMethod)
-	fields = append(fields, zap.String("request_name", requestName))
+	fields = append(fields, mlog.String("request_name", requestName))
 
 	username, err := GetCurUserFromContext(ctx)
 	if err == nil && username != "" {
-		fields = append(fields, zap.String("username", username))
+		fields = append(fields, mlog.String("username", username))
 	}
 
 	if !skipBaseRequestInfo {
@@ -82,17 +81,17 @@ func GetRequestBaseInfo(ctx context.Context, req interface{}, info *grpc.UnarySe
 			if !ok {
 				continue
 			}
-			fields = append(fields, zap.Any(baseInfoName, baseInfo))
+			fields = append(fields, mlog.Any(baseInfoName, baseInfo))
 		}
 	}
 
 	return fields
 }
 
-func GetRequestFieldWithoutSensitiveInfo(req interface{}) zap.Field {
+func GetRequestFieldWithoutSensitiveInfo(req interface{}) mlog.Field {
 	createCredentialReq, ok := req.(*milvuspb.CreateCredentialRequest)
 	if ok {
-		return zap.Any("request", &milvuspb.CreateCredentialRequest{
+		return mlog.Any("request", &milvuspb.CreateCredentialRequest{
 			Base:                  createCredentialReq.Base,
 			Username:              createCredentialReq.Username,
 			CreatedUtcTimestamps:  createCredentialReq.CreatedUtcTimestamps,
@@ -101,12 +100,12 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) zap.Field {
 	}
 	updateCredentialReq, ok := req.(*milvuspb.UpdateCredentialRequest)
 	if ok {
-		return zap.Any("request", &milvuspb.UpdateCredentialRequest{
+		return mlog.Any("request", &milvuspb.UpdateCredentialRequest{
 			Base:                  updateCredentialReq.Base,
 			Username:              updateCredentialReq.Username,
 			CreatedUtcTimestamps:  updateCredentialReq.CreatedUtcTimestamps,
 			ModifiedUtcTimestamps: updateCredentialReq.ModifiedUtcTimestamps,
 		})
 	}
-	return zap.Any("request", req)
+	return mlog.Any("request", req)
 }

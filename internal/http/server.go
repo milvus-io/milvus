@@ -28,11 +28,9 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -86,7 +84,8 @@ func registerDefaults() {
 	Register(&Handler{
 		Path: LogLevelRouterPath,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
-			log.Level().ServeHTTP(w, req)
+			level := mlog.GetAtomicLevel()
+			level.ServeHTTP(w, req)
 		},
 	})
 	Register(&Handler{
@@ -156,15 +155,16 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 	Register(&Handler{
 		Path: RouteTriggerStopPath,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			ctx := req.Context()
 			role := req.URL.Query().Get("role")
-			log.Info("start to trigger component stop", zap.String("role", role))
+			mlog.Info(ctx, "start to trigger component stop", mlog.String("role", role))
 			if err := triggerComponentStop(role); err != nil {
-				log.Warn("failed to trigger component stop", zap.Error(err))
+				mlog.Warn(ctx, "failed to trigger component stop", mlog.Err(err))
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to trigger component stop, %s"}`, err.Error())
 				return
 			}
-			log.Info("finish to trigger component stop", zap.String("role", role))
+			mlog.Info(ctx, "finish to trigger component stop", mlog.String("role", role))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
@@ -176,15 +176,16 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 	Register(&Handler{
 		Path: RouteCheckComponentReady,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			ctx := req.Context()
 			role := req.URL.Query().Get("role")
-			log.Info("start to check component ready", zap.String("role", role))
+			mlog.Info(ctx, "start to check component ready", mlog.String("role", role))
 			if err := checkActive(role); err != nil {
-				log.Warn("failed to check component ready", zap.Error(err))
+				mlog.Warn(ctx, "failed to check component ready", mlog.Err(err))
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to to check component ready, %s"}`, err.Error())
 				return
 			}
-			log.Info("finish to check component ready", zap.String("role", role))
+			mlog.Info(ctx, "finish to check component ready", mlog.String("role", role))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
@@ -292,7 +293,7 @@ func ServeHTTP() {
 	registerDefaults()
 	go func() {
 		bindAddr := getHTTPAddr()
-		log.Info("management listen", zap.String("addr", bindAddr))
+		mlog.Info(context.TODO(), "management listen", mlog.String("addr", bindAddr))
 		server = &http.Server{Handler: metricsServer, Addr: bindAddr, ReadTimeout: 10 * time.Second}
 
 		if runtime.GOARCH != "arm64" {
@@ -302,7 +303,7 @@ func ServeHTTP() {
 		}
 
 		if err := server.ListenAndServe(); err != nil {
-			log.Error("handle metrics failed", zap.Error(err))
+			mlog.Error(context.TODO(), "handle metrics failed", mlog.Err(err))
 		}
 	}()
 }

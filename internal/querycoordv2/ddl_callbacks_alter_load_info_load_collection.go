@@ -20,12 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
@@ -79,8 +77,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	}
 	if msg == nil {
 		// load config unchanged, the collection is already loaded as requested.
-		log.Ctx(ctx).Info("load collection ignored, load config is unchanged",
-			zap.Int64("collectionID", req.GetCollectionID()))
+		mlog.Info(ctx, "load collection ignored, load config is unchanged",
+			mlog.Int64("collectionID", req.GetCollectionID()))
 		return nil
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -94,7 +92,7 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 		// when replica number or resource groups is not set, use pre-defined load config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, collectionID)
 		if err != nil {
-			log.Warn("failed to get pre-defined load info", zap.Error(err))
+			mlog.Warn(ctx, "failed to get pre-defined load info", mlog.Err(err))
 		} else {
 			replicaNumber = int32(replicas)
 			resourceGroups = rgs
@@ -102,11 +100,12 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 	}
 	// to be compatible with old sdk, which set replica=1 if replica is not specified
 	if replicaNumber <= 0 {
-		log.Info("request doesn't indicate the number of replicas, set it to 1")
+		mlog.Info(ctx, "request doesn't indicate the number of replicas, set it to 1")
 		replicaNumber = 1
 	}
 	if len(resourceGroups) == 0 {
-		log.Info(fmt.Sprintf("request doesn't indicate the resource groups, set it to %s", meta.DefaultResourceGroupName))
+		mlog.Info(ctx,
+			fmt.Sprintf("request doesn't indicate the resource groups, set it to %s", meta.DefaultResourceGroupName))
 		resourceGroups = []string{meta.DefaultResourceGroupName}
 	}
 	return replicaNumber, resourceGroups, nil

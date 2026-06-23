@@ -5,7 +5,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -17,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -412,7 +411,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	body := result.Message.MustBody()
 	if err := c.meta.AlterCollection(ctx, result); err != nil {
 		if errors.Is(err, errAlterCollectionNotFound) {
-			log.Ctx(ctx).Warn("alter a non-existent collection, ignore it", log.FieldMessage(result.Message))
+			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
 			return nil
 		}
 		return merr.Wrap(err, "failed to alter collection")
@@ -428,7 +427,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			if errors.Is(err, merr.ErrResourceGroupNotFound) {
-				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", mlog.Err(err))
 				return nil
 			}
 			return merr.Wrap(err, "failed to update load config")
@@ -449,7 +448,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: int32(typeutil.CacheRefresh),
 			}); err != nil {
-				log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after collection rename, skipping", zap.Error(err))
+				mlog.Warn(ctx, "failed to refresh RBAC policy cache after collection rename, skipping", mlog.Err(err))
 			}
 			break
 		}
@@ -486,11 +485,11 @@ func (c *DDLCallback) cascadeDropFieldIndexesInline(ctx context.Context, result 
 	var indexIDs []int64
 	for _, indexInfo := range resp.GetIndexInfos() {
 		if _, ok := droppedFieldSet[indexInfo.GetFieldID()]; ok {
-			log.Ctx(ctx).Info("cascade dropping index on dropped field",
-				log.FieldMessage(result.Message),
-				zap.Int64("fieldID", indexInfo.GetFieldID()),
-				zap.String("indexName", indexInfo.GetIndexName()),
-				zap.Int64("indexID", indexInfo.GetIndexID()),
+			mlog.Info(ctx, "cascade dropping index on dropped field",
+				mlog.FieldMessage(result.Message),
+				mlog.FieldFieldID(indexInfo.GetFieldID()),
+				mlog.String("indexName", indexInfo.GetIndexName()),
+				mlog.FieldIndexID(indexInfo.GetIndexID()),
 			)
 			indexIDs = append(indexIDs, indexInfo.GetIndexID())
 		}

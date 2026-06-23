@@ -27,11 +27,10 @@ import (
 
 	"github.com/google/uuid"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -184,14 +183,14 @@ func (s *CommandStore) loadCache() {
 
 	// Load configs
 	if resp, err := s.kv.Get(ctx, s.configPath, clientv3.WithPrefix()); err != nil {
-		log.Ctx(ctx).Warn("loadCache: failed to load configs", zap.Error(err))
+		mlog.Warn(ctx, "loadCache: failed to load configs", mlog.Err(err))
 	} else {
 		for _, kv := range resp.Kvs {
 			var cfg storedConfig
 			if err := json.Unmarshal(kv.Value, &cfg); err != nil {
-				log.Ctx(ctx).Warn("loadCache: failed to unmarshal config",
-					zap.Error(err),
-					zap.String("key", string(kv.Key)))
+				mlog.Warn(ctx, "loadCache: failed to unmarshal config",
+					mlog.Err(err),
+					mlog.String("key", string(kv.Key)))
 				continue
 			}
 			s.cache.configs[cfg.ConfigID] = &cfg
@@ -201,9 +200,9 @@ func (s *CommandStore) loadCache() {
 	// Calculate config hash
 	s.cache.configHash = s.computeConfigHash()
 
-	log.Ctx(ctx).Info("loadCache: completed",
-		zap.Int("commands", len(s.cache.commands)),
-		zap.Int("configs", len(s.cache.configs)))
+	mlog.Info(ctx, "loadCache: completed",
+		mlog.Int("commands", len(s.cache.commands)),
+		mlog.Int("configs", len(s.cache.configs)))
 }
 
 // PushCommand stores a command/config in etcd and cache
@@ -257,9 +256,9 @@ func (s *CommandStore) PushCommand(ctx context.Context, req *milvuspb.PushClient
 		failedDeletes := make(map[string]struct{})
 		for _, id := range existingIDs {
 			if err := s.kv.Delete(ctx, s.configPath+id); err != nil {
-				log.Ctx(ctx).Warn("PushCommand: failed to delete old config",
-					zap.String("config_id", id),
-					zap.Error(err))
+				mlog.Warn(ctx, "PushCommand: failed to delete old config",
+					mlog.String("config_id", id),
+					mlog.Err(err))
 				failedDeletes[id] = struct{}{}
 			}
 		}
@@ -449,7 +448,7 @@ func (s *CommandStore) CleanupExpiredCommands(ctx context.Context) {
 	}
 
 	if len(expired) > 0 {
-		log.Ctx(ctx).Info("CleanupExpiredCommands", zap.Int("deleted", len(expired)))
+		mlog.Info(ctx, "CleanupExpiredCommands", mlog.Int("deleted", len(expired)))
 	}
 }
 

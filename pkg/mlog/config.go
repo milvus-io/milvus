@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package log
+package mlog
 
 import (
 	"time"
@@ -108,8 +108,8 @@ func newZapTextEncoder(cfg *Config) zapcore.Encoder {
 	return NewTextEncoderByConfig(cfg)
 }
 
-func (cfg *Config) buildOptions(errSink zapcore.WriteSyncer) []zap.Option {
-	opts := []zap.Option{zap.ErrorOutput(errSink)}
+func (cfg *Config) buildOptions(errSink zapcore.WriteSyncer) []Option {
+	opts := []Option{zap.ErrorOutput(errSink)}
 
 	if cfg.Development {
 		opts = append(opts, zap.Development())

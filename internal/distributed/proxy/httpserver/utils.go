@@ -33,7 +33,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -45,8 +44,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -92,7 +91,6 @@ func TraceIDHandlerFunc(c *gin.Context) {
 	traceID := span.SpanContext().TraceID()
 	if traceID.IsValid() {
 		traceIDStr := traceID.String()
-		ctx = log.WithTraceID(ctx, traceIDStr)
 		c.Set("traceID", traceIDStr)
 		c.Request = c.Request.WithContext(ctx)
 		setTraceIDHeader(c)
@@ -802,7 +800,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						case gjson.Null:
 							// skip null
 						default:
-							log.Warn("unknown json type found", zap.Int("mapValue.Type", int(mapValue.Type)))
+							mlog.Warn(context.TODO(), "unknown json type found", mlog.Int("mapValue.Type", int(mapValue.Type)))
 						}
 					} else {
 						return nil, nil, merr.WrapErrParameterInvalidMsg("has pass more field without dynamic schema, please check it")
@@ -1944,24 +1942,24 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		if fieldLen[name] == 0 && partialUpdate {
 			if hasValidData {
 				if len(validData) != rowsLen {
-					log.Info("field len is not equal to rows len",
-						zap.String("fieldName", name),
-						zap.Int("fieldLen", len(validData)),
-						zap.Int("rowsLen", rowsLen))
+					mlog.Info(context.TODO(), "field len is not equal to rows len",
+						mlog.String("fieldName", name),
+						mlog.Int("fieldLen", len(validData)),
+						mlog.Int("rowsLen", rowsLen))
 					return nil, merr.WrapErrParameterInvalidMsg("column %s has length %d, expected %d", name, len(validData), rowsLen)
 				}
 			} else {
-				log.Info("skip empty field for partial update",
-					zap.String("fieldName", name))
+				mlog.Info(context.TODO(), "skip empty field for partial update",
+					mlog.String("fieldName", name))
 				continue
 			}
 		}
 		if fieldLen[name] != rowsLen && partialUpdate && (!hasValidData || len(validData) != rowsLen) {
 			// for partial update, if try to update different field in different rows, return error
-			log.Info("field len is not equal to rows len",
-				zap.String("fieldName", name),
-				zap.Int("fieldLen", fieldLen[name]),
-				zap.Int("rowsLen", rowsLen))
+			mlog.Info(context.TODO(), "field len is not equal to rows len",
+				mlog.String("fieldName", name),
+				mlog.Int("fieldLen", fieldLen[name]),
+				mlog.Int("rowsLen", rowsLen))
 			return nil, merr.WrapErrParameterInvalidMsg("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
 		}
 
@@ -2669,7 +2667,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 
 						err := json.Unmarshal(fieldDataList[j].GetScalars().GetJsonData().Data[dataIdx], &dataMap)
 						if err != nil {
-							log.Error(fmt.Sprintf("[BuildQueryResp] Unmarshal error %s", err.Error()))
+							mlog.Error(context.TODO(),
+								fmt.Sprintf("[BuildQueryResp] Unmarshal error %s", err.Error()))
 							return nil, err
 						}
 
@@ -2959,7 +2958,7 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	// apply limiter for http/http2 server
 	limiter, err := pxy.GetRateLimiter()
 	if err != nil {
-		log.Error("Get proxy rate limiter for httpV1/V2 server failed", zap.Error(err))
+		mlog.Error(ctx, "Get proxy rate limiter for httpV1/V2 server failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -3619,7 +3618,7 @@ func convertTopHitsReq(req *TopHitsReq) (*commonpb.TopHitsSpec, error) {
 func genFunctionSchema(ctx context.Context, function *FunctionSchema) (*schemapb.FunctionSchema, error) {
 	functionTypeValue, ok := schemapb.FunctionType_value[function.FunctionType]
 	if !ok {
-		log.Ctx(ctx).Warn("function's data type is invalid(case sensitive).", zap.Any("function.DataType", function.FunctionType), zap.Any("function", function))
+		mlog.Warn(ctx, "function's data type is invalid(case sensitive).", mlog.Any("function.DataType", function.FunctionType), mlog.Any("function", function))
 		return nil, merr.WrapErrParameterInvalidMsg("Unsupported function type: %s", function.FunctionType)
 	}
 	functionType := schemapb.FunctionType(functionTypeValue)

@@ -25,9 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -170,12 +168,12 @@ func NewRotateWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Mi
 		maxBackups:  logCfg.MaxBackups.GetAsInt(),
 		closeCh:     make(chan struct{}),
 	}
-	log.Info("Access log save to " + logger.dir())
+	mlog.Info(context.TODO(), "Access log save to "+logger.dir())
 	if logCfg.MinioEnable.GetAsBool() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		log.Info("Access log will backup files to minio", zap.String("remote", logCfg.RemotePath.GetValue()), zap.String("maxBackups", logCfg.MaxBackups.GetValue()))
+		mlog.Info(context.TODO(), "Access log will backup files to minio", mlog.String("remote", logCfg.RemotePath.GetValue()), mlog.String("maxBackups", logCfg.MaxBackups.GetValue()))
 		handler, err := NewMinioHandler(ctx, minioCfg, logCfg.RemotePath.GetValue(), logCfg.MaxBackups.GetAsInt())
 		if err != nil {
 			return nil, err
@@ -297,7 +295,7 @@ func (l *RotateWriter) openNewFile() error {
 		if err := os.Rename(name, newName); err != nil {
 			return merr.WrapErrIoFailed(name, err)
 		}
-		log.Info("seal old log to: " + newName)
+		mlog.Info(context.TODO(), "seal old log to: "+newName)
 		if l.handler != nil {
 			l.handler.Update(newName, path.Base(newName))
 		}
@@ -351,7 +349,7 @@ func (l *RotateWriter) millRun() {
 	for {
 		select {
 		case <-l.closeCh:
-			log.Warn("close Access log mill")
+			mlog.Warn(context.TODO(), "close Access log mill")
 			return
 		case <-l.millCh:
 			_ = l.millRunOnce()
@@ -368,14 +366,14 @@ func (l *RotateWriter) mill() {
 
 func (l *RotateWriter) timeRotating() {
 	ticker := time.NewTicker(time.Duration(l.rotatedTime * int64(time.Second)))
-	log.Info("start time rotating of access log")
+	mlog.Info(context.TODO(), "start time rotating of access log")
 	defer ticker.Stop()
 	defer l.closeWg.Done()
 
 	for {
 		select {
 		case <-l.closeCh:
-			log.Warn("close Access file logger")
+			mlog.Warn(context.TODO(), "close Access file logger")
 			return
 		case <-ticker.C:
 			l.Rotate()

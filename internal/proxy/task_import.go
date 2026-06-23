@@ -22,14 +22,13 @@ import (
 	"context"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -217,7 +216,7 @@ func (it *importTask) Execute(ctx context.Context) error {
 	// Get database ID from database name
 	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, it.req.GetDbName())
 	if err != nil {
-		log.Ctx(ctx).Warn("failed to get database info", zap.String("dbName", it.req.GetDbName()), zap.Error(err))
+		mlog.Warn(ctx, "failed to get database info", mlog.FieldDbName(it.req.GetDbName()), mlog.Err(err))
 		return err
 	}
 
@@ -236,18 +235,16 @@ func (it *importTask) Execute(ctx context.Context) error {
 
 	resp, err := it.mixCoord.ImportV2(ctx, importReq)
 	if err != nil {
-		log.Ctx(ctx).Warn("import request to datacoord failed", zap.Error(err))
+		mlog.Warn(ctx, "import request to datacoord failed", mlog.Err(err))
 		return err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		err = merr.Error(resp.GetStatus())
-		log.Ctx(ctx).Warn("import request rejected by datacoord", zap.Error(err))
+		mlog.Warn(ctx, "import request rejected by datacoord", mlog.Err(err))
 		return err
 	}
-
-	log.Ctx(ctx).Info(
-		"import request sent to datacoord successfully",
-		zap.String("jobID", resp.GetJobID()),
+	mlog.Info(ctx, "import request sent to datacoord successfully",
+		mlog.String("jobID", resp.GetJobID()),
 	)
 	it.resp.JobID = resp.GetJobID()
 	return nil

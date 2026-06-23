@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"runtime/debug"
@@ -24,12 +25,11 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -222,7 +222,7 @@ func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, boo
 		for _, compactTo := range compactTos {
 			to, ok := s.segments[compactTo]
 			if !ok {
-				log.Warn("compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", compactTo))
+				mlog.Warn(context.TODO(), "compactionTo relation is broken", mlog.Int64("from", fromSegmentID), mlog.Int64("to", compactTo))
 				return nil, exist
 			}
 			result = append(result, to)
@@ -323,7 +323,7 @@ func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 // to extract a common updateSegment helper for all Set methods.
 func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	st := string(debug.Stack())
-	log.Info("set compacting", zap.Int64("segmentID", segmentID), zap.Bool("isCompacting", isCompacting), zap.Any("stacktrace", st))
+	mlog.Info(context.TODO(), "set compacting", mlog.FieldSegmentID(segmentID), mlog.Bool("isCompacting", isCompacting), mlog.Any("stacktrace", st))
 	if segment, ok := s.segments[segmentID]; ok {
 		newSegment := segment.ShadowClone(SetIsCompacting(isCompacting))
 		s.segments[segmentID] = newSegment

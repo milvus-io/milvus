@@ -24,7 +24,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
@@ -33,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -66,7 +65,7 @@ func (t *SearchTask) exportSearchResultsAsArrow(
 	exportOne := func(ctx context.Context, idx int, result *segments.SearchResult) error {
 		record, chunkSizes, err := segcore.ExportSearchResultAsArrowRecordBatch(ctx, result, plan, extraFieldIDs)
 		if err != nil {
-			log.Ctx(ctx).Warn("failed to export search result as Arrow", zap.Error(err))
+			mlog.Warn(ctx, "failed to export search result as Arrow", mlog.Err(err))
 			return err
 		}
 		defer record.Release()
@@ -139,7 +138,7 @@ func (t *SearchTask) executeGoReduce(
 		nq := int(t.originNqs[i])
 		reduceResult, err := heapMergeReduceRange(defaultAllocator, segDFs, t.originTopks[i], groupByOpts, nqOffset, nq)
 		if err != nil {
-			log.Ctx(t.ctx).Warn("failed to heapMergeReduce", zap.Error(err))
+			mlog.Warn(t.ctx, "failed to heapMergeReduce", mlog.Err(err))
 			return err
 		}
 
@@ -169,7 +168,7 @@ func (t *SearchTask) executeGoReduceFastPath(
 ) error {
 	reduceResult, err := heapMergeReduce(defaultAllocator, segDFs, plan.GetTopK(), groupByOpts)
 	if err != nil {
-		log.Ctx(t.ctx).Warn("failed to heapMergeReduce", zap.Error(err))
+		mlog.Warn(t.ctx, "failed to heapMergeReduce", mlog.Err(err))
 		return err
 	}
 	defer reduceResult.DF.Release()

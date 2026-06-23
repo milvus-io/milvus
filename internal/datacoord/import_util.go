@@ -27,7 +27,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -36,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -48,14 +47,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
-	res := []zap.Field{
-		zap.Int64("taskID", task.GetTaskID()),
-		zap.Int64("jobID", task.GetJobID()),
-		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("type", task.GetType().String()),
-		zap.String("state", task.GetTaskState().String()),
-		zap.Int64("nodeID", task.GetNodeID()),
+func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
+	res := []mlog.Field{
+		mlog.FieldTaskID(task.GetTaskID()),
+		mlog.FieldJobID(task.GetJobID()),
+		mlog.FieldCollectionID(task.GetCollectionID()),
+		mlog.String("type", task.GetType().String()),
+		mlog.String("state", task.GetTaskState().String()),
+		mlog.FieldNodeID(task.GetNodeID()),
 	}
 	res = append(res, fields...)
 	return res
@@ -131,7 +130,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				return nil, err
 			}
 			taskProto.SortedSegmentIDs = lo.RangeFrom(sortedSegIDBegin, len(segments))
-			log.Info("preallocate sorted segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", taskProto.SortedSegmentIDs))...)
+			mlog.Info(context.TODO(), "preallocate sorted segment ids", WrapTaskLog(task, mlog.Int64s("segmentIDs", taskProto.SortedSegmentIDs))...)
 		}
 		tasks = append(tasks, task)
 	}
@@ -233,10 +232,9 @@ func AllocImportSegment(ctx context.Context,
 	level datapb.SegmentLevel,
 	storageVersion int64,
 ) (*SegmentInfo, error) {
-	log := log.Ctx(ctx)
 	id, err := alloc.AllocID(ctx)
 	if err != nil {
-		log.Error("failed to alloc id for import segment", zap.Error(err))
+		mlog.Error(ctx, "failed to alloc id for import segment", mlog.Err(err))
 		return nil, err
 	}
 	if dataTimestamp == 0 {
@@ -261,16 +259,16 @@ func AllocImportSegment(ctx context.Context,
 	segmentInfo.IsImporting = true
 	segment := NewSegmentInfo(segmentInfo)
 	if err = meta.AddSegment(ctx, segment); err != nil {
-		log.Error("failed to add import segment", zap.Error(err))
+		mlog.Error(ctx, "failed to add import segment", mlog.Err(err))
 		return nil, err
 	}
-	log.Info("add import segment done",
-		zap.Int64("jobID", jobID),
-		zap.Int64("taskID", taskID),
-		zap.Int64("collectionID", segmentInfo.CollectionID),
-		zap.Int64("segmentID", segmentInfo.ID),
-		zap.String("channel", segmentInfo.InsertChannel),
-		zap.String("level", level.String()))
+	mlog.Info(ctx, "add import segment done",
+		mlog.FieldJobID(jobID),
+		mlog.FieldTaskID(taskID),
+		mlog.FieldCollectionID(segmentInfo.CollectionID),
+		mlog.FieldSegmentID(segmentInfo.ID),
+		mlog.String("channel", segmentInfo.InsertChannel),
+		mlog.String("level", level.String()))
 
 	return segment, nil
 }
@@ -340,12 +338,12 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return nil, err
 	}
 
-	log.Info("pre-allocate ids and ts for import task", WrapTaskLog(task,
-		zap.Int64("totalRows", totalRows),
-		zap.Int("fieldsNum", fieldsNum),
-		zap.Int64("idBegin", idBegin),
-		zap.Int64("idEnd", idEnd),
-		zap.Uint64("ts", ts))...,
+	mlog.Info(context.TODO(), "pre-allocate ids and ts for import task", WrapTaskLog(task,
+		mlog.Int64("totalRows", totalRows),
+		mlog.Int("fieldsNum", fieldsNum),
+		mlog.Int64("idBegin", idBegin),
+		mlog.Int64("idEnd", idEnd),
+		mlog.Uint64("ts", ts))...,
 	)
 
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
@@ -421,7 +419,7 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 		return 0, nil
 	}
 	if importutilv2.SkipDiskQuotaCheck(job.GetOptions()) {
-		log.Info("skip disk quota check for import", zap.Int64("jobID", job.GetJobID()))
+		mlog.Info(ctx, "skip disk quota check for import", mlog.FieldJobID(job.GetJobID()))
 		return 0, nil
 	}
 
@@ -450,23 +448,23 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	if float64(totalUsage+requestedTotal+requestSize) > totalDiskQuota {
-		log.Warn("global disk quota exceeded", zap.Int64("jobID", job.GetJobID()),
-			zap.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
-			zap.Int64("totalUsage", totalUsage),
-			zap.Int64("requestedTotal", requestedTotal),
-			zap.Int64("requestSize", requestSize),
-			zap.Float64("totalDiskQuota", totalDiskQuota))
+		mlog.Warn(ctx, "global disk quota exceeded", mlog.FieldJobID(job.GetJobID()),
+			mlog.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
+			mlog.Int64("totalUsage", totalUsage),
+			mlog.Int64("requestedTotal", requestedTotal),
+			mlog.Int64("requestSize", requestSize),
+			mlog.Float64("totalDiskQuota", totalDiskQuota))
 		return 0, err
 	}
 	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
 	colID := job.GetCollectionID()
 	if float64(collectionsUsage[colID]+requestedCollections[colID]+requestSize) > collectionDiskQuota {
-		log.Warn("collection disk quota exceeded", zap.Int64("jobID", job.GetJobID()),
-			zap.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
-			zap.Int64("collectionsUsage", collectionsUsage[colID]),
-			zap.Int64("requestedCollection", requestedCollections[colID]),
-			zap.Int64("requestSize", requestSize),
-			zap.Float64("collectionDiskQuota", collectionDiskQuota))
+		mlog.Warn(ctx, "collection disk quota exceeded", mlog.FieldJobID(job.GetJobID()),
+			mlog.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
+			mlog.Int64("collectionsUsage", collectionsUsage[colID]),
+			mlog.Int64("requestedCollection", requestedCollections[colID]),
+			mlog.Int64("requestSize", requestSize),
+			mlog.Float64("collectionDiskQuota", collectionDiskQuota))
 		return 0, err
 	}
 	return requestSize, nil
@@ -505,7 +503,7 @@ func getImportRowsInfo(ctx context.Context, jobID int64, importMeta ImportMeta, 
 		segmentIDs = append(segmentIDs, task.(*importTask).GetSegmentIDs()...)
 	}
 	importedRows = meta.GetSegmentsTotalNumRows(segmentIDs)
-	return
+	return importedRows, totalRows
 }
 
 func getImportingProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) (float32, int64, int64) {
@@ -659,7 +657,7 @@ func DropImportTask(task ImportTask, cluster session.Cluster, tm ImportMeta) err
 	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		return err
 	}
-	log.Info("drop import in datanode done", WrapTaskLog(task)...)
+	mlog.Info(context.TODO(), "drop import in datanode done", WrapTaskLog(task)...)
 	return tm.UpdateTask(context.TODO(), task.GetTaskID(), UpdateNodeID(NullNodeID))
 }
 
@@ -740,14 +738,14 @@ func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
 					Size: size,
 				}
 			})
-			log.Info("import segments info", zap.Int64("jobID", jobID),
-				zap.String("channel", channel), zap.Int64("partitionID", partitionID),
-				zap.Int("segmentsNum", len(segments)), zap.Any("segmentsInfo", infos),
+			mlog.Info(context.TODO(), "import segments info", mlog.FieldJobID(jobID),
+				mlog.String("channel", channel), mlog.FieldPartitionID(partitionID),
+				mlog.Int("segmentsNum", len(segments)), mlog.Any("segmentsInfo", infos),
 			)
 		}
 	}
-	log.Info("import result info", zap.Int64("jobID", jobID),
-		zap.Int64("totalRows", totalRows), zap.Int64("totalSize", totalSize))
+	mlog.Info(context.TODO(), "import result info", mlog.FieldJobID(jobID),
+		mlog.Int64("totalRows", totalRows), mlog.Int64("totalSize", totalSize))
 }
 
 // ValidateBinlogImportRequest validates the binlog import request.
@@ -803,7 +801,7 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 		return nil, merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
 			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(resFiles))
 	}
-	log.Info("list binlogs prefixes for import done", zap.Int("num", len(resFiles)), zap.Any("binlog_prefixes", resFiles))
+	mlog.Info(ctx, "list binlogs prefixes for import done", mlog.Int("num", len(resFiles)), mlog.Any("binlog_prefixes", resFiles))
 	return resFiles, nil
 }
 
@@ -868,31 +866,31 @@ func createSortCompactionTask(ctx context.Context,
 	handler Handler,
 	alloc allocator.Allocator,
 ) (*datapb.CompactionTask, error) {
-	log := log.Ctx(ctx).With(WrapTaskLog(t)...)
+	log := mlog.With(WrapTaskLog(t)...)
 	if originSegment.GetNumOfRows() == 0 {
 		operator := UpdateStatusOperator(originSegment.GetID(), commonpb.SegmentState_Dropped)
 		err := meta.UpdateSegmentsInfo(ctx, operator)
 		if err != nil {
-			log.Warn("import zero num row segment, but mark it dropped failed", zap.Error(err))
+			log.Warn(ctx, "import zero num row segment, but mark it dropped failed", mlog.Err(err))
 			return nil, err
 		}
 		return nil, nil
 	}
 	collection, err := handler.GetCollection(ctx, originSegment.GetCollectionID())
 	if err != nil {
-		log.Warn("Failed to create sort compaction task because get collection fail", zap.Error(err))
+		log.Warn(ctx, "Failed to create sort compaction task because get collection fail", mlog.Err(err))
 		return nil, err
 	}
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
-		log.Warn("Failed to create sort compaction task because get collection ttl failed")
+		log.Warn(ctx, "Failed to create sort compaction task because get collection ttl failed")
 		return nil, err
 	}
 
 	startID, _, err := alloc.AllocN(2)
 	if err != nil {
-		log.Warn("Failed to create sort compaction task because allocate id fail", zap.Error(err))
+		log.Warn(ctx, "Failed to create sort compaction task because allocate id fail", mlog.Err(err))
 		return nil, err
 	}
 
@@ -919,7 +917,7 @@ func createSortCompactionTask(ctx context.Context,
 		},
 	}
 
-	log.Info("create sort compaction task success", zap.Int64("segmentID", originSegment.GetID()),
-		zap.Int64("targetSegmentID", targetSegmentID), zap.Int64("num rows", originSegment.GetNumOfRows()))
+	log.Info(ctx, "create sort compaction task success", mlog.FieldSegmentID(originSegment.GetID()),
+		mlog.Int64("targetSegmentID", targetSegmentID), mlog.Int64("num rows", originSegment.GetNumOfRows()))
 	return task, nil
 }

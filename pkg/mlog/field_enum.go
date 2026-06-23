@@ -1,31 +1,73 @@
 package mlog
 
-import "go.uber.org/zap/zapcore"
+import (
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
 
 // Well-known field keys for consistent logging across Milvus components.
-// All keys use lowercase with underscores for readability and gRPC metadata compatibility.
+// All keys use camelCase in logs. gRPC metadata propagation lowercases these
+// keys on the wire and restores them through wellKnownLowerKeyToLogKey.
 const (
-	keyNodeID         = "node_id"
+	keyNodeID         = "nodeID"
 	keyModule         = "module"
-	keyTraceID        = "trace_id"
-	keySpanID         = "span_id"
-	keyDbID           = "db_id"
-	keyDbName         = "db_name"
-	keyCollectionID   = "collection_id"
-	keyCollectionName = "collection_name"
-	keyPartitionID    = "partition_id"
-	keyPartitionName  = "partition_name"
-	keySegmentID      = "segment_id"
-	keyIndexID        = "index_id"
-	keyFieldID        = "field_id"
-	keyTaskID         = "task_id"
-	keyBroadcastID    = "broadcast_id"
-	keyJobID          = "job_id"
-	keyBuildID        = "build_id"
+	keyComponent      = "component"
+	keyTraceID        = "traceID"
+	keySpanID         = "spanID"
+	keyDbID           = "dbID"
+	keyDbName         = "dbName"
+	keyCollectionID   = "collectionID"
+	keyCollectionName = "collectionName"
+	keyPartitionID    = "partitionID"
+	keyPartitionName  = "partitionName"
+	keySegmentID      = "segmentID"
+	keyIndexID        = "indexID"
+	keyFieldID        = "fieldID"
+	keyTaskID         = "taskID"
+	keyBroadcastID    = "broadcastID"
+	keyJobID          = "jobID"
+	keyBuildID        = "buildID"
 	keyVChannel       = "vchannel"
 	keyPChannel       = "pchannel"
-	keyMessageID      = "message_id"
+	keyMessageID      = "messageID"
 	keyMessage        = "message"
+)
+
+var wellKnownLowerKeyToLogKey = map[string]string{
+	"nodeid":         keyNodeID,
+	"module":         keyModule,
+	"component":      keyComponent,
+	"traceid":        keyTraceID,
+	"spanid":         keySpanID,
+	"dbid":           keyDbID,
+	"dbname":         keyDbName,
+	"collectionid":   keyCollectionID,
+	"collectionname": keyCollectionName,
+	"partitionid":    keyPartitionID,
+	"partitionname":  keyPartitionName,
+	"segmentid":      keySegmentID,
+	"indexid":        keyIndexID,
+	"fieldid":        keyFieldID,
+	"taskid":         keyTaskID,
+	"broadcastid":    keyBroadcastID,
+	"jobid":          keyJobID,
+	"buildid":        keyBuildID,
+	"vchannel":       keyVChannel,
+	"pchannel":       keyPChannel,
+	"messageid":      keyMessageID,
+	"message":        keyMessage,
+}
+
+func restoreWellKnownLogKey(key string) string {
+	if logKey, ok := wellKnownLowerKeyToLogKey[key]; ok {
+		return logKey
+	}
+	return key
+}
+
+const (
+	FieldNameModule    = keyModule
+	FieldNameComponent = keyComponent
 )
 
 // FieldOption configures optional behavior for well-known field constructors.
@@ -56,6 +98,9 @@ func FieldNodeID(val int64) Field { return Int64(keyNodeID, val) }
 
 // FieldModule creates a field for module name.
 func FieldModule(val string) Field { return String(keyModule, val) }
+
+// FieldComponent creates a field for component name.
+func FieldComponent(val string) Field { return String(keyComponent, val) }
 
 // FieldTraceID creates a field for trace ID.
 func FieldTraceID(val string) Field { return String(keyTraceID, val) }
@@ -188,3 +233,8 @@ func FieldMessageID(val zapcore.ObjectMarshaler) Field { return Object(keyMessag
 
 // FieldMessage creates a field for message content.
 func FieldMessage(val zapcore.ObjectMarshaler) Field { return Object(keyMessage, val) }
+
+// FieldMessages creates an array field for message contents.
+func FieldMessages[T zapcore.ObjectMarshaler](msgs []T) Field {
+	return zap.Objects("messages", msgs)
+}

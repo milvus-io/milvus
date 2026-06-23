@@ -19,15 +19,13 @@ package querycoordv2
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -113,7 +111,7 @@ func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.Transf
 	// Move node from source resource group to target resource group.
 	rgs, err := s.meta.CheckIfTransferNode(ctx, req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
 	if err != nil {
-		log.Warn("failed to transfer node", zap.Error(err))
+		mlog.Warn(ctx, "failed to transfer node", mlog.Err(err))
 		return err
 	}
 

@@ -19,7 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -201,7 +201,7 @@ func TestRecoveryStorageManualFlushMarksSegmentsFlushed(t *testing.T) {
 			},
 		},
 	}
-	r.SetLogger(log.With())
+	r.SetLogger(mlog.With())
 
 	msg := message.NewManualFlushMessageBuilderV2().
 		WithVChannel("v1").

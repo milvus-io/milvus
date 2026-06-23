@@ -24,7 +24,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -33,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -118,11 +117,10 @@ func (t *LevelZeroCompactionTask) GetCollection() int64 {
 func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
 	defer span.End()
-	log := log.Ctx(t.ctx).With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
-	log.Info("L0 compaction", zap.Duration("wait in queue elapse", t.tr.RecordSpan()))
+	mlog.Info(context.TODO(), "L0 compaction", mlog.Duration("wait in queue elapse", t.tr.RecordSpan()))
 
 	if !funcutil.CheckCtxValid(ctx) {
-		log.Warn("compact wrong, task context done or timeout")
+		mlog.Warn(context.TODO(), "compact wrong, task context done or timeout")
 		return nil, ctx.Err()
 	}
 
@@ -135,14 +133,14 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		return s.Level != datapb.SegmentLevel_L0
 	})
 	if len(targetSegments) == 0 {
-		log.Warn("compact wrong, not target sealed segments")
+		mlog.Warn(context.TODO(), "compact wrong, not target sealed segments")
 		// The plan is produced by datacoord, so a malformed plan is an internal
 		// protocol violation, not user input.
 		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan with empty target segments")
 	}
 	err = binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), l0Segments)
 	if err != nil {
-		log.Warn("DecompressCompactionBinlogs failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "DecompressCompactionBinlogs failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -170,7 +168,7 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 
 	metrics.DataNodeCompactionLatency.WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
-	log.Info("L0 compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()))
+	mlog.Info(context.TODO(), "L0 compaction finished", mlog.Duration("elapse", t.tr.ElapseSpan()))
 
 	return result, nil
 }
@@ -256,7 +254,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			segment := allSeg[segmentID]
 			logID, err := t.allocator.AllocOne()
 			if err != nil {
-				log.Warn("L0 compaction allocate log ID fail", zap.Int64("segmentID", segmentID), zap.Error(err))
+				mlog.Warn(context.TODO(), "L0 compaction allocate log ID fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
 				return nil, err
 			}
 
@@ -268,7 +266,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 				// V3: build deltalog path under basePath/_delta/
 				basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
 				if err != nil {
-					log.Warn("L0 compaction failed to parse manifest path", zap.Int64("segmentID", segmentID), zap.Error(err))
+					mlog.Warn(context.TODO(), "L0 compaction failed to parse manifest path", mlog.Int64("segmentID", segmentID), mlog.Err(err))
 					return nil, err
 				}
 				path = metautil.BuildDeltaLogPathV3(basePath, logID)
@@ -285,30 +283,30 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 				storage.WithVersion(storageVersion),
 			)
 			if err != nil {
-				log.Warn("L0 compaction create deltalog writer fail", zap.Int64("segmentID", segmentID), zap.Error(err))
+				mlog.Warn(context.TODO(), "L0 compaction create deltalog writer fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
 				return nil, err
 			}
 
 			// Create Arrow record from collected deletes
 			record, tsFrom, tsTo, err := storage.BuildDeleteRecord(deletes.pks, deletes.tss)
 			if err != nil {
-				log.Warn("L0 compaction build delete record fail", zap.Int64("segmentID", segmentID), zap.Error(err))
+				mlog.Warn(context.TODO(), "L0 compaction build delete record fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
 				return nil, err
 			}
 			defer record.Release()
 
 			// Write the entire record at once
 			if err := writer.Write(record); err != nil {
-				log.Warn("L0 compaction write record fail", zap.Int64("segmentID", segmentID), zap.Error(err))
+				mlog.Warn(context.TODO(), "L0 compaction write record fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
 				return nil, err
 			}
 
 			if err := writer.Close(); err != nil {
-				log.Warn("L0 compaction close writer fail", zap.Int64("segmentID", segmentID), zap.Error(err))
+				mlog.Warn(context.TODO(), "L0 compaction close writer fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
 				return nil, err
 			}
 
-			log.Info("L0 compaction write record success", zap.String("path", path), zap.Int64("entries", int64(len(deletes.pks))))
+			mlog.Info(context.TODO(), "L0 compaction write record success", mlog.String("path", path), mlog.Int64("entries", int64(len(deletes.pks))))
 
 			// Check if this is a manifest segment
 			if segment.GetManifest() != "" {
@@ -422,7 +420,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 		return nil, merr.Wrap(merr.ErrServiceMemoryLimitExceeded, fmt.Sprintf("L0 compaction failed, not enough memory, request memory size: %v, memory limit: %v", l0MemSize, memLimit))
 	}
 
-	log.Info("L0 compaction process start")
+	mlog.Info(context.TODO(), "L0 compaction process start")
 	pkField, err := typeutil.GetPrimaryFieldSchema(t.plan.GetSchema())
 	if err != nil {
 		return nil, err
@@ -432,19 +430,12 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 		storage.WithDownloader(t.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
-		log.Warn("L0 compaction compose delete data fail", zap.Error(err))
+		mlog.Warn(context.TODO(), "L0 compaction compose delete data fail", mlog.Err(err))
 		return nil, err
 	}
 
 	batchSize := getMaxBatchSize(float64(allDelta.Size()), memLimit)
 	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
-	log := log.Ctx(ctx).With(
-		zap.Int64("planID", t.plan.GetPlanID()),
-		zap.Int("max conc segment counts", batchSize),
-		zap.Int("total segment counts", len(targetSegments)),
-		zap.Int("total batch", batch),
-	)
-
 	results := make([]*datapb.CompactionSegment, 0)
 	for i := 0; i < batch; i++ {
 		left, right := i*batchSize, (i+1)*batchSize
@@ -454,24 +445,24 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 		batchSegments := targetSegments[left:right]
 		segmentBFs, err := t.loadBF(ctx, batchSegments)
 		if err != nil {
-			log.Warn("L0 compaction loadBF fail", zap.Error(err))
+			mlog.Warn(context.TODO(), "L0 compaction loadBF fail", mlog.Err(err))
 			return nil, err
 		}
 
 		batchResults, err := t.splitAndWrite(ctx, allDelta, segmentBFs)
 		if err != nil {
-			log.Warn("L0 compaction splitAndWrite fail", zap.Error(err))
+			mlog.Warn(context.TODO(), "L0 compaction splitAndWrite fail", mlog.Err(err))
 			return nil, err
 		}
 
-		log.Info("L0 compaction finished one batch",
-			zap.Int("batch no.", i),
-			zap.Int64("total deltaRowCount", allDelta.RowCount),
-			zap.Int("batch segment count", len(batchResults)))
+		mlog.Info(context.TODO(), "L0 compaction finished one batch",
+			mlog.Int("batch no.", i),
+			mlog.Int64("total deltaRowCount", allDelta.RowCount),
+			mlog.Int("batch segment count", len(batchResults)))
 		results = append(results, batchResults...)
 	}
 
-	log.Info("L0 compaction process done")
+	mlog.Info(context.TODO(), "L0 compaction process done")
 	return results, nil
 }
 
@@ -501,10 +492,10 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 				segment.GetSegmentID(),
 				segment.GetField2StatslogPaths())
 			if err != nil {
-				log.Warn("failed to decompress segment stats log",
-					zap.Int64("planID", t.plan.GetPlanID()),
-					zap.String("type", t.plan.GetType().String()),
-					zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to decompress segment stats log",
+					mlog.Int64("planID", t.plan.GetPlanID()),
+					mlog.String("type", t.plan.GetType().String()),
+					mlog.Err(err))
 				return err, err
 			}
 
@@ -522,11 +513,11 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 
 			pks, err := compaction.LoadStatsFromPaths(innerCtx, t.cm, segment.GetSegmentID(), paths)
 			if err != nil {
-				log.Warn("failed to load segment stats log",
-					zap.Int64("planID", t.plan.GetPlanID()),
-					zap.String("type", t.plan.GetType().String()),
-					zap.Int64("segmentID", segment.GetSegmentID()),
-					zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to load segment stats log",
+					mlog.Int64("planID", t.plan.GetPlanID()),
+					mlog.String("type", t.plan.GetType().String()),
+					mlog.Int64("segmentID", segment.GetSegmentID()),
+					mlog.Err(err))
 				return err, err
 			}
 			bf := pkoracle.NewBloomFilterSet(pks...)

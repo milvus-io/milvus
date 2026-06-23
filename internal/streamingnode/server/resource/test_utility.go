@@ -12,7 +12,7 @@ import (
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -26,7 +26,7 @@ func OptWriteBufferManager(wbMgr writebuffer.BufferManager) optResourceInit {
 // InitForTest initializes the singleton of resources for test.
 func InitForTest(t *testing.T, opts ...optResourceInit) {
 	r = &resourceImpl{
-		logger: log.With(),
+		logger: mlog.With(),
 	}
 	for _, opt := range opts {
 		opt(r)

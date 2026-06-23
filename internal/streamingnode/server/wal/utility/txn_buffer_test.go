@@ -8,7 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -19,7 +19,7 @@ import (
 var idAllocator = typeutil.NewIDAllocator()
 
 func TestTxnBuffer(t *testing.T) {
-	b := NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	baseTso := tsoutil.GetCurrentTime()
 
@@ -173,7 +173,7 @@ func newAlterReplicateConfigMessage(t *testing.T, forcePromote bool, ignore bool
 }
 
 func TestRollbackAllUncommittedTxn(t *testing.T) {
-	b := NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	baseTso := tsoutil.GetCurrentTime()
 
@@ -215,7 +215,7 @@ func TestRollbackAllUncommittedTxn(t *testing.T) {
 }
 
 func TestRollbackAllUncommittedTxn_Empty(t *testing.T) {
-	b := NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	// Rollback on empty buffer should be a no-op
 	b.rollbackAllUncommittedTxn()
@@ -224,7 +224,7 @@ func TestRollbackAllUncommittedTxn_Empty(t *testing.T) {
 }
 
 func TestForcePromoteRollsBackUncommittedTxn(t *testing.T) {
-	b := NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	baseTso := tsoutil.GetCurrentTime()
 
@@ -260,7 +260,7 @@ func TestForcePromoteRollsBackUncommittedTxn(t *testing.T) {
 }
 
 func TestForcePromoteIgnored_DoesNotRollback(t *testing.T) {
-	b := NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	baseTso := tsoutil.GetCurrentTime()
 
@@ -296,7 +296,7 @@ func TestForcePromoteIgnored_DoesNotRollback(t *testing.T) {
 }
 
 func TestNonForcePromoteAlterReplicateConfig_DoesNotRollback(t *testing.T) {
-	b := NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	baseTso := tsoutil.GetCurrentTime()
 

@@ -19,14 +19,12 @@ package replicateutil
 import (
 	"fmt"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-func ConfigLogField(config *commonpb.ReplicateConfiguration) zap.Field {
-	return zap.Object("replicateConfiguration", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
+func ConfigLogField(config *commonpb.ReplicateConfiguration) mlog.Field {
+	return mlog.Object("replicateConfiguration", mlog.ObjectMarshalerFunc(func(enc mlog.ObjectEncoder) error {
 		enc.AddInt("clusterCount", len(config.GetClusters()))
 		for i, cluster := range config.GetClusters() {
 			enc.AddString(fmt.Sprintf("cluster-%d", i), cluster.GetClusterId())

@@ -21,11 +21,11 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -142,7 +142,7 @@ func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMe
 			// if the transaction is expired,
 			// there may be wal is transferred to another streaming node,
 			// retry it with new transaction.
-			g.producer.Logger().Warn("transaction expired, retrying", zap.String("vchannel", msgs[0].VChannel()), zap.Error(err))
+			g.producer.Logger().Warn(ctx, "transaction expired, retrying", mlog.FieldVChannel(msgs[0].VChannel()), mlog.Err(err))
 			continue
 		}
 		if err != nil {

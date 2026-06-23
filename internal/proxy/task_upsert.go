@@ -22,7 +22,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -33,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -159,7 +158,7 @@ func (it *upsertTask) OnEnqueue() error {
 }
 
 func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-	log := log.Ctx(ctx).With(zap.String("collectionName", t.req.GetCollectionName()))
+	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
 	var err error
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
@@ -191,12 +190,12 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		// partition name could be defaultPartitionName or name specified by sdk
 		partName := t.upsertMsg.DeleteMsg.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
-			log.Warn("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
+			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return nil, segcore.StorageCost{}, err
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, t.req.GetDbName(), t.req.GetCollectionName(), partName)
 		if err != nil {
-			log.Warn("Failed to get partition id", zap.String("partitionName", partName), zap.Error(err))
+			log.Warn(ctx, "Failed to get partition id", mlog.String("partitionName", partName), mlog.Err(err))
 			return nil, segcore.StorageCost{}, err
 		}
 		partitionIDs = []int64{partID}
@@ -237,23 +236,23 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 }
 
 func (it *upsertTask) queryPreExecute(ctx context.Context) error {
-	log := log.Ctx(ctx).With(zap.String("collectionName", it.req.CollectionName))
+	log := mlog.With(mlog.String("collectionName", it.req.CollectionName))
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema.CollectionSchema)
 	if err != nil {
-		log.Warn("get primary field schema failed", zap.Error(err))
+		log.Warn(ctx, "get primary field schema failed", mlog.Err(err))
 		return err
 	}
 
 	primaryFieldData, err := typeutil.GetPrimaryFieldData(it.req.GetFieldsData(), primaryFieldSchema)
 	if err != nil {
-		log.Error("get primary field data failed", zap.Error(err))
+		log.Error(ctx, "get primary field data failed", mlog.Err(err))
 		return merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name)
 	}
 
 	upsertIDs, err := parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Warn("parse primary field data to IDs failed", zap.Error(err))
+		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return err
 	}
 
@@ -261,7 +260,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	if upsertIDSize == 0 {
 		it.deletePKs = &schemapb.IDs{}
 		it.insertFieldData = it.req.GetFieldsData()
-		log.Info("old records not found, just do insert")
+		log.Info(ctx, "old records not found, just do insert")
 		return nil
 	}
 
@@ -269,7 +268,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	// retrieve by primary key to get original field data
 	resp, storageCost, err := retrieveByPKs(ctx, it, upsertIDs, []string{"*"})
 	if err != nil {
-		log.Info("retrieve by primary key failed", zap.Error(err))
+		log.Info(ctx, "retrieve by primary key failed", mlog.Err(err))
 		return err
 	}
 	it.storageCost = storageCost
@@ -280,17 +279,17 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	existFieldData := resp.GetFieldsData()
 	pkFieldData, err := typeutil.GetPrimaryFieldData(existFieldData, primaryFieldSchema)
 	if err != nil {
-		log.Error("get primary field data failed", zap.Error(err))
+		log.Error(ctx, "get primary field data failed", mlog.Err(err))
 		return err
 	}
 	existIDs, err := parsePrimaryFieldData2IDs(pkFieldData)
 	if err != nil {
-		log.Info("parse primary field data to ids failed", zap.Error(err))
+		log.Info(ctx, "parse primary field data to ids failed", mlog.Err(err))
 		return err
 	}
-	log.Info("retrieveByPKs cost",
-		zap.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
-		zap.Int64("latency", tr.ElapseSpan().Milliseconds()))
+	log.Info(ctx, "retrieveByPKs cost",
+		mlog.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
+		mlog.Int64("latency", tr.ElapseSpan().Milliseconds()))
 
 	// set field id for user passed field data, prepare for merge logic
 	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
@@ -303,7 +302,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		}
 		fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(fieldName)
 		if err != nil {
-			log.Info("get field schema failed", zap.Error(err))
+			log.Info(ctx, "get field schema failed", mlog.Err(err))
 			return err
 		}
 		fieldData.FieldId = fieldSchema.GetFieldID()
@@ -333,7 +332,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				err = FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
 			}
 			if err != nil {
-				log.Info("unify field data format failed", zap.Error(err))
+				log.Info(ctx, "unify field data format failed", mlog.Err(err))
 				return err
 			}
 		}
@@ -341,7 +340,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 	// Validate field data alignment before processing to prevent index out of range panic
 	if err := newValidateUtil().checkAligned(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, uint64(upsertIDSize)); err != nil {
-		log.Warn("check field data aligned failed", zap.Error(err))
+		log.Warn(ctx, "check field data aligned failed", mlog.Err(err))
 		return err
 	}
 
@@ -353,13 +352,13 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	// 1. split upsert data into insert and update by query result
 	idsChecker, err := typeutil.NewIDsChecker(existIDs)
 	if err != nil {
-		log.Info("create primary key checker failed", zap.Error(err))
+		log.Info(ctx, "create primary key checker failed", mlog.Err(err))
 		return err
 	}
 	for upsertIdx := 0; upsertIdx < upsertIDSize; upsertIdx++ {
 		exist, err := idsChecker.Contains(upsertIDs, upsertIdx)
 		if err != nil {
-			log.Info("check primary key exist in query result failed", zap.Error(err))
+			log.Info(ctx, "check primary key exist in query result failed", mlog.Err(err))
 			return err
 		}
 		if exist {
@@ -405,7 +404,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		for fieldIdx, existField := range existFieldData {
 			fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(existField.GetFieldName())
 			if err != nil {
-				log.Info("get field schema failed", zap.Error(err))
+				log.Info(ctx, "get field schema failed", mlog.Err(err))
 				return err
 			}
 
@@ -493,7 +492,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		// if necessary field is not exist in upsert request, return error
 		lackOfFieldErr := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true)
 		if lackOfFieldErr != nil {
-			log.Info("check fields data by schema failed", zap.Error(lackOfFieldErr))
+			log.Info(ctx, "check fields data by schema failed", mlog.Err(lackOfFieldErr))
 			return lackOfFieldErr
 		}
 
@@ -508,7 +507,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				if fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil {
 					fieldData, err := GenNullableFieldData(fieldSchema, upsertIDSize)
 					if err != nil {
-						log.Info("generate nullable field data failed", zap.Error(err))
+						log.Info(ctx, "generate nullable field data failed", mlog.Err(err))
 						return err
 					}
 					insertWithNullField = append(insertWithNullField, fieldData)
@@ -565,7 +564,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		if len(fieldData.GetValidData()) > 0 {
 			err := ToCompressedFormatNullable(fieldData)
 			if err != nil {
-				log.Info("convert to compressed format nullable failed", zap.Error(err))
+				log.Info(ctx, "convert to compressed format nullable failed", mlog.Err(err))
 				return err
 			}
 		}
@@ -1049,8 +1048,9 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-insertPreExecute")
 	defer sp.End()
 	collectionName := it.upsertMsg.InsertMsg.CollectionName
+	log := mlog.With(mlog.String("collectionName", collectionName))
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Ctx(ctx).Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Error(ctx, "valid collection name failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 
@@ -1078,11 +1078,11 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if allocateErr != nil {
-		log.Ctx(ctx).Warn("failed to allocate auto id for upsert",
-			zap.String("collectionName", collectionName),
-			zap.Int64("collectionID", it.upsertMsg.InsertMsg.CollectionID),
-			zap.Uint32("rowNums", rowNums),
-			zap.Error(allocateErr))
+		log.Warn(ctx, "failed to allocate auto id for upsert",
+			mlog.String("collectionName", collectionName),
+			mlog.Int64("collectionID", it.upsertMsg.InsertMsg.CollectionID),
+			mlog.Uint32("rowNums", rowNums),
+			mlog.Err(allocateErr))
 		return allocateErr
 	}
 
@@ -1134,35 +1134,34 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
-	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
-	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
+	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(ctx, allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	if err != nil {
-		log.Warn("check primary field data and hash primary key failed when upsert",
-			zap.Error(err))
+		log.Warn(ctx, "check primary field data and hash primary key failed when upsert",
+			mlog.Err(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
 
 	// check varchar/text with analyzer was utf-8 format
 	err = checkInputUtf8Compatiable(allFields, it.upsertMsg.InsertMsg)
 	if err != nil {
-		log.Warn("check varchar/text format failed", zap.Error(err))
+		log.Warn(ctx, "check varchar/text format failed", mlog.Err(err))
 		return err
 	}
 
 	// Validate and set field ID to insert field data
 	err = validateFieldDataColumns(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
-		log.Warn("validate field data columns failed when upsert", zap.Error(err))
+		log.Warn(ctx, "validate field data columns failed when upsert", mlog.Err(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
 	err = fillFieldPropertiesOnly(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
-		log.Warn("fill field properties failed when upsert", zap.Error(err))
+		log.Warn(ctx, "fill field properties failed when upsert", mlog.Err(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
 	err = normalizeFP32ToFP16BF16VectorFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
-		log.Warn("normalize fp32 to fp16/bf16 vector field data failed when upsert", zap.Error(err))
+		log.Warn(ctx, "normalize fp32 to fp16/bf16 vector field data failed when upsert", mlog.Err(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
 
@@ -1170,15 +1169,15 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema.CollectionSchema)
 		it.partitionKeys, err = getPartitionKeyFieldData(fieldSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
-			log.Warn("get partition keys from insert request failed",
-				zap.String("collectionName", collectionName),
-				zap.Error(err))
+			log.Warn(ctx, "get partition keys from insert request failed",
+				mlog.String("collectionName", collectionName),
+				mlog.Err(err))
 			return err
 		}
 	} else {
 		partitionTag := it.upsertMsg.InsertMsg.PartitionName
 		if err = validatePartitionTag(partitionTag, true); err != nil {
-			log.Warn("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+			log.Warn(ctx, "valid partition name failed", mlog.String("partition name", partitionTag), mlog.Err(err))
 			return err
 		}
 	}
@@ -1188,27 +1187,27 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	log.Debug("Proxy Upsert insertPreExecute done")
+	log.Debug(ctx, "Proxy Upsert insertPreExecute done")
 
 	return nil
 }
 
 func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 	collName := it.upsertMsg.DeleteMsg.CollectionName
-	log := log.Ctx(ctx).With(
-		zap.String("collectionName", collName))
+	log := mlog.With(
+		mlog.String("collectionName", collName))
 
 	if it.upsertMsg.DeleteMsg.PrimaryKeys == nil {
 		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
 		it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
 	}
 	if typeutil.GetSizeOfIDs(it.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
-		log.Info("deletePKs is empty, skip deleteExecute")
+		log.Info(ctx, "deletePKs is empty, skip deleteExecute")
 		return nil
 	}
 
 	if err := validateCollectionName(collName); err != nil {
-		log.Info("Invalid collectionName", zap.Error(err))
+		log.Info(ctx, "Invalid collectionName", mlog.Err(err))
 		return err
 	}
 
@@ -1221,12 +1220,12 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		// partition name could be defaultPartitionName or name specified by sdk
 		partName := it.upsertMsg.DeleteMsg.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
-			log.Warn("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
+			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return err
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, it.req.GetDbName(), collName, partName)
 		if err != nil {
-			log.Warn("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName), zap.Error(err))
+			log.Warn(ctx, "Failed to get partition id", mlog.String("collectionName", collName), mlog.String("partitionName", partName), mlog.Err(err))
 			return err
 		}
 		it.upsertMsg.DeleteMsg.PartitionID = partID
@@ -1236,7 +1235,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 	for index := range it.upsertMsg.DeleteMsg.Timestamps {
 		it.upsertMsg.DeleteMsg.Timestamps[index] = it.BeginTs()
 	}
-	log.Debug("Proxy Upsert deletePreExecute done")
+	log.Debug(ctx, "Proxy Upsert deletePreExecute done")
 	return nil
 }
 
@@ -1245,7 +1244,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	defer sp.End()
 
 	collectionName := it.req.CollectionName
-	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
+	log := mlog.With(mlog.String("collectionName", collectionName))
 
 	it.result = &milvuspb.MutationResult{
 		Status: merr.Success(),
@@ -1258,33 +1257,33 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	// check collection exists
 	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("fail to get collection id", zap.Error(err))
+		log.Warn(ctx, "fail to get collection id", mlog.Err(err))
 		return err
 	}
 	it.collectionID = collID
 
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
 	if err != nil {
-		log.Warn("fail to get collection info", zap.Error(err))
+		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
 
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
-			log.Info("collection schema mismatch", zap.String("collectionName", collectionName),
-				zap.Uint64("requestSchemaTs", it.schemaTimestamp),
-				zap.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
-				zap.Error(err))
+			log.Info(ctx, "collection schema mismatch", mlog.String("collectionName", collectionName),
+				mlog.Uint64("requestSchemaTs", it.schemaTimestamp),
+				mlog.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
+				mlog.Err(err))
 			return err
 		}
 	}
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("Failed to get collection schema",
-			zap.String("collectionName", collectionName),
-			zap.Error(err))
+		log.Warn(ctx, "Failed to get collection schema",
+			mlog.String("collectionName", collectionName),
+			mlog.Err(err))
 		return err
 	}
 	it.schema = schema
@@ -1298,7 +1297,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	// so users do not need to set both fields explicitly.
 	nonReplaceSeen, err := validateFieldPartialUpdateOps(it.req, schema.CollectionSchema)
 	if err != nil {
-		log.Warn("validate field partial update ops failed", zap.Error(err))
+		log.Warn(ctx, "validate field partial update ops failed", mlog.Err(err))
 		return err
 	}
 	if nonReplaceSeen && !it.req.GetPartialUpdate() {
@@ -1316,9 +1315,9 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("check partition key mode failed",
-			zap.String("collectionName", collectionName),
-			zap.Error(err))
+		log.Warn(ctx, "check partition key mode failed",
+			mlog.String("collectionName", collectionName),
+			mlog.Err(err))
 		return err
 	}
 	if it.partitionKeyMode {
@@ -1332,7 +1331,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		if len(partitionTag) <= 0 {
 			pinfo, err := globalMetaCache.GetPartitionInfo(ctx, it.req.GetDbName(), collectionName, "")
 			if err != nil {
-				log.Warn("get partition info failed", zap.String("collectionName", collectionName), zap.Error(err))
+				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err
 			}
 			it.req.PartitionName = pinfo.name
@@ -1342,12 +1341,12 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	// check for duplicate primary keys in the same batch
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
 	if err != nil {
-		log.Warn("fail to get primary field schema", zap.Error(err))
+		log.Warn(ctx, "fail to get primary field schema", mlog.Err(err))
 		return err
 	}
 	duplicate, err := CheckDuplicatePkExist(primaryFieldSchema, it.req.GetFieldsData())
 	if err != nil {
-		log.Warn("fail to check duplicate primary keys", zap.Error(err))
+		log.Warn(ctx, "fail to check duplicate primary keys", mlog.Err(err))
 		return err
 	}
 	if duplicate {
@@ -1398,7 +1397,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if it.req.GetPartialUpdate() {
 		err = it.queryPreExecute(ctx)
 		if err != nil {
-			log.Warn("Fail to queryPreExecute", zap.Error(err))
+			log.Warn(ctx, "Fail to queryPreExecute", mlog.Err(err))
 			return err
 		}
 		// reconstruct upsert msg after queryPreExecute
@@ -1409,25 +1408,25 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 	err = it.insertPreExecute(ctx)
 	if err != nil {
-		log.Warn("Fail to insertPreExecute", zap.Error(err))
+		log.Warn(ctx, "Fail to insertPreExecute", mlog.Err(err))
 		return err
 	}
 
 	err = it.deletePreExecute(ctx)
 	if err != nil {
-		log.Warn("Fail to deletePreExecute", zap.Error(err))
+		log.Warn(ctx, "Fail to deletePreExecute", mlog.Err(err))
 		return err
 	}
 
 	it.result.DeleteCnt = it.upsertMsg.DeleteMsg.NumRows
 	it.result.InsertCnt = int64(it.upsertMsg.InsertMsg.NumRows)
 	if it.result.DeleteCnt != it.result.InsertCnt {
-		log.Info("DeleteCnt and InsertCnt are not the same when upsert",
-			zap.Int64("DeleteCnt", it.result.DeleteCnt),
-			zap.Int64("InsertCnt", it.result.InsertCnt))
+		log.Info(ctx, "DeleteCnt and InsertCnt are not the same when upsert",
+			mlog.Int64("DeleteCnt", it.result.DeleteCnt),
+			mlog.Int64("InsertCnt", it.result.InsertCnt))
 	}
 	it.result.UpsertCnt = it.result.InsertCnt
-	log.Debug("Proxy Upsert PreExecute done")
+	log.Debug(ctx, "Proxy Upsert PreExecute done")
 	return nil
 }
 

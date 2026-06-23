@@ -17,14 +17,14 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -33,19 +33,19 @@ import (
 )
 
 func ValidateSegment(segment *datapb.SegmentInfo) error {
-	log := log.With(
-		zap.Int64("collection", segment.GetCollectionID()),
-		zap.Int64("partition", segment.GetPartitionID()),
-		zap.Int64("segment", segment.GetID()))
+	log := mlog.With(
+		mlog.Int64("collection", segment.GetCollectionID()),
+		mlog.Int64("partition", segment.GetPartitionID()),
+		mlog.Int64("segment", segment.GetID()))
 	// check stats log and bin log size match
 
 	// check L0 Segment
 	if segment.GetLevel() == datapb.SegmentLevel_L0 {
 		// L0 segment should only have delta logs
 		if len(segment.GetBinlogs()) > 0 || len(segment.GetStatslogs()) > 0 {
-			log.Warn("find invalid segment while L0 segment get more than delta logs",
-				zap.Any("binlogs", segment.GetBinlogs()),
-				zap.Any("stats", segment.GetBinlogs()),
+			log.Warn(context.TODO(), "find invalid segment while L0 segment get more than delta logs",
+				mlog.Any("binlogs", segment.GetBinlogs()),
+				mlog.Any("stats", segment.GetBinlogs()),
 			)
 			return merr.WrapErrServiceInternalMsg("segment can not be saved because of L0 segment get more than delta logs: collection %v, segment %v",
 				segment.GetCollectionID(), segment.GetID())
@@ -59,9 +59,9 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 	}
 
 	if len(segment.GetBinlogs()) == 0 || len(segment.GetStatslogs()) == 0 {
-		log.Warn("find segment binlog or statslog was empty",
-			zap.Any("binlogs", segment.GetBinlogs()),
-			zap.Any("stats", segment.GetBinlogs()),
+		log.Warn(context.TODO(), "find segment binlog or statslog was empty",
+			mlog.Any("binlogs", segment.GetBinlogs()),
+			mlog.Any("stats", segment.GetBinlogs()),
 		)
 		return merr.WrapErrServiceInternalMsg("segment can not be saved because of binlog file or stat log file lack: collection %v, segment %v",
 			segment.GetCollectionID(), segment.GetID())
@@ -73,9 +73,9 @@ func ValidateSegment(segment *datapb.SegmentInfo) error {
 	statslogNum := len(segment.GetStatslogs()[0].GetBinlogs())
 
 	if len(segment.GetCompactionFrom()) == 0 && statslogNum != binlogNum && !hasSpecialStatslog(segment) {
-		log.Warn("find invalid segment while bin log size didn't match stat log size",
-			zap.Any("binlogs", segment.GetBinlogs()),
-			zap.Any("stats", segment.GetStatslogs()),
+		log.Warn(context.TODO(), "find invalid segment while bin log size didn't match stat log size",
+			mlog.Any("binlogs", segment.GetBinlogs()),
+			mlog.Any("stats", segment.GetStatslogs()),
 		)
 		return merr.WrapErrServiceInternalMsg("segment can not be saved because of binlog file not match stat log number: collection %v, segment %v",
 			segment.GetCollectionID(), segment.GetID())

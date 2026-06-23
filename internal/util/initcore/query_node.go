@@ -37,10 +37,8 @@ import (
 	"sync"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -81,7 +79,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	bloomEnabled := paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()
 	C.SegcoreSetVisibilityFilterEnabled(C.bool(visibilityEnabled))
 	if !visibilityEnabled && bloomEnabled {
-		log.Warn("visibilityFilterEnabled=false with bloomFilterEnabled=true: deletes are forwarded via bloom filter but never applied — consider disabling bloom filter to save memory")
+		mlog.Warn(ctx, "visibilityFilterEnabled=false with bloomFilterEnabled=true: deletes are forwarded via bloom filter but never applied — consider disabling bloom filter to save memory")
 	}
 
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
@@ -126,7 +124,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	if knowhereBuildPoolSize < uint32(1) {
 		knowhereBuildPoolSize = uint32(1)
 	}
-	log.Ctx(ctx).Info("set up knowhere build pool size", zap.Uint32("pool_size", knowhereBuildPoolSize))
+	mlog.Info(ctx, "set up knowhere build pool size", mlog.Uint32("pool_size", knowhereBuildPoolSize))
 	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
 
@@ -234,7 +232,7 @@ func SyncPreferFieldDataWhenIndexHasRawData(ctx context.Context, params *paramta
 	v := params.QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool()
 	C.SegcoreSetPreferFieldDataWhenIndexHasRawData(C.bool(v))
 	if v {
-		log.Ctx(ctx).Info("preferFieldDataWhenIndexHasRawData=true: sealed retrieve will read field data instead of index raw data; " +
+		mlog.Info(ctx, "preferFieldDataWhenIndexHasRawData=true: sealed retrieve will read field data instead of index raw data; "+
 			"both will stay resident in memory, increasing the memory footprint for fields whose index also holds raw data")
 	}
 }
@@ -248,6 +246,6 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 	C.SegcoreSetStorageV3Enabled(C.bool(storageV3Enabled))
 	C.SegcoreSetEnableGrowingSourceFlush(C.bool(v))
 	if v {
-		log.Ctx(ctx).Info("enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
+		mlog.Info(ctx, "enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
 }

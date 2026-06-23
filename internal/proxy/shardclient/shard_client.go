@@ -24,10 +24,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -111,7 +110,7 @@ func (n *shardClient) initClients(ctx context.Context) error {
 			for _, c := range clients {
 				c.Close()
 			}
-			log.Info("failed to create client for node", zap.Int64("nodeID", n.info.NodeID), zap.Error(err))
+			mlog.Info(context.TODO(), "failed to create client for node", mlog.Int64("nodeID", n.info.NodeID), mlog.Err(err))
 			return errors.Wrap(err, fmt.Sprintf("create client for node=%d failed", n.info.NodeID))
 		}
 		clients = append(clients, client)
@@ -161,7 +160,7 @@ func (n *shardClient) close() {
 
 	for _, client := range n.clients {
 		if err := client.Close(); err != nil {
-			log.Warn("close grpc client failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "close grpc client failed", mlog.Err(err))
 		}
 	}
 	n.clients = nil
