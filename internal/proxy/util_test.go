@@ -4191,7 +4191,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported element type of array field array_vector_with_scalar, now only float vector is supported")
+		assert.Contains(t, err.Error(), "only fixed dimension vector types are supported")
 	})
 
 	t.Run("array of vector missing dimension", func(t *testing.T) {
@@ -4271,19 +4271,19 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		assert.Contains(t, err.Error(), "nullable is not supported for fields in struct array now")
 	})
 
-	// t.Run("sparse float vector in array of vector", func(t *testing.T) {
-	// 	// Note: ArrayOfVector with sparse vector element type still requires dimension
-	// 	// because validateDimension checks the field's DataType (ArrayOfVector), not ElementType
-	// 	field := &schemapb.FieldSchema{
-	// 		Name:        "sparse_vector_array",
-	// 		DataType:    schemapb.DataType_ArrayOfVector,
-	// 		ElementType: schemapb.DataType_SparseFloatVector,
-	// 		TypeParams:  []*commonpb.KeyValuePair{},
-	// 	}
-	// 	err := ValidateFieldsInStruct(field, schema)
-	// 	assert.Error(t, err)
-	// 	assert.Contains(t, err.Error(), "dimension is not defined")
-	// })
+	t.Run("sparse float vector in array of vector", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "sparse_vector_array",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_SparseFloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "only fixed dimension vector types are supported")
+	})
 
 	t.Run("array with various scalar element types", func(t *testing.T) {
 		validScalarTypes := []schemapb.DataType{
@@ -4310,11 +4310,10 @@ func TestValidateFieldsInStruct(t *testing.T) {
 	t.Run("array of vector with various vector types", func(t *testing.T) {
 		validVectorTypes := []schemapb.DataType{
 			schemapb.DataType_FloatVector,
-			// schemapb.DataType_BinaryVector,
-			// schemapb.DataType_Float16Vector,
-			// schemapb.DataType_BFloat16Vector,
-			// Note: SparseFloatVector is excluded because validateDimension checks
-			// the field's DataType (ArrayOfVector), not ElementType, so it still requires dimension
+			schemapb.DataType_BinaryVector,
+			schemapb.DataType_Float16Vector,
+			schemapb.DataType_BFloat16Vector,
+			schemapb.DataType_Int8Vector,
 		}
 
 		for _, vt := range validVectorTypes {
