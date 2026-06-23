@@ -39,6 +39,9 @@ void
 SegcoreSetEnableGeometryCache(const bool);
 
 void
+SegcoreSetEnableGISSplitFusion(const bool);
+
+void
 SegcoreSetNlist(const int64_t);
 
 void
