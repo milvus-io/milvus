@@ -78,6 +78,14 @@ type upsertTask struct {
 	deletePKs       *schemapb.IDs
 	insertFieldData []*schemapb.FieldData
 
+	// partial-update OCC state, populated by queryPreExecute and consumed by
+	// packInsertMessage to construct the InsertMessageHeader CAS extension.
+	// Indices in these slices are aligned with the rows of upsertMsg.InsertMsg.
+	// occExpectedRowTs[i]    : expected hidden Timestamp version of pk[i].
+	// occExpectedRowExists[i]: false means a first-write (CAS expects no row).
+	occExpectedRowTs     []uint64
+	occExpectedRowExists []bool
+
 	storageCost segcore.StorageCost
 }
 
@@ -223,6 +231,10 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		mixCoord:       t.node.(*Proxy).mixCoord,
 		lb:             t.node.(*Proxy).lbPolicy,
 		shardclientMgr: t.node.(*Proxy).shardMgr,
+		// partial-update OCC needs the hidden Timestamp column to be preserved
+		// in the reduced result so that queryPreExecute can build the per-row
+		// expected version map.
+		keepTimestamp: t.req.GetPartialUpdate(),
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
@@ -278,6 +290,19 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	}
 
 	existFieldData := resp.GetFieldsData()
+	// For partial-update OCC, peel the hidden Timestamp column from the
+	// query result before downstream merge logic so it does not bleed into
+	// insertFieldData. existRowTs[i] is the version of the i-th row in
+	// existIDs (matched by existPKToIndex below).
+	var existRowTs []uint64
+	if it.req.GetPartialUpdate() {
+		var ok bool
+		existFieldData, existRowTs, ok = extractHiddenTimestampColumn(existFieldData)
+		if !ok {
+			log.Warn("queryPreExecute: timestamp column not found in retrieve result; partial-update will degrade to first-write semantics")
+		}
+		resp.FieldsData = existFieldData
+	}
 	pkFieldData, err := typeutil.GetPrimaryFieldData(existFieldData, primaryFieldSchema)
 	if err != nil {
 		log.Error("get primary field data failed", zap.Error(err))
@@ -373,6 +398,15 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	it.deletePKs = &schemapb.IDs{}
 	it.insertFieldData = typeutil.PrepareResultFieldData(existFieldData, int64(upsertIDSize))
 
+	// Build a stable existPK -> index mapping once: it is also needed by OCC
+	// version assembly (so we read existRowTs[existIndex] for each update).
+	existIDsLen := typeutil.GetSizeOfIDs(existIDs)
+	existPKToIndex := make(map[interface{}]int, existIDsLen)
+	for j := 0; j < existIDsLen; j++ {
+		pk := typeutil.GetPK(existIDs, int64(j))
+		existPKToIndex[pk] = j
+	}
+
 	if len(updateIdxInUpsert) > 0 {
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (int64, *schemapb.FieldData) {
 			return field.FieldId, field
@@ -382,15 +416,8 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		// fall back to REPLACE.
 		fieldOpMap := buildFieldOpMap(it.req)
 
-		// Build mapping from existing primary keys to their positions in query result
-		// This ensures we can correctly locate data even if query results are not in the same order as request
-		existIDsLen := typeutil.GetSizeOfIDs(existIDs)
-		existPKToIndex := make(map[interface{}]int, existIDsLen)
-		for i := 0; i < existIDsLen; i++ {
-			pk := typeutil.GetPK(existIDs, int64(i))
-			existPKToIndex[pk] = i
-		}
-
+		// existPKToIndex (and existIDsLen) are built once at function scope
+		// above; reuse it so OCC version assembly and the merge path agree.
 		existIndices := make([]int64, len(updateIdxInUpsert))
 		for i, upsertIdx := range updateIdxInUpsert {
 			typeutil.AppendIDs(it.deletePKs, upsertIDs, upsertIdx)
@@ -570,6 +597,17 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			}
 		}
 	}
+
+	// Build the per-row OCC expected-version arrays aligned with the row
+	// layout used to populate insertFieldData: [updates in order, then
+	// inserts in order]. This MUST match the order in which insertExecute
+	// later sends rows down to the WAL.
+	occRowTs, occRowExists, err := assignOCCRowVersions(upsertIDs, updateIdxInUpsert, insertIdxInUpsert, existPKToIndex, existRowTs)
+	if err != nil {
+		return err
+	}
+	it.occExpectedRowTs = occRowTs
+	it.occExpectedRowExists = occRowExists
 	return nil
 }
 
@@ -1433,4 +1471,70 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 func (it *upsertTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+// extractHiddenTimestampColumn locates the hidden Timestamp column in a
+// retrieved field-data slice and splits it out as a separate uint64 row
+// version array. It returns the input slice with the timestamp column
+// removed, the per-row timestamps, and ok=true when the column was found.
+// When ok=false the input slice and a nil version slice are returned
+// unchanged so the caller can degrade to first-write semantics.
+func extractHiddenTimestampColumn(fields []*schemapb.FieldData) ([]*schemapb.FieldData, []uint64, bool) {
+	keptIdx := -1
+	for idx, fd := range fields {
+		if fd.GetFieldId() == common.TimeStampField {
+			keptIdx = idx
+			break
+		}
+	}
+	if keptIdx < 0 {
+		return fields, nil, false
+	}
+	tsLong := fields[keptIdx].GetScalars().GetLongData().GetData()
+	existRowTs := make([]uint64, len(tsLong))
+	for i, v := range tsLong {
+		existRowTs[i] = uint64(v)
+	}
+	fields = append(fields[:keptIdx], fields[keptIdx+1:]...)
+	return fields, existRowTs, true
+}
+
+// assignOCCRowVersions builds the per-row OCC (expectedTs, expectedExists)
+// arrays aligned with insertFieldData layout: [updates in order, then
+// first-writes in order]. existPKToIndex maps each existing PK (as returned
+// by typeutil.GetPK) to its position in existRowTs. existRowTs may be nil
+// when the hidden timestamp column was missing; in that case all updates
+// are tagged as expectedExists=true with expectedTs=0 so the streaming-node
+// interceptor degrades gracefully. Returns ErrParameterInvalid when an
+// update PK is missing from the mapping (an internal invariant violation).
+// Returns (nil, nil, nil) when there are no rows to assign.
+func assignOCCRowVersions(
+	upsertIDs *schemapb.IDs,
+	updateIdxInUpsert []int,
+	insertIdxInUpsert []int,
+	existPKToIndex map[interface{}]int,
+	existRowTs []uint64,
+) ([]uint64, []bool, error) {
+	totalRows := len(updateIdxInUpsert) + len(insertIdxInUpsert)
+	if totalRows == 0 {
+		return nil, nil, nil
+	}
+	occExpectedRowTs := make([]uint64, totalRows)
+	occExpectedRowExists := make([]bool, totalRows)
+	for i, idx := range updateIdxInUpsert {
+		oldPK := typeutil.GetPK(upsertIDs, int64(idx))
+		existIndex, ok := existPKToIndex[oldPK]
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping (occ)")
+		}
+		occExpectedRowExists[i] = true
+		if existRowTs != nil && existIndex < len(existRowTs) {
+			occExpectedRowTs[i] = existRowTs[existIndex]
+		}
+	}
+	for j := range insertIdxInUpsert {
+		occExpectedRowExists[len(updateIdxInUpsert)+j] = false
+		occExpectedRowTs[len(updateIdxInUpsert)+j] = 0
+	}
+	return occExpectedRowTs, occExpectedRowExists, nil
 }

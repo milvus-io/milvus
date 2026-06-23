@@ -2,6 +2,7 @@ package status
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/redact"
@@ -9,6 +10,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
+
+// PKStateConflictCausePrefix is the prefix prepended to the Cause field of the
+// StreamingError raised on a pk-state CAS conflict. The streamingpb
+// StreamingCode enum is a stable wire contract that cannot be extended without
+// a coordinated proto rollout, so the conflict is signaled by string-matching
+// on this prefix (the code itself is STREAMING_CODE_INNER).
+//
+// Note: redact.Sprintf used by New strips inner whitespace from format
+// strings, so the prefix must NOT contain spaces.
+const PKStateConflictCausePrefix = "pk_state_conflict:"
 
 var _ error = (*StreamingError)(nil)
 
@@ -99,6 +110,15 @@ func (e *StreamingError) IsOnShutdown() bool {
 // IsRateLimitRejected returns true if the error is caused by rate limit rejected.
 func (e *StreamingError) IsRateLimitRejected() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED
+}
+
+// IsPKStateConflict returns true if the error is a pk-state CAS conflict
+// raised by the partial-update interceptor. Such conflicts must NOT be
+// retried inside the streaming client: they have to bubble up to the proxy
+// so its bounded OCC retry loop can re-read the latest row versions.
+func (e *StreamingError) IsPKStateConflict() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_INNER &&
+		strings.HasPrefix(e.Cause, PKStateConflictCausePrefix)
 }
 
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.

@@ -88,6 +88,11 @@ type queryTask struct {
 	resolvedTimezoneStr  string
 	storageCost          segcore.StorageCost
 	aggregationFieldMap  *agg.AggregationFieldMap
+
+	// keepTimestamp prevents the result pipeline from stripping the
+	// hidden Timestamp system column. Used by partial-update OCC to
+	// observe per-row version on the proxy side.
+	keepTimestamp bool
 }
 
 func (t *queryTask) getQueryLabel() string {
@@ -996,6 +1001,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		t.GetAggregates(),
 		t.aggregationFieldMap,
 		filterSystemFields(t.GetOutputFieldsId()),
+		t.keepTimestamp,
 	)
 	if err != nil {
 		log.Warn("fail to create query pipeline", zap.Error(err))

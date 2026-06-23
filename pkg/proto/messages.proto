@@ -162,6 +162,31 @@ message InsertMessageHeader {
     repeated PartitionSegmentAssignment partitions = 2;
     // optional so consumers can distinguish omitted (legacy producer) from explicit value.
     optional int32 schema_version                  = 3;
+    // pk_state OCC (optimistic concurrency control) extension.
+    // When occ_mode = OCC_MODE_CAS, streaming node will perform a CAS check
+    // against PKVersionCache before appending the body. The check uses
+    // expected_pks / expected_row_timestamps / expected_row_exists aligned
+    // with the rows carried in the InsertRequest body (same order, same length).
+    OCCMode occ_mode                               = 4;
+    // expected_pks carries the primary key value for each row, used by the
+    // pk_state_interceptor to acquire the per-PK CAS lock without
+    // depending on schema knowledge inside streamingnode.
+    schema.IDs expected_pks                        = 5;
+    // expected_row_timestamps is the row-level expected version (the hidden
+    // Timestamp system field of the previously read row). Length must match
+    // the number of rows in the body when occ_mode != OCC_MODE_NONE.
+    // When expected_row_exists[i] == false, expected_row_timestamps[i] is
+    // ignored and the CAS expects "no existing row for this PK".
+    repeated uint64 expected_row_timestamps        = 6;
+    // expected_row_exists indicates whether the i-th row was a read-modify-write
+    // (true) or a brand-new first-write insert (false).
+    repeated bool expected_row_exists              = 7;
+}
+
+// OCCMode is the optimistic concurrency control mode of an insert message.
+enum OCCMode {
+    OCC_MODE_NONE = 0;
+    OCC_MODE_CAS  = 1;
 }
 
 // PartitionSegmentAssignment is the segment assignment of a partition.

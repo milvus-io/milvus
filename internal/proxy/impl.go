@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partial_update"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -83,6 +84,94 @@ import (
 )
 
 const moduleName = "Proxy"
+
+const (
+	occInitialBackoff = 5 * time.Millisecond
+	occMaxBackoff     = 100 * time.Millisecond
+)
+
+// computeOCCRetryParams returns (maxAttempts, initialBackoff) for the
+// pk-state OCC retry loop. Non-partial-update upserts always run exactly
+// once with no backoff. For partial updates the values come from
+// paramtable; negative retries are clamped to zero.
+func computeOCCRetryParams(partialUpdate bool) (int, time.Duration) {
+	if !partialUpdate {
+		return 1, occInitialBackoff
+	}
+	retries := paramtable.Get().ProxyCfg.PartialUpdateRetryOnConflict.GetAsInt()
+	if retries < 0 {
+		retries = 0
+	}
+	backoff := occInitialBackoff
+	if ms := paramtable.Get().ProxyCfg.PartialUpdateRetryBackoffMs.GetAsInt(); ms > 0 {
+		backoff = time.Duration(ms) * time.Millisecond
+	}
+	return retries + 1, backoff
+}
+
+// nextOCCBackoff doubles the backoff up to occMaxBackoff.
+func nextOCCBackoff(cur time.Duration) time.Duration {
+	if cur >= occMaxBackoff {
+		return occMaxBackoff
+	}
+	next := cur * 2
+	if next > occMaxBackoff {
+		return occMaxBackoff
+	}
+	return next
+}
+
+// newUpsertTaskForRetry rebuilds a fresh upsertTask for an OCC retry attempt
+// so that BeginTs is re-allocated and queryPreExecute re-reads the latest
+// row versions. Kept separate from the inline first-attempt construction so
+// the retry loop body is small and the helper can be unit-tested.
+func newUpsertTaskForRetry(ctx context.Context, request *milvuspb.UpsertRequest, node *Proxy) *upsertTask {
+	return &upsertTask{
+		baseMsg: msgstream.BaseMsg{
+			HashValues: request.HashKeys,
+		},
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       request,
+		result: &milvuspb.MutationResult{
+			Status: merr.Success(),
+			IDs: &schemapb.IDs{
+				IdField: nil,
+			},
+		},
+		idAllocator:     node.rowIDAllocator,
+		chMgr:           node.chMgr,
+		schemaTimestamp: request.SchemaTimestamp,
+		node:            node,
+	}
+}
+
+// classifyOCCRetry decides what the OCC retry loop should do given the
+// current attempt result. Pure function, no side effects, designed to keep
+// the retry loop in Upsert thin and easy to unit-test.
+//
+//	waitErr:        the error returned by the most recent enqueue/wait pair
+//	                (nil means success).
+//	partialUpdate:  whether the request is a partial-update upsert. Only
+//	                partial updates are retried.
+//	attempt:        current zero-based attempt index.
+//	maxAttempts:    upper bound (>= 1).
+//
+// Returns retry=true only when the loop should sleep and try again. When
+// retry=false the caller breaks out of the loop. exhausted=true signals
+// that retries are exhausted and the caller should log a warning.
+func classifyOCCRetry(waitErr error, partialUpdate bool, attempt, maxAttempts int) (retry, exhausted bool) {
+	if waitErr == nil {
+		return false, false
+	}
+	if !partialUpdate || !partial_update.IsPKStateConflict(waitErr) {
+		return false, false
+	}
+	if attempt >= maxAttempts-1 {
+		return false, true
+	}
+	return true, false
+}
 
 // checkExternalCollectionBlockedForWrite checks if the collection is external and returns error if so.
 // External collections do not support write operations (insert, delete, upsert, flush, etc).
@@ -3053,25 +3142,58 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		zap.Int("len(FieldsData)", len(request.FieldsData)),
 		zap.Int("len(HashKeys)", len(request.HashKeys)))
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
-		log.Info("Failed to enqueue upsert task",
-			zap.Error(err))
-		return &milvuspb.MutationResult{
-			Status: merr.Status(err),
-		}, nil
+	// pk-state OCC retry loop. For non-pk-state CAS upserts the loop
+	// runs exactly once. On a CAS conflict reported by the streaming-node
+	// pk_state interceptor, the task is rebuilt from scratch so that
+	// BeginTs is re-allocated and queryPreExecute re-reads the latest row
+	// versions before the next attempt.
+	maxAttempts, backoff := computeOCCRetryParams(request.GetPartialUpdate())
+	var waitErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			it = newUpsertTaskForRetry(ctx, request, node)
+		}
+
+		if err := node.sched.dmQueue.Enqueue(it); err != nil {
+			log.Info("Failed to enqueue upsert task",
+				zap.Error(err))
+			return &milvuspb.MutationResult{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		waitErr = it.WaitToFinish()
+		retry, exhausted := classifyOCCRetry(waitErr, request.GetPartialUpdate(), attempt, maxAttempts)
+		if exhausted {
+			log.Warn("pk-state CAS conflict exhausted retries",
+				zap.Int("attempts", maxAttempts),
+				zap.Error(waitErr))
+		}
+		if !retry {
+			break
+		}
+		log.Info("pk-state CAS conflict, retrying",
+			zap.Int("attempt", attempt),
+			zap.Duration("backoff", backoff),
+			zap.Error(waitErr))
+		select {
+		case <-ctx.Done():
+			waitErr = ctx.Err()
+		case <-time.After(backoff):
+		}
+		if waitErr != nil && errors.Is(waitErr, context.Canceled) {
+			break
+		}
+		backoff = nextOCCBackoff(backoff)
 	}
 
-	log.Debug("Detail of upsert request in Proxy",
-		zap.Uint64("BeginTS", it.BeginTs()),
-		zap.Uint64("EndTS", it.EndTs()))
-
-	if err := it.WaitToFinish(); err != nil {
-		log.Warn("Failed to execute insert task in task scheduler",
-			zap.Error(err))
+	if waitErr != nil {
+		log.Info("Failed to execute insert task in task scheduler",
+			zap.Error(waitErr))
 		// Not every error case changes the status internally
 		// change status there to handle it
 		if it.result.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
-			it.result.Status = merr.Status(err)
+			it.result.Status = merr.Status(waitErr)
 		}
 
 		numRows := request.NumRows
@@ -3081,7 +3203,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		}
 
 		return &milvuspb.MutationResult{
-			Status:   merr.Status(err),
+			Status:   merr.Status(waitErr),
 			ErrIndex: errIndex,
 		}, nil
 	}
