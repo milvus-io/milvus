@@ -662,7 +662,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return sd.handleReopenPostLoad(ctx, req)
 	}
 
-	effectiveSchemaVersion, err := sd.maybeReopenLoadedSegmentsBeforePublish(ctx, worker, req)
+	effectiveSchemaBarrierTs, err := sd.maybeReopenLoadedSegmentsBeforePublish(ctx, worker, req)
 	if err != nil {
 		log.Warn("failed to reopen loaded segments before publish", zap.Error(err))
 		return err
@@ -711,7 +711,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Debug(ctx, "load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, effectiveSchemaVersion)
+			entries, effectiveSchemaBarrierTs)
 		if err != nil {
 			log.Warn(ctx, "load stream delete failed", mlog.Err(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
