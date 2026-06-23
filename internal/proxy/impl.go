@@ -3893,7 +3893,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
-	if mlog.With().LevelEnabled(mlog.DebugLevel) && matchCountRule(request.OutputFields) {
+	if mlog.LevelEnabled(mlog.DebugLevel) && matchCountRule(request.OutputFields) {
 		r, _ := protojson.Marshal(res)
 		mlog.Debug(ctx, "Count result", mlog.String("result", string(r)))
 	}

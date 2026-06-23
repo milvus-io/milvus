@@ -12,7 +12,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -30,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -140,15 +139,15 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 	} else {
 		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
-			log.Ctx(t.ctx).Warn("search task get collectionID failed, can't skip alloc timestamp",
-				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
+			mlog.Warn(t.ctx, "search task get collectionID failed, can't skip alloc timestamp",
+				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
 
 		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
 		if err2 != nil {
-			log.Ctx(t.ctx).Warn("search task get collection info failed, can't skip alloc timestamp",
-				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
+			mlog.Warn(t.ctx, "search task get collection info failed, can't skip alloc timestamp",
+				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
 		consistencyLevel = collectionInfo.consistencyLevel
@@ -173,10 +172,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.DbID = 0 // todo
 	t.CollectionID = collID
-	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
+	log := mlog.With(mlog.Int64("collID", collID), mlog.String("collName", collectionName))
 	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
+		log.Warn(ctx, "get collection schema failed", mlog.Err(err))
 		return err
 	}
 	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
@@ -185,8 +184,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
-		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID), zap.Error(err2))
+		log.Warn(ctx, "Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
+			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID), mlog.Err(err2))
 		return err2
 	}
 	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
@@ -194,7 +193,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("is partition key mode failed", zap.Error(err))
+		log.Warn(ctx, "is partition key mode failed", mlog.Err(err))
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
@@ -209,7 +208,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		// translate partition name to partition ids. Use regex-pattern to match partition name.
 		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, t.request.GetPartitionNames())
 		if err != nil {
-			log.Warn("failed to get partition ids", zap.Error(err))
+			log.Warn(ctx, "failed to get partition ids", mlog.Err(err))
 			return err
 		}
 	}
@@ -221,15 +220,15 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
-		log.Warn("translate output fields failed", zap.Error(err), zap.Any("schema", t.schema))
+		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.Any("schema", t.schema))
 		return err
 	}
 	if len(aggs) > 0 {
-		log.Warn("aggregates are not supported in search request", zap.Strings("aggregates", lo.Map(aggs, func(agg agg.AggregateBase, _ int) string { return agg.OriginalName() })))
+		log.Warn(ctx, "aggregates are not supported in search request", mlog.Strings("aggregates", lo.Map(aggs, func(agg agg.AggregateBase, _ int) string { return agg.OriginalName() })))
 		return merr.WrapErrParameterInvalidMsg("aggregates are not supported in search request")
 	}
-	log.Debug("translate output fields",
-		zap.Strings("output fields", t.translatedOutputFields))
+	log.Debug(ctx, "translate output fields",
+		mlog.Strings("output fields", t.translatedOutputFields))
 
 	if t.GetIsAdvanced() {
 		if len(t.request.GetSubReqs()) > defaultMaxSearchRequest {
@@ -239,7 +238,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	nq, err := t.checkNq(ctx)
 	if err != nil {
-		log.Info("failed to check nq", zap.Error(err))
+		log.Info(ctx, "failed to check nq", mlog.Err(err))
 		return err
 	}
 	t.Nq = nq
@@ -250,7 +249,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	outputFieldIDs, err := getOutputFieldIDs(t.schema, t.translatedOutputFields)
 	if err != nil {
-		log.Info("fail to get output field ids", zap.Error(err))
+		log.Info(ctx, "fail to get output field ids", mlog.Err(err))
 		return err
 	}
 	t.OutputFieldsId = outputFieldIDs
@@ -265,7 +264,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// stays empty at reduce stage and DerivedTopK/DerivedGroupSize overrides
 	// are skipped.
 	if err = t.initSearchAggregation(); err != nil {
-		log.Debug("init search aggregation failed", zap.Error(err))
+		log.Debug(ctx, "init search aggregation failed", mlog.Err(err))
 		return err
 	}
 
@@ -275,7 +274,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		err = t.initSearchRequest(ctx)
 	}
 	if err != nil {
-		log.Debug("init search request failed", zap.Error(err))
+		log.Debug(ctx, "init search request failed", mlog.Err(err))
 		return err
 	}
 
@@ -339,13 +338,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
 	if exist {
 		if !timestamptz.IsTimezoneValid(timezone) {
-			log.Info("get invalid timezone from request", zap.String("timezone", timezone))
+			log.Info(ctx, "get invalid timezone from request", mlog.String("timezone", timezone))
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
 		}
-		log.Debug("determine timezone from request", zap.String("user defined timezone", timezone))
+		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", timezone))
 	} else {
 		timezone = getColTimezone(collectionInfo)
-		log.Debug("determine timezone from collection", zap.Any("collection timezone", timezone))
+		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", timezone))
 	}
 	t.resolvedTimezoneStr = timezone
 
@@ -355,12 +354,12 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	log.Debug("search PreExecute done.",
-		zap.Uint64("guarantee_ts", guaranteeTs),
-		zap.Bool("use_default_consistency", useDefaultConsistency),
-		zap.Any("consistency level", consistencyLevel),
-		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
-		zap.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
+	log.Debug(ctx, "search PreExecute done.",
+		mlog.Uint64("guarantee_ts", guaranteeTs),
+		mlog.Bool("use_default_consistency", useDefaultConsistency),
+		mlog.Any("consistency level", consistencyLevel),
+		mlog.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
+		mlog.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
 	return nil
 }
 
@@ -457,7 +456,7 @@ func (t *searchTask) validatePartitionKeyIsolation(plan *planpb.PlanNode) error 
 	}
 	expr, err := exprutil.ParseExprFromPlan(plan)
 	if err != nil {
-		log.Ctx(t.ctx).Warn("failed to parse expr from plan when validating partition key isolation", zap.Error(err))
+		mlog.Warn(t.ctx, "failed to parse expr from plan when validating partition key isolation", mlog.Err(err))
 		return err
 	}
 	return exprutil.ValidatePartitionKeyIsolation(expr)
@@ -467,7 +466,7 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask) error {
 	if t.enableMaterializedView {
 		partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(t.schema.CollectionSchema)
 		if err != nil {
-			log.Ctx(t.ctx).Warn("failed to get partition key field schema", zap.Error(err))
+			mlog.Warn(t.ctx, "failed to get partition key field schema", mlog.Err(err))
 			return err
 		}
 		if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyFieldSchema) {
@@ -486,7 +485,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init advanced search request")
 	defer sp.End()
 	t.partitionIDsSet = typeutil.NewConcurrentSet[UniqueID]()
-	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
+	log := mlog.With(mlog.Int64("collID", t.GetCollectionID()), mlog.String("collName", t.collectionName))
 
 	// Old SDK hybrid callers pass only singular group_by_field; output must
 	// downgrade plural→singular the same way the non-advanced path does.
@@ -511,13 +510,13 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	})
 
 	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
-		log.Error("parseRankParams failed", zap.Error(err))
+		log.Error(ctx, "parseRankParams failed", mlog.Err(err))
 		return err
 	}
 
 	// Parse order_by_fields from main search params
 	if t.orderByFields, err = parseOrderByFields(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
-		log.Error("parseOrderByFields failed", zap.Error(err))
+		log.Error(ctx, "parseOrderByFields failed", mlog.Err(err))
 		return err
 	}
 
@@ -691,9 +690,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		internalSubReq.PlaceholderGroup = convertedPlaceholder
 		t.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
-		log.Debug("proxy init search request",
-			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-			zap.Stringer("plan", plan)) // may be very large if large term passed.
+		log.Debug(ctx, "proxy init search request",
+			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
+			mlog.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
@@ -817,7 +816,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init search request")
 	defer sp.End()
 
-	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
+	log := mlog.With(mlog.Int64("collID", t.GetCollectionID()), mlog.String("collName", t.collectionName))
 
 	// Old SDK: group_by_field only, no group_by_fields, no agg → output as singular.
 	_, errGroupByField := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, t.request.GetSearchParams())
@@ -1038,9 +1037,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		sp.AddEvent("Call-function-udf")
 	}
 
-	log.Debug("proxy init search request",
-		zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
-		zap.Stringer("plan", plan)) // may be very large if large term passed.
+	log.Debug(ctx, "proxy init search request",
+		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
+		mlog.Stringer("plan", plan)) // may be very large if large term passed.
 
 	return nil
 }
@@ -1100,29 +1099,29 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	start := time.Now()
 	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
-		log.Ctx(t.ctx).Warn("failed to create query plan", zap.Error(planErr),
-			zap.String("dsl", dsl), // may be very large if large term passed.
-			zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
+		mlog.Warn(t.ctx, "failed to create query plan", mlog.Err(planErr),
+			mlog.String("dsl", dsl), // may be very large if large term passed.
+			mlog.String("anns field", annsFieldName), mlog.Any("query info", searchInfo.planInfo))
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-	log.Ctx(t.ctx).Debug("create query plan",
-		zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
-		zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
+	mlog.Debug(t.ctx, "create query plan",
+		mlog.String("dsl", t.request.Dsl), // may be very large if large term passed.
+		mlog.String("anns field", annsFieldName), mlog.Any("query info", searchInfo.planInfo))
 	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, searchInfo.orderByFields, searchType, nil
 }
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
 	expr, err := exprutil.ParseExprFromPlan(plan)
 	if err != nil {
-		log.Ctx(t.ctx).Warn("failed to parse expr", zap.Error(err))
+		mlog.Warn(t.ctx, "failed to parse expr", mlog.Err(err))
 		return nil, err
 	}
 	partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
 	hashedPartitionNames, err := assignPartitionKeys(t.ctx, t.request.GetDbName(), t.collectionName, partitionKeys)
 	if err != nil {
-		log.Ctx(t.ctx).Warn("failed to assign partition keys", zap.Error(err))
+		mlog.Warn(t.ctx, "failed to assign partition keys", mlog.Err(err))
 		return nil, err
 	}
 
@@ -1130,7 +1129,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 		// translate partition name to partition ids. Use regex-pattern to match partition name.
 		PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
 		if err2 != nil {
-			log.Ctx(t.ctx).Warn("failed to get partition ids", zap.Error(err2))
+			mlog.Warn(t.ctx, "failed to get partition ids", mlog.Err(err2))
 			return nil, err2
 		}
 		return PartitionIDs, nil
@@ -1141,7 +1140,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 func (t *searchTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-Execute")
 	defer sp.End()
-	log := log.Ctx(ctx).WithLazy(zap.Int64("nq", t.GetNq()))
+	log := mlog.WithLazy(mlog.Int64("nq", t.GetNq()))
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
@@ -1155,13 +1154,13 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		Exec:           t.searchShard,
 	})
 	if err != nil {
-		log.Warn("search execute failed", zap.Error(err))
+		log.Warn(ctx, "search execute failed", mlog.Err(err))
 		return errors.Wrap(err, "failed to search")
 	}
 
-	log.Debug("Search Execute done.",
-		zap.Int64("collection", t.GetCollectionID()),
-		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
+	log.Debug(ctx, "Search Execute done.",
+		mlog.Int64("collection", t.GetCollectionID()),
+		mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
 	return nil
 }
 
@@ -1229,11 +1228,11 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	defer func() {
 		tr.CtxElapse(ctx, "done")
 	}()
-	log := log.Ctx(ctx).With(zap.Int64("nq", t.GetNq()))
+	log := mlog.With(mlog.Int64("nq", t.GetNq()))
 
 	toReduceResults, err := t.collectSearchResults(ctx)
 	if err != nil {
-		log.Warn("failed to collect search results", zap.Error(err))
+		log.Warn(ctx, "failed to collect search results", mlog.Err(err))
 		return err
 	}
 
@@ -1263,7 +1262,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	// call pipeline
 	pipeline, err := newSearchPipeline(t)
 	if err != nil {
-		log.Warn("Faild to create post process pipeline")
+		log.Warn(ctx, "Faild to create post process pipeline")
 		return err
 	}
 	if t.result, t.storageCost, err = pipeline.Run(ctx, sp, toReduceResults, storageCost); err != nil {
@@ -1316,7 +1315,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	for i, fieldData := range fieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
 			if err := validateGeometryFieldSearchResult(&fieldsData[i]); err != nil {
-				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				log.Warn(ctx, "fail to validate geometry field search result", mlog.Err(err))
 				return err
 			}
 		}
@@ -1326,7 +1325,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	for i, gbv := range t.result.GetResults().GetGroupByFieldValues() {
 		if gbv != nil && gbv.GetType() == schemapb.DataType_Geometry {
 			if err := validateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValues[i]); err != nil {
-				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				log.Warn(ctx, "fail to validate geometry field search result", mlog.Err(err))
 				return err
 			}
 		}
@@ -1341,16 +1340,16 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 	timeFields := parseTimeFields(t.request.SearchParams)
 	if timeFields != nil {
-		log.Debug("extracting fields for timestamptz", zap.Strings("fields", timeFields))
+		log.Debug(ctx, "extracting fields for timestamptz", mlog.Strings("fields", timeFields))
 		err = extractFieldsFromResults(t.result.GetResults().GetFieldsData(), t.resolvedTimezoneStr, timeFields)
 		if err != nil {
-			log.Warn("fail to extract fields for timestamptz", zap.Error(err))
+			log.Warn(ctx, "fail to extract fields for timestamptz", mlog.Err(err))
 			return err
 		}
 	} else {
 		err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), t.resolvedTimezoneStr)
 		if err != nil {
-			log.Warn("fail to translate timestamp", zap.Error(err))
+			log.Warn(ctx, "fail to translate timestamp", mlog.Err(err))
 			return err
 		}
 	}
@@ -1367,9 +1366,9 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 
-	log.Debug("Search post execute done",
-		zap.Int64("collection", t.GetCollectionID()),
-		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
+	log.Debug(ctx, "Search post execute done",
+		mlog.Int64("collection", t.GetCollectionID()),
+		mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
 	return nil
 }
 
@@ -1383,29 +1382,29 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		TotalChannelNum: int32(1),
 	}
 
-	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
-		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
-		zap.Int64("nodeID", nodeID),
-		zap.String("channel", channel))
+	log := mlog.With(mlog.Int64("collection", t.GetCollectionID()),
+		mlog.Int64s("partitionIDs", t.GetPartitionIDs()),
+		mlog.Int64("nodeID", nodeID),
+		mlog.String("channel", channel))
 
 	var result *internalpb.SearchResults
 	var err error
 
 	result, err = qn.Search(ctx, req)
 	if err != nil {
-		log.Warn("QueryNode search return error", zap.Error(err))
+		log.Warn(ctx, "QueryNode search return error", mlog.Err(err))
 		// globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		t.shardClientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Warn("QueryNode is not shardLeader")
+		log.Warn(ctx, "QueryNode is not shardLeader")
 		t.shardClientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("QueryNode search result error",
-			zap.String("reason", result.GetStatus().GetReason()))
+		log.Warn(ctx, "QueryNode search result error",
+			mlog.String("reason", result.GetStatus().GetReason()))
 		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to search on QueryNode %d", nodeID)
 	}
 	if t.resultBuf != nil {
@@ -1455,15 +1454,15 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 func (t *searchTask) collectSearchResults(ctx context.Context) ([]*internalpb.SearchResults, error) {
 	select {
 	case <-t.TraceCtx().Done():
-		log.Ctx(ctx).Warn("search task wait to finish timeout!")
+		mlog.Warn(ctx, "search task wait to finish timeout!")
 		return nil, merr.Wrapf(t.TraceCtx().Err(), "search task wait to finish timeout, msgID=%d", t.ID())
 	default:
 		toReduceResults := make([]*internalpb.SearchResults, 0)
-		log.Ctx(ctx).Debug("all searches are finished or canceled")
+		mlog.Debug(ctx, "all searches are finished or canceled")
 		t.resultBuf.Range(func(res *internalpb.SearchResults) bool {
 			toReduceResults = append(toReduceResults, res)
-			log.Ctx(ctx).Debug("proxy receives one search result",
-				zap.Int64("sourceID", res.GetBase().GetSourceID()))
+			mlog.Debug(ctx, "proxy receives one search result",
+				mlog.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true
 		})
 		return toReduceResults, nil
