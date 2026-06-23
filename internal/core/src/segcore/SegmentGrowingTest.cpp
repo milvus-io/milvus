@@ -15,7 +15,9 @@
 #include <stddef.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <random>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -1816,4 +1818,73 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
                            N * sizeof(float) + N * sizeof(double) +
                            N * sizeof(Timestamp);
     EXPECT_GE(resource.memory_bytes, min_expected);
+}
+
+// Regression for the chunk-batched string bulk_subscript fast path
+// (SegmentGrowingImpl::bulk_subscript_ptr_impl<std::string>): bulk_subscript on a
+// VarChar field of a growing segment must return correct values, and must stay
+// race-free while another thread keeps inserting into the same segment (the
+// production pattern is a single insert stream with concurrent reads).
+TEST(Growing, StringBulkSubscriptUnderConcurrentInsert) {
+    auto schema = std::make_shared<Schema>();
+    auto str_fid = schema->AddDebugField("str", DataType::VARCHAR);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    const int64_t N = 20000;  // spans many growing chunks
+    auto dataset = DataGen(schema, N);
+    auto expect = dataset.get_col<std::string>(str_fid);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Scattered offsets, as a top-K result (sorted by score) would be.
+    std::mt19937_64 rng(123);
+    std::uniform_int_distribution<int64_t> dist(0, N - 1);
+    std::vector<int64_t> offsets(400);
+    for (auto& o : offsets) {
+        o = dist(rng);
+    }
+
+    auto verify = [&]() {
+        auto result = segment->bulk_subscript(
+            nullptr, str_fid, offsets.data(), offsets.size());
+        const auto& got = result->scalars().string_data().data();
+        ASSERT_EQ(got.size(), static_cast<int>(offsets.size()));
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            ASSERT_EQ(got[i], expect[offsets[i]]);
+        }
+    };
+
+    verify();  // single-threaded correctness through the real function
+
+    // One writer keeps appending new rows while we repeatedly bulk_subscript the
+    // committed rows (which the writer never mutates).
+    const int64_t batch = 1024;
+    auto more = DataGen(schema, batch);
+    std::atomic<bool> stop{false};
+    std::thread writer([&]() {
+        std::vector<int64_t> rids(batch);
+        std::vector<Timestamp> tss(batch);
+        int64_t seq = N;
+        while (!stop.load(std::memory_order_relaxed)) {
+            auto off = segment->PreInsert(batch);
+            for (int64_t i = 0; i < batch; ++i) {
+                rids[i] = seq + i;
+                tss[i] = seq + i;
+            }
+            segment->Insert(off, batch, rids.data(), tss.data(), more.raw_);
+            seq += batch;
+        }
+    });
+
+    for (int round = 0; round < 300; ++round) {
+        verify();
+    }
+    stop.store(true);
+    writer.join();
 }
