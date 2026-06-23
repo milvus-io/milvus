@@ -2948,10 +2948,6 @@ class TestImport2PCRestOperation(TestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50460: Milvus accepts options.auto_commit=null and creates an import job; REST option values should be strings",
-        strict=True,
-    )
     def test_import_2pc_create_rejects_null_auto_commit_option(self):
         """
         target: import create auto_commit option null validation
