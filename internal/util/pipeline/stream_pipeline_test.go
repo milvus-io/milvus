@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -87,7 +89,7 @@ func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherMergesBufferedDMLPacks() 
 		false,
 		suite.channel,
 		staticMVCCGetter{},
-		WithMsgPackBatcher(NewDMLMsgPackBatcher(8)),
+		WithMsgPackBatcher(NewDMLMsgPackBatcher(func() int { return 8 })),
 	)
 
 	received := make(chan *msgstream.MsgPack, 1)
@@ -132,6 +134,44 @@ func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherMergesBufferedDMLPacks() 
 	suite.Empty(received)
 }
 
+func TestDMLMsgPackBatcherLimitsByTotalMessageNum(t *testing.T) {
+	maxMsgNum := 3
+	batcher := NewDMLMsgPackBatcher(func() int { return maxMsgNum })
+	input := make(chan *msgstream.MsgPack, 1)
+	input <- newDMLMsgPack(110, 120, newInsertTsMsg(111), newDeleteTsMsg(112))
+
+	merged, pending := batcher.Batch(newDMLMsgPack(100, 109, newInsertTsMsg(101)), input)
+
+	require.NotNil(t, merged)
+	assert.Len(t, merged.Msgs, 3)
+	assert.Equal(t, uint64(100), merged.BeginTs)
+	assert.Equal(t, uint64(120), merged.EndTs)
+	assert.Nil(t, pending)
+
+	maxMsgNum = 2
+	input = make(chan *msgstream.MsgPack, 1)
+	input <- newDMLMsgPack(211, 220, newDeleteTsMsg(211))
+	merged, pending = batcher.Batch(newDMLMsgPack(200, 210, newInsertTsMsg(201)), input)
+
+	require.NotNil(t, merged)
+	assert.Len(t, merged.Msgs, 2)
+	assert.Equal(t, uint64(200), merged.BeginTs)
+	assert.Equal(t, uint64(220), merged.EndTs)
+	assert.Nil(t, pending)
+
+	input = make(chan *msgstream.MsgPack, 1)
+	input <- newDMLMsgPack(311, 320, newDeleteTsMsg(311), newInsertTsMsg(312))
+	merged, pending = batcher.Batch(newDMLMsgPack(300, 310, newInsertTsMsg(301)), input)
+
+	require.NotNil(t, merged)
+	assert.Len(t, merged.Msgs, 1)
+	assert.Equal(t, uint64(300), merged.BeginTs)
+	assert.Equal(t, uint64(310), merged.EndTs)
+	require.NotNil(t, pending)
+	assert.Len(t, pending.Msgs, 2)
+	assert.Equal(t, uint64(311), pending.BeginTs)
+}
+
 func TestStreamPipeline(t *testing.T) {
 	suite.Run(t, new(StreamPipelineSuite))
 }
@@ -150,6 +190,16 @@ type captureMsgPackNode struct {
 func (node *captureMsgPackNode) Operate(in Msg) Msg {
 	node.outChannel <- in.(*msgstream.MsgPack)
 	return nil
+}
+
+func newDMLMsgPack(beginTs, endTs uint64, msgs ...msgstream.TsMsg) *msgstream.MsgPack {
+	return &msgstream.MsgPack{
+		BeginTs:        beginTs,
+		EndTs:          endTs,
+		Msgs:           msgs,
+		StartPositions: []*msgpb.MsgPosition{{Timestamp: beginTs}},
+		EndPositions:   []*msgpb.MsgPosition{{Timestamp: endTs}},
+	}
 }
 
 func newInsertTsMsg(ts uint64) *msgstream.InsertMsg {

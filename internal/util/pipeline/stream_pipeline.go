@@ -211,20 +211,22 @@ type MsgPackBatcher interface {
 }
 
 type dmlMsgPackBatcher struct {
-	maxPacks int
+	maxMsgNum func() int
 }
 
-func NewDMLMsgPackBatcher(maxPacks int) MsgPackBatcher {
-	return &dmlMsgPackBatcher{maxPacks: maxPacks}
+func NewDMLMsgPackBatcher(maxMsgNum func() int) MsgPackBatcher {
+	return &dmlMsgPackBatcher{maxMsgNum: maxMsgNum}
 }
 
 func (b *dmlMsgPackBatcher) Batch(first *msgstream.MsgPack, input <-chan *msgstream.MsgPack) (*msgstream.MsgPack, *msgstream.MsgPack) {
-	if b.maxPacks <= 1 || !isDMLMsgPack(first) {
+	maxMsgNum := b.getMaxMsgNum()
+	if maxMsgNum <= 1 || !isDMLMsgPack(first) {
 		return first, nil
 	}
 
 	packs := []*msgstream.MsgPack{first}
-	for len(packs) < b.maxPacks {
+	msgNum := len(first.Msgs)
+	for msgNum < maxMsgNum {
 		select {
 		case next, ok := <-input:
 			if !ok {
@@ -233,12 +235,23 @@ func (b *dmlMsgPackBatcher) Batch(first *msgstream.MsgPack, input <-chan *msgstr
 			if !isDMLMsgPack(next) {
 				return mergeMsgPacks(packs), next
 			}
+			if msgNum+len(next.Msgs) > maxMsgNum {
+				return mergeMsgPacks(packs), next
+			}
 			packs = append(packs, next)
+			msgNum += len(next.Msgs)
 		default:
 			return mergeMsgPacks(packs), nil
 		}
 	}
 	return mergeMsgPacks(packs), nil
+}
+
+func (b *dmlMsgPackBatcher) getMaxMsgNum() int {
+	if b.maxMsgNum == nil {
+		return 1
+	}
+	return b.maxMsgNum()
 }
 
 func isDMLMsgPack(pack *msgstream.MsgPack) bool {
