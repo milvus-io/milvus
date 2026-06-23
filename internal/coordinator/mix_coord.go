@@ -945,6 +945,10 @@ func (s *mixCoordImpl) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 	return s.queryCoordServer.LoadPartitions(ctx, req)
 }
 
+func (s *mixCoordImpl) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*commonpb.Status, error) {
+	return s.queryCoordServer.Prewarm(ctx, req)
+}
+
 func (s *mixCoordImpl) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.ReleasePartitions(ctx, req)
 }

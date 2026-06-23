@@ -192,6 +192,10 @@ func (s *L0Segment) Load(ctx context.Context) error {
 	return nil
 }
 
+func (s *L0Segment) Prewarm(ctx context.Context, fieldIDs []int64) error {
+	return nil
+}
+
 func (s *L0Segment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
 	return merr.WrapErrServiceInternal("unexpected reopen on l0 segment")
 }

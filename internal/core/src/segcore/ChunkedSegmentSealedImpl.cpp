@@ -6815,4 +6815,55 @@ ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
         this->prefetch_chunks(op_ctx, field_id);
     }
 }
+
+void
+ChunkedSegmentSealedImpl::Prewarm(
+    milvus::OpContext* op_ctx,
+    const std::vector<FieldId>& requested_field_ids) const {
+    std::vector<FieldId> field_ids = requested_field_ids;
+    if (field_ids.empty()) {
+        field_ids.reserve(schema_->get_fields().size());
+        for (const auto& field : schema_->get_fields()) {
+            field_ids.push_back(field.first);
+        }
+    }
+
+    for (auto field_id : field_ids) {
+        prefetch_chunks(op_ctx, field_id);
+
+        vector_indexings_.prewarm(field_id, op_ctx);
+
+        std::vector<index::CacheIndexBasePtr> index_slots;
+        scalar_indexings_.withRLock([&](const auto& mapping) {
+            auto iter = mapping.find(field_id);
+            if (iter != mapping.end()) {
+                index_slots.push_back(iter->second);
+            }
+        });
+        ngram_indexings_.withRLock([&](const auto& mapping) {
+            auto iter = mapping.find(field_id);
+            if (iter == mapping.end()) {
+                return;
+            }
+            for (const auto& slot_entry : iter->second) {
+                index_slots.push_back(slot_entry.second);
+            }
+        });
+        json_indices.withRLock([&](const auto& indices) {
+            for (const auto& index : indices) {
+                if (index.field_id == field_id) {
+                    index_slots.push_back(index.index);
+                }
+            }
+        });
+
+        for (const auto& slot : index_slots) {
+            if (slot == nullptr) {
+                continue;
+            }
+            auto ca = SemiInlineGet(slot->PinCells(op_ctx, {0}));
+            (void)ca;
+        }
+    }
+}
 }  // namespace milvus::segcore

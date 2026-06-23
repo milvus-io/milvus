@@ -188,6 +188,10 @@ func (qn *qnServerWrapper) ComputePhraseMatchSlop(ctx context.Context, in *query
 	return qn.QueryNode.ComputePhraseMatchSlop(ctx, in)
 }
 
+func (qn *qnServerWrapper) Prewarm(ctx context.Context, in *querypb.PrewarmRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	return qn.QueryNode.Prewarm(ctx, in)
+}
+
 func WrapQueryNodeServerAsClient(qn types.QueryNode) types.QueryNodeClient {
 	return &qnServerWrapper{
 		QueryNode: qn,

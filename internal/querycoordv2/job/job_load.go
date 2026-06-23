@@ -140,14 +140,26 @@ func (job *LoadCollectionJob) Execute() error {
 		fieldIDs = append(fieldIDs, loadField.GetFieldId())
 	}
 	replicaNumber := int32(len(replicas))
+	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	currentPartitionForceSyncWarmup := make(map[int64]bool, len(currentPartitions))
+	for _, partition := range currentPartitions {
+		currentPartitionForceSyncWarmup[partition.GetPartitionID()] = partition.GetForceSyncWarmup()
+	}
+	forceSyncWarmup := req.GetForceSyncWarmup()
 	partitions := lo.Map(req.GetPartitionIds(), func(partID int64, _ int) *meta.Partition {
+		partitionForceSyncWarmup, ok := currentPartitionForceSyncWarmup[partID]
+		if !ok {
+			partitionForceSyncWarmup = req.GetForceSyncWarmup()
+		}
+		forceSyncWarmup = forceSyncWarmup || partitionForceSyncWarmup
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
-				CollectionID:  req.GetCollectionId(),
-				PartitionID:   partID,
-				ReplicaNumber: replicaNumber,
-				Status:        querypb.LoadStatus_Loading,
-				FieldIndexID:  fieldIndexIDs,
+				CollectionID:    req.GetCollectionId(),
+				PartitionID:     partID,
+				ReplicaNumber:   replicaNumber,
+				Status:          querypb.LoadStatus_Loading,
+				FieldIndexID:    fieldIndexIDs,
+				ForceSyncWarmup: partitionForceSyncWarmup,
 			},
 			CreatedAt: time.Now(),
 		}
@@ -164,13 +176,13 @@ func (job *LoadCollectionJob) Execute() error {
 			LoadFields:               fieldIDs,
 			DbID:                     req.GetDbId(),
 			UserSpecifiedReplicaMode: req.GetUserSpecifiedReplicaMode(),
+			ForceSyncWarmup:          forceSyncWarmup,
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
 		Schema:    collInfo.GetSchema(),
 	}
 	incomingPartitions := typeutil.NewSet(req.GetPartitionIds()...)
-	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
 	toReleasePartitions := make([]int64, 0)
 	for _, partition := range currentPartitions {
 		if !incomingPartitions.Contain(partition.GetPartitionID()) {

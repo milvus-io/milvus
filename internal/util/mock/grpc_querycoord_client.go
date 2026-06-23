@@ -66,6 +66,10 @@ func (m *GrpcQueryCoordClient) LoadPartitions(ctx context.Context, in *querypb.L
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) Prewarm(ctx context.Context, in *querypb.PrewarmRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
