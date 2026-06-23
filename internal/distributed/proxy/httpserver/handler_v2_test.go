@@ -4401,6 +4401,27 @@ func TestCommitImportJob(t *testing.T) {
 		mp.AssertNotCalled(t, "CommitImport", mock.Anything, mock.Anything)
 	})
 
+	t.Run("authorization enabled returns get progress error", func(t *testing.T) {
+		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, merr.ErrImportFailed).Once()
+		testEngine := initHTTPServerV2(mp, true)
+		req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CommitAction), bytes.NewReader([]byte(`{"jobId": "123"}`)))
+		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+		w := httptest.NewRecorder()
+
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.Nil(t, err)
+		assert.Equal(t, merr.Code(merr.ErrImportFailed), returnBody.Code)
+		mp.AssertNotCalled(t, "CommitImport", mock.Anything, mock.Anything)
+	})
+
 	t.Run("authorization enabled allows root", func(t *testing.T) {
 		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
 		defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
@@ -4482,6 +4503,27 @@ func TestAbortImportJob(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, int32(65535), returnBody.Code)
 		assert.Contains(t, returnBody.Message, "PrivilegeImport: permission deny to test")
+		mp.AssertNotCalled(t, "AbortImport", mock.Anything, mock.Anything)
+	})
+
+	t.Run("authorization enabled returns get progress error", func(t *testing.T) {
+		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, merr.ErrImportFailed).Once()
+		testEngine := initHTTPServerV2(mp, true)
+		req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, AbortAction), bytes.NewReader([]byte(`{"jobId": "123"}`)))
+		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+		w := httptest.NewRecorder()
+
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.Nil(t, err)
+		assert.Equal(t, merr.Code(merr.ErrImportFailed), returnBody.Code)
 		mp.AssertNotCalled(t, "AbortImport", mock.Anything, mock.Anything)
 	})
 
