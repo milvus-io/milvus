@@ -70,6 +70,10 @@ func (m *GrpcQueryNodeClient) LoadPartitions(ctx context.Context, req *querypb.L
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) Prewarm(ctx context.Context, req *querypb.PrewarmRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

@@ -256,6 +256,13 @@ LoadJsonKeyIndex(CTraceContext c_trace,
                  CLoadCancellationSource source);
 
 CStatus
+PrewarmSegment(CTraceContext c_trace,
+               CSegmentInterface c_segment,
+               const int64_t* field_ids,
+               int64_t field_count,
+               CLoadCancellationSource source);
+
+CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,
                        int64_t field_id,
                        int64_t num_rows,

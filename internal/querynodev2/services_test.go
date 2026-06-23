@@ -1017,6 +1017,43 @@ func (suite *ServiceSuite) TestLoadSegments_Failed() {
 	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 }
 
+func TestPrewarmSegments(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	node := NewQueryNode(ctx, nil)
+	defer node.cancel()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	segmentManager := segments.NewMockSegmentManager(t)
+	node.manager = &segments.Manager{Segment: segmentManager}
+
+	segment := segments.NewMockSegment(t)
+	segment.EXPECT().Prewarm(mock.Anything, []int64{101, 102}).Return(nil).Once()
+
+	segmentManager.EXPECT().
+		GetAndPin([]int64{11, 12}, mock.Anything, mock.Anything, mock.Anything).
+		Return([]segments.Segment{segment}, nil).
+		Once()
+	segmentManager.EXPECT().
+		Unpin(mock.MatchedBy(func(pinned []segments.Segment) bool {
+			return len(pinned) == 1 && pinned[0] == segment
+		})).
+		Once()
+
+	status, err := node.Prewarm(ctx, &querypb.PrewarmRequest{
+		CollectionID: 111,
+		PartitionIDs: []int64{
+			222,
+		},
+		SegmentIDs: []int64{11, 12},
+		FieldIDs:   []int64{101, 102},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+}
+
 func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 	ctx := context.Background()
 	suite.Run("normal_run", func() {
