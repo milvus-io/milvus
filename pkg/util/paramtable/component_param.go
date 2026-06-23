@@ -3575,6 +3575,7 @@ type queryNodeConfig struct {
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 	EnableGeometryCache           ParamItem `refreshable:"false"`
+	EnableGISSplitFusion          ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -4279,6 +4280,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.EnableGeometryCache.Init(base.mgr)
+
+	p.EnableGISSplitFusion = ParamItem{
+		Key:          "queryNode.segcore.enableGISSplitFusion",
+		Version:      "2.6.6",
+		DefaultValue: "false",
+		Doc:          "Enable GIS filter coarse/refine split + same-column fusion optimization",
+		Export:       true,
+	}
+	p.EnableGISSplitFusion.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",

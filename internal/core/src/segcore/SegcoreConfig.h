@@ -228,6 +228,16 @@ class SegcoreConfig {
         return interim_index_mem_expansion_rate_;
     }
 
+    void
+    set_enable_gis_split_fusion(bool value) {
+        enable_gis_split_fusion_ = value;
+    }
+
+    bool
+    get_enable_gis_split_fusion() const {
+        return enable_gis_split_fusion_;
+    }
+
  private:
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
@@ -249,6 +259,7 @@ class SegcoreConfig {
         knowhere::RefineType::DATA_VIEW;
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
+    inline static bool enable_gis_split_fusion_ = false;
     inline static bool visibility_filter_enabled_ = true;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static bool reject_remote_vector_output_ = false;
