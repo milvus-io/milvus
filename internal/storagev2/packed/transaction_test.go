@@ -17,11 +17,13 @@ package packed
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -413,5 +415,188 @@ func TestGetDeltaLogPathsFromManifest(t *testing.T) {
 		sameManifest, err := AddDeltaLogsToManifest(manifestPath, storageConfig, []DeltaLogEntry{})
 		require.NoError(t, err)
 		assert.Equal(t, manifestPath, sameManifest)
+	})
+}
+
+func TestCloneManifestWithoutDeltaLogs_DropsSourceDeltaLogs(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+	sourceBase := filepath.Join(dir, "insert_log/1/2/3_clone_src")
+	targetBase := filepath.Join(dir, "insert_log/4/5/6_clone_dst")
+	manifestPath := createBaseManifest(t, sourceBase, storageConfig)
+	sourceStatsPath := filepath.Join(sourceBase, "_stats/bloom_filter.100/1")
+	withStats, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{
+		{
+			Key:      "bloom_filter.100",
+			Files:    []string{sourceStatsPath},
+			Metadata: map[string]string{"memory_size": "4096"},
+		},
+	})
+	require.NoError(t, err)
+
+	sourceLobPath := filepath.Join(sourceBase, "lobs/200/_data/lob-1")
+	withStatsBase, withStatsVersion, err := UnmarshalManifestPath(withStats)
+	require.NoError(t, err)
+	withLobVersion, err := AddLobFilesToTransaction(withStatsBase, withStatsVersion, storageConfig, []LobFileInfo{
+		{
+			Path:          sourceLobPath,
+			FieldID:       200,
+			TotalRows:     10,
+			ValidRows:     8,
+			FileSizeBytes: 128,
+		},
+	})
+	require.NoError(t, err)
+	withLob := MarshalManifestPath(withStatsBase, withLobVersion)
+
+	withDelta, err := AddDeltaLogsToManifest(withLob, storageConfig, []DeltaLogEntry{
+		{Path: filepath.Join(sourceBase, "_delta/101"), NumEntries: 3},
+	})
+	require.NoError(t, err)
+
+	cloned, err := CloneManifestWithoutDeltaLogs(
+		withDelta,
+		targetBase,
+		storageConfig,
+		func(p string) (string, error) {
+			return strings.Replace(p, sourceBase, targetBase, 1), nil
+		},
+	)
+	require.NoError(t, err)
+
+	deltaPaths, err := GetDeltaLogPathsFromManifest(cloned, storageConfig)
+	require.NoError(t, err)
+	assert.Empty(t, deltaPaths)
+
+	basePath, _, err := UnmarshalManifestPath(cloned)
+	require.NoError(t, err)
+	assert.Equal(t, targetBase, basePath)
+
+	clonedStats, err := GetManifestStats(cloned, storageConfig)
+	require.NoError(t, err)
+	require.Contains(t, clonedStats, "bloom_filter.100")
+	assert.Equal(t,
+		strings.Replace(sourceStatsPath, sourceBase, targetBase, 1),
+		clonedStats["bloom_filter.100"].Paths[0])
+	assert.Equal(t, "4096", clonedStats["bloom_filter.100"].Metadata["memory_size"])
+
+	clonedLobs, err := GetManifestLobFiles(cloned, storageConfig)
+	require.NoError(t, err)
+	require.Len(t, clonedLobs, 1)
+	assert.Equal(t, strings.Replace(sourceLobPath, sourceBase, targetBase, 1), clonedLobs[0].Path)
+	assert.Equal(t, int64(200), clonedLobs[0].FieldID)
+	assert.Equal(t, int64(10), clonedLobs[0].TotalRows)
+	assert.Equal(t, int64(8), clonedLobs[0].ValidRows)
+}
+
+func TestCloneManifestWithoutDeltaLogs_ErrorPaths(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	t.Run("invalid source manifest", func(t *testing.T) {
+		_, err := CloneManifestWithoutDeltaLogs(
+			MarshalManifestPath(filepath.Join(dir, "missing_manifest"), 1),
+			filepath.Join(dir, "insert_log/4/5/6_missing_dst"),
+			storageConfig,
+			nil,
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get source manifest")
+	})
+
+	sourceBase := filepath.Join(dir, "insert_log/1/2/3_clone_error_src")
+	manifestPath := createBaseManifest(t, sourceBase, storageConfig)
+	sourceStatsPath := filepath.Join(sourceBase, "_stats/bloom_filter.100/1")
+	withStats, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{
+		{
+			Key:      "bloom_filter.100",
+			Files:    []string{sourceStatsPath},
+			Metadata: map[string]string{"memory_size": "4096"},
+		},
+	})
+	require.NoError(t, err)
+
+	sourceLobPath := filepath.Join(sourceBase, "lobs/200/_data/lob-1")
+	withStatsBase, withStatsVersion, err := UnmarshalManifestPath(withStats)
+	require.NoError(t, err)
+	withLobVersion, err := AddLobFilesToTransaction(withStatsBase, withStatsVersion, storageConfig, []LobFileInfo{
+		{
+			Path:          sourceLobPath,
+			FieldID:       200,
+			TotalRows:     10,
+			ValidRows:     8,
+			FileSizeBytes: 128,
+		},
+	})
+	require.NoError(t, err)
+	withLob := MarshalManifestPath(withStatsBase, withLobVersion)
+
+	t.Run("column path mapper error", func(t *testing.T) {
+		_, err := CloneManifestWithoutDeltaLogs(
+			withLob,
+			filepath.Join(dir, "insert_log/4/5/6_column_error"),
+			storageConfig,
+			func(string) (string, error) {
+				return "", errors.New("map column")
+			},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to map column group file path")
+	})
+
+	t.Run("stat path mapper error", func(t *testing.T) {
+		_, err := CloneManifestWithoutDeltaLogs(
+			withLob,
+			filepath.Join(dir, "insert_log/4/5/6_stat_error"),
+			storageConfig,
+			func(p string) (string, error) {
+				if strings.Contains(p, "_stats/") {
+					return "", errors.New("map stat")
+				}
+				return strings.Replace(p, sourceBase, filepath.Join(dir, "insert_log/4/5/6_stat_error"), 1), nil
+			},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to map stat file path")
+	})
+
+	t.Run("lob path mapper error", func(t *testing.T) {
+		_, err := CloneManifestWithoutDeltaLogs(
+			withLob,
+			filepath.Join(dir, "insert_log/4/5/6_lob_error"),
+			storageConfig,
+			func(p string) (string, error) {
+				if strings.Contains(p, "/lobs/") {
+					return "", errors.New("map lob")
+				}
+				return strings.Replace(p, sourceBase, filepath.Join(dir, "insert_log/4/5/6_lob_error"), 1), nil
+			},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to map LOB file path")
 	})
 }

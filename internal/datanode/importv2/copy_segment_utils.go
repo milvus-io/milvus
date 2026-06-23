@@ -18,15 +18,23 @@ package importv2
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"math"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -34,7 +42,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type CopySegmentFileOptions struct {
+	Schema        *schemapb.CollectionSchema
+	StorageConfig *indexpb.StorageConfig
+}
 
 // SegmentFiles organizes source files by type for copy operations.
 // InsertBinlogs come from manifest (when storage_version >= StorageV3) or pb (otherwise).
@@ -125,6 +140,1305 @@ func transformManifestPath(
 	return targetManifestPath, nil
 }
 
+type cutoffPK struct {
+	int64PK int64
+	strPK   string
+}
+
+type cutoffDeleteEntry struct {
+	pk storage.PrimaryKey
+	ts uint64
+}
+
+func isDeltaOnlyCutoffSource(source *datapb.CopySegmentSource) bool {
+	return source.GetCutoffTs() > 0 &&
+		source.GetManifestPath() == "" &&
+		len(source.GetInsertBinlogs()) == 0 &&
+		hasBinlogPath(source.GetDeltaBinlogs())
+}
+
+type cutoffLogAction int
+
+const (
+	cutoffLogKeep cutoffLogAction = iota
+	cutoffLogDrop
+	cutoffLogRewrite
+)
+
+type restoreCutoffPlan struct {
+	copySource    *datapb.CopySegmentSource
+	metaSource    *datapb.CopySegmentSource
+	mappings      map[string]string
+	copiedFiles   []string
+	updateNumRows bool
+	importedRows  int64
+}
+
+func classifyBinlogForCutoff(binlog *datapb.Binlog, cutoffTs uint64) cutoffLogAction {
+	if binlog.GetTimestampTo() > 0 && binlog.GetTimestampTo() <= cutoffTs {
+		return cutoffLogKeep
+	}
+	if binlog.GetTimestampFrom() > 0 && binlog.GetTimestampFrom() > cutoffTs {
+		return cutoffLogDrop
+	}
+	return cutoffLogRewrite
+}
+
+func classifyInsertBatchForCutoff(batch []*datapb.Binlog, cutoffTs uint64) cutoffLogAction {
+	keep := true
+	drop := true
+	for _, binlog := range batch {
+		if binlog.GetTimestampTo() == 0 || binlog.GetTimestampTo() > cutoffTs {
+			keep = false
+		}
+		if binlog.GetTimestampFrom() == 0 || binlog.GetTimestampFrom() <= cutoffTs {
+			drop = false
+		}
+	}
+	if keep {
+		return cutoffLogKeep
+	}
+	if drop {
+		return cutoffLogDrop
+	}
+	return cutoffLogRewrite
+}
+
+func writeDeltaLog(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	pkType schemapb.DataType,
+	logID int64,
+	deltaPath string,
+	deletes []cutoffDeleteEntry,
+	version int64,
+	storageConfig *indexpb.StorageConfig,
+) (*datapb.FieldBinlog, error) {
+	if version == storage.StorageV1 && cm == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("cutoff requires chunk manager for legacy deltalog writer")
+	}
+
+	pks := make([]storage.PrimaryKey, 0, len(deletes))
+	tss := make([]storage.Timestamp, 0, len(deletes))
+	for _, delete := range deletes {
+		pks = append(pks, delete.pk)
+		tss = append(tss, delete.ts)
+	}
+
+	record, tsFrom, tsTo, err := storage.BuildDeleteRecord(pks, tss)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to build cutoff delete record")
+	}
+	defer record.Release()
+
+	writer, err := storage.NewDeltalogWriter(
+		ctx,
+		target.GetCollectionId(),
+		target.GetPartitionId(),
+		target.GetSegmentId(),
+		logID,
+		pkType,
+		deltaPath,
+		storage.WithVersion(version),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithCollectionID(target.GetCollectionId()),
+		storage.WithCollectionProperties(schema.GetProperties()),
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			if cm == nil {
+				return merr.WrapErrParameterInvalidMsg("cutoff requires chunk manager for legacy deltalog writer")
+			}
+			for key, blob := range kvs {
+				if err := cm.Write(ctx, key, blob); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to create cutoff deltalog writer")
+	}
+	if err := writer.Write(record); err != nil {
+		return nil, merr.Wrap(err, "failed to write cutoff deltalog")
+	}
+	if err := writer.Close(); err != nil {
+		return nil, merr.Wrap(err, "failed to close cutoff deltalog")
+	}
+
+	return &datapb.FieldBinlog{
+		Binlogs: []*datapb.Binlog{{
+			LogID:         logID,
+			EntriesNum:    int64(len(deletes)),
+			LogPath:       deltaPath,
+			TimestampFrom: tsFrom,
+			TimestampTo:   tsTo,
+			MemorySize:    int64(writer.GetWrittenUncompressed()),
+		}},
+	}, nil
+}
+
+func prepareNonManifestRestoreCutoff(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+) (*restoreCutoffPlan, error) {
+	if schema == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("cutoff requires collection schema")
+	}
+	if storageConfig == nil {
+		storageConfig = compaction.CreateStorageConfig()
+	}
+	pkField, err := findPrimaryKeyField(schema)
+	if err != nil {
+		return nil, err
+	}
+
+	copySource := proto.Clone(source).(*datapb.CopySegmentSource)
+	metaSource := proto.Clone(source).(*datapb.CopySegmentSource)
+	plan := &restoreCutoffPlan{
+		copySource:    copySource,
+		metaSource:    metaSource,
+		mappings:      make(map[string]string),
+		updateNumRows: true,
+	}
+
+	insertMutated := false
+	if source.GetStorageVersion() == storage.StorageV2 {
+		copyInsert, metaInsert, mappings, files, mutated, err := rewriteV2InsertBinlogsForCutoff(
+			ctx, source, target, schema, storageConfig)
+		if err != nil {
+			return nil, err
+		}
+		copySource.InsertBinlogs = copyInsert
+		metaSource.InsertBinlogs = metaInsert
+		insertMutated = mutated
+		for src, dst := range mappings {
+			plan.mappings[src] = dst
+		}
+		plan.copiedFiles = append(plan.copiedFiles, files...)
+	}
+
+	copyDeltas, metaDeltas, mappings, files, retainedDeletes, err := rewriteDeltaFieldBinlogsForCutoff(
+		ctx, cm, source, target, schema, pkField.GetDataType(), source.GetDeltaBinlogs(), storageConfig)
+	if err != nil {
+		return nil, err
+	}
+	copySource.DeltaBinlogs = copyDeltas
+	metaSource.DeltaBinlogs = metaDeltas
+	for src, dst := range mappings {
+		plan.mappings[src] = dst
+	}
+	plan.copiedFiles = append(plan.copiedFiles, files...)
+
+	if insertMutated {
+		clearCopiedDerivedData(copySource)
+		clearCopiedDerivedData(metaSource)
+	}
+	if isDeltaOnlyCutoffSource(source) {
+		plan.importedRows = retainedDeletes
+	}
+	return plan, nil
+}
+
+func rewriteManifestSegmentForCutoff(
+	ctx context.Context,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+) (*datapb.CopySegmentResult, []string, error) {
+	if schema == nil {
+		return nil, nil, merr.WrapErrParameterInvalidMsg("cutoff requires collection schema")
+	}
+	if storageConfig == nil {
+		storageConfig = compaction.CreateStorageConfig()
+	}
+	pkField, err := findPrimaryKeyField(schema)
+	if err != nil {
+		return nil, nil, err
+	}
+	rewriteSchema := buildCutoffRewriteSchema(schema)
+
+	targetManifestPath, err := transformManifestPath(source.GetManifestPath(), source, target)
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to transform manifest path")
+	}
+	targetBasePath, _, err := packed.UnmarshalManifestPath(targetManifestPath)
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to parse target manifest path")
+	}
+
+	reader, err := storage.NewManifestRecordReader(ctx, source.GetManifestPath(), rewriteSchema,
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithBufferSize(packed.DefaultReadBufferSize),
+		storage.WithCollectionID(source.GetCollectionId()),
+		storage.WithCollectionProperties(rewriteSchema.GetProperties()))
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to create manifest reader for cutoff rewrite")
+	}
+	defer reader.Close()
+
+	writerOptions := []storage.RwOption{
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithBufferSize(packed.DefaultWriteBufferSize),
+		storage.WithMultiPartUploadSize(packed.DefaultMultiPartUploadSize),
+		storage.WithCollectionID(target.GetCollectionId()),
+		storage.WithCollectionProperties(rewriteSchema.GetProperties()),
+	}
+	textColumnConfigs := buildCutoffTextColumnConfigs(rewriteSchema, path.Dir(targetBasePath))
+	if len(textColumnConfigs) > 0 {
+		writerOptions = append(writerOptions, storage.WithTextColumnConfigs(textColumnConfigs))
+	}
+
+	writer, err := storage.NewBinlogRecordWriter(
+		ctx,
+		target.GetCollectionId(),
+		target.GetPartitionId(),
+		target.GetSegmentId(),
+		rewriteSchema,
+		allocator.NewLocalAllocator(1, math.MaxInt64),
+		uint64(packed.DefaultWriteBufferSize),
+		math.MaxInt64,
+		writerOptions...,
+	)
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to create manifest writer for cutoff rewrite")
+	}
+
+	var predicateErr error
+	rowCount, _, err := storage.Sort(
+		uint64(packed.DefaultWriteBufferSize),
+		rewriteSchema,
+		[]storage.RecordReader{reader},
+		writer,
+		func(record storage.Record, _, row int) bool {
+			if predicateErr != nil {
+				return false
+			}
+			ts, err := timestampAt(record, row)
+			if err != nil {
+				predicateErr = err
+				return false
+			}
+			return ts <= source.GetCutoffTs()
+		},
+		nil,
+	)
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to rewrite manifest insert data for cutoff")
+	}
+	if predicateErr != nil {
+		return nil, nil, predicateErr
+	}
+	if err := writer.Close(); err != nil {
+		return nil, nil, merr.Wrap(err, "failed to close manifest cutoff writer")
+	}
+
+	fieldBinlogs, statsLog, bm25StatsLogs, manifestPath, _ := writer.GetLogs()
+	if manifestPath == "" {
+		manifestPath = packed.MarshalManifestPath(targetBasePath, packed.ManifestEarliest)
+	}
+	binlogs := storage.SortFieldBinlogs(fieldBinlogs)
+	copiedFiles := extractFromPb(binlogs)
+
+	var statsFiles []string
+	manifestPath, statsFiles, err = addWriterStatsToManifest(manifestPath, storageConfig, statsLog, bm25StatsLogs)
+	if err != nil {
+		return nil, copiedFiles, merr.Wrap(err, "failed to add cutoff writer stats to manifest")
+	}
+	copiedFiles = append(copiedFiles, statsFiles...)
+
+	deltaEntries, deltaFiles, err := rewriteManifestDeltasForCutoff(
+		ctx, source, target, schema, pkField.GetDataType(), storageConfig)
+	if err != nil {
+		return nil, copiedFiles, err
+	}
+	copiedFiles = append(copiedFiles, deltaFiles...)
+	if len(deltaEntries) > 0 {
+		if rowCount > 0 {
+			manifestPath, err = packed.AddDeltaLogsToManifestOverwrite(manifestPath, storageConfig, deltaEntries)
+		} else {
+			manifestPath, err = packed.CommitManifestUpdates(
+				targetBasePath,
+				packed.ManifestEarliest,
+				storageConfig,
+				&packed.ManifestUpdates{DeltaLogs: deltaEntries},
+			)
+		}
+		if err != nil {
+			return nil, copiedFiles, merr.Wrap(err, "failed to add cutoff deltas to manifest")
+		}
+	}
+	copiedFiles = append(copiedFiles, manifestPhysicalPath(manifestPath))
+	if statsFiles, err := manifestStatsFiles(manifestPath, storageConfig); err == nil {
+		copiedFiles = append(copiedFiles, statsFiles...)
+	}
+
+	if err := binlog.CompressBinLogs(binlogs, nil, nil, nil); err != nil {
+		return nil, copiedFiles, merr.Wrap(err, "failed to compress cutoff manifest binlog paths")
+	}
+	return &datapb.CopySegmentResult{
+		SegmentId:     target.GetSegmentId(),
+		ImportedRows:  int64(rowCount),
+		Binlogs:       binlogs,
+		ManifestPath:  manifestPath,
+		UpdateNumRows: true,
+	}, copiedFiles, nil
+}
+
+func addWriterStatsToManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	statsLog *datapb.FieldBinlog,
+	bm25StatsLogs map[storage.FieldID]*datapb.FieldBinlog,
+) (string, []string, error) {
+	statEntries := make([]packed.StatEntry, 0, len(bm25StatsLogs)+1)
+	if statsLog != nil {
+		statEntries = append(statEntries, packed.FieldBinlogStatEntry("bloom_filter", statsLog.GetFieldID(), statsLog))
+	}
+	bm25FieldIDs := make([]int64, 0, len(bm25StatsLogs))
+	for fieldID := range bm25StatsLogs {
+		bm25FieldIDs = append(bm25FieldIDs, fieldID)
+	}
+	sort.Slice(bm25FieldIDs, func(i, j int) bool {
+		return bm25FieldIDs[i] < bm25FieldIDs[j]
+	})
+	for _, fieldID := range bm25FieldIDs {
+		statEntries = append(statEntries, packed.FieldBinlogStatEntry("bm25", fieldID, bm25StatsLogs[fieldID]))
+	}
+	if len(statEntries) == 0 {
+		return manifestPath, nil, nil
+	}
+	if manifestPath == "" {
+		return "", nil, merr.WrapErrServiceInternalMsg("cutoff rewrite produced stats without manifest")
+	}
+	manifestPath, err := packed.AddStatsToManifest(manifestPath, storageConfig, statEntries)
+	if err != nil {
+		return "", nil, err
+	}
+	return manifestPath, statEntryFiles(statEntries), nil
+}
+
+func statEntryFiles(entries []packed.StatEntry) []string {
+	files := make([]string, 0)
+	for _, entry := range entries {
+		files = append(files, entry.Files...)
+	}
+	return files
+}
+
+func rewriteManifestDeltasForCutoff(
+	ctx context.Context,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	pkType schemapb.DataType,
+	storageConfig *indexpb.StorageConfig,
+) ([]packed.DeltaLogEntry, []string, error) {
+	paths, err := packed.GetDeltaLogPathsFromManifest(source.GetManifestPath(), storageConfig)
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to read source manifest deltas")
+	}
+	paths = append(paths, extractFromPb(source.GetDeltaBinlogs())...)
+	if len(paths) == 0 {
+		return nil, nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(paths))
+	entries := make([]packed.DeltaLogEntry, 0, len(paths))
+	copiedFiles := make([]string, 0, len(paths))
+	for _, sourcePath := range paths {
+		if _, ok := seen[sourcePath]; ok {
+			continue
+		}
+		seen[sourcePath] = struct{}{}
+
+		deletes, err := scanDeltaLogPathsForCutoff([]string{sourcePath}, pkType, source.GetCutoffTs(),
+			storage.WithVersion(storage.StorageV2),
+			storage.WithStorageConfig(storageConfig),
+			storage.WithCollectionID(source.GetCollectionId()),
+			storage.WithCollectionProperties(schema.GetProperties()))
+		if err != nil {
+			return nil, copiedFiles, merr.Wrap(err, "failed to scan manifest delta for cutoff")
+		}
+		if len(deletes) == 0 {
+			continue
+		}
+		logID, err := strconv.ParseInt(path.Base(sourcePath), 10, 64)
+		if err != nil {
+			return nil, copiedFiles, merr.WrapErrParameterInvalidMsg("failed to parse delta log id from path %s", sourcePath)
+		}
+		targetPath, err := generateTargetPath(sourcePath, source, target)
+		if err != nil {
+			return nil, copiedFiles, err
+		}
+		if _, err := writeDeltaLog(ctx, nil, target, schema, pkType, logID, targetPath, deletes, storage.StorageV2, storageConfig); err != nil {
+			return nil, copiedFiles, err
+		}
+		entries = append(entries, packed.DeltaLogEntry{Path: targetPath, NumEntries: int64(len(deletes))})
+		copiedFiles = append(copiedFiles, targetPath)
+	}
+	return entries, copiedFiles, nil
+}
+
+func buildCutoffTextColumnConfigs(schema *schemapb.CollectionSchema, partitionBasePath string) []packed.TextColumnConfig {
+	configs := make([]packed.TextColumnConfig, 0)
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() != schemapb.DataType_Text {
+			continue
+		}
+		fieldID := field.GetFieldID()
+		configs = append(configs, packed.TextColumnConfig{
+			FieldID:             fieldID,
+			LobBasePath:         path.Join(partitionBasePath, "lobs", strconv.FormatInt(fieldID, 10)),
+			InlineThreshold:     paramtable.Get().DataNodeCfg.TextInlineThreshold.GetAsInt64(),
+			MaxLobFileBytes:     paramtable.Get().DataNodeCfg.TextMaxLobFileBytes.GetAsInt64(),
+			FlushThresholdBytes: paramtable.Get().DataNodeCfg.TextFlushThresholdBytes.GetAsInt64(),
+			RewriteMode:         true,
+		})
+	}
+	return configs
+}
+
+func manifestStatsFiles(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+	stats, err := packed.GetManifestStats(manifestPath, storageConfig)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0)
+	for _, stat := range stats {
+		paths = append(paths, stat.Paths...)
+	}
+	return paths, nil
+}
+
+func clearCopiedDerivedData(source *datapb.CopySegmentSource) {
+	source.StatsBinlogs = nil
+	source.Bm25Binlogs = nil
+	source.IndexFiles = nil
+	source.TextIndexFiles = nil
+	source.JsonKeyIndexFiles = nil
+}
+
+func appendBinlogToField(builders map[int64]*datapb.FieldBinlog, field *datapb.FieldBinlog, binlog *datapb.Binlog) {
+	fieldID := field.GetFieldID()
+	dst, ok := builders[fieldID]
+	if !ok {
+		dst = proto.Clone(field).(*datapb.FieldBinlog)
+		dst.Binlogs = nil
+		builders[fieldID] = dst
+	}
+	dst.Binlogs = append(dst.Binlogs, proto.Clone(binlog).(*datapb.Binlog))
+}
+
+func fieldBinlogBuildersToList(builders map[int64]*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	fieldIDs := make([]int64, 0, len(builders))
+	for fieldID := range builders {
+		fieldIDs = append(fieldIDs, fieldID)
+	}
+	sort.Slice(fieldIDs, func(i, j int) bool {
+		return fieldIDs[i] < fieldIDs[j]
+	})
+	result := make([]*datapb.FieldBinlog, 0, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		if len(builders[fieldID].GetBinlogs()) > 0 {
+			result = append(result, builders[fieldID])
+		}
+	}
+	return result
+}
+
+func rewriteV2InsertBinlogsForCutoff(
+	ctx context.Context,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, map[string]string, []string, bool, error) {
+	mappings := make(map[string]string)
+	if len(source.GetInsertBinlogs()) == 0 {
+		return nil, nil, mappings, nil, false, nil
+	}
+
+	fields := make([]*datapb.FieldBinlog, 0, len(source.GetInsertBinlogs()))
+	for _, field := range source.GetInsertBinlogs() {
+		fields = append(fields, proto.Clone(field).(*datapb.FieldBinlog))
+	}
+	sort.Slice(fields, func(i, j int) bool {
+		return fields[i].GetFieldID() < fields[j].GetFieldID()
+	})
+
+	batchCount := len(fields[0].GetBinlogs())
+	for _, field := range fields[1:] {
+		if len(field.GetBinlogs()) != batchCount {
+			return nil, nil, nil, nil, false, merr.WrapErrServiceInternalMsg(
+				"v2 cutoff requires aligned column-group binlogs: field %d has %d batches, expected %d",
+				field.GetFieldID(), len(field.GetBinlogs()), batchCount)
+		}
+	}
+
+	copyBuilders := make(map[int64]*datapb.FieldBinlog)
+	metaBuilders := make(map[int64]*datapb.FieldBinlog)
+	copiedFiles := make([]string, 0)
+	mutated := false
+	for batchIdx := 0; batchIdx < batchCount; batchIdx++ {
+		batch := make([]*datapb.Binlog, 0, len(fields))
+		batchFields := make([]*datapb.FieldBinlog, 0, len(fields))
+		for _, field := range fields {
+			batch = append(batch, field.GetBinlogs()[batchIdx])
+			batchFields = append(batchFields, &datapb.FieldBinlog{
+				FieldID:     field.GetFieldID(),
+				ChildFields: append([]int64(nil), field.GetChildFields()...),
+				Binlogs:     []*datapb.Binlog{proto.Clone(field.GetBinlogs()[batchIdx]).(*datapb.Binlog)},
+				Format:      field.GetFormat(),
+			})
+		}
+
+		switch classifyInsertBatchForCutoff(batch, source.GetCutoffTs()) {
+		case cutoffLogKeep:
+			for i, field := range fields {
+				appendBinlogToField(copyBuilders, field, batch[i])
+				appendBinlogToField(metaBuilders, field, batch[i])
+			}
+		case cutoffLogDrop:
+			mutated = true
+		case cutoffLogRewrite:
+			mutated = true
+			rewritten, batchMappings, batchFiles, err := rewriteV2InsertBatchForCutoff(
+				ctx, source, target, schema, storageConfig, batchFields)
+			if err != nil {
+				return nil, nil, nil, nil, false, err
+			}
+			for _, rewrittenField := range rewritten {
+				for _, binlog := range rewrittenField.GetBinlogs() {
+					appendBinlogToField(metaBuilders, rewrittenField, binlog)
+				}
+			}
+			for src, dst := range batchMappings {
+				mappings[src] = dst
+			}
+			copiedFiles = append(copiedFiles, batchFiles...)
+		}
+	}
+
+	return fieldBinlogBuildersToList(copyBuilders),
+		fieldBinlogBuildersToList(metaBuilders),
+		mappings,
+		copiedFiles,
+		mutated,
+		nil
+}
+
+func rewriteV2InsertBatchForCutoff(
+	ctx context.Context,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	batchFields []*datapb.FieldBinlog,
+) ([]*datapb.FieldBinlog, map[string]string, []string, error) {
+	rewriteSchema := buildCutoffRewriteSchema(schema)
+	columnGroups, logIDStart, err := columnGroupsFromFieldBinlogs(rewriteSchema, batchFields)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	reader, err := storage.NewBinlogRecordReader(ctx, batchFields, rewriteSchema,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithCollectionID(source.GetCollectionId()),
+		storage.WithCollectionProperties(rewriteSchema.GetProperties()))
+	if err != nil {
+		return nil, nil, nil, merr.Wrap(err, "failed to create v2 binlog reader for cutoff rewrite")
+	}
+	defer reader.Close()
+
+	writer, err := storage.NewBinlogRecordWriter(
+		ctx,
+		target.GetCollectionId(),
+		target.GetPartitionId(),
+		target.GetSegmentId(),
+		rewriteSchema,
+		allocator.NewLocalAllocator(logIDStart, math.MaxInt64),
+		uint64(packed.DefaultWriteBufferSize),
+		math.MaxInt64,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithBufferSize(packed.DefaultWriteBufferSize),
+		storage.WithMultiPartUploadSize(packed.DefaultMultiPartUploadSize),
+		storage.WithColumnGroups(columnGroups),
+		storage.WithCollectionID(target.GetCollectionId()),
+		storage.WithCollectionProperties(rewriteSchema.GetProperties()),
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			for key, blob := range kvs {
+				if err := packed.WriteFile(storageConfig, key, blob); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, nil, nil, merr.Wrap(err, "failed to create v2 binlog writer for cutoff rewrite")
+	}
+
+	var predicateErr error
+	rowCount, _, err := storage.Sort(
+		uint64(packed.DefaultWriteBufferSize),
+		rewriteSchema,
+		[]storage.RecordReader{reader},
+		writer,
+		func(record storage.Record, _, row int) bool {
+			if predicateErr != nil {
+				return false
+			}
+			ts, err := timestampAt(record, row)
+			if err != nil {
+				predicateErr = err
+				return false
+			}
+			return ts <= source.GetCutoffTs()
+		},
+		nil,
+	)
+	if err != nil {
+		return nil, nil, nil, merr.Wrap(err, "failed to rewrite v2 insert binlog for cutoff")
+	}
+	if predicateErr != nil {
+		return nil, nil, nil, predicateErr
+	}
+	if rowCount == 0 {
+		return nil, nil, nil, nil
+	}
+	if err := writer.Close(); err != nil {
+		return nil, nil, nil, merr.Wrap(err, "failed to close v2 cutoff insert writer")
+	}
+
+	sourceByField := make(map[int64]*datapb.Binlog, len(batchFields))
+	for _, field := range batchFields {
+		if len(field.GetBinlogs()) != 1 {
+			return nil, nil, nil, merr.WrapErrServiceInternalMsg("cutoff rewrite expects one binlog per column group")
+		}
+		sourceByField[field.GetFieldID()] = field.GetBinlogs()[0]
+	}
+
+	fieldBinlogs, _, _, _, _ := writer.GetLogs()
+	rewritten := storage.SortFieldBinlogs(fieldBinlogs)
+	mappings := make(map[string]string, len(rewritten))
+	copiedFiles := make([]string, 0, len(rewritten))
+	for _, field := range rewritten {
+		sourceBinlog := sourceByField[field.GetFieldID()]
+		if sourceBinlog == nil || len(field.GetBinlogs()) != 1 {
+			return nil, nil, nil, merr.WrapErrServiceInternalMsg("cutoff rewrite produced unexpected field binlog")
+		}
+		sourcePath := sourceBinlog.GetLogPath()
+		targetPath := field.GetBinlogs()[0].GetLogPath()
+		logID, err := binlogLogID(sourceBinlog)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		rewrittenField := proto.Clone(field).(*datapb.FieldBinlog)
+		rewrittenField.Binlogs[0].LogPath = sourcePath
+		rewrittenField.Binlogs[0].LogID = logID
+		mappings[sourcePath] = targetPath
+		copiedFiles = append(copiedFiles, targetPath)
+		field.Binlogs = rewrittenField.Binlogs
+	}
+	return rewritten, mappings, copiedFiles, nil
+}
+
+func columnGroupsFromFieldBinlogs(
+	schema *schemapb.CollectionSchema,
+	fieldBinlogs []*datapb.FieldBinlog,
+) ([]storagecommon.ColumnGroup, int64, error) {
+	if len(fieldBinlogs) == 0 {
+		return nil, 0, merr.WrapErrServiceInternalMsg("empty field binlogs for cutoff rewrite")
+	}
+	fields := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
+	for _, field := range fieldBinlogs {
+		fields = append(fields, field)
+	}
+	sort.Slice(fields, func(i, j int) bool {
+		return fields[i].GetFieldID() < fields[j].GetFieldID()
+	})
+
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	fieldColumn := make(map[int64]int, len(allFields))
+	for idx, field := range allFields {
+		fieldColumn[field.GetFieldID()] = idx
+	}
+	explicitFields := make(map[int64]struct{})
+	for _, field := range fields {
+		if len(field.GetChildFields()) > 0 {
+			for _, fieldID := range field.GetChildFields() {
+				explicitFields[fieldID] = struct{}{}
+			}
+			continue
+		}
+		if field.GetFieldID() != storagecommon.DefaultShortColumnGroupID {
+			explicitFields[field.GetFieldID()] = struct{}{}
+		}
+	}
+
+	logIDStart, err := binlogLogID(fields[0].GetBinlogs()[0])
+	if err != nil {
+		return nil, 0, err
+	}
+	columnGroups := make([]storagecommon.ColumnGroup, 0, len(fields))
+	for idx, field := range fields {
+		if len(field.GetBinlogs()) != 1 {
+			return nil, 0, merr.WrapErrServiceInternalMsg("cutoff rewrite expects one binlog per column group")
+		}
+		logID, err := binlogLogID(field.GetBinlogs()[0])
+		if err != nil {
+			return nil, 0, err
+		}
+		if logID != logIDStart+int64(idx) {
+			return nil, 0, merr.WrapErrParameterInvalidMsg(
+				"cutoff rewrite requires contiguous v2 column-group log IDs, got %d want %d",
+				logID, logIDStart+int64(idx))
+		}
+
+		groupFields := append([]int64(nil), field.GetChildFields()...)
+		if len(groupFields) == 0 {
+			if field.GetFieldID() == storagecommon.DefaultShortColumnGroupID {
+				for _, schemaField := range allFields {
+					if _, ok := explicitFields[schemaField.GetFieldID()]; !ok {
+						groupFields = append(groupFields, schemaField.GetFieldID())
+					}
+				}
+			} else {
+				groupFields = []int64{field.GetFieldID()}
+			}
+		}
+		columns := make([]int, 0, len(groupFields))
+		for _, fieldID := range groupFields {
+			column, ok := fieldColumn[fieldID]
+			if !ok {
+				return nil, 0, merr.WrapErrServiceInternalMsg("field %d not found in cutoff rewrite schema", fieldID)
+			}
+			columns = append(columns, column)
+		}
+		columnGroups = append(columnGroups, storagecommon.ColumnGroup{
+			GroupID: field.GetFieldID(),
+			Columns: columns,
+			Fields:  groupFields,
+			Format:  field.GetFormat(),
+		})
+	}
+	return columnGroups, logIDStart, nil
+}
+
+func rewriteDeltaFieldBinlogsForCutoff(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	pkType schemapb.DataType,
+	fieldBinlogs []*datapb.FieldBinlog,
+	storageConfig *indexpb.StorageConfig,
+) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, map[string]string, []string, int64, error) {
+	mappings := make(map[string]string)
+	copyBuilders := make(map[int64]*datapb.FieldBinlog)
+	metaBuilders := make(map[int64]*datapb.FieldBinlog)
+	copiedFiles := make([]string, 0)
+	var retainedRows int64
+
+	for _, field := range fieldBinlogs {
+		for _, srcBinlog := range field.GetBinlogs() {
+			switch classifyBinlogForCutoff(srcBinlog, source.GetCutoffTs()) {
+			case cutoffLogKeep:
+				appendBinlogToField(copyBuilders, field, srcBinlog)
+				appendBinlogToField(metaBuilders, field, srcBinlog)
+				retainedRows += srcBinlog.GetEntriesNum()
+			case cutoffLogDrop:
+				continue
+			case cutoffLogRewrite:
+				rewritten, targetPath, retained, err := rewriteDeltaBinlogForCutoff(
+					ctx, cm, source, target, schema, pkType, field, srcBinlog, storageConfig)
+				if err != nil {
+					return nil, nil, nil, nil, 0, err
+				}
+				if rewritten == nil || retained == 0 {
+					continue
+				}
+				retainedRows += retained
+				sourcePath := srcBinlog.GetLogPath()
+				mappings[sourcePath] = targetPath
+				copiedFiles = append(copiedFiles, targetPath)
+				appendBinlogToField(metaBuilders, field, rewritten.GetBinlogs()[0])
+			}
+		}
+	}
+	return fieldBinlogBuildersToList(copyBuilders),
+		fieldBinlogBuildersToList(metaBuilders),
+		mappings,
+		copiedFiles,
+		retainedRows,
+		nil
+}
+
+func rewriteDeltaBinlogForCutoff(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	pkType schemapb.DataType,
+	field *datapb.FieldBinlog,
+	srcBinlog *datapb.Binlog,
+	storageConfig *indexpb.StorageConfig,
+) (*datapb.FieldBinlog, string, int64, error) {
+	sourcePath := srcBinlog.GetLogPath()
+	logID, err := binlogLogID(srcBinlog)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	targetPath, err := generateTargetPath(sourcePath, source, target)
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	deletes, version, err := scanDeltaBinlogForCutoff(ctx, cm, source, schema, pkType, sourcePath, source.GetCutoffTs(), storageConfig)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	if len(deletes) == 0 {
+		return nil, targetPath, 0, nil
+	}
+
+	deltaLog, err := writeDeltaLog(ctx, cm, target, schema, pkType, logID, targetPath, deletes, version, storageConfig)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	deltaLog.FieldID = field.GetFieldID()
+	deltaLog.Binlogs[0].LogPath = sourcePath
+	deltaLog.Binlogs[0].LogID = logID
+	return deltaLog, targetPath, int64(len(deletes)), nil
+}
+
+func scanDeltaBinlogForCutoff(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	source *datapb.CopySegmentSource,
+	schema *schemapb.CollectionSchema,
+	pkType schemapb.DataType,
+	sourcePath string,
+	cutoffTs uint64,
+	storageConfig *indexpb.StorageConfig,
+) ([]cutoffDeleteEntry, int64, error) {
+	if source.GetManifestPath() != "" {
+		deletes, err := scanDeltaLogPathsForCutoff([]string{sourcePath}, pkType, cutoffTs,
+			storage.WithVersion(storage.StorageV2),
+			storage.WithStorageConfig(storageConfig),
+			storage.WithCollectionID(source.GetCollectionId()),
+			storage.WithCollectionProperties(schema.GetProperties()))
+		return deletes, storage.StorageV2, err
+	}
+	if source.GetStorageVersion() == storage.StorageV2 {
+		if cm == nil {
+			return nil, 0, merr.WrapErrParameterInvalidMsg("cutoff requires chunk manager for v2 legacy deltalogs")
+		}
+		deletes, err := scanDeltaLogPathsForCutoff([]string{sourcePath}, pkType, cutoffTs,
+			storage.WithVersion(storage.StorageV1),
+			storage.WithCollectionID(source.GetCollectionId()),
+			storage.WithCollectionProperties(schema.GetProperties()),
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return cm.MultiRead(ctx, paths)
+			}))
+		if err == nil {
+			return deletes, storage.StorageV1, nil
+		}
+		deletes, err = scanDeltaLogPathsForCutoff([]string{sourcePath}, pkType, cutoffTs,
+			storage.WithVersion(storage.StorageV2),
+			storage.WithStorageConfig(storageConfig),
+			storage.WithCollectionID(source.GetCollectionId()),
+			storage.WithCollectionProperties(schema.GetProperties()))
+		return deletes, storage.StorageV2, err
+	}
+	if cm == nil {
+		return nil, 0, merr.WrapErrParameterInvalidMsg("cutoff requires chunk manager for legacy deltalogs")
+	}
+	deletes, err := scanDeltaLogPathsForCutoff([]string{sourcePath}, pkType, cutoffTs,
+		storage.WithVersion(storage.StorageV1),
+		storage.WithCollectionID(source.GetCollectionId()),
+		storage.WithCollectionProperties(schema.GetProperties()),
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return cm.MultiRead(ctx, paths)
+		}))
+	return deletes, storage.StorageV1, err
+}
+
+func timestampAt(record storage.Record, row int) (uint64, error) {
+	tsColumn, ok := record.Column(common.TimeStampField).(*array.Int64)
+	if !ok {
+		return 0, merr.WrapErrServiceInternalMsg("timestamp column has unexpected type %T", record.Column(common.TimeStampField))
+	}
+	return uint64(tsColumn.Value(row)), nil
+}
+
+func binlogLogID(binlog *datapb.Binlog) (int64, error) {
+	if binlog.GetLogID() != 0 {
+		return binlog.GetLogID(), nil
+	}
+	logID, err := strconv.ParseInt(path.Base(binlog.GetLogPath()), 10, 64)
+	if err != nil {
+		return 0, merr.WrapErrParameterInvalidMsg("failed to parse log id from path %s", binlog.GetLogPath())
+	}
+	return logID, nil
+}
+
+func scanInsertBinlogsForCutoff(
+	ctx context.Context,
+	source *datapb.CopySegmentSource,
+	schema *schemapb.CollectionSchema,
+	pkField *schemapb.FieldSchema,
+	cutoffTs uint64,
+	storageConfig *indexpb.StorageConfig,
+) (map[cutoffPK]struct{}, map[cutoffPK]cutoffDeleteEntry, error) {
+	preCutoffPKs := make(map[cutoffPK]struct{})
+	postCutoffPKs := make(map[cutoffPK]cutoffDeleteEntry)
+	if len(source.GetInsertBinlogs()) == 0 {
+		return preCutoffPKs, postCutoffPKs, nil
+	}
+
+	readSchema := buildV2CutoffReadSchema(schema, pkField)
+	reader, err := storage.NewBinlogRecordReader(ctx, source.GetInsertBinlogs(), readSchema,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithCollectionID(source.GetCollectionId()),
+		storage.WithCollectionProperties(schema.GetProperties()))
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to create v2 binlog reader for cutoff")
+	}
+	defer reader.Close()
+
+	return scanCutoffPKs(reader, pkField, cutoffTs)
+}
+
+func buildV2CutoffReadSchema(schema *schemapb.CollectionSchema, pkField *schemapb.FieldSchema) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:       schema.GetName(),
+		Properties: schema.GetProperties(),
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  common.RowIDField,
+				Name:     common.RowIDFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  common.TimeStampField,
+				Name:     common.TimeStampFieldName,
+				DataType: schemapb.DataType_Int64,
+			},
+			proto.Clone(pkField).(*schemapb.FieldSchema),
+		},
+	}
+}
+
+func buildCutoffRewriteSchema(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	hasRowID := false
+	hasTimestamp := false
+	for _, field := range schema.GetFields() {
+		switch field.GetFieldID() {
+		case common.RowIDField:
+			hasRowID = true
+		case common.TimeStampField:
+			hasTimestamp = true
+		}
+	}
+	if hasRowID && hasTimestamp {
+		return schema
+	}
+
+	fields := make([]*schemapb.FieldSchema, 0, len(schema.GetFields())+2)
+	if !hasRowID {
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID:  common.RowIDField,
+			Name:     common.RowIDFieldName,
+			DataType: schemapb.DataType_Int64,
+		})
+	}
+	if !hasTimestamp {
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID:  common.TimeStampField,
+			Name:     common.TimeStampFieldName,
+			DataType: schemapb.DataType_Int64,
+		})
+	}
+	fields = append(fields, schema.GetFields()...)
+	rewritten := proto.Clone(schema).(*schemapb.CollectionSchema)
+	rewritten.Fields = fields
+	return rewritten
+}
+
+func scanInsertManifestForCutoff(
+	ctx context.Context,
+	source *datapb.CopySegmentSource,
+	schema *schemapb.CollectionSchema,
+	pkField *schemapb.FieldSchema,
+	cutoffTs uint64,
+	storageConfig *indexpb.StorageConfig,
+) (map[cutoffPK]struct{}, map[cutoffPK]cutoffDeleteEntry, error) {
+	minimalSchema := &schemapb.CollectionSchema{
+		Name:       schema.GetName(),
+		Properties: schema.GetProperties(),
+		Fields: []*schemapb.FieldSchema{
+			proto.Clone(pkField).(*schemapb.FieldSchema),
+			{
+				FieldID:  common.TimeStampField,
+				Name:     "ts",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	reader, err := storage.NewManifestRecordReader(ctx, source.GetManifestPath(), minimalSchema,
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithBufferSize(packed.DefaultReadBufferSize),
+		storage.WithCollectionID(source.GetCollectionId()))
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to create manifest reader for cutoff")
+	}
+	defer reader.Close()
+
+	return scanCutoffPKs(reader, pkField, cutoffTs)
+}
+
+func scanCutoffPKs(
+	reader storage.RecordReader,
+	pkField *schemapb.FieldSchema,
+	cutoffTs uint64,
+) (map[cutoffPK]struct{}, map[cutoffPK]cutoffDeleteEntry, error) {
+	preCutoffPKs := make(map[cutoffPK]struct{})
+	postCutoffPKs := make(map[cutoffPK]cutoffDeleteEntry)
+	for {
+		record, err := reader.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, nil, merr.Wrap(err, "failed to read insert record for cutoff")
+		}
+		if err := visitPKTimestampRecord(record, pkField.GetFieldID(), pkField.GetDataType(), func(key cutoffPK, pk storage.PrimaryKey, ts uint64) error {
+			if ts <= cutoffTs {
+				preCutoffPKs[key] = struct{}{}
+				return nil
+			}
+			existing, ok := postCutoffPKs[key]
+			if !ok || ts > existing.ts {
+				postCutoffPKs[key] = cutoffDeleteEntry{pk: pk, ts: ts}
+			}
+			return nil
+		}); err != nil {
+			record.Release()
+			return nil, nil, err
+		}
+		record.Release()
+	}
+	return preCutoffPKs, postCutoffPKs, nil
+}
+
+func scanSourceDeltaLogsForCutoff(
+	source *datapb.CopySegmentSource,
+	schema *schemapb.CollectionSchema,
+	pkType schemapb.DataType,
+	cutoffTs uint64,
+	storageConfig *indexpb.StorageConfig,
+) ([]cutoffDeleteEntry, error) {
+	paths, err := packed.GetDeltaLogPathsFromManifest(source.GetManifestPath(), storageConfig)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to read source manifest deltas")
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	return scanDeltaLogPathsForCutoff(paths, pkType, cutoffTs,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithCollectionID(source.GetCollectionId()),
+		storage.WithCollectionProperties(schema.GetProperties()))
+}
+
+func scanSourceDeltaLogPathsForCutoff(
+	cm storage.ChunkManager,
+	source *datapb.CopySegmentSource,
+	schema *schemapb.CollectionSchema,
+	pkType schemapb.DataType,
+	cutoffTs uint64,
+	storageConfig *indexpb.StorageConfig,
+) ([]cutoffDeleteEntry, error) {
+	paths := extractFromPb(source.GetDeltaBinlogs())
+	if source.GetManifestPath() != "" {
+		manifestPaths, err := packed.GetDeltaLogPathsFromManifest(source.GetManifestPath(), storageConfig)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to read source manifest deltas")
+		}
+		paths = append(paths, manifestPaths...)
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(paths))
+	uniquePaths := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		uniquePaths = append(uniquePaths, p)
+	}
+	if source.GetManifestPath() != "" {
+		return scanDeltaLogPathsForCutoff(uniquePaths, pkType, cutoffTs,
+			storage.WithVersion(storage.StorageV2),
+			storage.WithStorageConfig(storageConfig),
+			storage.WithCollectionID(source.GetCollectionId()),
+			storage.WithCollectionProperties(schema.GetProperties()))
+	}
+	if source.GetStorageVersion() == storage.StorageV2 {
+		if cm == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("cutoff requires chunk manager for v2 legacy deltalogs")
+		}
+		deletes, err := scanDeltaLogPathsForCutoff(uniquePaths, pkType, cutoffTs,
+			storage.WithVersion(storage.StorageV1),
+			storage.WithCollectionID(source.GetCollectionId()),
+			storage.WithCollectionProperties(schema.GetProperties()),
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return cm.MultiRead(ctx, paths)
+			}))
+		if err == nil {
+			return deletes, nil
+		}
+		return scanDeltaLogPathsForCutoff(uniquePaths, pkType, cutoffTs,
+			storage.WithVersion(storage.StorageV2),
+			storage.WithStorageConfig(storageConfig),
+			storage.WithCollectionID(source.GetCollectionId()),
+			storage.WithCollectionProperties(schema.GetProperties()))
+	}
+	if cm == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("cutoff requires chunk manager for legacy deltalogs")
+	}
+	return scanDeltaLogPathsForCutoff(uniquePaths, pkType, cutoffTs,
+		storage.WithVersion(storage.StorageV1),
+		storage.WithCollectionID(source.GetCollectionId()),
+		storage.WithCollectionProperties(schema.GetProperties()),
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return cm.MultiRead(ctx, paths)
+		}))
+}
+
+func scanDeltaLogPathsForCutoff(
+	paths []string,
+	pkType schemapb.DataType,
+	cutoffTs uint64,
+	options ...storage.RwOption,
+) ([]cutoffDeleteEntry, error) {
+	reader, err := storage.NewDeltalogReader(
+		pkType,
+		paths,
+		options...,
+	)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to create source deltalog reader")
+	}
+	defer reader.Close()
+
+	deletes := make([]cutoffDeleteEntry, 0)
+	for {
+		record, err := reader.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, merr.Wrap(err, "failed to read source deltalog record")
+		}
+		if err := visitPKTimestampRecord(record, 0, pkType, func(_ cutoffPK, pk storage.PrimaryKey, ts uint64) error {
+			if ts <= cutoffTs {
+				deletes = append(deletes, cutoffDeleteEntry{pk: pk, ts: ts})
+			}
+			return nil
+		}); err != nil {
+			record.Release()
+			return nil, err
+		}
+		record.Release()
+	}
+	return deletes, nil
+}
+
+func visitPKTimestampRecord(
+	record storage.Record,
+	pkFieldID int64,
+	pkType schemapb.DataType,
+	visit func(cutoffPK, storage.PrimaryKey, uint64) error,
+) error {
+	tsColumn, ok := record.Column(common.TimeStampField).(*array.Int64)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("timestamp column has unexpected type %T", record.Column(common.TimeStampField))
+	}
+
+	switch pkType {
+	case schemapb.DataType_Int64:
+		pkColumn, ok := record.Column(pkFieldID).(*array.Int64)
+		if !ok {
+			return merr.WrapErrServiceInternalMsg("int64 primary key column has unexpected type %T", record.Column(pkFieldID))
+		}
+		for i := 0; i < record.Len(); i++ {
+			pkValue := pkColumn.Value(i)
+			ts := uint64(tsColumn.Value(i))
+			pk := storage.NewInt64PrimaryKey(pkValue)
+			key := cutoffPK{int64PK: pkValue}
+			if err := visit(key, pk, ts); err != nil {
+				return err
+			}
+		}
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		pkColumn, ok := record.Column(pkFieldID).(*array.String)
+		if !ok {
+			return merr.WrapErrServiceInternalMsg("varchar primary key column has unexpected type %T", record.Column(pkFieldID))
+		}
+		for i := 0; i < record.Len(); i++ {
+			pkValue := pkColumn.Value(i)
+			ts := uint64(tsColumn.Value(i))
+			pk := storage.NewVarCharPrimaryKey(pkValue)
+			key := cutoffPK{strPK: pkValue}
+			if err := visit(key, pk, ts); err != nil {
+				return err
+			}
+		}
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported primary key type for restore cutoff: %s", pkType.String())
+	}
+	return nil
+}
+
+func findPrimaryKeyField(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field, nil
+		}
+	}
+	return nil, merr.WrapErrParameterInvalidMsg("primary key field not found in collection schema")
+}
+
+func manifestPhysicalPath(manifestPath string) string {
+	basePath, version, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version)
+}
+
 // listAllFiles recursively lists all files under the given path using WalkWithPrefix.
 // Returns (nil, error) if the walk fails.
 func listAllFiles(ctx context.Context, cm storage.ChunkManager, basePath string) ([]string, error) {
@@ -137,6 +1451,11 @@ func listAllFiles(ctx context.Context, cm storage.ChunkManager, basePath string)
 		return nil, err
 	}
 	return files, nil
+}
+
+func isManifestControlFile(basePath, filePath string) bool {
+	rel := strings.TrimPrefix(filePath, strings.TrimRight(basePath, "/")+"/")
+	return strings.HasPrefix(rel, "_delta/") || strings.HasPrefix(rel, "_metadata/")
 }
 
 // copyFile copies a single file from src to dst using the chunk manager.
@@ -155,6 +1474,17 @@ func extractFromPb(fieldBinlogs []*datapb.FieldBinlog) []string {
 		}
 	}
 	return paths
+}
+
+func hasBinlogPath(fieldBinlogs []*datapb.FieldBinlog) bool {
+	for _, fieldBinlog := range fieldBinlogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			if binlog.GetLogPath() != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // extractIndexFiles extracts vector/scalar index file paths.
@@ -226,45 +1556,61 @@ func collectSegmentFiles(
 		// StorageV3+: binlog paths MUST come from manifest
 		manifestPath := source.GetManifestPath()
 		if manifestPath == "" {
-			return nil, merr.WrapErrParameterInvalidMsg("storage_version=%d requires manifest_path but it is empty (segmentID=%d)",
-				source.GetStorageVersion(), source.GetSegmentId())
-		}
+			if !(source.GetCutoffTs() > 0 && len(source.GetInsertBinlogs()) == 0) {
+				return nil, merr.WrapErrParameterInvalidMsg("storage_version=%d requires manifest_path but it is empty (segmentID=%d)",
+					source.GetStorageVersion(), source.GetSegmentId())
+			}
+			mlog.Info(context.TODO(), "using delta-only cutoff source without manifest",
+				mlog.Int64("segmentID", source.GetSegmentId()),
+				mlog.Int64("storageVersion", source.GetStorageVersion()))
+		} else {
+			basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
+			if err != nil {
+				return nil, merr.Wrapf(err, "failed to unmarshal manifest path %q for segment %d", manifestPath, source.GetSegmentId())
+			}
 
-		basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
-		if err != nil {
-			return nil, merr.Wrapf(err, "failed to unmarshal manifest path %q for segment %d", manifestPath, source.GetSegmentId())
-		}
+			allFiles, listErr := listAllFiles(ctx, cm, basePath)
+			if listErr != nil {
+				return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())
+			}
 
-		allFiles, listErr := listAllFiles(ctx, cm, basePath)
-		if listErr != nil {
-			return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())
-		}
+			// Empty file list is OK for V3 - segment may have only deltas and no insert binlogs.
+			// With restore cutoff enabled, the target manifest is rebuilt and its deltas
+			// are rewritten, so source manifest metadata and source delta files must not
+			// be copied into the target segment directory.
+			if source.GetCutoffTs() > 0 {
+				for _, file := range allFiles {
+					if !isManifestControlFile(basePath, file) {
+						files.InsertBinlogs = append(files.InsertBinlogs, file)
+					}
+				}
+			} else {
+				files.InsertBinlogs = allFiles
+			}
+			mlog.Info(context.TODO(), "collected InsertBinlogs from manifest",
+				mlog.String("basePath", basePath),
+				mlog.Int("fileCount", len(files.InsertBinlogs)),
+				mlog.Int64("storageVersion", source.GetStorageVersion()))
 
-		// Empty file list is OK for V3 — segment may have only deltas and no insert binlogs
-		files.InsertBinlogs = allFiles
-		mlog.Info(context.TODO(), "collected InsertBinlogs from manifest",
-			mlog.String("basePath", basePath),
-			mlog.Int("fileCount", len(allFiles)),
-			mlog.Int64("storageVersion", source.GetStorageVersion()))
-
-		// Collect LOB files owned by THIS segment from the manifest.
-		// LOB files live at partition level ({root}/insert_log/{coll}/{part}/lobs/),
-		// but multiple segments share that directory. We must only copy the files
-		// referenced by this segment's manifest to preserve the invariant that
-		// each LOB file belongs to exactly one segment.
-		storageConfig := compaction.CreateStorageConfig()
-		lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, storageConfig)
-		if lobErr != nil {
-			mlog.Debug(context.TODO(), "no LOB files found in manifest (may not have TEXT fields)",
-				mlog.String("manifestPath", manifestPath),
-				mlog.Err(lobErr))
-		} else if len(lobFileInfos) > 0 {
-			// GetManifestLobFiles returns absolute paths (the manifest
-			// deserializer calls ToAbsolute internally), so use them directly.
-			files.LobFiles = lobFileInfosToPaths(lobFileInfos)
-			mlog.Info(context.TODO(), "collected LOB files from segment manifest",
-				mlog.String("manifestPath", manifestPath),
-				mlog.Int("lobFileCount", len(files.LobFiles)))
+			// Collect LOB files owned by THIS segment from the manifest.
+			// LOB files live at partition level ({root}/insert_log/{coll}/{part}/lobs/),
+			// but multiple segments share that directory. We must only copy the files
+			// referenced by this segment's manifest to preserve the invariant that
+			// each LOB file belongs to exactly one segment.
+			storageConfig := compaction.CreateStorageConfig()
+			lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, storageConfig)
+			if lobErr != nil {
+				mlog.Debug(context.TODO(), "no LOB files found in manifest (may not have TEXT fields)",
+					mlog.String("manifestPath", manifestPath),
+					mlog.Err(lobErr))
+			} else if len(lobFileInfos) > 0 {
+				// GetManifestLobFiles returns absolute paths (the manifest
+				// deserializer calls ToAbsolute internally), so use them directly.
+				files.LobFiles = lobFileInfosToPaths(lobFileInfos)
+				mlog.Info(context.TODO(), "collected LOB files from segment manifest",
+					mlog.String("manifestPath", manifestPath),
+					mlog.Int("lobFileCount", len(files.LobFiles)))
+			}
 		}
 	} else {
 		// StorageV1/V2: use pb paths (traditional non-packed format)
@@ -274,7 +1620,8 @@ func collectSegmentFiles(
 			mlog.Int64("storageVersion", source.GetStorageVersion()))
 	}
 
-	// Other types from pb
+	// Other types from pb. In cutoff mode callers pass an already-filtered
+	// source, so it is safe to copy the remaining delta logs directly.
 	files.DeltaBinlogs = extractFromPb(source.GetDeltaBinlogs())
 	files.StatsBinlogs = extractFromPb(source.GetStatsBinlogs())
 	files.Bm25Binlogs = extractFromPb(source.GetBm25Binlogs())
@@ -365,30 +1712,67 @@ func CopySegmentAndIndexFiles(
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
 	logFields []mlog.Field,
+	options ...CopySegmentFileOptions,
 ) (*datapb.CopySegmentResult, []string, error) {
 	segmentID := source.GetSegmentId()
-	useManifest := source.GetStorageVersion() >= storage.StorageV3
+	deltaOnlyCutoffSource := isDeltaOnlyCutoffSource(source)
+	useManifest := source.GetStorageVersion() >= storage.StorageV3 && !deltaOnlyCutoffSource
+	fileOptions := CopySegmentFileOptions{StorageConfig: compaction.CreateStorageConfig()}
+	if len(options) > 0 {
+		fileOptions = options[0]
+		if fileOptions.StorageConfig == nil {
+			fileOptions.StorageConfig = compaction.CreateStorageConfig()
+		}
+	}
 
 	mlog.Info(context.TODO(), "start copying segment and index files",
 		mlog.Int64("sourceSegmentID", segmentID),
 		mlog.Int64("storageVersion", source.GetStorageVersion()),
+		mlog.Uint64("cutoffTs", source.GetCutoffTs()),
 		mlog.Bool("useManifest", useManifest),
 		mlog.Bool("isExternalCollection", source.GetIsExternalCollection()))
 
+	if source.GetCutoffTs() > 0 &&
+		source.GetStorageVersion() != storage.StorageV2 &&
+		source.GetStorageVersion() < storage.StorageV3 &&
+		!deltaOnlyCutoffSource {
+		return nil, nil, merr.WrapErrParameterInvalidMsg("cutoff only supports StorageV2/StorageV3 segments, got storage_version=%d", source.GetStorageVersion())
+	}
+
+	if useManifest && source.GetCutoffTs() > 0 {
+		return rewriteManifestSegmentForCutoff(ctx, source, target, fileOptions.Schema, fileOptions.StorageConfig)
+	}
+
+	copySource := source
+	metaSource := source
+	var cutoffPlan *restoreCutoffPlan
+	if source.GetCutoffTs() > 0 && (source.GetStorageVersion() == storage.StorageV2 || deltaOnlyCutoffSource) {
+		var err error
+		cutoffPlan, err = prepareNonManifestRestoreCutoff(ctx, cm, source, target, fileOptions.Schema, fileOptions.StorageConfig)
+		if err != nil {
+			return nil, nil, merr.Wrap(err, "failed to prepare restore cutoff")
+		}
+		copySource = cutoffPlan.copySource
+		metaSource = cutoffPlan.metaSource
+	}
+
 	// Step 1: Collect all files to copy
-	files, err := collectSegmentFiles(ctx, cm, source)
+	files, err := collectSegmentFiles(ctx, cm, copySource)
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to collect segment files")
 	}
 
 	// Step 2: Generate src->dst mappings for file copying
-	mappings, err := generateMappingsFromFiles(files, source, target)
+	mappings, err := generateMappingsFromFiles(files, copySource, target)
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to generate file mappings")
 	}
 
 	// Step 3: Execute all copy operations
 	copiedFiles := make([]string, 0, len(mappings))
+	if cutoffPlan != nil {
+		copiedFiles = append(copiedFiles, cutoffPlan.copiedFiles...)
+	}
 	for src, dst := range mappings {
 		mlog.Debug(context.TODO(), "copying file",
 			mlog.String("src", src),
@@ -406,6 +1790,12 @@ func CopySegmentAndIndexFiles(
 
 	mlog.Info(context.TODO(), "all files copied successfully",
 		mlog.Int("fileCount", len(mappings)))
+
+	if cutoffPlan != nil {
+		for src, dst := range cutoffPlan.mappings {
+			mappings[src] = dst
+		}
+	}
 
 	// Step 3.5: When manifest is used (StorageV3+), InsertBinlogs were collected from manifest
 	// (actual file paths under base_path including _data/ and _metadata/), but
@@ -427,13 +1817,13 @@ func CopySegmentAndIndexFiles(
 	}
 
 	// Step 4: Build index metadata from source
-	indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(source, target, mappings)
+	indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(metaSource, target, mappings)
 	if err != nil {
 		return nil, copiedFiles, merr.Wrap(err, "failed to build index info")
 	}
 
-	// Step 5: Generate segment metadata with path mappings
-	segmentInfo, err := generateSegmentInfoFromSource(source, target, mappings)
+	// Step 5: Generate segment metadata with path mappings.
+	segmentInfo, err := generateSegmentInfoFromSource(metaSource, target, mappings)
 	if err != nil {
 		return nil, copiedFiles, merr.Wrap(err, "failed to generate segment info")
 	}
@@ -467,6 +1857,13 @@ func CopySegmentAndIndexFiles(
 		IndexInfos:        indexInfos,
 		TextIndexInfos:    textIndexInfos,
 		JsonKeyIndexInfos: jsonKeyIndexInfos,
+	}
+
+	if cutoffPlan != nil && cutoffPlan.updateNumRows {
+		result.UpdateNumRows = true
+		if deltaOnlyCutoffSource {
+			result.ImportedRows = cutoffPlan.importedRows
+		}
 	}
 
 	// Step 8: Transform and propagate manifest_path for StorageV3+ segments
@@ -510,6 +1907,9 @@ func transformFieldBinlogs(
 ) ([]*datapb.FieldBinlog, int64, error) {
 	result := make([]*datapb.FieldBinlog, 0, len(srcFieldBinlogs))
 	var totalRows int64
+	if countRows {
+		totalRows = countRowsFromFieldBinlogs(srcFieldBinlogs)
+	}
 
 	for _, srcFieldBinlog := range srcFieldBinlogs {
 		dstFieldBinlog := proto.Clone(srcFieldBinlog).(*datapb.FieldBinlog)
@@ -531,9 +1931,6 @@ func transformFieldBinlogs(
 			}
 
 			dstFieldBinlog.Binlogs = append(dstFieldBinlog.Binlogs, dstBinlog)
-			if countRows {
-				totalRows += srcBinlog.GetEntriesNum()
-			}
 		}
 
 		if len(dstFieldBinlog.Binlogs) > 0 {
@@ -542,6 +1939,19 @@ func transformFieldBinlogs(
 	}
 
 	return result, totalRows, nil
+}
+
+func countRowsFromFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog) int64 {
+	for _, fieldBinlog := range fieldBinlogs {
+		var rows int64
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			rows += binlog.GetEntriesNum()
+		}
+		if rows > 0 {
+			return rows
+		}
+	}
+	return 0
 }
 
 // generateSegmentInfoFromSource generates ImportSegmentInfo from CopySegmentSource

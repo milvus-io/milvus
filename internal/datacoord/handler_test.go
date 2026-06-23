@@ -1833,36 +1833,19 @@ func TestGenSnapshot(t *testing.T) {
 	}).Build()
 	defer mock5.UnPatch()
 
-	mock6 := mockey.Mock((*meta).GetSegment).To(func(m *meta, ctx context.Context, segmentID int64) *SegmentInfo {
-		if segmentID == 1001 {
-			return NewSegmentInfo(&datapb.SegmentInfo{
-				ID:           1001,
-				CollectionID: 200,
-				PartitionID:  0,
-				State:        commonpb.SegmentState_Flushed,
-				Binlogs: []*datapb.FieldBinlog{
-					{
-						FieldID: 1,
-						Binlogs: []*datapb.Binlog{
-							{LogID: 1, LogSize: 100},
-						},
-					},
-				},
-				Deltalogs: []*datapb.FieldBinlog{},
-			})
-		}
-		return nil
-	}).Build()
-	defer mock6.UnPatch()
-
 	mock7 := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 		return map[int64]*model.SegmentIndex{}
 	}).Build()
 	defer mock7.UnPatch()
 
-	mock8 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-		return nil, false // No compaction children
-	}).Build()
+	mock8 := mockey.Mock((*ServerHandler).GetDeltaLogFromCompactTo).Return([]*datapb.FieldBinlog{
+		{
+			FieldID: 0,
+			Binlogs: []*datapb.Binlog{
+				{LogID: 101, LogPath: "compact-to-delta"},
+			},
+		},
+	}, nil).Build()
 	defer mock8.UnPatch()
 
 	// Test GenSnapshot
@@ -1876,6 +1859,7 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, 1, len(snapshotData.Indexes))
 	assert.Equal(t, 1, len(snapshotData.Segments))
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
+	assert.Empty(t, snapshotData.Segments[0].Deltalogs)
 	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
 }
@@ -2057,20 +2041,10 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		}).Build()
 		mockers = append(mockers, m3)
 
-		m4 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
-			return nil, false
-		}).Build()
-		mockers = append(mockers, m4)
-
 		m5 := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
 		mockers = append(mockers, m5)
-
-		m6 := mockey.Mock((*meta).GetSegment).To(func(m *meta, ctx context.Context, segmentID int64) *SegmentInfo {
-			return nil
-		}).Build()
-		mockers = append(mockers, m6)
 
 		return handler, mockers
 	}

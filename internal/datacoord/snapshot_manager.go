@@ -250,6 +250,7 @@ type SnapshotManager interface {
 	//   - snapshotName: Name of the snapshot to restore (unique within source collection)
 	//   - collectionID: ID of the target collection (already created)
 	//   - jobID: Pre-allocated job ID for idempotency (from WAL message)
+	//   - pinID: Snapshot pin ID transferred from the restore WAL header
 	//
 	// Returns:
 	//   - jobID: The restore job ID (same as input if job created, or existing job ID)
@@ -961,6 +962,13 @@ func (sm *snapshotManager) RestoreData(
 		return 0, merr.Wrap(err, "failed to read snapshot data")
 	}
 
+	cutoffTs, err := snapshotCreateTsCutoff(snapshotData)
+	if err != nil {
+		mlog.Error(context.TODO(), "invalid snapshot create ts", mlog.Err(err))
+		return 0, err
+	}
+	mlog.Info(context.TODO(), "snapshot create ts cutoff derived", mlog.Uint64("cutoffTs", cutoffTs))
+
 	// ========== Phase 2: Build partition mapping ==========
 	partitionMapping, err := sm.buildPartitionMapping(ctx, snapshotData, collectionID)
 	if err != nil {
@@ -978,7 +986,8 @@ func (sm *snapshotManager) RestoreData(
 
 	// ========== Phase 4: Create copy segment job ==========
 	// Use the pre-allocated jobID from the WAL message
-	if err := sm.createRestoreJob(ctx, collectionID, channelMapping, partitionMapping, snapshotData, jobID, pinID); err != nil {
+	err = sm.createRestoreJob(ctx, collectionID, channelMapping, partitionMapping, snapshotData, jobID, pinID, cutoffTs)
+	if err != nil {
 		mlog.Error(context.TODO(), "failed to create restore job", mlog.Err(err))
 		return 0, merr.Wrap(err, "restore job creation failed")
 	}
@@ -988,6 +997,18 @@ func (sm *snapshotManager) RestoreData(
 		mlog.Int64("collectionID", collectionID))
 
 	return jobID, nil
+}
+
+func snapshotCreateTsCutoff(snapshotData *SnapshotData) (uint64, error) {
+	if snapshotData == nil || snapshotData.SnapshotInfo == nil {
+		return 0, merr.WrapErrServiceInternal("snapshot info is missing")
+	}
+	createTs := snapshotData.SnapshotInfo.GetCreateTs()
+	if createTs < 0 {
+		return 0, merr.WrapErrServiceInternal(
+			fmt.Sprintf("snapshot create_ts is negative: %d", createTs))
+	}
+	return uint64(createTs), nil
 }
 
 // ============================================================================
@@ -1122,6 +1143,7 @@ func (sm *snapshotManager) createRestoreJob(
 	snapshotData *SnapshotData,
 	jobID int64,
 	pinID int64,
+	cutoffTs uint64,
 ) error {
 	// Validate which segments exist in meta
 	validSegments := make([]*datapb.SegmentDescription, 0, len(snapshotData.Segments))
@@ -1259,6 +1281,7 @@ func (sm *snapshotManager) createRestoreJob(
 			SnapshotName:       snapshotData.SnapshotInfo.GetName(),
 			SourceCollectionId: snapshotData.SnapshotInfo.GetCollectionId(),
 			PinId:              pinID,
+			CutoffTs:           cutoffTs,
 		},
 		tr: timerecord.NewTimeRecorder("copy segment job"),
 	}

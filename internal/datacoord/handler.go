@@ -637,6 +637,14 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 	return minTs, nil
 }
 
+func isSnapshotSegmentCandidate(info *SegmentInfo, snapshotTs uint64) bool {
+	segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
+	return segmentHasData &&
+		segmentEffectiveTs(info.SegmentInfo) <= snapshotTs &&
+		info.GetState() != commonpb.SegmentState_Dropped &&
+		!info.GetIsImporting()
+}
+
 // GenSnapshot generates a point-in-time snapshot of a collection's data and metadata.
 //
 // This function captures a consistent view of a collection at a specific timestamp, including:
@@ -644,7 +652,6 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 // - Partition metadata (excluding auto-created partitions)
 // - Segment data (binlogs, deltalogs, statslogs)
 // - All index types (vector/scalar, text, JSON key)
-// - Compaction history deltalogs
 //
 // Process flow:
 //  1. Retrieve collection schema and partition information
@@ -653,9 +660,8 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 //  4. Collect index metadata created before snapshot timestamp
 //  5. Select segments with data that started before snapshot timestamp
 //  6. Decompress binlog paths for segment data
-//  7. Gather delta logs from compacted segments
-//  8. Build segment descriptions with all binlog and index file paths
-//  9. Assemble complete snapshot data structure
+//  7. Build segment descriptions with all binlog and index file paths
+//  8. Assemble complete snapshot data structure
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout
@@ -672,7 +678,7 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 //
 // Segment selection criteria:
 // - Must have data (binlogs or deltalogs present)
-// - StartPosition timestamp < snapshot timestamp (data started before snapshot)
+// - Effective segment timestamp <= snapshot timestamp (data exists at snapshot)
 // - State != Dropped (still valid)
 // - Not importing (stable segments only)
 //
@@ -731,8 +737,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 
 	// get segment info
 	segments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-		return segmentHasData && segmentEffectiveTs(info.SegmentInfo) < snapshotTs && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
+		return isSnapshotSegmentCandidate(info, snapshotTs)
 	}))
 
 	if len(segments) == 0 {
@@ -753,20 +758,6 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			mlog.Err(err))
 		return nil, err
 	}
-
-	// get delta logs from compactTo segments
-	lo.ForEach(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) {
-		deltalogs, err := h.GetDeltaLogFromCompactTo(ctx, segInfo.GetID())
-		if err != nil {
-			mlog.Error(ctx, "get delta logs from compactTo failed when generating snapshot",
-				mlog.FieldCollectionID(collectionID),
-				mlog.Uint64("snapshotTs", snapshotTs),
-				mlog.FieldSegmentID(segInfo.GetID()),
-				mlog.Err(err))
-			return
-		}
-		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
-	})
 
 	segDescList := lo.Map(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) *datapb.SegmentDescription {
 		segID := segInfo.GetID()

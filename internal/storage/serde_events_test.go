@@ -677,7 +677,42 @@ func TestNewManifestRecordReaderBranches(t *testing.T) {
 	require.NotNil(t, capturedPluginContext)
 	require.Equal(t, int64(7), capturedPluginContext.GetEncryptionZoneId())
 	require.Equal(t, int64(2), capturedPluginContext.GetCollectionId())
-	require.Equal(t, "unsafe-key", capturedPluginContext.GetEncryptionKey())
+	require.Equal(t, "dW5zYWZlLWtleQ==", capturedPluginContext.GetEncryptionKey())
+}
+
+func TestNewDeltalogReaderPassesExplicitPluginContext(t *testing.T) {
+	pluginContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 7,
+		CollectionId:     8,
+		EncryptionKey:    "encoded-key",
+	}
+
+	var capturedPluginContext *indexcgopb.StoragePluginContext
+	mockReader := mockey.Mock(newPackedRecordReader).To(
+		func(paths []string,
+			schema *schemapb.CollectionSchema,
+			bufferSize int64,
+			cfg *indexpb.StorageConfig,
+			pluginContext *indexcgopb.StoragePluginContext,
+		) (*packedRecordReader, error) {
+			capturedPluginContext = pluginContext
+			return nil, io.EOF
+		}).Build()
+	defer mockReader.UnPatch()
+
+	reader, err := NewDeltalogReader(
+		schemapb.DataType_Int64,
+		[]string{"delta-1"},
+		WithVersion(StorageV2),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithPluginContext(pluginContext),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+
+	_, err = reader.Next()
+	require.ErrorIs(t, err, io.EOF)
+	require.Same(t, pluginContext, capturedPluginContext)
 }
 
 func TestBinlogSerializeWriter(t *testing.T) {

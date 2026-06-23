@@ -1076,6 +1076,11 @@ message CopySegmentSource {
 
   // Whether the source segment belongs to an external collection.
   bool is_external_collection = 13;
+
+  // Snapshot create timestamp used as restore cutoff. When set,
+  // StorageV2/StorageV3 restore only carries data whose timestamp is no
+  // greater than this value.
+  uint64 cutoff_ts = 14;
 }
 
 message CopySegmentTarget {
@@ -1096,6 +1101,7 @@ message CopySegmentRequest {
 
   index.StorageConfig storage_config = 6;
   int64 task_slot = 7;
+  schema.CollectionSchema schema = 8;
 }
 
 message QueryCopySegmentRequest {
@@ -1157,6 +1163,9 @@ message CopySegmentResult {
 
   // Transformed manifest path for target segment
   string manifest_path = 10;
+
+  // Whether DataCoord should overwrite target segment NumOfRows with imported_rows.
+  bool update_num_rows = 11;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
@@ -1261,6 +1270,9 @@ message CopySegmentJob {
   // dropped (by DropSnapshot RPC, drop-collection cascade, or GC) while this
   // job is still reading its data.
   int64 pin_id = 18;
+
+  // Snapshot create timestamp used as restore cutoff.
+  uint64 cutoff_ts = 19;
 }
 
 message ImportJob {

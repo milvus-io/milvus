@@ -24,6 +24,7 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagecommon"
@@ -60,20 +61,21 @@ const (
 )
 
 type rwOptions struct {
-	version             int64
-	op                  rwOp
-	bufferSize          int64
-	downloader          downloaderFn
-	uploader            uploaderFn
-	multiPartUploadSize int64
-	columnGroups        []storagecommon.ColumnGroup
-	collectionID        int64
-	storageConfig       *indexpb.StorageConfig
-	neededFields        typeutil.Set[int64]
-	useLoonFFI          bool
-	pluginContext       *indexcgopb.StoragePluginContext
-	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
-	externalReader      packed.ExternalReaderContext
+	version              int64
+	op                   rwOp
+	bufferSize           int64
+	downloader           downloaderFn
+	uploader             uploaderFn
+	multiPartUploadSize  int64
+	columnGroups         []storagecommon.ColumnGroup
+	collectionID         int64
+	collectionProperties []*commonpb.KeyValuePair
+	storageConfig        *indexpb.StorageConfig
+	neededFields         typeutil.Set[int64]
+	useLoonFFI           bool
+	pluginContext        *indexcgopb.StoragePluginContext
+	textColumnConfigs    []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	externalReader       packed.ExternalReaderContext
 }
 
 func (o *rwOptions) validate() error {
@@ -116,6 +118,12 @@ func DefaultReaderOptions() *rwOptions {
 func WithCollectionID(collID int64) RwOption {
 	return func(options *rwOptions) {
 		options.collectionID = collID
+	}
+}
+
+func WithCollectionProperties(properties []*commonpb.KeyValuePair) RwOption {
+	return func(options *rwOptions) {
+		options.collectionProperties = properties
 	}
 }
 
@@ -191,6 +199,32 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
+	}
+}
+
+func buildPackedPluginContext(
+	properties []*commonpb.KeyValuePair,
+	collectionID int64,
+	explicit *indexcgopb.StoragePluginContext,
+) *indexcgopb.StoragePluginContext {
+	if explicit != nil {
+		return explicit
+	}
+	if !hookutil.IsClusterEncryptionEnabled() {
+		return nil
+	}
+	ez := hookutil.GetEzByCollProperties(properties, collectionID)
+	if ez == nil {
+		return nil
+	}
+	unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+	if len(unsafe) == 0 {
+		return nil
+	}
+	return &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: ez.EzID,
+		CollectionId:     ez.CollectionID,
+		EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 	}
 }
 
@@ -283,30 +317,15 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		return nil, err
 	}
 
-	binlogReaderOpts := []BinlogReaderOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
-			pluginContext = rwOptions.pluginContext
-		} else {
+	switch rwOptions.version {
+	case StorageV1:
+		binlogReaderOpts := []BinlogReaderOption{}
+		if hookutil.IsClusterEncryptionEnabled() && rwOptions.pluginContext == nil {
 			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
 			if ez != nil {
 				binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
-
-				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-				if len(unsafe) > 0 {
-					pluginContext = &indexcgopb.StoragePluginContext{
-						EncryptionZoneId: ez.EzID,
-						CollectionId:     ez.CollectionID,
-						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-					}
-				}
 			}
 		}
-	}
-	switch rwOptions.version {
-	case StorageV1:
 		var blobsReader ChunkedBlobsReader
 		blobsReader, err = makeBlobsReader(ctx, binlogs, rwOptions.downloader)
 		if err != nil {
@@ -332,6 +351,11 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			}
 		}
 		// FIXME: add needed fields support
+		pluginContext := buildPackedPluginContext(
+			schema.GetProperties(),
+			rwOptions.collectionID,
+			rwOptions.pluginContext,
+		)
 		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
@@ -351,25 +375,11 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 		return nil, err
 	}
 
-	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
-			pluginContext = rwOptions.pluginContext
-		} else {
-			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
-			if ez != nil {
-				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-				if len(unsafe) > 0 {
-					pluginContext = &indexcgopb.StoragePluginContext{
-						EncryptionZoneId: ez.EzID,
-						CollectionId:     ez.CollectionID,
-						EncryptionKey:    string(unsafe),
-					}
-				}
-			}
-		}
-	}
+	pluginContext := buildPackedPluginContext(
+		schema.GetProperties(),
+		rwOptions.collectionID,
+		rwOptions.pluginContext,
+	)
 	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize,
 		rwOptions.storageConfig, pluginContext, option...)
 }
@@ -474,6 +484,7 @@ func NewDeltalogWriter(
 		return NewLegacyDeltalogWriter(collectionID, partitionID, segmentID, logID, pkType, rwOptions.uploader, path)
 	case StorageV2:
 		schema := &schemapb.CollectionSchema{
+			Properties: rwOptions.collectionProperties,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      0,
@@ -486,11 +497,16 @@ func NewDeltalogWriter(
 				},
 			},
 		}
+		pluginContext := buildPackedPluginContext(
+			rwOptions.collectionProperties,
+			collectionID,
+			rwOptions.pluginContext,
+		)
 		bucketName := rwOptions.storageConfig.BucketName
 		return NewPackedRecordWriter(bucketName, []string{path}, schema,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize,
 			[]storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{0, common.TimeStampField}}},
-			rwOptions.storageConfig, nil)
+			rwOptions.storageConfig, pluginContext)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
@@ -521,6 +537,7 @@ func NewDeltalogReader(
 	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
+			Properties: rwOptions.collectionProperties,
 			Fields: []*schemapb.FieldSchema{
 				pkField,
 				{
@@ -530,6 +547,11 @@ func NewDeltalogReader(
 				},
 			},
 		}
+		pluginContext := buildPackedPluginContext(
+			rwOptions.collectionProperties,
+			rwOptions.collectionID,
+			rwOptions.pluginContext,
+		)
 		return &IterativeRecordReader{
 			iterate: func() (RecordReader, error) {
 				if pathPos >= len(paths) {
@@ -537,7 +559,7 @@ func NewDeltalogReader(
 				}
 				path := paths[pathPos]
 				pathPos++
-				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil)
+				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 			},
 		}, nil
 	default:

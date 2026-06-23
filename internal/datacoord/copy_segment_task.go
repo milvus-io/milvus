@@ -570,6 +570,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			ManifestPath:         sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
 			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
 			IsExternalCollection: isExternalCollection,
+			CutoffTs:             job.GetCutoffTs(),
 		}
 		sources = append(sources, source)
 
@@ -606,6 +607,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 				}
 			}
 		}
+
 		// Build target with IDs and buildID mappings
 		target := &datapb.CopySegmentTarget{
 			CollectionId: job.GetCollectionId(),
@@ -635,6 +637,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		Targets:       targets,
 		StorageConfig: createStorageConfig(),
 		TaskSlot:      task.GetTaskSlot(),
+		Schema:        sourceSchema,
 	}, nil
 }
 
@@ -695,6 +698,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
 			operators := []UpdateOperator{op1, op2, op3}
+			if result.GetUpdateNumRows() {
+				operators = append(operators, UpdateImportedRows(result.GetSegmentId(), result.GetImportedRows()))
+			}
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}

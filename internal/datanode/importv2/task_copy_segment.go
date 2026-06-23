@@ -391,6 +391,10 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 		source,
 		target,
 		logFields,
+		CopySegmentFileOptions{
+			Schema:        t.req.GetSchema(),
+			StorageConfig: t.req.GetStorageConfig(),
+		},
 	)
 
 	// Step 3: Always record copied files (even on failure, for potential cleanup)

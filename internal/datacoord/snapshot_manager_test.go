@@ -1806,7 +1806,7 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err := sm.createRestoreJob(ctx, int64(200), map[string]string{}, map[int64]int64{}, snapshotData, int64(42), expectedPinID)
+	err := sm.createRestoreJob(ctx, int64(200), map[string]string{}, map[int64]int64{}, snapshotData, int64(42), expectedPinID, 0)
 	assert.NoError(t, err)
 	require.NotNil(t, captured, "AddJob must be invoked")
 	assert.Equal(t, expectedPinID, captured.GetPinId(), "PinId must be propagated verbatim to the persisted job")
@@ -1872,7 +1872,7 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7))
+	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7), 0)
 	require.NoError(t, err)
 	assert.True(t, addJobCalled)
 }
@@ -1924,7 +1924,7 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7))
+	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), 0)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "alloc segment IDs failed")
 	assert.False(t, addJobCalled, "AddJob must not be called when segment-ID allocation fails")
@@ -2169,6 +2169,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		snapshotData *SnapshotData,
 		jobID int64,
 		pinID int64,
+		cutoffTs uint64,
 	) error {
 		assert.Equal(t, int64(200), collectionID)
 		assert.Equal(t, int64(12345), jobID)
@@ -2411,6 +2412,7 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 		snapshotData *SnapshotData,
 		jobID int64,
 		pinID int64,
+		cutoffTs uint64,
 	) error {
 		return expectedErr
 	}).Build()

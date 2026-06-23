@@ -124,6 +124,41 @@ func waitForAllIndexesBuilt(ctx context.Context, mc *base.MilvusClient, collName
 	return fmt.Errorf("timeout waiting for indexes to be built on collection %s", collName)
 }
 
+func insertSnapshotCutoffRows(t *testing.T, ctx context.Context, mc *base.MilvusClient, collName string, offset, numRows, dim int) {
+	t.Helper()
+
+	ids := make([]int64, numRows)
+	vectors := make([][]float32, numRows)
+	for i := 0; i < numRows; i++ {
+		ids[i] = int64(offset + i)
+		vectors[i] = make([]float32, dim)
+		for j := 0; j < dim; j++ {
+			vectors[i][j] = float32(offset+i+j) * 0.001
+		}
+	}
+
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(
+		column.NewColumnInt64(common.DefaultFastPk, ids),
+		column.NewColumnFloatVector(common.DefaultFastVector, dim, vectors),
+	))
+	common.CheckErr(t, err, true)
+}
+
+func querySnapshotCount(t *testing.T, ctx context.Context, mc *base.MilvusClient, collName string, expr string) int64 {
+	t.Helper()
+
+	queryOpt := client.NewQueryOption(collName).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong)
+	if expr != "" {
+		queryOpt.WithFilter(expr)
+	}
+	queryRes, err := mc.Query(ctx, queryOpt)
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	return count
+}
+
 // TestCreateSnapshot tests creating a snapshot for a collection
 func TestCreateSnapshot(t *testing.T) {
 	t.Parallel()
@@ -172,6 +207,73 @@ func TestCreateSnapshot(t *testing.T) {
 	dropOpt := client.NewDropSnapshotOption(snapshotName, collName)
 	err = mc.DropSnapshot(ctx, dropOpt)
 	common.CheckErr(t, err, true)
+}
+
+func TestSnapshotRestoreWithSnapshotCreateTsCutoff(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const (
+		dim               = 16
+		preCutoffN        = 300
+		postCutoffN       = 50
+		postCutoffDeleteN = 10
+	)
+
+	collName := common.GenRandomString(snapshotPrefix, 6)
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
+
+	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, dim).WithAutoID(false))
+	common.CheckErr(t, err, true)
+
+	insertSnapshotCutoffRows(t, ctx, mc, collName, 0, preCutoffN, dim)
+	err = flushWithRetry(ctx, mc, collName)
+	common.CheckErr(t, err, true)
+
+	snapshotName := fmt.Sprintf("cutoff_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, collName))
+	})
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("snapshot restore cutoff test"))
+	common.CheckErr(t, err, true)
+
+	insertSnapshotCutoffRows(t, ctx, mc, collName, preCutoffN, postCutoffN, dim)
+	deletedIDs := make([]int64, postCutoffDeleteN)
+	for i := range deletedIDs {
+		deletedIDs[i] = int64(i)
+	}
+	deleteRes, err := mc.Delete(ctx, client.NewDeleteOption(collName).WithInt64IDs(common.DefaultFastPk, deletedIDs))
+	common.CheckErr(t, err, true)
+	require.Equal(t, int64(postCutoffDeleteN), deleteRes.DeleteCount)
+	err = flushWithRetry(ctx, mc, collName)
+	common.CheckErr(t, err, true)
+
+	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
+	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName)
+	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobID, time.Minute)
+	common.CheckErr(t, err, true)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	require.Equal(t, int64(preCutoffN), querySnapshotCount(t, ctx, mc, restoredCollName, ""))
+	require.Equal(t, int64(0), querySnapshotCount(t, ctx, mc, restoredCollName, fmt.Sprintf("%s >= %d", common.DefaultFastPk, preCutoffN)))
+	require.Equal(t, int64(preCutoffN), querySnapshotCount(t, ctx, mc, restoredCollName, fmt.Sprintf("%s < %d", common.DefaultFastPk, preCutoffN)))
+	require.Equal(t, int64(postCutoffDeleteN), querySnapshotCount(t, ctx, mc, restoredCollName, fmt.Sprintf("%s < %d", common.DefaultFastPk, postCutoffDeleteN)))
 }
 
 // TestSnapshotRestoreWithMultiSegment tests the complete snapshot restore workflow with data operations
