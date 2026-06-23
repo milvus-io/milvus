@@ -1379,7 +1379,6 @@ func (sd *shardDelegator) Close() {
 // return an error status
 func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersions map[int64]int64) {
 	colID := sd.Collection()
-	log := mlog.With()
 	for partID, newVersion := range partStatsVersions {
 		var curStats *storage.PartitionStatsSnapshot
 		var exist bool
@@ -1389,7 +1388,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 			curStats, exist = sd.partitionStats[partID]
 		}()
 		if exist && curStats != nil && curStats.Version >= newVersion {
-			log.RatedWarn(ctx, rate.Limit(60), "Input partition stats' version is less or equal than current partition stats, skip",
+			mlog.RatedWarn(ctx, rate.Limit(60), "Input partition stats' version is less or equal than current partition stats, skip",
 				mlog.Int64("partID", partID),
 				mlog.Int64("curVersion", curStats.Version),
 				mlog.Int64("inputVersion", newVersion),

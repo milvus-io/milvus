@@ -155,15 +155,16 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 	Register(&Handler{
 		Path: RouteTriggerStopPath,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			ctx := req.Context()
 			role := req.URL.Query().Get("role")
-			mlog.Info(context.TODO(), "start to trigger component stop", mlog.String("role", role))
+			mlog.Info(ctx, "start to trigger component stop", mlog.String("role", role))
 			if err := triggerComponentStop(role); err != nil {
-				mlog.Warn(context.TODO(), "failed to trigger component stop", mlog.Err(err))
+				mlog.Warn(ctx, "failed to trigger component stop", mlog.Err(err))
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to trigger component stop, %s"}`, err.Error())
 				return
 			}
-			mlog.Info(context.TODO(), "finish to trigger component stop", mlog.String("role", role))
+			mlog.Info(ctx, "finish to trigger component stop", mlog.String("role", role))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
@@ -175,15 +176,16 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 	Register(&Handler{
 		Path: RouteCheckComponentReady,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			ctx := req.Context()
 			role := req.URL.Query().Get("role")
-			mlog.Info(context.TODO(), "start to check component ready", mlog.String("role", role))
+			mlog.Info(ctx, "start to check component ready", mlog.String("role", role))
 			if err := checkActive(role); err != nil {
-				mlog.Warn(context.TODO(), "failed to check component ready", mlog.Err(err))
+				mlog.Warn(ctx, "failed to check component ready", mlog.Err(err))
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to to check component ready, %s"}`, err.Error())
 				return
 			}
-			mlog.Info(context.TODO(), "finish to check component ready", mlog.String("role", role))
+			mlog.Info(ctx, "finish to check component ready", mlog.String("role", role))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},

@@ -333,7 +333,7 @@ func (delta *SegmentTaskDelta) Add(task *SegmentTask) {
 	defer delta.mu.Unlock()
 
 	if _, ok := delta.records[task.ID()]; ok {
-		mlog.Warn(context.TODO(), "segment task already exists in delta cache",
+		mlog.Warn(task.Context(), "segment task already exists in delta cache",
 			mlog.Int64("collectionID", task.CollectionID()),
 			mlog.Int64("replicaID", task.ReplicaID()),
 			mlog.Int64("taskID", task.ID()))
@@ -363,7 +363,7 @@ func (delta *SegmentTaskDelta) Sub(task *SegmentTask) {
 	defer delta.mu.Unlock()
 
 	if _, ok := delta.records[task.ID()]; !ok {
-		mlog.Warn(context.TODO(), "segment task does not exist in delta cache",
+		mlog.Warn(task.Context(), "segment task does not exist in delta cache",
 			mlog.Int64("collectionID", task.CollectionID()),
 			mlog.Int64("replicaID", task.ReplicaID()),
 			mlog.Int64("taskID", task.ID()))
@@ -448,7 +448,7 @@ func (delta *ChannelTaskDelta) Add(task *ChannelTask) {
 	defer delta.mu.Unlock()
 
 	if delta.taskIDRecords.Contain(task.ID()) {
-		mlog.Warn(context.TODO(), "channel task already exists in delta cache",
+		mlog.Warn(task.Context(), "channel task already exists in delta cache",
 			mlog.Int64("collectionID", task.CollectionID()),
 			mlog.Int64("replicaID", task.ReplicaID()),
 			mlog.Int64("taskID", task.ID()))
@@ -474,7 +474,7 @@ func (delta *ChannelTaskDelta) Sub(task *ChannelTask) {
 	defer delta.mu.Unlock()
 
 	if !delta.taskIDRecords.Contain(task.ID()) {
-		mlog.Warn(context.TODO(), "channel task does not exist in delta cache",
+		mlog.Warn(task.Context(), "channel task does not exist in delta cache",
 			mlog.Int64("collectionID", task.CollectionID()),
 			mlog.Int64("replicaID", task.ReplicaID()),
 			mlog.Int64("taskID", task.ID()))
@@ -1396,15 +1396,13 @@ func WrapTaskLog(task Task, fields ...mlog.Field) []mlog.Field {
 }
 
 func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error {
-	log := mlog.With()
-
 	// Get replica, but only fail if we need it for RO node check
 	// NilReplica (ID=-1) is used for reduce-only tasks like unsubscribe channel
 	var replica *meta.Replica
 	if task.ReplicaID() != -1 {
 		replica = scheduler.meta.Get(scheduler.ctx, task.ReplicaID())
 		if replica == nil {
-			log.Warn(task.Context(), "task stale due to replica not found", mlog.String("task", task.String()))
+			mlog.Warn(task.Context(), "task stale due to replica not found", mlog.String("task", task.String()))
 			return merr.WrapErrReplicaNotFound(task.ReplicaID())
 		}
 	}
@@ -1423,7 +1421,7 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 				meta.WithSegmentID(segmentTask.SegmentID()),
 			)
 			if len(existsInDist) > 0 {
-				log.Info(task.Context(), "task stale due to segment already loaded in dist",
+				mlog.Info(task.Context(), "task stale due to segment already loaded in dist",
 					mlog.String("task", task.String()),
 					mlog.Int64("segmentID", segmentTask.SegmentID()))
 				return merr.WrapErrServiceInternal("segment already loaded in dist")
@@ -1449,17 +1447,17 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 
 		nodeInfo := scheduler.nodeMgr.Get(targetNode)
 		if nodeInfo == nil {
-			log.Warn(task.Context(), "task stale due to node not found", mlog.String("task", task.String()), mlog.Int64("nodeID", targetNode))
+			mlog.Warn(task.Context(), "task stale due to node not found", mlog.String("task", task.String()), mlog.Int64("nodeID", targetNode))
 			return merr.WrapErrNodeNotFound(targetNode)
 		}
 		if action.Type() == ActionTypeGrow {
 			if nodeInfo.IsStoppingState() {
-				log.Warn(task.Context(), "task stale due to node offline", mlog.String("task", task.String()), mlog.Int64("nodeID", targetNode))
+				mlog.Warn(task.Context(), "task stale due to node offline", mlog.String("task", task.String()), mlog.Int64("nodeID", targetNode))
 				return merr.WrapErrNodeOffline(targetNode)
 			}
 
 			if replica != nil && (replica.ContainRONode(targetNode) || replica.ContainROSQNode(targetNode)) {
-				log.Warn(task.Context(), "task stale due to node becomes ro node", mlog.String("task", task.String()), mlog.Int64("nodeID", targetNode))
+				mlog.Warn(task.Context(), "task stale due to node becomes ro node", mlog.String("task", task.String()), mlog.Int64("nodeID", targetNode))
 				return merr.WrapErrNodeStateUnexpected(targetNode, "node becomes ro node")
 			}
 		}
