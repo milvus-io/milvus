@@ -33,8 +33,8 @@ type Broadcaster interface {
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 
 	// GetPendingCreateCollectionResources returns collection ID → file resource IDs
-	// for all pending CreateCollection broadcast tasks that haven't completed
-	// their ack callback yet. Used during recovery to rebuild file resource refCnt.
+	// for all pending schema broadcast tasks that haven't completed their ack
+	// callback yet. Used during recovery to rebuild file resource refCnt.
 	GetPendingCreateCollectionResources() map[int64][]int64
 
 	// Close closes the broadcaster.

@@ -373,8 +373,8 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 }
 
 // GetPendingCreateCollectionResources returns collection ID → file resource IDs
-// for all non-tombstone CreateCollection broadcast tasks. Used during recovery to
-// rebuild file resource refCnt for collections whose AddCollection hasn't run yet.
+// for all non-tombstone schema broadcast tasks. Used during recovery to rebuild
+// file resource refCnt for resources referenced by pending schema changes.
 func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64][]int64 {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
@@ -384,17 +384,29 @@ func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64]
 		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 			continue
 		}
-		if task.msg.MessageType() != message.MessageTypeCreateCollection {
+		switch task.msg.MessageType() {
+		case message.MessageTypeCreateCollection:
+			createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
+			if err != nil {
+				continue
+			}
+			body := createMsg.MustBody()
+			ids := body.CollectionSchema.GetFileResourceIds()
+			if len(ids) > 0 {
+				result[createMsg.Header().CollectionId] = ids
+			}
+		case message.MessageTypeAlterCollectionV2:
+			alterMsg, err := message.AsMutableAlterCollectionMessageV2(task.msg)
+			if err != nil {
+				continue
+			}
+			schema := alterMsg.MustBody().GetUpdates().GetSchema()
+			ids := schema.GetFileResourceIds()
+			if len(ids) > 0 {
+				result[alterMsg.Header().CollectionId] = ids
+			}
+		default:
 			continue
-		}
-		createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
-		if err != nil {
-			continue
-		}
-		body := createMsg.MustBody()
-		ids := body.CollectionSchema.GetFileResourceIds()
-		if len(ids) > 0 {
-			result[createMsg.Header().CollectionId] = ids
 		}
 	}
 	return result

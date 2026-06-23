@@ -239,45 +239,55 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		}
 	}
 
-	// validate analyzer params at any streaming node
-	// and set file resource ids to schema
-	if len(analyzerInfos) > 0 {
-		err := retry.Do(ctx, func() error {
-			if t.fileResourceObserver == nil {
-				return nil
-			}
-			if err := t.fileResourceObserver.CheckAllQnReady(); err != nil {
-				return err
-			}
-			return nil
-		}, retry.Attempts(10), retry.Sleep(3*time.Second))
-		if err != nil {
+	fileResourceIds, err := t.Core.validateAnalyzerInfos(ctx, analyzerInfos)
+	if err != nil {
+		return err
+	}
+	schema.FileResourceIds = fileResourceIds
+
+	// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
+	// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
+	if len(schema.FileResourceIds) > 0 {
+		if err := t.meta.IncFileResourceRefCnt(schema.FileResourceIds); err != nil {
 			return err
 		}
-
-		resp, err := t.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
-			AnalyzerInfos: analyzerInfos,
-		})
-		if err != nil {
-			return err
-		}
-
-		if err := merr.Error(resp.GetStatus()); err != nil {
-			return err
-		}
-		schema.FileResourceIds = resp.GetResourceIds()
-
-		// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
-		// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
-		if len(schema.FileResourceIds) > 0 {
-			if err := t.meta.IncFileResourceRefCnt(schema.FileResourceIds); err != nil {
-				return err
-			}
-			t.heldFileResourceIds = schema.FileResourceIds
-		}
+		t.heldFileResourceIds = schema.FileResourceIds
 	}
 
 	return validateFieldDataType(schema.GetFields())
+}
+
+func (c *Core) validateAnalyzerInfos(ctx context.Context, analyzerInfos []*querypb.AnalyzerInfo) ([]int64, error) {
+	if len(analyzerInfos) == 0 {
+		return nil, nil
+	}
+
+	// validate analyzer params at any streaming node
+	// and set file resource ids to schema
+	err := retry.Do(ctx, func() error {
+		if c.fileResourceObserver == nil {
+			return nil
+		}
+		if err := c.fileResourceObserver.CheckAllQnReady(); err != nil {
+			return err
+		}
+		return nil
+	}, retry.Attempts(10), retry.Sleep(3*time.Second))
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.mixCoord.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
+		AnalyzerInfos: analyzerInfos,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		return nil, err
+	}
+	return resp.GetResourceIds(), nil
 }
 
 func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
@@ -922,14 +932,36 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	return nil
 }
 
+func collectAnalyzerInfosForAlter(collSchema *schemapb.CollectionSchema) ([]*querypb.AnalyzerInfo, error) {
+	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
+	for _, field := range collSchema.GetFields() {
+		if err := validateAnalyzerWithInactive(collSchema, field, &analyzerInfos); err != nil {
+			return nil, err
+		}
+	}
+	return analyzerInfos, nil
+}
+
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
+	return validateAnalyzerInternal(collSchema, fieldSchema, analyzerInfos, false)
+}
+
+func validateAnalyzerWithInactive(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
+	return validateAnalyzerInternal(collSchema, fieldSchema, analyzerInfos, true)
+}
+
+func validateAnalyzerInternal(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo, validateInactive bool) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	if !h.EnableMatch() && !typeutil.IsBm25FunctionInputField(collSchema, fieldSchema) {
+	active := h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
+	if !active && !validateInactive {
 		return nil
 	}
 
-	if !h.EnableAnalyzer() {
+	if active && !h.EnableAnalyzer() {
 		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
+	}
+	if !h.EnableAnalyzer() {
+		return nil
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {

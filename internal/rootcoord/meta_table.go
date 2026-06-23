@@ -1091,6 +1091,18 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		}
 	}
 
+	if fieldModify {
+		_, removedFileResourceIds := diffFileResourceIDs(oldColl.FileResourceIds, newColl.FileResourceIds)
+		for _, fileResourceID := range removedFileResourceIds {
+			if mt.fileResourceRefCnt[fileResourceID] > 0 {
+				mt.fileResourceRefCnt[fileResourceID]--
+			} else {
+				log.Warn("AlterCollection: file resource refCnt underflow",
+					zap.Int64("collectionID", newColl.CollectionID), zap.Int64("fileResourceID", fileResourceID))
+			}
+		}
+	}
+
 	mt.names.remove(oldColl.DBName, oldColl.Name)
 	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
 	mt.collID2Meta[header.CollectionId] = newColl
@@ -2499,16 +2511,24 @@ func (mt *MetaTable) DecFileResourceRefCnt(ids []int64) {
 }
 
 // RecoverFileResourceRefCnt re-increments refCnt for file resources referenced by
-// pending CreateCollection broadcast tasks whose collections have not yet been
-// persisted. Called during startup before rootcoord becomes Healthy.
+// pending schema broadcast tasks. CreateCollection tasks may not have persisted
+// their collections yet; AlterCollection tasks may reference resources that are
+// not in the persisted collection schema yet. Called during startup before
+// rootcoord becomes Healthy.
 func (mt *MetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]int64) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	for collID, resourceIds := range pendingCollections {
-		if _, exists := mt.collID2Meta[collID]; exists {
-			continue // collection already persisted, reload already counted it
+		existingResourceIDs := map[int64]struct{}{}
+		if coll, exists := mt.collID2Meta[collID]; exists {
+			for _, id := range coll.FileResourceIds {
+				existingResourceIDs[id] = struct{}{}
+			}
 		}
 		for _, id := range resourceIds {
+			if _, exists := existingResourceIDs[id]; exists {
+				continue
+			}
 			if _, ok := mt.fileResourceID2Meta[id]; ok {
 				mt.fileResourceRefCnt[id]++
 			} else {

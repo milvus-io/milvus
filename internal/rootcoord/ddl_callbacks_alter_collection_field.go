@@ -2,17 +2,69 @@ package rootcoord
 
 import (
 	"context"
+	"strconv"
 
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func hasAnalyzerFieldParamMutation(req *milvuspb.AlterCollectionFieldRequest) bool {
+	for _, prop := range req.GetProperties() {
+		if prop.GetKey() == common.EnableAnalyzerKey || prop.GetKey() == common.AnalyzerParamKey {
+			return true
+		}
+	}
+	for _, key := range req.GetDeleteKeys() {
+		if key == common.EnableAnalyzerKey || key == common.AnalyzerParamKey {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAlterCollectionFieldAnalyzerParams(req *milvuspb.AlterCollectionFieldRequest) error {
+	for _, prop := range req.GetProperties() {
+		if prop.GetKey() != common.EnableAnalyzerKey {
+			continue
+		}
+		if _, err := strconv.ParseBool(prop.GetValue()); err != nil {
+			return merr.WrapErrParameterInvalidMsg("%s should be a boolean, but got %s", prop.GetKey(), prop.GetValue())
+		}
+	}
+	return nil
+}
+
+func getAlterCollectionField(schema *schemapb.CollectionSchema, fieldName string) *schemapb.FieldSchema {
+	for _, field := range schema.GetFields() {
+		if field.GetName() == fieldName {
+			return field
+		}
+	}
+	return nil
+}
+
+func validateAlterCollectionFieldAnalyzerMutation(schema *schemapb.CollectionSchema, fieldName string) error {
+	field := getAlterCollectionField(schema, fieldName)
+	if field == nil {
+		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
+	}
+	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() || typeutil.IsBm25FunctionInputField(schema, field) {
+		return merr.WrapErrParameterInvalidMsg(
+			"can not alter analyzer params for field %s after text match is enabled or BM25 function depends on it",
+			fieldName,
+		)
+	}
+	return nil
+}
 
 func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) error {
 	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
@@ -66,6 +118,30 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
+	}
+
+	if hasAnalyzerFieldParamMutation(req) {
+		if err := validateAlterCollectionFieldAnalyzerParams(req); err != nil {
+			return err
+		}
+		if err := validateAlterCollectionFieldAnalyzerMutation(schema, req.GetFieldName()); err != nil {
+			return err
+		}
+		analyzerInfos, err := collectAnalyzerInfosForAlter(schema)
+		if err != nil {
+			return err
+		}
+		fileResourceIds, err := c.validateAnalyzerInfos(ctx, analyzerInfos)
+		if err != nil {
+			return err
+		}
+		schema.FileResourceIds = fileResourceIds
+		addedFileResourceIds, _ := diffFileResourceIDs(coll.FileResourceIds, schema.FileResourceIds)
+		if len(addedFileResourceIds) > 0 {
+			if err := c.meta.IncFileResourceRefCnt(addedFileResourceIds); err != nil {
+				return err
+			}
+		}
 	}
 
 	header := &messagespb.AlterCollectionMessageHeader{
