@@ -713,6 +713,12 @@ func InitGeometryCache(params *paramtable.ComponentParam) error {
 	return nil
 }
 
+func InitGISSplitFusion(params *paramtable.ComponentParam) error {
+	enableGISSplitFusion := C.bool(params.QueryNodeCfg.EnableGISSplitFusion.GetAsBool())
+	C.SegcoreSetEnableGISSplitFusion(enableGISSplitFusion)
+	return nil
+}
+
 func CleanRemoteChunkManager() {
 	C.CleanRemoteChunkManagerSingleton()
 }
