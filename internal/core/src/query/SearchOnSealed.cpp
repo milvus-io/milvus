@@ -98,6 +98,7 @@ SearchOnSealedIndex(const Schema& schema,
 
     const auto& offset_mapping = vec_index->GetOffsetMapping();
     const bool is_element_level_search = search_info.array_offsets_ != nullptr;
+    search_result.element_level_ = is_element_level_search;
     TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
     const auto has_offset_mapping =
@@ -201,6 +202,7 @@ SearchOnSealedColumn(const Schema& schema,
     bool is_element_level_search =
         field.get_data_type() == DataType::VECTOR_ARRAY &&
         search_info.array_offsets_ != nullptr;
+    result.element_level_ = is_element_level_search;
     TargetBitmap transformed_bitset;
     BitsetView search_bitview = bitview;
     const auto has_offset_mapping =
@@ -339,6 +341,7 @@ SearchOnSealedColumn(const Schema& schema,
                     search_info.array_offsets_.get());
             result.seg_offsets_ = std::move(seg_offsets);
             result.element_indices_ = std::move(elem_indicies);
+            result.element_level_ = true;
         } else {
             if (has_offset_mapping) {
                 offset_mapping.TransformOffsets(final_qr.mutable_offsets());

@@ -8,6 +8,7 @@ from base.testbase import TestBase
 from faker import Faker
 from pymilvus import Collection
 from sklearn import preprocessing
+from utils.constant import CaseLabel
 from utils.util_log import test_log as logger
 from utils.utils import (
     en_vocabularies_distribution,
@@ -33,7 +34,7 @@ index_param_map = {
 }
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestCreateIndex(TestBase):
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
     @pytest.mark.parametrize("index_type", ["AUTOINDEX", "IVF_SQ8", "HNSW"])
@@ -477,7 +478,7 @@ class TestCreateIndex(TestBase):
             assert info["index_param"]["index_type"] == index_type
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestIndexProperties(TestBase):
     """Test index properties operations"""
 
@@ -621,7 +622,7 @@ class TestIndexProperties(TestBase):
         assert rsp["code"] == 1100
 
 
-@pytest.mark.L1
+@pytest.mark.tags(CaseLabel.L1)
 class TestCreateIndexNegative(TestBase):
     @pytest.mark.parametrize("index_type", ["BIN_FLAT", "BIN_IVF_FLAT"])
     @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE"])
@@ -678,4 +679,4 @@ class TestCreateIndexNegative(TestBase):
             payload["indexParams"][0]["params"]["nlist"] = "16384"
         rsp = self.index_client.index_create(payload)
         assert rsp["code"] == 1100
-        assert "not supported" in rsp["message"]
+        assert "does not support metric type" in rsp["message"]

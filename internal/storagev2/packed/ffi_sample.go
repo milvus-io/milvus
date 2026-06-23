@@ -25,7 +25,6 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"runtime"
 	"unsafe"
 
@@ -33,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // SampleExternalFieldSizes samples rows from an external segment via Take API
@@ -52,19 +52,19 @@ func SampleExternalFieldSizes(
 	storageConfig *indexpb.StorageConfig,
 ) (map[string]int64, error) {
 	if storageConfig == nil {
-		return nil, fmt.Errorf("storageConfig is required for SampleExternalFieldSizes")
+		return nil, merr.WrapErrStorageMsg("storageConfig is required for SampleExternalFieldSizes")
 	}
 	if manifestPath == "" {
-		return nil, fmt.Errorf("manifest_path is empty for SampleExternalFieldSizes")
+		return nil, merr.WrapErrStorageMsg("manifest_path is empty for SampleExternalFieldSizes")
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return nil, merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, collectionID, externalSource, externalSpec); err != nil {
-		return nil, fmt.Errorf("inject extfs: %w", err)
+		return nil, merr.Wrap(err, "inject extfs")
 	}
 
 	cManifestPath := C.CString(manifestPath)
@@ -75,7 +75,7 @@ func SampleExternalFieldSizes(
 	if schema != nil {
 		schemaBytes, err = proto.Marshal(schema)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal collection schema: %w", err)
+			return nil, merr.WrapErrStorage(err, "failed to marshal collection schema")
 		}
 		if len(schemaBytes) > 0 {
 			cSchema.proto_blob = unsafe.Pointer(&schemaBytes[0])

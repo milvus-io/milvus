@@ -957,7 +957,7 @@ func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvusp
 	collectionNames := request.GetCollectionName()
 	if len(collectionNames) == 0 {
 		return &milvuspb.BatchDescribeCollectionResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection names cannot be empty")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names cannot be empty")),
 		}, nil
 	}
 
@@ -2818,7 +2818,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {
 		log.Warn("Failed to enqueue insert task: " + err.Error())
-		return constructFailedResponse(merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)), nil
+		return constructFailedResponse(err), nil
 	}
 
 	log.Debug("Detail of insert request in Proxy")
@@ -3760,7 +3760,9 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 
 	annField := typeutil.GetFieldByName(collectionInfo.schema.CollectionSchema, annsFieldName)
 	if annField == nil {
-		return nil, merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema")
+		// annsFieldName comes from the user's search request; a missing field is
+		// the user's input error.
+		return nil, merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema"))
 	}
 
 	if annField.GetDataType() == schemapb.DataType_ArrayOfVector {
@@ -3781,7 +3783,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	} else {
 		// Vector search: validate and fetch the vector field
 		if !typeutil.IsVectorType(annField.GetDataType()) {
-			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
+			return nil, merr.WrapErrParameterInvalidMsg("field (%s) to search is not of vector data type", annsFieldName)
 		}
 		fieldToFetch = annsFieldName
 	}
@@ -5481,11 +5483,14 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	if err := ValidateUsername(username); err != nil {
 		return merr.Status(err), nil
 	}
+	if err := ValidateUserDescription(req.GetDescription()); err != nil {
+		return merr.Status(err), nil
+	}
 	rawPassword, err := crypto.Base64Decode(req.Password)
 	if err != nil {
 		log.Error("decode password fail",
 			zap.Error(err))
-		err = errors.Wrap(err, "decode password fail")
+		err = merr.WrapErrParameterInvalidErr(err, "decode password fail")
 		return merr.Status(err), nil
 	}
 	if err = ValidatePassword(rawPassword); err != nil {
@@ -5497,7 +5502,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	if err != nil {
 		log.Error("encrypt password fail",
 			zap.Error(err))
-		err = errors.Wrap(err, "encrypt password failed")
+		err = merr.WrapErrServiceInternalErr(err, "encrypt password failed")
 		return merr.Status(err), nil
 	}
 	if req.Base == nil {
@@ -5509,6 +5514,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 		Username:          req.Username,
 		EncryptedPassword: encryptedPassword,
 		Sha256Password:    crypto.SHA256(rawPassword, req.Username),
+		Description:       req.Description,
 	}
 	result, err := node.mixCoord.CreateCredential(ctx, credInfo)
 	if err != nil { // for error like conntext timeout etc.
@@ -5531,57 +5537,69 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
-	if err != nil {
-		log.Error("decode old password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "decode old password failed")
+	if err := ValidateUserDescription(req.GetDescription()); err != nil {
 		return merr.Status(err), nil
 	}
-	rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
-	if err != nil {
-		log.Error("decode password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "decode password failed")
-		return merr.Status(err), nil
-	}
-	// valid new password
-	if err = ValidatePassword(rawNewPassword); err != nil {
-		log.Error("illegal password",
-			zap.Error(err))
+	if req.GetNewPassword() == "" && req.Description == nil {
+		err := merr.WrapErrParameterInvalidMsg("must update either password or description")
 		return merr.Status(err), nil
 	}
 
-	skipPasswordVerify := false
-	if currentUser, _ := GetCurUserFromContext(ctx); currentUser != "" {
-		for _, s := range Params.CommonCfg.SuperUsers.GetAsStrings() {
-			if s == currentUser {
-				skipPasswordVerify = true
+	updateCredReq := &internalpb.CredentialInfo{
+		Username:    req.Username,
+		Description: req.Description,
+	}
+
+	if req.GetNewPassword() != "" {
+		rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
+		if err != nil {
+			log.Error("decode old password fail",
+				zap.Error(err))
+			err = merr.WrapErrParameterInvalidErr(err, "decode old password failed")
+			return merr.Status(err), nil
+		}
+		rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
+		if err != nil {
+			log.Error("decode password fail",
+				zap.Error(err))
+			err = merr.WrapErrParameterInvalidErr(err, "decode password failed")
+			return merr.Status(err), nil
+		}
+		// valid new password
+		if err = ValidatePassword(rawNewPassword); err != nil {
+			log.Error("illegal password",
+				zap.Error(err))
+			return merr.Status(err), nil
+		}
+
+		skipPasswordVerify := false
+		if currentUser, _ := GetCurUserFromContext(ctx); currentUser != "" {
+			for _, s := range Params.CommonCfg.SuperUsers.GetAsStrings() {
+				if s == currentUser {
+					skipPasswordVerify = true
+				}
 			}
 		}
-	}
 
-	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
-		err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
-		return merr.Status(err), nil
-	}
-	// update meta data
-	encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
-	if err != nil {
-		log.Error("encrypt password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "encrypt password failed")
-		return merr.Status(err), nil
+		if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
+			err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
+			return merr.Status(err), nil
+		}
+		// update meta data
+		encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
+		if err != nil {
+			log.Error("encrypt password fail",
+				zap.Error(err))
+			err = merr.WrapErrServiceInternalErr(err, "encrypt password failed")
+			return merr.Status(err), nil
+		}
+		updateCredReq.Sha256Password = crypto.SHA256(rawNewPassword, req.Username)
+		updateCredReq.EncryptedPassword = encryptedPassword
 	}
 	if req.Base == nil {
 		req.Base = &commonpb.MsgBase{}
 	}
 	req.Base.MsgType = commonpb.MsgType_UpdateCredential
-	updateCredReq := &internalpb.CredentialInfo{
-		Username:          req.Username,
-		Sha256Password:    crypto.SHA256(rawNewPassword, req.Username),
-		EncryptedPassword: encryptedPassword,
-	}
 	result, err := node.mixCoord.UpdateCredential(ctx, updateCredReq)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("update credential fail",
@@ -5665,10 +5683,15 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	}
 
 	var roleName string
+	var description string
 	if req.Entity != nil {
 		roleName = req.Entity.Name
+		description = req.Entity.GetDescription()
 	}
 	if err := ValidateRoleName(roleName); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleDescription(description); err != nil {
 		return merr.Status(err), nil
 	}
 	if req.Base == nil {
@@ -5679,6 +5702,39 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	result, err := node.mixCoord.CreateRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to create role", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	return result, nil
+}
+
+func (node *Proxy) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterRole")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	log.Info("AlterRole", zap.Stringer("req", req))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleName(req.GetRoleName()); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleDescription(req.GetDescription()); err != nil {
+		return merr.Status(err), nil
+	}
+	if IsDefaultRole(req.GetRoleName()) {
+		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be altered", req.GetRoleName())
+		return merr.Status(err), nil
+	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_AlterRole
+
+	result, err := node.mixCoord.AlterRole(ctx, req)
+	if err != nil {
+		log.Warn("fail to alter role", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -5814,19 +5870,19 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 
 func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) error {
 	if req.Entity == nil {
-		return errors.New("the entity in the request is nil")
+		return merr.WrapErrParameterInvalidMsg("the entity in the request is nil")
 	}
 	if req.Entity.Grantor == nil {
-		return errors.New("the grantor entity in the grant entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the grantor entity in the grant entity is nil")
 	}
 	if req.Entity.Grantor.Privilege == nil {
-		return errors.New("the privilege entity in the grantor entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the privilege entity in the grantor entity is nil")
 	}
 	if err := ValidatePrivilege(req.Entity.Grantor.Privilege.Name); err != nil {
 		return err
 	}
 	if req.Entity.Object == nil {
-		return errors.New("the resource entity in the grant entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the resource entity in the grant entity is nil")
 	}
 	if err := ValidateObjectType(req.Entity.Object.Name); err != nil {
 		return err
@@ -5835,7 +5891,7 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 		return err
 	}
 	if req.Entity.Role == nil {
-		return errors.New("the object entity in the grant entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the object entity in the grant entity is nil")
 	}
 	if err := ValidateRoleName(req.Entity.Role.Name); err != nil {
 		return err
@@ -6106,8 +6162,14 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.RBACMeta == nil {
+	meta := req.GetRBACMeta()
+	if meta == nil {
 		return merr.Success(), nil
+	}
+	for _, role := range meta.GetRoles() {
+		if err := ValidateRoleDescription(role.GetDescription()); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	result, err := node.mixCoord.RestoreRBAC(ctx, req)
@@ -6698,8 +6760,11 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 
 	if !funcutil.SliceContain(resp.GetDbNames(), db) {
 		log.Info("connect failed, target database not exist")
+		// db is the caller-supplied database name; this Connect handshake builds
+		// the not-found directly (it does not go through GetDatabaseInfo's marking
+		// chokepoint), so stamp InputError here.
 		return &milvuspb.ConnectResponse{
-			Status: merr.Status(merr.WrapErrDatabaseNotFound(db)),
+			Status: merr.Status(merr.WrapErrAsInputError(merr.WrapErrDatabaseNotFound(db))),
 		}, nil
 	}
 
@@ -7477,7 +7542,13 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		return merr.WrapErrParameterMissing("start_message_id")
 	}
 
-	startMsgID := message.MustUnmarshalMessageID(req.GetStartMessageId())
+	// Unmarshal the message id without panicking: the id bytes are
+	// client-controlled, so a malformed value must be rejected as an invalid
+	// parameter rather than crashing the process.
+	startMsgID, err := message.UnmarshalMessageID(req.GetStartMessageId())
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid start_message_id: %s", err.Error())
+	}
 
 	// Use exclusive start position (dump messages AFTER start_message_id)
 	// This is appropriate for salvage scenarios where start_message_id is the last synced message
@@ -7824,7 +7895,7 @@ func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req
 	// Validate job ID
 	if req.GetJobId() == 0 {
 		return &milvuspb.GetRefreshExternalCollectionProgressResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("job_id is required")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("job_id is required")),
 		}, nil
 	}
 

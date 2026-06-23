@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"time"
 
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -295,7 +295,7 @@ func (m *externalCollectionRefreshMeta) mutateJob(
 ) (applied bool, err error) {
 	job, ok := m.jobs.Get(jobID)
 	if !ok {
-		return false, fmt.Errorf("job %d not found", jobID)
+		return false, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
 	}
 
 	m.jobLock.Lock(job.GetCollectionId())
@@ -304,7 +304,7 @@ func (m *externalCollectionRefreshMeta) mutateJob(
 	// Re-fetch after lock
 	job, ok = m.jobs.Get(jobID)
 	if !ok {
-		return false, fmt.Errorf("job %d not found", jobID)
+		return false, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
 	}
 
 	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
@@ -385,7 +385,7 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 ) (bool, error) {
 	job, ok := m.jobs.Get(jobID)
 	if !ok {
-		return false, fmt.Errorf("job %d not found", jobID)
+		return false, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
 	}
 
 	m.jobLock.Lock(job.GetCollectionId())
@@ -395,7 +395,7 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	// terminal state owns the one-time side effects.
 	job, ok = m.jobs.Get(jobID)
 	if !ok {
-		return false, fmt.Errorf("job %d not found", jobID)
+		return false, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
 	}
 	if job.GetState() == indexpb.JobState_JobStateFinished ||
 		job.GetState() == indexpb.JobState_JobStateFailed {
@@ -416,7 +416,7 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 				log.Warn("update job state after pre-apply failed",
 					zap.Int64("jobID", jobID),
 					zap.Error(saveErr))
-				return false, fmt.Errorf("pre-apply failed: %w; additionally failed to persist Failed job state: %v", err, saveErr)
+				return false, merr.Wrapf(err, "pre-apply failed; additionally failed to persist Failed job state: %v", saveErr)
 			}
 			m.jobs.Insert(jobID, cloneJob)
 			m.addToCollectionJobs(cloneJob)
@@ -613,7 +613,7 @@ func (m *externalCollectionRefreshMeta) mutateTask(
 ) (applied bool, cloned *datapb.ExternalCollectionRefreshTask, err error) {
 	task, ok := m.tasks.Get(taskID)
 	if !ok {
-		return false, nil, fmt.Errorf("task %d not found", taskID)
+		return false, nil, merr.WrapErrServiceInternalMsg("task %d not found", taskID)
 	}
 
 	m.taskLock.Lock(task.GetJobId())
@@ -622,7 +622,7 @@ func (m *externalCollectionRefreshMeta) mutateTask(
 	// Re-fetch after lock
 	task, ok = m.tasks.Get(taskID)
 	if !ok {
-		return false, nil, fmt.Errorf("task %d not found", taskID)
+		return false, nil, merr.WrapErrServiceInternalMsg("task %d not found", taskID)
 	}
 
 	cloneTask := proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)

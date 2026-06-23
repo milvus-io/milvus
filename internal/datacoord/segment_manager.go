@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -299,7 +299,7 @@ func (s *SegmentManager) genLastExpireTsForSegments() (Timestamp, error) {
 	}, retry.Attempts(Params.DataCoordCfg.AllocLatestExpireAttempt.GetAsUint()), retry.Sleep(200*time.Millisecond))
 	if allocateErr != nil {
 		log.Warn("cannot allocate latest lastExpire from rootCoord", zap.Error(allocateErr))
-		return 0, errors.New("global max expire ts is unavailable for segment manager")
+		return 0, merr.WrapErrServiceInternalMsg("global max expire ts is unavailable for segment manager")
 	}
 	return latestTs, nil
 }
@@ -466,7 +466,7 @@ func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error
 	// it's ok to use meta.GetCollection here, since collection meta is set before using segmentManager
 	collMeta := s.meta.GetCollection(collectionID)
 	if collMeta == nil {
-		return -1, fmt.Errorf("failed to get collection %d", collectionID)
+		return -1, merr.WrapErrServiceInternalMsg("failed to get collection %d", collectionID)
 	}
 	return s.estimatePolicy(collMeta.Schema)
 }

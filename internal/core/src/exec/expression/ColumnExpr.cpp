@@ -98,20 +98,19 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
-        auto data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
-            expr_->GetColumn().field_id_);
-
         int64_t processed_rows = 0;
-        const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
             auto [chunk_id,
                   chunk_offset] = [&]() -> std::pair<int64_t, int64_t> {
                 if (segment_chunk_reader_.segment_->type() ==
                     SegmentType::Growing) {
+                    const auto size_per_chunk =
+                        segment_chunk_reader_.SizePerChunk();
                     return {offset / size_per_chunk, offset % size_per_chunk};
                 } else if (segment_chunk_reader_.segment_->is_chunked() &&
-                           data_barrier > 0) {
+                           segment_chunk_reader_.segment_->num_chunk_data(
+                               expr_->GetColumn().field_id_) > 0) {
                     return segment_chunk_reader_.segment_->get_chunk_by_offset(
                         expr_->GetColumn().field_id_, offset);
                 } else {
@@ -122,8 +121,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 expr_->GetColumn().data_type_,
                 expr_->GetColumn().field_id_,
                 chunk_id,
-                data_barrier,
-                pinned_index_);
+                PinnedIndexForRawLookup());
             auto chunk_data_by_offset = cda(chunk_offset);
             if (!chunk_data_by_offset.has_value()) {
                 valid_res[processed_rows] = false;
@@ -153,7 +151,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             expr_->GetColumn().field_id_,
             current_chunk_id_,
             current_chunk_pos_,
-            pinned_index_);
+            PinnedIndexForRawLookup());
         for (int i = 0; i < real_batch_size; ++i) {
             auto data = cda();
             if (!data.has_value()) {
@@ -175,9 +173,6 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
-        auto data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
-            expr_->GetColumn().field_id_);
-
         int64_t processed_rows = 0;
         for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;
              ++chunk_id) {
@@ -190,8 +185,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 expr_->GetColumn().data_type_,
                 expr_->GetColumn().field_id_,
                 chunk_id,
-                data_barrier,
-                pinned_index_);
+                PinnedIndexForRawLookup());
 
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;

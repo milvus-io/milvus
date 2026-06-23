@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -185,9 +186,9 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		LoadType:      querypb.LoadType_LoadCollection,
-		PartitionIDs:  []int64{1001, 1002},
-		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
+		LoadType:        querypb.LoadType_LoadCollection,
+		PartitionIDs:    []int64{1001, 1002},
+		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0),
 	})
 }
 
@@ -219,15 +220,16 @@ func (s *DelegatorDataSuite) genTextCollection() {
 			},
 		},
 	}, nil, &querypb.LoadMetaInfo{
-		LoadType:      querypb.LoadType_LoadCollection,
-		PartitionIDs:  []int64{1001},
-		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
+		LoadType:        querypb.LoadType_LoadCollection,
+		PartitionIDs:    []int64{1001},
+		SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0),
 	})
 }
 
 func (s *DelegatorDataSuite) genCollectionWithFunction() {
 	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
-		Name: "TestCollection",
+		Name:    "TestCollection",
+		Version: 1,
 		Fields: []*schemapb.FieldSchema{
 			{
 				Name:         "id",
@@ -257,11 +259,12 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 			InputFieldIds:  []int64{102},
 			OutputFieldIds: []int64{101},
 		}},
-	}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
+	s.allocFunctionRunnersForTest()
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
@@ -296,6 +299,18 @@ func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
 	})
+}
+
+func (s *DelegatorDataSuite) TearDownTest() {
+	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
+}
+
+func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
+	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
+	errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, s.delegator.collection.Schema())
+	if errCh != nil {
+		s.Require().NoError(<-errCh)
+	}
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
@@ -1380,7 +1395,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			SerializedExprPlan: plan,
 			FieldId:            101,
 		}
-		avgdl, err := s.delegator.buildBM25IDF(req)
+		avgdl, err := s.delegator.buildBM25IDF(context.Background(), req)
 		s.NoError(err)
 		s.Equal(float64(1), avgdl)
 
@@ -1410,7 +1425,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 
@@ -1423,7 +1438,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			FieldId:          103, // invalid field id
 		}
 
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 
@@ -1432,7 +1447,6 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		s.NoError(err)
 
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		oldRunner := s.delegator.functionState.setFunctionRunnersForTest(map[int64]function.FunctionRunner{101: mockRunner})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1441,13 +1455,16 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock err"))
-		defer s.delegator.functionState.setFunctionRunnersForTest(oldRunner)
+		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
+			return true, run(schemapb.FunctionType_BM25, mockRunner)
+		}).Build()
+		defer patch.UnPatch()
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 
@@ -1456,7 +1473,6 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		s.NoError(err)
 
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		oldRunner := s.delegator.functionState.setFunctionRunnersForTest(map[int64]function.FunctionRunner{101: mockRunner})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1465,13 +1481,16 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
-		defer s.delegator.functionState.setFunctionRunnersForTest(oldRunner)
+		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
+			return true, run(schemapb.FunctionType_BM25, mockRunner)
+		}).Build()
+		defer patch.UnPatch()
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 
@@ -1480,7 +1499,6 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		s.NoError(err)
 
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		oldRunner := s.delegator.functionState.setFunctionRunnersForTest(map[int64]function.FunctionRunner{103: mockRunner})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1489,13 +1507,16 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{&schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})}}}, nil)
-		defer s.delegator.functionState.setFunctionRunnersForTest(oldRunner)
+		patch := mockey.Mock(function.RunWithRunner).To(func(ctx context.Context, collectionID int64, schemaVersion int32, outputFieldID int64, run func(schemapb.FunctionType, function.FunctionRunner) error) (bool, error) {
+			return true, run(schemapb.FunctionType_BM25, mockRunner)
+		}).Build()
+		defer patch.UnPatch()
 
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          103, // invalid field
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 		log.Info("test", zap.Error(err))
 	})
@@ -1518,7 +1539,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(context.Background(), req)
 		s.Error(err)
 	})
 }

@@ -253,7 +253,7 @@ func TestHeartbeatMetricsRecording(t *testing.T) {
 	}
 
 	// Act: Handle distribution response
-	handler.handleDistResp(ctx, resp, false)
+	handler.handleDistResp(ctx, resp)
 
 	// Assert: Verify our specific metric was recorded with the expected value
 	finalMetricValue := getMetricValueForNode(fmt.Sprint(nodeID))
@@ -289,6 +289,40 @@ func getMetricValueForNode(nodeID string) float64 {
 		}
 	}
 	return 0 // Return 0 if metric not found (default value)
+}
+
+func TestDispatchLoopUsesDispatchInterval(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.QueryCoordCfg.DistPullInterval.Key, "60000")
+	params.Save(params.QueryCoordCfg.DispatchInterval.Key, "10")
+	defer params.Reset(params.QueryCoordCfg.DistPullInterval.Key)
+	defer params.Reset(params.QueryCoordCfg.DispatchInterval.Key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dispatched := atomic.NewBool(false)
+	scheduler := task.NewMockScheduler(t)
+	scheduler.EXPECT().Dispatch(int64(1)).Run(func(nodeID int64) {
+		dispatched.Store(true)
+		cancel()
+	})
+
+	handler := &distHandler{
+		nodeID:    1,
+		c:         make(chan struct{}),
+		scheduler: scheduler,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.startDispatchLoop(ctx)
+	}()
+
+	assert.Eventually(t, dispatched.Load, time.Second, 10*time.Millisecond)
+	<-done
 }
 
 func TestDistHandlerSuite(t *testing.T) {

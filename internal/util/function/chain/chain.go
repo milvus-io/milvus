@@ -117,12 +117,12 @@ func (fc *FuncChain) addWithError(op Operator, err error) *FuncChain {
 func (fc *FuncChain) Validate() error {
 	// Check for errors accumulated during fluent API calls
 	if fc.buildError != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("chain build error: %v", fc.buildError))
+		return merr.WrapErrServiceInternalMsg("chain build error: %v", fc.buildError)
 	}
 
 	// Stage is required
 	if fc.stage == "" {
-		return merr.WrapErrParameterInvalidMsg("chain stage is required")
+		return merr.WrapErrParameterMissingMsg("chain stage is required")
 	}
 
 	// Validate all operators including stage compatibility
@@ -134,13 +134,13 @@ func (fc *FuncChain) Validate() error {
 func (fc *FuncChain) validateOperators(stage string) error {
 	for i, op := range fc.operators {
 		if op == nil {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("operator[%d] is nil", i))
+			return merr.WrapErrServiceInternalMsg("operator[%d] is nil", i)
 		}
 
 		// Validate MapOp
 		if mapOp, ok := op.(*MapOp); ok {
 			if mapOp.function == nil {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("operator[%d] MapOp has nil function", i))
+				return merr.WrapErrServiceInternalMsg("operator[%d] MapOp has nil function", i)
 			}
 			if !mapOp.function.IsRunnable(stage) {
 				return merr.WrapErrParameterInvalidMsg("operator[%d] function %q does not support stage %q",
@@ -151,7 +151,7 @@ func (fc *FuncChain) validateOperators(stage string) error {
 		// Validate FilterOp
 		if filterOp, ok := op.(*FilterOp); ok {
 			if filterOp.function == nil {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("operator[%d] FilterOp has nil function", i))
+				return merr.WrapErrServiceInternalMsg("operator[%d] FilterOp has nil function", i)
 			}
 			if !filterOp.function.IsRunnable(stage) {
 				return merr.WrapErrParameterInvalidMsg("operator[%d] filter function %q does not support stage %q",
@@ -176,7 +176,7 @@ func (fc *FuncChain) Execute(input *DataFrame) (*DataFrame, error) {
 // Supports multiple inputs when the first operator is MergeOp.
 func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFrame) (*DataFrame, error) {
 	if len(inputs) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("at least one input is required")
+		return nil, merr.WrapErrParameterMissingMsg("at least one input is required")
 	}
 
 	// Validate chain before execution
@@ -195,7 +195,7 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 			var err error
 			result, err = mergeOp.ExecuteMulti(funcCtx, inputs)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("%s failed: %v", mergeOp.Name(), err))
+				return nil, merr.Wrapf(err, "%s failed", mergeOp.Name())
 			}
 			startIdx = 1
 		} else {
@@ -226,7 +226,7 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 		newResult, err := op.Execute(funcCtx, result)
 		if err != nil {
 			fc.releaseIfOwned(result, inputs)
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("%s failed: %v", op.Name(), err))
+			return nil, merr.Wrapf(err, "%s failed", op.Name())
 		}
 
 		// Release intermediate results (but not the original inputs)
@@ -346,7 +346,7 @@ func (fc *FuncChain) GroupBy(groupByField string, groupSize, limit, offset int64
 //	chain.GroupByWithScorer("category", 3, 10, 0, GroupScorerAvg)  // use average score for group ranking
 func (fc *FuncChain) GroupByWithScorer(groupByField string, groupSize, limit, offset int64, scorer GroupScorer) *FuncChain {
 	if groupByField == "" {
-		return fc.addWithError(nil, merr.WrapErrParameterInvalidMsg("groupByField cannot be empty"))
+		return fc.addWithError(nil, merr.WrapErrParameterMissingMsg("groupByField cannot be empty"))
 	}
 	if groupSize <= 0 {
 		return fc.addWithError(nil, merr.WrapErrParameterInvalidMsg("groupSize must be positive, got %d", groupSize))

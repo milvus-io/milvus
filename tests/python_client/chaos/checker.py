@@ -11,15 +11,18 @@ from collections import Counter
 from datetime import UTC, datetime
 from enum import Enum
 from time import sleep
+from urllib.parse import urlparse
 
 import pandas as pd
 import pytest
+import requests
 from chaos import constants
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CheckTasks
 from common.milvus_sys import MilvusSys
 from faker import Faker
+from minio import Minio
 from prettytable import PrettyTable
 from pymilvus import (
     AnnSearchRequest,
@@ -30,7 +33,7 @@ from pymilvus import (
     RRFRanker,
     connections,
 )
-from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
+from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter, bulk_import, get_import_progress
 from pymilvus.client.embedding_list import EmbeddingList
 from pymilvus.exceptions import SchemaMismatchRetryableException
 from pymilvus.milvus_client.index import IndexParams
@@ -301,6 +304,7 @@ class Op(Enum):
     drop_partition = "drop_partition"
     load_balance = "load_balance"
     bulk_insert = "bulk_insert"
+    import_2pc = "import_2pc"
     alter_collection = "alter_collection"
     add_field = "add_field"
     add_vector_field = "add_vector_field"
@@ -322,6 +326,7 @@ enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
 
 request_records = RequestRecords()
+MAX_ERROR_SAMPLE_LENGTH = 500
 
 
 def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
@@ -360,6 +365,26 @@ def normalize_error_message(error_msg):
     return msg
 
 
+def compact_error_message(error_msg):
+    msg = str(error_msg).replace("\n", "\\n")
+    msg = re.sub(r"\s+", " ", msg).strip()
+    return msg if len(msg) <= MAX_ERROR_SAMPLE_LENGTH else msg[:MAX_ERROR_SAMPLE_LENGTH] + "..."
+
+
+def record_error_message(checker, operation_name, error_msg, start_time=None):
+    normalized_msg = normalize_error_message(error_msg) or "Unknown error"
+    sample_msg = compact_error_message(error_msg)
+    collection_name = getattr(checker, "c_name", "")
+    if not hasattr(checker, "error_message_samples"):
+        checker.error_message_samples = {}
+    checker.error_message_samples.setdefault(
+        normalized_msg,
+        f"type={normalized_msg}; operation={operation_name}; "
+        f"collection={collection_name}; time={start_time}; sample={sample_msg}",
+    )
+    checker.error_messages = set(checker.error_message_samples.values())
+
+
 def trace(fmt=DEFAULT_FMT, prefix="test", flag=True):
     def decorate(func):
         @functools.wraps(func)
@@ -396,14 +421,13 @@ def trace(fmt=DEFAULT_FMT, prefix="test", flag=True):
             else:
                 self._fail += 1
                 self.fail_records.append(("failure", self._succ + self._fail, start_time, start_time_ts))
-                # Collect unique error messages (normalized to group similar errors)
                 if hasattr(res, "message"):
-                    normalized_msg = normalize_error_message(res.message)
+                    error_msg = res.message
                 elif res is not None:
-                    normalized_msg = normalize_error_message(str(res))
+                    error_msg = str(res)
                 else:
-                    normalized_msg = "Unknown error"
-                self.error_messages.add(normalized_msg)
+                    error_msg = "Unknown error"
+                record_error_message(self, operation_name, error_msg, start_time)
             return res, result
 
         return inner_wrapper
@@ -432,6 +456,9 @@ def exception_handler():
                     log_message = f"Error in {function_name}: {log_e}"
                 log.exception(log_message)
                 log.error(log_e)
+                if hasattr(self, "error_messages"):
+                    start_time = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")
+                    record_error_message(self, function_name, e_str, start_time)
                 return Error(e), False
 
         return inner_wrapper
@@ -462,6 +489,7 @@ class Checker:
         self._fail = 0
         self.fail_records = []
         self.error_messages = set()  # Store unique error messages
+        self.error_message_samples = {}
         self._keep_running = True
         self.rsp_times = []
         self.average_time = 0
@@ -472,12 +500,16 @@ class Checker:
         self.bucket_name = cf.param_info.param_bucket_name
 
         # Initialize MilvusClient - prioritize uri and token
-        if cf.param_info.param_uri:
+        if kwargs.get("uri"):
+            uri = kwargs["uri"]
+        elif cf.param_info.param_uri:
             uri = cf.param_info.param_uri
         else:
             uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
 
-        if cf.param_info.param_token:
+        if kwargs.get("token"):
+            token = kwargs["token"]
+        elif cf.param_info.param_token:
             token = cf.param_info.param_token
         else:
             token = f"{cf.param_info.param_user}:{cf.param_info.param_password}"
@@ -786,6 +818,7 @@ class Checker:
         self.rsp_times = []
         self.fail_records = []
         self.error_messages = set()
+        self.error_message_samples = {}
         self.average_time = 0
 
     def get_rto(self):
@@ -848,6 +881,7 @@ class ExternalTableChecker(Checker):
         self._fail = 0
         self.fail_records = []
         self.error_messages = set()
+        self.error_message_samples = {}
         self.consistency_errors = []
         self._keep_running = True
         self.rsp_times = []
@@ -1864,7 +1898,6 @@ class InsertChecker(Checker):
 
     @exception_handler()
     def run_task(self):
-
         res, result = self.insert_entities()
         return res, result
 
@@ -2126,7 +2159,6 @@ class PartialUpdateChecker(Checker):
 
     @exception_handler()
     def run_task(self, count=0):
-
         schema = self.get_schema()
         pk_field_name = self.int64_field_name
         rows = len(self.data)
@@ -3053,6 +3085,426 @@ class BulkInsertChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
+
+
+class Import2PCChecker(Checker):
+    """Check manual Import 2PC lifecycle in a dependent chaos thread."""
+
+    def __init__(
+        self,
+        collection_name=None,
+        rows_per_import=20,
+        dim=ct.default_dim,
+        schema=None,
+        minio_endpoint=None,
+        bucket_name=None,
+        import_timeout=720,
+        visibility_timeout=180,
+        insert_data=False,
+        uri=None,
+        token=None,
+        downstream_uri=None,
+        downstream_token=None,
+        downstream_minio_endpoint=None,
+        downstream_bucket_name=None,
+        strict_count=True,
+        pk_start=None,
+    ):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("Import2PCChecker_")
+        schema = cf.gen_bulk_insert_collection_schema(dim=dim, with_json=False) if schema is None else schema
+        super().__init__(
+            collection_name=collection_name,
+            dim=dim,
+            schema=schema,
+            insert_data=insert_data,
+            uri=uri,
+            token=token,
+        )
+        self.schema = schema
+        self.rows_per_import = rows_per_import
+        self.import_timeout = import_timeout
+        self.visibility_timeout = visibility_timeout
+        self.minio_endpoint = minio_endpoint or "127.0.0.1:9000"
+        self.bucket_name = bucket_name or self.bucket_name or "milvus-bucket"
+        self.downstream_uri = downstream_uri
+        self.downstream_token = downstream_token or token or "root:Milvus"
+        self.downstream_minio_endpoint = downstream_minio_endpoint or self.minio_endpoint
+        self.downstream_bucket_name = downstream_bucket_name or self.bucket_name
+        self.downstream_client = (
+            MilvusClient(uri=self.downstream_uri, token=self.downstream_token) if self.downstream_uri else None
+        )
+        self.strict_count = strict_count
+        self.import_remote_path = f"import_2pc_checker/{self.c_name}"
+        self.pk_field_name = self.int64_field_name
+        if self.pk_field_name is None:
+            raise AssertionError("Import2PCChecker requires a schema with an INT64 primary key field")
+        self.uri = uri or cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        self.token = token or cf.param_info.param_token or f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+        self.next_pk = int(pk_start) if pk_start is not None else int(time.time() * self.scale)
+        self.expected_count = self._query_count()
+        self.pending_job_ids = set()
+
+    @staticmethod
+    def _unwrap_data(resp_json):
+        data = resp_json.get("data", {})
+        if isinstance(data, list) and data:
+            return data[0]
+        return data or {}
+
+    @staticmethod
+    def _job_id_from_create_response(resp_json):
+        data = Import2PCChecker._unwrap_data(resp_json)
+        job_id = data.get("jobId") or data.get("job_id")
+        if isinstance(job_id, list):
+            job_id = job_id[0] if job_id else None
+        if job_id is None:
+            raise AssertionError(f"import create response has no job id: {resp_json}")
+        return str(job_id)
+
+    @staticmethod
+    def _job_state_from_progress(resp_json):
+        data = Import2PCChecker._unwrap_data(resp_json)
+        return data.get("state"), data.get("reason") or "", data
+
+    def _post_import_endpoint(self, endpoint, payload):
+        url = f"{self.uri}/v2/vectordb/jobs/import/{endpoint}"
+        resp = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=timeout,
+        )
+        if resp.status_code != 200:
+            raise AssertionError(f"import {endpoint} http status={resp.status_code}, body={resp.text}")
+        resp_json = resp.json()
+        if resp_json.get("code") != 0:
+            raise AssertionError(f"import {endpoint} failed: {resp_json}")
+        return resp_json
+
+    def _query_count(self, client=None):
+        client = client or self.milvus_client
+        res = client.query(
+            collection_name=self.c_name,
+            filter="",
+            output_fields=["count(*)"],
+            consistency_level="Strong",
+            timeout=query_timeout,
+        )
+        return int(res[0]["count(*)"]) if res else 0
+
+    def _query_ids(self, ids, client=None):
+        if not ids:
+            return set()
+        client = client or self.milvus_client
+        expr = f"{self.pk_field_name} in {sorted(ids)}"
+        res = client.query(
+            collection_name=self.c_name,
+            filter=expr,
+            output_fields=[self.pk_field_name],
+            consistency_level="Strong",
+            timeout=query_timeout,
+        )
+        return {row[self.pk_field_name] for row in res}
+
+    def _wait_ids_visible(self, ids, client=None, label="primary"):
+        deadline = time.time() + self.visibility_timeout
+        last_seen = set()
+        while time.time() < deadline:
+            try:
+                last_seen = self._query_ids(ids, client=client)
+                if last_seen == set(ids):
+                    return None, True
+            except Exception as e:
+                log.debug(f"Import2PCChecker {label} query visible retry failed: {e}")
+            sleep(2)
+        return f"{label} import ids not visible, expected={sorted(ids)}, last_seen={sorted(last_seen)}", False
+
+    def _wait_ids_absent(self, ids, client=None, label="primary"):
+        deadline = time.time() + min(30, self.visibility_timeout)
+        last_seen = set()
+        while time.time() < deadline:
+            try:
+                last_seen = self._query_ids(ids, client=client)
+                if not last_seen:
+                    return None, True
+            except Exception as e:
+                log.debug(f"Import2PCChecker {label} query absent retry failed: {e}")
+            sleep(2)
+        return f"{label} import ids became visible before commit: {sorted(last_seen)}", False
+
+    def _wait_count(self, expected, client=None, label="primary"):
+        deadline = time.time() + self.visibility_timeout
+        last_count = None
+        while time.time() < deadline:
+            try:
+                last_count = self._query_count(client=client)
+                if last_count == expected:
+                    return None, True
+            except Exception as e:
+                log.debug(f"Import2PCChecker {label} count retry failed: {e}")
+            sleep(2)
+        return f"{label} unexpected count, expected={expected}, last_count={last_count}", False
+
+    def _wait_import_state(self, job_id, expected_state, uri=None, token=None, label="primary"):
+        uri = uri or self.uri
+        token = token or self.token
+        deadline = time.time() + self.import_timeout
+        last_progress = None
+        while time.time() < deadline:
+            resp = get_import_progress(url=uri, api_key=token, job_id=job_id, timeout=timeout)
+            last_progress = resp.json()
+            if last_progress.get("code") != 0:
+                sleep(2)
+                continue
+            state, reason, _ = self._job_state_from_progress(last_progress)
+            if state == expected_state:
+                return last_progress, True
+            if state == "Failed":
+                return f"{label} import job {job_id} failed while waiting for {expected_state}: {reason}", False
+            sleep(2)
+        return f"{label} import job {job_id} did not reach {expected_state}, last={last_progress}", False
+
+    def _wait_downstream_collection_ready(self):
+        if self.downstream_client is None:
+            return None, True
+        deadline = time.time() + self.visibility_timeout
+        last_error = None
+        while time.time() < deadline:
+            try:
+                if self.downstream_client.has_collection(self.c_name):
+                    self._query_count(client=self.downstream_client)
+                    return None, True
+            except Exception as e:
+                last_error = e
+                log.debug(f"Import2PCChecker downstream collection wait retry failed: {e}")
+            sleep(2)
+        return f"downstream collection {self.c_name} not queryable, last_error={last_error}", False
+
+    def _make_rows(self):
+        start = self.next_pk
+        self.next_pk += self.rows_per_import
+        rows = cf.gen_row_data_by_schema(nb=self.rows_per_import, schema=self.schema, start=start)
+        ids = []
+        for offset, row in enumerate(rows):
+            pk = start + offset
+            row[self.pk_field_name] = pk
+            ids.append(pk)
+        rows = [{key: self._normalize_import_value(value) for key, value in row.items()} for row in rows]
+        return rows, ids
+
+    @staticmethod
+    def _normalize_import_value(value):
+        if isinstance(value, dict):
+            return {key: Import2PCChecker._normalize_import_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [Import2PCChecker._normalize_import_value(item) for item in value]
+        if value.__class__.__module__.startswith("numpy"):
+            if hasattr(value, "tolist"):
+                return Import2PCChecker._normalize_import_value(value.tolist())
+            if hasattr(value, "item"):
+                return value.item()
+        return value
+
+    def _write_import_files(self, rows):
+        with RemoteBulkWriter(
+            schema=self.schema,
+            file_type=BulkFileType.PARQUET,
+            remote_path=self.import_remote_path,
+            connect_param=RemoteBulkWriter.ConnectParam(
+                endpoint=self.minio_endpoint,
+                access_key="minioadmin",
+                secret_key="minioadmin",
+                bucket_name=self.bucket_name,
+            ),
+        ) as remote_writer:
+            for row in rows:
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            batch_files = remote_writer.batch_files
+        if not batch_files:
+            raise AssertionError("RemoteBulkWriter did not produce import files")
+        return batch_files
+
+    @staticmethod
+    def _flatten_import_files(files):
+        flattened = []
+        for file_item in files:
+            if isinstance(file_item, (list, tuple)):
+                flattened.extend(Import2PCChecker._flatten_import_files(file_item))
+            else:
+                flattened.append(str(file_item))
+        return flattened
+
+    @staticmethod
+    def _object_name_from_import_path(file_path, bucket_name):
+        parsed = urlparse(file_path)
+        if parsed.scheme:
+            path = parsed.path.lstrip("/")
+            if parsed.netloc == bucket_name:
+                return path
+            bucket_prefix = f"{bucket_name}/"
+            if path.startswith(bucket_prefix):
+                return path[len(bucket_prefix) :]
+            return path
+        return file_path.lstrip("/")
+
+    def _copy_import_files_to_downstream(self, files):
+        if self.downstream_client is None:
+            return []
+        if self.downstream_minio_endpoint == self.minio_endpoint and self.downstream_bucket_name == self.bucket_name:
+            return []
+
+        source = Minio(
+            self.minio_endpoint,
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            secure=False,
+        )
+        target = Minio(
+            self.downstream_minio_endpoint,
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            secure=False,
+        )
+        if not target.bucket_exists(self.downstream_bucket_name):
+            target.make_bucket(self.downstream_bucket_name)
+
+        copied = []
+        for file_path in self._flatten_import_files(files):
+            object_name = self._object_name_from_import_path(file_path, self.bucket_name)
+            stat = source.stat_object(self.bucket_name, object_name)
+            response = source.get_object(self.bucket_name, object_name)
+            try:
+                target.put_object(
+                    self.downstream_bucket_name,
+                    object_name,
+                    response,
+                    length=stat.size,
+                )
+            finally:
+                response.close()
+                response.release_conn()
+            copied.append(object_name)
+        log.info(f"Import2PCChecker copied import files to downstream object store: {copied}")
+        return copied
+
+    @trace()
+    def import_2pc(self):
+        job_id = None
+        try:
+            rows, ids = self._make_rows()
+            expected_count_after_commit = self.expected_count + len(ids)
+            ready_msg, downstream_ready = self._wait_downstream_collection_ready()
+            if not downstream_ready:
+                return ready_msg, False
+            files = self._write_import_files(rows)
+            self._copy_import_files_to_downstream(files)
+            create_resp = bulk_import(
+                url=self.uri,
+                api_key=self.token,
+                collection_name=self.c_name,
+                files=files,
+                options={"auto_commit": "false"},
+                timeout=timeout,
+            )
+            job_id = self._job_id_from_create_response(create_resp.json())
+            self.pending_job_ids.add(job_id)
+
+            progress, ready = self._wait_import_state(job_id, "Uncommitted")
+            if not ready:
+                return progress, False
+
+            if self.downstream_client is not None:
+                progress, ready = self._wait_import_state(
+                    job_id,
+                    "Uncommitted",
+                    uri=self.downstream_uri,
+                    token=self.downstream_token,
+                    label="downstream",
+                )
+                if not ready:
+                    return progress, False
+
+            res, absent = self._wait_ids_absent(ids)
+            if not absent:
+                return res, False
+            if self.downstream_client is not None:
+                res, absent = self._wait_ids_absent(ids, client=self.downstream_client, label="downstream")
+                if not absent:
+                    return res, False
+
+            if self.strict_count:
+                res, count_unchanged = self._wait_count(self.expected_count)
+                if not count_unchanged:
+                    return f"count changed before commit: {res}", False
+                if self.downstream_client is not None:
+                    res, count_unchanged = self._wait_count(
+                        self.expected_count, client=self.downstream_client, label="downstream"
+                    )
+                    if not count_unchanged:
+                        return f"downstream count changed before commit: {res}", False
+
+            self._post_import_endpoint("commit", {"jobId": job_id})
+            progress, completed = self._wait_import_state(job_id, "Completed")
+            if not completed:
+                return progress, False
+            if self.downstream_client is not None:
+                progress, completed = self._wait_import_state(
+                    job_id,
+                    "Completed",
+                    uri=self.downstream_uri,
+                    token=self.downstream_token,
+                    label="downstream",
+                )
+                if not completed:
+                    return progress, False
+
+            res, visible = self._wait_ids_visible(ids)
+            if not visible:
+                return res, False
+            if self.downstream_client is not None:
+                res, visible = self._wait_ids_visible(ids, client=self.downstream_client, label="downstream")
+                if not visible:
+                    return res, False
+
+            if self.strict_count:
+                res, count_ok = self._wait_count(expected_count_after_commit)
+                if not count_ok:
+                    return res, False
+                if self.downstream_client is not None:
+                    res, count_ok = self._wait_count(
+                        expected_count_after_commit, client=self.downstream_client, label="downstream"
+                    )
+                    if not count_ok:
+                        return res, False
+                self.expected_count = expected_count_after_commit
+
+            self.pending_job_ids.discard(job_id)
+            return {"job_id": job_id, "rows": len(ids), "expected_count": self.expected_count}, True
+        except Exception as e:
+            log.warning(f"Import2PCChecker import_2pc failed: {e}")
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        return self.import_2pc()
+
+    def terminate(self):
+        self._keep_running = False
+        for job_id in list(self.pending_job_ids):
+            try:
+                self._post_import_endpoint("abort", {"jobId": job_id})
+            except Exception as e:
+                log.debug(f"abort pending Import2PCChecker job {job_id} failed: {e}")
+            finally:
+                self.pending_job_ids.discard(job_id)
+        self.reset()
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP)
 
 
 class AlterCollectionChecker(Checker):

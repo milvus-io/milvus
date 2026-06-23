@@ -1061,6 +1061,94 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
     FreeFlushResult(&result);
 }
 
+TEST_F(FlushGrowingSegmentTest, FlushNullableVectorArrayRoundTrip) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_array_fid = schema->AddDebugVectorArrayField(
+        "emb_list", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 4;
+    std::vector<int64_t> row_ids = {10, 11, 12, 13};
+    std::vector<Timestamp> timestamps = {100, 101, 102, 103};
+    std::vector<int64_t> pks = {1000, 1001, 1002, 1003};
+    std::vector<VectorFieldProto> vec_arrays(N);
+
+    auto fill_float_vectors = [](VectorFieldProto& vector_array,
+                                 std::initializer_list<float> values) {
+        vector_array.set_dim(4);
+        vector_array.mutable_float_vector()->mutable_data()->Add(values.begin(),
+                                                                 values.end());
+    };
+
+    fill_float_vectors(vec_arrays[0], {1.0F, 2.0F, 3.0F, 4.0F});
+    vec_arrays[1].set_dim(4);
+    vec_arrays[1].mutable_float_vector();
+    fill_float_vectors(vec_arrays[2],
+                       {5.0F, 6.0F, 7.0F, 8.0F, 9.0F, 10.0F, 11.0F, 12.0F});
+    vec_arrays[3].set_dim(4);
+    vec_arrays[3].mutable_float_vector();
+    bool valid_data[N] = {true, false, true, false};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            vec_arrays.data(), valid_data, N, (*schema)[vec_array_fid])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir_ + "/segment_nullable_vector_array";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto field_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            vec_array_fid,
+                                            DataType::VECTOR_ARRAY,
+                                            true,
+                                            4,
+                                            DataType::VECTOR_FLOAT);
+    ASSERT_EQ(field_datas.size(), 1);
+    ASSERT_EQ(field_datas[0]->get_num_rows(), N);
+    ASSERT_EQ(field_datas[0]->get_valid_rows(), 2);
+    EXPECT_TRUE(field_datas[0]->is_valid(0));
+    EXPECT_FALSE(field_datas[0]->is_valid(1));
+    EXPECT_TRUE(field_datas[0]->is_valid(2));
+    EXPECT_FALSE(field_datas[0]->is_valid(3));
+
+    auto vector_array_data =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            field_datas[0]);
+    ASSERT_NE(vector_array_data, nullptr);
+    ASSERT_EQ(vector_array_data->value_at(0)->output_data().SerializeAsString(),
+              vec_arrays[0].SerializeAsString());
+    ASSERT_EQ(vector_array_data->value_at(1)->output_data().SerializeAsString(),
+              vec_arrays[2].SerializeAsString());
+
+    FreeFlushResult(&result);
+}
+
 TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
     struct Case {
         DataType element_type;

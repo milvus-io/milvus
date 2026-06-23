@@ -336,7 +336,6 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 std::pair<size_t, size_t>
 VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     size_t total_rows = 0;
-    size_t valid_rows = 0;
     size_t total_size = 0;
 
     for (const auto& array_data : array_vec) {
@@ -362,7 +361,6 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
                     if (nullable_ && list_array->IsNull(i)) {
                         continue;
                     }
-                    valid_rows++;
                     actual_values_count +=
                         list_offsets[i + 1] - list_offsets[i];
                 }
@@ -377,14 +375,12 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     }
 
     row_nums_ = total_rows;
-    valid_row_nums_ = nullable_ ? valid_rows : total_rows;
 
     if (nullable_) {
         total_size += (total_rows + 7) / 8;
     }
-    // Add space for offset and length arrays.
-    total_size +=
-        sizeof(uint32_t) * (valid_row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
+    // Add space for logical-row offset and length arrays.
+    total_size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
     return {total_size, total_rows};
 }
 
@@ -393,7 +389,7 @@ VectorArrayChunkWriter::write_to_target(
     const arrow::ArrayVector& array_vec,
     const std::shared_ptr<ChunkTarget>& target) {
     std::vector<uint32_t> offsets_lens;
-    offsets_lens.reserve(valid_row_nums_ * 2 + 1);
+    offsets_lens.reserve(row_nums_ * 2 + 1);
     std::vector<const uint8_t*> vector_data_ptrs;
     std::vector<size_t> data_sizes;
 
@@ -409,7 +405,7 @@ VectorArrayChunkWriter::write_to_target(
 
     uint32_t current_offset =
         (nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0) +
-        sizeof(uint32_t) * (valid_row_nums_ * 2 + 1);
+        sizeof(uint32_t) * (row_nums_ * 2 + 1);
 
     for (const auto& array_data : array_vec) {
         auto list_array =
@@ -424,6 +420,8 @@ VectorArrayChunkWriter::write_to_target(
         // Each list contains multiple vectors, each stored as a fixed-size binary chunk
         for (int64_t i = 0; i < list_array->length(); i++) {
             if (nullable_ && list_array->IsNull(i)) {
+                offsets_lens.push_back(current_offset);
+                offsets_lens.push_back(0);
                 continue;
             }
             auto start_idx = list_offsets[i];

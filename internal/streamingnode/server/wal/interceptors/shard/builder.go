@@ -14,6 +14,11 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	shardInterceptor := &shardInterceptor{
 		shardManager: param.ShardManager,
 	}
+	if schemaProvider, ok := param.ShardManager.(collectionSchemaProvider); ok {
+		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
+			shardInterceptor.allocFunctionRunners(collectionID, schemaInfo.VChannel, schemaInfo.Schema)
+		}
+	}
 	shardInterceptor.initOpTable()
 	return shardInterceptor
 }

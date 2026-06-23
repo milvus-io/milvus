@@ -171,7 +171,7 @@ class ResponseChecker:
             #     f"but got {res.code} {res.message}")
             assert error_dict[ct.err_msg] in res.message, (
                 f"Response of API {self.func_name} "
-                f"expect get error message {error_dict[ct.err_code]}, "
+                f"expect get error message {error_dict[ct.err_msg]}, "
                 f"but got {res.code} {res.message}"
             )
 
@@ -504,9 +504,13 @@ class ResponseChecker:
                 num_to_check = min(100, len(distances))  # check 100 items if more than that
                 eps = 1e-6
                 if check_items.get("metric").upper() in ["IP", "COSINE", "BM25"]:
-                    assert all(distances[i] >= distances[i + 1] - eps for i in range(num_to_check - 1))
+                    assert all(distances[i] >= distances[i + 1] - eps for i in range(num_to_check - 1)), (
+                        f"distances not descending within eps={eps}: {distances[:num_to_check]}"
+                    )
                 else:
-                    assert all(distances[i] <= distances[i + 1] + eps for i in range(num_to_check - 1))
+                    assert all(distances[i] <= distances[i + 1] + eps for i in range(num_to_check - 1)), (
+                        f"distances not ascending within eps={eps}: {distances[:num_to_check]}"
+                    )
                 if check_items.get("vector_nq") is None or check_items.get("original_vectors") is None:
                     log.debug("skip distance check for knowhere does not return the precise distances")
                 else:

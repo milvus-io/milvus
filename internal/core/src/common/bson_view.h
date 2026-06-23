@@ -16,12 +16,6 @@
 
 #pragma once
 
-#include <bsoncxx/builder/basic/document.hpp>
-#include <bsoncxx/builder/basic/kvp.hpp>
-#include <bsoncxx/document/view.hpp>
-#include <bsoncxx/json.hpp>
-#include <bsoncxx/types.hpp>
-#include <bsoncxx/types/bson_value/view.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -36,50 +30,14 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/bson_shim.h"
 #include "fmt/format.h"
 #include "log/Log.h"
-
-template <>
-struct fmt::formatter<bsoncxx::type> : fmt::formatter<std::string> {
-    auto
-    format(bsoncxx::type type, fmt::format_context& ctx) const {
-        std::string name;
-        switch (type) {
-            case bsoncxx::type::k_int32:
-                name = "int32";
-                break;
-            case bsoncxx::type::k_int64:
-                name = "int64";
-                break;
-            case bsoncxx::type::k_double:
-                name = "double";
-                break;
-            case bsoncxx::type::k_string:
-                name = "string";
-                break;
-            case bsoncxx::type::k_bool:
-                name = "bool";
-                break;
-            case bsoncxx::type::k_null:
-                name = "null";
-                break;
-            case bsoncxx::type::k_document:
-                name = "document";
-                break;
-            case bsoncxx::type::k_array:
-                name = "array";
-                break;
-            default:
-                name = "Unknown";
-        }
-        return fmt::formatter<std::string>::format(name, ctx);
-    }
-};
 
 namespace milvus {
 
 struct BsonRawField {
-    bsoncxx::type type;
+    milvus::bson::type type;
     std::string key;
     const uint8_t* value_ptr;  // points to value (not including type/key)
 };
@@ -124,16 +82,16 @@ ReadRawDocOrArray(const uint8_t* ptr) {
     return std::vector<uint8_t>(ptr, ptr + len);
 }
 
-inline bsoncxx::document::view
+inline milvus::bson::document_view
 ParseAsDocument(const uint8_t* ptr) {
     int32_t len = *reinterpret_cast<const int32_t*>(ptr);
-    return bsoncxx::document::view(ptr, len);
+    return milvus::bson::document_view(ptr, len);
 }
 
-inline bsoncxx::array::view
+inline milvus::bson::array_view
 ParseAsArray(const uint8_t* ptr) {
     int32_t len = *reinterpret_cast<const int32_t*>(ptr);
-    return bsoncxx::array::view(ptr, len);
+    return milvus::bson::array_view(ptr, len);
 }
 
 template <typename T>
@@ -211,13 +169,13 @@ class BsonView {
     // Core implementation: check if a BSON value is "empty" (null or recursively contains only nulls/empties)
     // Following the same semantics as Json::isObjectEmpty/isDocEmpty in Json.h
     static bool
-    IsBsonValueEmpty(const bsoncxx::types::bson_value::view& val) {
+    IsBsonValueEmpty(const milvus::bson::value_view& val) {
         switch (val.type()) {
-            case bsoncxx::type::k_null:
+            case milvus::bson::type::k_null:
                 return true;
-            case bsoncxx::type::k_document:
+            case milvus::bson::type::k_document:
                 return IsBsonValueEmpty(val.get_document().value);
-            case bsoncxx::type::k_array:
+            case milvus::bson::type::k_array:
                 return IsBsonValueEmpty(val.get_array().value);
             default:
                 return false;
@@ -225,7 +183,7 @@ class BsonView {
     }
 
     static bool
-    IsBsonValueEmpty(const bsoncxx::document::view& doc) {
+    IsBsonValueEmpty(const milvus::bson::document_view& doc) {
         for (auto&& elem : doc) {
             if (!IsBsonValueEmpty(elem.get_value())) {
                 return false;
@@ -235,7 +193,7 @@ class BsonView {
     }
 
     static bool
-    IsBsonValueEmpty(const bsoncxx::array::view& arr) {
+    IsBsonValueEmpty(const milvus::bson::array_view& arr) {
         for (auto&& elem : arr) {
             if (!IsBsonValueEmpty(elem.get_value())) {
                 return false;
@@ -250,11 +208,11 @@ class BsonView {
         auto field = ParseBsonField(data_, offset);
 
         switch (field.type) {
-            case bsoncxx::type::k_null:
+            case milvus::bson::type::k_null:
                 return true;
-            case bsoncxx::type::k_document:
+            case milvus::bson::type::k_document:
                 return IsBsonValueEmpty(ParseAsDocument(field.value_ptr));
-            case bsoncxx::type::k_array:
+            case milvus::bson::type::k_array:
                 return IsBsonValueEmpty(ParseAsArray(field.value_ptr));
             default:
                 return false;
@@ -270,8 +228,8 @@ class BsonView {
 
     std::string
     ToString() const {
-        bsoncxx::document::view view(data_, size_);
-        return bsoncxx::to_json(view);
+        milvus::bson::document_view view(data_, size_);
+        return milvus::bson::to_json(view);
     }
 
     bool
@@ -279,8 +237,8 @@ class BsonView {
         const uint8_t* ptr = data_ + offset;
         AssertInfo(offset < size_, "bson offset out of range");
 
-        auto type_tag = static_cast<bsoncxx::type>(*ptr++);
-        return type_tag == bsoncxx::type::k_null;
+        auto type_tag = static_cast<milvus::bson::type>(*ptr++);
+        return type_tag == milvus::bson::type::k_null;
     }
 
     template <typename T>
@@ -295,7 +253,7 @@ class BsonView {
             offset < size_, "bson offset:{} out of range:{}", offset, size_);
 
         // parse type tag
-        auto type_tag = static_cast<bsoncxx::type>(*ptr++);
+        auto type_tag = static_cast<milvus::bson::type>(*ptr++);
 
         // parse key
         const char* key_cstr = reinterpret_cast<const char*>(ptr);
@@ -304,7 +262,7 @@ class BsonView {
 
         // parse value
         switch (type_tag) {
-            case bsoncxx::type::k_int32:
+            case milvus::bson::type::k_int32:
                 if constexpr (std::is_same_v<T, int32_t>) {
                     return GetValue<int32_t>(ptr);
                 }
@@ -312,14 +270,14 @@ class BsonView {
                     return static_cast<int64_t>(GetValue<int32_t>(ptr));
                 }
                 break;
-            case bsoncxx::type::k_int64:
+            case milvus::bson::type::k_int64:
                 if constexpr (std::is_same_v<T, int64_t>) {
                     return GetValue<int64_t>(ptr);
                 } else if constexpr (std::is_same_v<T, double>) {
                     return static_cast<double>(GetValue<int64_t>(ptr));
                 }
                 break;
-            case bsoncxx::type::k_double:
+            case milvus::bson::type::k_double:
                 if constexpr (std::is_same_v<T, double>) {
                     return GetValue<double>(ptr);
                 }
@@ -329,12 +287,12 @@ class BsonView {
                 //     }
                 // }
                 break;
-            case bsoncxx::type::k_bool:
+            case milvus::bson::type::k_bool:
                 if constexpr (std::is_same_v<T, bool>) {
                     return GetValue<bool>(ptr);
                 }
                 break;
-            case bsoncxx::type::k_string:
+            case milvus::bson::type::k_string:
                 if (ptr + 4 > data_ + size_) {
                     return std::nullopt;
                 }
@@ -345,9 +303,9 @@ class BsonView {
                     return GetValue<std::string_view>(ptr);
                 }
                 break;
-            case bsoncxx::type::k_null:
-            case bsoncxx::type::k_document:
-            case bsoncxx::type::k_array:
+            case milvus::bson::type::k_null:
+            case milvus::bson::type::k_document:
+            case milvus::bson::type::k_array:
                 break;
             default:
                 ThrowInfo(
@@ -356,18 +314,19 @@ class BsonView {
         return std::nullopt;
     }
 
-    std::optional<bsoncxx::array::view>
+    std::optional<milvus::bson::array_view>
     ParseAsArrayAtOffset(size_t offset) {
         if (offset == 0) {
             // if offset is 0, it means the array is the whole bson_view
-            return bsoncxx::array::view(data_, size_);
+            return milvus::bson::array_view(data_, size_);
         }
 
         // check offset
         AssertInfo(offset < size_, "bson offset out of range");
         const uint8_t* ptr = data_ + offset;
 
-        if (static_cast<bsoncxx::type>(*ptr) != bsoncxx::type::k_array) {
+        if (static_cast<milvus::bson::type>(*ptr) !=
+            milvus::bson::type::k_array) {
             return std::nullopt;
         }
         ptr++;
@@ -383,11 +342,11 @@ class BsonView {
             ThrowInfo(ErrorCode::UnexpectedError,
                       "ParseAsArrayAtOffset out of range");
         }
-        return bsoncxx::array::view(view_start, len);
+        return milvus::bson::array_view(view_start, len);
     }
 
-    inline std::optional<bsoncxx::types::bson_value::view>
-    FindByPath(const bsoncxx::document::view& doc_view,
+    inline std::optional<milvus::bson::value_view>
+    FindByPath(const milvus::bson::document_view& doc_view,
                const std::vector<std::string>& path,
                size_t idx = 0) {
         if (idx >= path.size())
@@ -404,11 +363,11 @@ class BsonView {
 
             // Recursively process nested structures
             switch (value.type()) {
-                case bsoncxx::type::k_document: {
+                case milvus::bson::type::k_document: {
                     auto sub_doc = value.get_document();
                     return FindByPath(sub_doc.view(), path, idx + 1);
                 }
-                case bsoncxx::type::k_array:
+                case milvus::bson::type::k_array:
                     // TODO: may support array index from parent json for now
                     break;
                 default:
@@ -432,28 +391,28 @@ class BsonView {
             ++ptr;
 
             if (i == index) {
-                switch (static_cast<bsoncxx::type>(type_tag)) {
-                    case bsoncxx::type::k_int32:
+                switch (static_cast<milvus::bson::type>(type_tag)) {
+                    case milvus::bson::type::k_int32:
                         if constexpr (std::is_same_v<T, int32_t>) {
                             return ReadInt32(ptr);
                         }
                         break;
-                    case bsoncxx::type::k_int64:
+                    case milvus::bson::type::k_int64:
                         if constexpr (std::is_same_v<T, int64_t>) {
                             return ReadInt64(ptr);
                         }
                         break;
-                    case bsoncxx::type::k_double:
+                    case milvus::bson::type::k_double:
                         if constexpr (std::is_same_v<T, double>) {
                             return ReadDouble(ptr);
                         }
                         break;
-                    case bsoncxx::type::k_bool:
+                    case milvus::bson::type::k_bool:
                         if constexpr (std::is_same_v<T, bool>) {
                             return ReadBool(ptr);
                         }
                         break;
-                    case bsoncxx::type::k_string:
+                    case milvus::bson::type::k_string:
                         if constexpr (std::is_same_v<T, std::string>) {
                             return ReadUtf8(ptr);
                         }
@@ -461,8 +420,10 @@ class BsonView {
                             return ReadUtf8View(ptr);
                         }
                         break;
-                    case bsoncxx::type::k_array:
-                        if constexpr (std::is_same_v<T, bsoncxx::array::view>) {
+                    case milvus::bson::type::k_array:
+                        if constexpr (std::is_same_v<
+                                          T,
+                                          milvus::bson::array_view>) {
                             return ParseAsArray(ptr);
                         }
                         break;
@@ -471,26 +432,26 @@ class BsonView {
                 }
             }
 
-            switch (static_cast<bsoncxx::type>(type_tag)) {
-                case bsoncxx::type::k_string: {
+            switch (static_cast<milvus::bson::type>(type_tag)) {
+                case milvus::bson::type::k_string: {
                     int32_t len = *reinterpret_cast<const int32_t*>(ptr);
                     ptr += 4 + len;
                     break;
                 }
-                case bsoncxx::type::k_int32:
+                case milvus::bson::type::k_int32:
                     ptr += 4;
                     break;
-                case bsoncxx::type::k_int64:
+                case milvus::bson::type::k_int64:
                     ptr += 8;
                     break;
-                case bsoncxx::type::k_double:
+                case milvus::bson::type::k_double:
                     ptr += 8;
                     break;
-                case bsoncxx::type::k_bool:
+                case milvus::bson::type::k_bool:
                     ptr += 1;
                     break;
-                case bsoncxx::type::k_array:
-                case bsoncxx::type::k_document: {
+                case milvus::bson::type::k_array:
+                case milvus::bson::type::k_document: {
                     int32_t len = *reinterpret_cast<const int32_t*>(ptr);
                     ptr += len;
                     break;
@@ -506,7 +467,7 @@ class BsonView {
     inline BsonRawField
     ParseBsonField(const uint8_t* bson_data, size_t offset) const {
         const uint8_t* ptr = bson_data + offset;
-        auto type_tag = static_cast<bsoncxx::type>(*ptr++);
+        auto type_tag = static_cast<milvus::bson::type>(*ptr++);
 
         const char* key_cstr = reinterpret_cast<const char*>(ptr);
         size_t key_len = strlen(key_cstr);
@@ -517,30 +478,30 @@ class BsonView {
 
     template <typename T>
     static std::optional<T>
-    GetValueFromElement(const bsoncxx::document::element& element) {
+    GetValueFromElement(const milvus::bson::element& element) {
         if constexpr (std::is_same_v<T, int32_t>) {
-            if (element.type() == bsoncxx::type::k_int32) {
+            if (element.type() == milvus::bson::type::k_int32) {
                 return element.get_int32().value;
             }
         } else if constexpr (std::is_same_v<T, int64_t>) {
-            if (element.type() == bsoncxx::type::k_int64) {
+            if (element.type() == milvus::bson::type::k_int64) {
                 return element.get_int64().value;
             }
         } else if constexpr (std::is_same_v<T, double>) {
-            if (element.type() == bsoncxx::type::k_double) {
+            if (element.type() == milvus::bson::type::k_double) {
                 return element.get_double().value;
             }
         } else if constexpr (std::is_same_v<T, bool>) {
-            if (element.type() == bsoncxx::type::k_bool) {
+            if (element.type() == milvus::bson::type::k_bool) {
                 return element.get_bool().value;
             }
         } else if constexpr (std::is_same_v<T, std::string>) {
-            if (element.type() == bsoncxx::type::k_string) {
+            if (element.type() == milvus::bson::type::k_string) {
                 return std::string(element.get_string().value.data(),
                                    element.get_string().value.size());
             }
         } else if constexpr (std::is_same_v<T, std::string_view>) {
-            if (element.type() == bsoncxx::type::k_string) {
+            if (element.type() == milvus::bson::type::k_string) {
                 return std::string_view(element.get_string().value.data(),
                                         element.get_string().value.size());
             }
@@ -550,27 +511,27 @@ class BsonView {
 
     template <typename T>
     static std::optional<T>
-    GetValueFromBsonView(const bsoncxx::types::bson_value::view& value_view) {
+    GetValueFromBsonView(const milvus::bson::value_view& value_view) {
         switch (value_view.type()) {
-            case bsoncxx::type::k_int32:
+            case milvus::bson::type::k_int32:
                 if constexpr (std::is_same_v<T, int32_t>)
                     return value_view.get_int32().value;
                 break;
-            case bsoncxx::type::k_int64:
+            case milvus::bson::type::k_int64:
                 if constexpr (std::is_same_v<T, int64_t>)
                     return value_view.get_int64().value;
                 if constexpr (std::is_same_v<T, double>)
                     return static_cast<double>(value_view.get_int64().value);
                 break;
-            case bsoncxx::type::k_double:
+            case milvus::bson::type::k_double:
                 if constexpr (std::is_same_v<T, double>)
                     return value_view.get_double().value;
                 break;
-            case bsoncxx::type::k_bool:
+            case milvus::bson::type::k_bool:
                 if constexpr (std::is_same_v<T, bool>)
                     return value_view.get_bool().value;
                 break;
-            case bsoncxx::type::k_string:
+            case milvus::bson::type::k_string:
                 if constexpr (std::is_same_v<T, std::string>) {
                     return std::string(value_view.get_string().value.data(),
                                        value_view.get_string().value.size());
@@ -580,8 +541,8 @@ class BsonView {
                         value_view.get_string().value.size());
                 }
                 break;
-            case bsoncxx::type::k_array:
-                if constexpr (std::is_same_v<T, bsoncxx::array::view>) {
+            case milvus::bson::type::k_array:
+                if constexpr (std::is_same_v<T, milvus::bson::array_view>) {
                     return value_view.get_array().value;
                 }
                 break;

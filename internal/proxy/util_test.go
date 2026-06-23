@@ -40,8 +40,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -2448,6 +2450,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 }
 
 func Test_validateMaxCapacityPerRow(t *testing.T) {
+	paramtable.Init()
+
 	t.Run("normal case", func(t *testing.T) {
 		arrayField := &schemapb.FieldSchema{
 			DataType:    schemapb.DataType_Array,
@@ -2508,6 +2512,27 @@ func Test_validateMaxCapacityPerRow(t *testing.T) {
 
 		err := validateMaxCapacityPerRow("collection", arrayField)
 		assert.Error(t, err)
+	})
+
+	t.Run("custom max capacity", func(t *testing.T) {
+		paramtable.Init()
+		err := paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key, "5000")
+		assert.NoError(t, err)
+		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key)
+
+		arrayField := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "5000",
+				},
+			},
+		}
+
+		err = validateMaxCapacityPerRow("collection", arrayField)
+		assert.NoError(t, err)
 	})
 }
 
@@ -2789,7 +2814,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -2809,11 +2834,11 @@ func TestValidateFunction(t *testing.T) {
 			},
 		}
 
-		err := validateFunction(schema, "", true)
+		err := validator.ValidateFunction(schema, "", true)
 		assert.NoError(t, err)
 		assert.False(t, schema.GetFields()[1].GetIsFunctionOutput())
 
-		err = normalizeFunctionOutputFields(schema)
+		err = validator.NormalizeFunctionOutputFields(schema)
 		assert.NoError(t, err)
 		assert.True(t, schema.GetFields()[1].GetIsFunctionOutput())
 	})
@@ -2842,7 +2867,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -2867,7 +2892,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicate function name")
 	})
@@ -2886,7 +2911,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "input field not found")
 	})
@@ -2905,7 +2930,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "output field not found")
 	})
@@ -2925,7 +2950,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be nullable")
 	})
@@ -2945,7 +2970,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -2964,7 +2989,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be primary key")
 	})
@@ -2984,7 +3009,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -3004,7 +3029,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -3024,7 +3049,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be nullable")
 	})
@@ -3095,13 +3120,13 @@ func TestValidateModelFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "f1", false)
+		err := validator.ValidateFunction(schema, "f1", false)
 		assert.NoError(t, err)
 
-		err = validateFunction(schema, "f2", false)
+		err = validator.ValidateFunction(schema, "f2", false)
 		assert.Error(t, err)
 
-		err = validateFunction(schema, "", false)
+		err = validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 	})
 
@@ -3134,7 +3159,7 @@ func TestValidateModelFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 	})
 }
@@ -3150,7 +3175,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}},
 			},
 		}
-		err := checkFunctionInputField(function, fields)
+		err := validator.CheckFunctionInputField(function, fields)
 		assert.NoError(t, err)
 	})
 
@@ -3163,7 +3188,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 				DataType: schemapb.DataType_Int64,
 			},
 		}
-		err := checkFunctionInputField(function, fields)
+		err := validator.CheckFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3177,7 +3202,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "false"}},
 			},
 		}
-		err := checkFunctionInputField(function, fields)
+		err := validator.CheckFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3195,7 +3220,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}},
 			},
 		}
-		err := checkFunctionInputField(function, fields)
+		err := validator.CheckFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3208,7 +3233,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 				DataType: schemapb.DataType_VarChar,
 			},
 		}
-		err := checkFunctionInputField(function, fields)
+		err := validator.CheckFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3217,7 +3242,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 			Type: schemapb.FunctionType_TextEmbedding,
 		}
 		fields := []*schemapb.FieldSchema{}
-		err := checkFunctionInputField(function, fields)
+		err := validator.CheckFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3230,7 +3255,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 				DataType: schemapb.DataType_Int64,
 			},
 		}
-		err := checkFunctionInputField(function, fields)
+		err := validator.CheckFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
 }
@@ -3245,7 +3270,7 @@ func TestValidateFunctionOutputField(t *testing.T) {
 				DataType: schemapb.DataType_SparseFloatVector,
 			},
 		}
-		err := checkFunctionOutputField(function, fields)
+		err := validator.CheckFunctionOutputField(function, fields)
 		assert.NoError(t, err)
 	})
 
@@ -3258,7 +3283,7 @@ func TestValidateFunctionOutputField(t *testing.T) {
 				DataType: schemapb.DataType_Float,
 			},
 		}
-		err := checkFunctionOutputField(function, fields)
+		err := validator.CheckFunctionOutputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3274,7 +3299,7 @@ func TestValidateFunctionOutputField(t *testing.T) {
 				DataType: schemapb.DataType_FloatVector,
 			},
 		}
-		err := checkFunctionOutputField(function, fields)
+		err := validator.CheckFunctionOutputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3287,7 +3312,7 @@ func TestValidateFunctionOutputField(t *testing.T) {
 				DataType: schemapb.DataType_FloatVector,
 			},
 		}
-		err := checkFunctionOutputField(function, fields)
+		err := validator.CheckFunctionOutputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3296,7 +3321,7 @@ func TestValidateFunctionOutputField(t *testing.T) {
 			Type: schemapb.FunctionType_TextEmbedding,
 		}
 		fields := []*schemapb.FieldSchema{}
-		err := checkFunctionOutputField(function, fields)
+		err := validator.CheckFunctionOutputField(function, fields)
 		assert.Error(t, err)
 	})
 
@@ -3309,7 +3334,7 @@ func TestValidateFunctionOutputField(t *testing.T) {
 				DataType: schemapb.DataType_Int64,
 			},
 		}
-		err := checkFunctionOutputField(function, fields)
+		err := validator.CheckFunctionOutputField(function, fields)
 		assert.Error(t, err)
 	})
 }
@@ -3322,7 +3347,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"input1", "input2"},
 			OutputFieldNames: []string{"output1"},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.NoError(t, err)
 	})
 
@@ -3333,7 +3358,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"input1"},
 			OutputFieldNames: []string{"output1"},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 
@@ -3344,7 +3369,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{},
 			OutputFieldNames: []string{"output1"},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 
@@ -3355,7 +3380,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"input1"},
 			OutputFieldNames: []string{},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 
@@ -3366,7 +3391,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"input1", ""},
 			OutputFieldNames: []string{"output1"},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 
@@ -3377,7 +3402,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"input1", "input1"},
 			OutputFieldNames: []string{"output1"},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 
@@ -3388,7 +3413,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"input1"},
 			OutputFieldNames: []string{"output1", ""},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 
@@ -3399,7 +3424,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"field1", "field2"},
 			OutputFieldNames: []string{"field1"},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 
@@ -3410,7 +3435,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"input1"},
 			OutputFieldNames: []string{"output1", "output1"},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 
@@ -3421,7 +3446,7 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			InputFieldNames:  []string{"input1"},
 			OutputFieldNames: []string{"output1"},
 		}
-		err := checkFunctionBasicParams(function)
+		err := validator.CheckFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
 }
@@ -5400,7 +5425,7 @@ func TestMinHashFunction(t *testing.T) {
 			},
 		}
 
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -5430,7 +5455,7 @@ func TestMinHashFunction(t *testing.T) {
 			},
 		}
 
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -5460,7 +5485,7 @@ func TestMinHashFunction(t *testing.T) {
 		schema1 := createSchema()
 
 		// Inject permutations in both schemas
-		err := validateFunction(schema1, "", false)
+		err := validator.ValidateFunction(schema1, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -5491,7 +5516,7 @@ func TestMinHashFunction(t *testing.T) {
 		schema1 := createSchema()
 
 		// Inject permutations in both schemas
-		err := validateFunction(schema1, "", false)
+		err := validator.ValidateFunction(schema1, "", false)
 		assert.Error(t, err)
 	})
 
@@ -5515,7 +5540,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "num_hashes")
 		assert.Contains(t, err.Error(), "not a number")
@@ -5541,7 +5566,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "num_hashes")
 		assert.Contains(t, err.Error(), "positive")
@@ -5567,7 +5592,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "shingle_size")
 		assert.Contains(t, err.Error(), "not a number")
@@ -5593,7 +5618,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "shingle_size")
 		assert.Contains(t, err.Error(), "positive")
@@ -5619,7 +5644,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown hash function")
 	})
@@ -5644,7 +5669,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown hash function")
 	})
@@ -5669,7 +5694,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown token_level")
 	})
@@ -5694,7 +5719,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown token_level")
 	})
@@ -5719,7 +5744,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "seed")
 		assert.Contains(t, err.Error(), "not a number")
@@ -5745,7 +5770,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -5769,7 +5794,7 @@ func TestMinHashFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, "", false)
+		err := validator.ValidateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 }
@@ -6717,4 +6742,17 @@ func TestInjectVirtualPKForExternalCollection(t *testing.T) {
 		// FieldID should be 0 (assigned by RootCoord later)
 		assert.Equal(t, int64(0), schema.Fields[0].FieldID)
 	})
+}
+
+func TestFailMetricLabel(t *testing.T) {
+	// untyped / nil errors must take the conservative system bucket
+	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(nil))
+	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(errors.New("plain error")))
+	assert.Equal(t, metrics.FailSystemLabel, failMetricLabel(merr.WrapErrServiceInternalMsg("internal failure")))
+	// input-classified merr errors go to the user bucket, also through wrapping
+	assert.Equal(t, metrics.FailInputLabel, failMetricLabel(merr.WrapErrParameterInvalidMsg("bad parameter")))
+	assert.Equal(t, metrics.FailInputLabel, failMetricLabel(merr.Wrap(merr.WrapErrParameterInvalidMsg("bad parameter"), "context")))
+	// client cancellation is neither party's failure
+	assert.Equal(t, metrics.CancelLabel, failMetricLabel(context.Canceled))
+	assert.Equal(t, metrics.CancelLabel, failMetricLabel(errors.Wrap(context.Canceled, "rpc aborted")))
 }

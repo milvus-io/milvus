@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -424,19 +425,33 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_AllowsEmptyElementLevelR
 		},
 	}
 
-	op := &elementBestCollapseOperator{}
-	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
-	s.Require().NoError(err)
+	tests := []struct {
+		name   string
+		config elementCollapseConfig
+	}{
+		{name: "default max"},
+		{name: "topk sum", config: elementCollapseConfig{Strategy: elementCollapseTopKSum, TopK: 2}},
+	}
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			op := &elementBestCollapseOperator{}
+			if test.config.Strategy != "" {
+				op.configs = []elementCollapseConfig{test.config}
+			}
+			out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
+			s.Require().NoError(err)
 
-	results := out[0].([]*milvuspb.SearchResults)
-	result := results[0].GetResults()
+			results := out[0].([]*milvuspb.SearchResults)
+			result := results[0].GetResults()
 
-	s.Nil(result.GetElementIndices())
-	s.Equal(int64(1), result.GetNumQueries())
-	s.Equal(int64(0), result.GetTopK())
-	s.Equal([]int64{0}, result.GetTopks())
-	s.Empty(result.GetScores())
-	s.Equal(int64(10), result.GetAllSearchCount())
+			s.Nil(result.GetElementIndices())
+			s.Equal(int64(1), result.GetNumQueries())
+			s.Equal(int64(0), result.GetTopK())
+			s.Equal([]int64{0}, result.GetTopks())
+			s.Empty(result.GetScores())
+			s.Equal(int64(10), result.GetAllSearchCount())
+		})
+	}
 }
 
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_DeduplicatesEqualScoreElementsByRowID() {
@@ -680,6 +695,25 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsSumCollapseForNeg
 			},
 			Scores:         []float32{0.8, 0.2},
 			ElementIndices: &schemapb.LongArray{Data: []int64{0, 1}},
+		},
+	}
+	op := &elementBestCollapseOperator{configs: []elementCollapseConfig{{Strategy: elementCollapseTopKSum, TopK: 2}}}
+
+	_, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"L2"})
+
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "only supported for positively related metrics")
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsSumCollapseForNegativeMetricsWithEmptyResult() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           0,
+			Topks:          []int64{0},
+			ElementIndices: &schemapb.LongArray{},
 		},
 	}
 	op := &elementBestCollapseOperator{configs: []elementCollapseConfig{{Strategy: elementCollapseTopKSum, TopK: 2}}}
@@ -1200,7 +1234,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(
 			&querypb.GetHighlightResponse{
 				Status:  merr.Success(),
-				Results: []*querypb.HighlightResult{},
+				Results: []*querypb.HighlightResult{{}},
 			}, nil)
 		workload.Exec(ctx, 0, qn, "test_chan")
 	}).Return(nil)
@@ -1226,6 +1260,156 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		},
 	})
 	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestLexicalHighlightOpNullableStringKeepsEmptyHighlightData() {
+	cases := []struct {
+		name          string
+		rowNum        int
+		stringData    []string
+		validData     []bool
+		expectedTexts []string
+	}{
+		{
+			name:          "compact nullable string",
+			rowNum:        2,
+			stringData:    []string{"match text"},
+			validData:     []bool{true, false},
+			expectedTexts: []string{"target text", "match text", ""},
+		},
+		{
+			name:          "all null string",
+			rowNum:        1,
+			stringData:    []string{},
+			validData:     []bool{false},
+			expectedTexts: []string{"target text", ""},
+		},
+		{
+			name:          "empty string",
+			rowNum:        1,
+			stringData:    []string{""},
+			validData:     []bool{true},
+			expectedTexts: []string{"target text", ""},
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			proxy := &Proxy{}
+			proxy.tsoAllocator = &timestampAllocator{
+				tso: newMockTimestampAllocatorInterface(),
+			}
+			sched, err := newTaskScheduler(ctx, proxy.tsoAllocator)
+			s.Require().NoError(err)
+
+			err = sched.Start()
+			s.Require().NoError(err)
+			defer sched.Close()
+			proxy.sched = sched
+
+			collName := "test_coll_highlight_nullable"
+			fieldName2Types := map[string]schemapb.DataType{
+				testVarCharField: schemapb.DataType_VarChar,
+			}
+			schema := constructCollectionSchemaByDataType(collName, fieldName2Types, testVarCharField, false)
+
+			highlightTasks := map[int64]*highlightTask{
+				100: {
+					HighlightTask: &querypb.HighlightTask{
+						Texts:         []string{"target text"},
+						FieldName:     testVarCharField,
+						FieldId:       100,
+						SearchTextNum: 1,
+					},
+					preTags:  [][]byte{[]byte(DefaultPreTag)},
+					postTags: [][]byte{[]byte(DefaultPostTag)},
+				},
+			}
+
+			mockLb := shardclient.NewMockLBPolicy(s.T())
+			searchTask := &searchTask{
+				node: proxy,
+				highlighter: &LexicalHighlighter{
+					tasks: highlightTasks,
+				},
+				lb:             mockLb,
+				schema:         newSchemaInfo(schema),
+				request:        &milvuspb.SearchRequest{CollectionName: collName, DbName: "default"},
+				collectionName: collName,
+				SearchRequest:  &internalpb.SearchRequest{CollectionID: 0},
+			}
+
+			op, err := opFactory[highlightOp](searchTask, map[string]any{})
+			s.Require().NoError(err)
+
+			queryNodeResults := make([]*querypb.HighlightResult, tc.rowNum)
+			for i := range queryNodeResults {
+				queryNodeResults[i] = &querypb.HighlightResult{}
+			}
+
+			mockLb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+				qn := mocks.NewMockQueryNodeClient(s.T())
+				qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *querypb.GetHighlightRequest, opts ...grpc.CallOption) {
+					s.Require().Len(req.GetTasks(), 1)
+					task := req.GetTasks()[0]
+					s.Equal(int64(tc.rowNum), task.GetCorpusTextNum())
+					s.Equal(tc.expectedTexts, task.GetTexts())
+				}).Return(
+					&querypb.GetHighlightResponse{
+						Status:  merr.Success(),
+						Results: queryNodeResults,
+					}, nil)
+				workload.Exec(ctx, 0, qn, "test_chan")
+			}).Return(nil)
+
+			ids := make([]int64, tc.rowNum)
+			scores := make([]float32, tc.rowNum)
+			for i := range tc.rowNum {
+				ids[i] = int64(i + 1)
+				scores[i] = 1.0 - float32(i)*0.1
+			}
+
+			results, err := op.run(ctx, s.span, &milvuspb.SearchResults{
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       int64(tc.rowNum),
+					Topks:      []int64{int64(tc.rowNum)},
+					Ids:        testSearchResultIDs(ids...),
+					Scores:     scores,
+					FieldsData: []*schemapb.FieldData{
+						{
+							FieldId:   100,
+							FieldName: testVarCharField,
+							Type:      schemapb.DataType_VarChar,
+							ValidData: tc.validData,
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_StringData{
+										StringData: &schemapb.StringArray{Data: tc.stringData},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			s.NoError(err)
+			s.Require().Len(results, 1)
+
+			result := results[0].(*milvuspb.SearchResults)
+			highlightResults := result.GetResults().GetHighlightResults()
+			s.Require().Len(highlightResults, 1)
+			s.Equal(testVarCharField, highlightResults[0].GetFieldName())
+			s.Require().Len(highlightResults[0].GetDatas(), tc.rowNum)
+			for _, data := range highlightResults[0].GetDatas() {
+				s.NotNil(data)
+				s.Empty(data.GetFragments())
+			}
+		})
+	}
 }
 
 func (s *SearchPipelineSuite) TestLexicalHighlightOpZeroHitWithNonEmptyFieldsData() {

@@ -44,11 +44,12 @@ namespace milvus {
 namespace exec {
 
 static milvus::SearchResult
-empty_search_result(int64_t num_queries) {
+empty_search_result(int64_t num_queries, bool element_level = false) {
     milvus::SearchResult final_result;
     final_result.total_nq_ = num_queries;
     final_result.unity_topK_ = 0;  // no result
     final_result.total_data_cnt_ = 0;
+    final_result.element_level_ = element_level;
     return final_result;
 }
 
@@ -146,7 +147,7 @@ PhyVectorSearchNode::GetOutput() {
             query_context_->set_active_element_count(element_bitset.size());
             if (element_bitset.empty()) {
                 query_context_->set_search_result(
-                    empty_search_result(num_queries));
+                    empty_search_result(num_queries, ph.element_level_));
                 return input_;
             }
 
@@ -154,6 +155,7 @@ PhyVectorSearchNode::GetOutput() {
             col_res.push_back(std::make_shared<ColumnVector>(
                 std::move(element_bitset), std::move(valid_element_bitset)));
             input_ = std::make_shared<RowVector>(col_res);
+            query_context_->set_bitset_is_element_level(true);
         }
 
         auto col_input = GetColumnVector(input_);

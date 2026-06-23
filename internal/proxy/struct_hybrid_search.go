@@ -11,6 +11,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -77,7 +79,7 @@ func parseAndRemoveElementScope(searchParamStr string) (elementCollapseConfig, b
 	delete(root, elementScopeKey)
 	sanitized, err := json.Marshal(root)
 	if err != nil {
-		return elementCollapseConfig{}, false, "", merr.WrapErrServiceInternal(fmt.Sprintf("failed to rewrite search params without %s: %v", elementScopeKey, err))
+		return elementCollapseConfig{}, false, "", merr.WrapErrServiceInternalMsg("failed to rewrite search params without %s: %v", elementScopeKey, err)
 	}
 	return cfg, true, string(sanitized), nil
 }
@@ -94,7 +96,7 @@ func parseElementScope(scopeRaw json.RawMessage) (elementCollapseConfig, error) 
 	}
 	collapseRaw, ok := scope["collapse"]
 	if !ok {
-		return elementCollapseConfig{}, merr.WrapErrParameterInvalidMsg("%s.collapse is required", elementScopeKey)
+		return elementCollapseConfig{}, merr.WrapErrParameterMissingMsg("%s.collapse is required", elementScopeKey)
 	}
 
 	var collapse map[string]json.RawMessage
@@ -115,7 +117,7 @@ func parseElementScope(scopeRaw json.RawMessage) (elementCollapseConfig, error) 
 	}
 	strategy = strings.TrimSpace(strategy)
 	if strategy == "" {
-		return elementCollapseConfig{}, merr.WrapErrParameterInvalidMsg("%s.collapse.strategy is required", elementScopeKey)
+		return elementCollapseConfig{}, merr.WrapErrParameterMissingMsg("%s.collapse.strategy is required", elementScopeKey)
 	}
 	if !isSupportedElementCollapseStrategy(strategy) {
 		return elementCollapseConfig{}, merr.WrapErrParameterInvalidMsg("unsupported %s.collapse.strategy: %s", elementScopeKey, strategy)
@@ -134,7 +136,7 @@ func parseElementScope(scopeRaw json.RawMessage) (elementCollapseConfig, error) 
 	switch strategy {
 	case elementCollapseTopKSum, elementCollapseTopKAvg:
 		if cfg.TopK <= 0 {
-			return elementCollapseConfig{}, merr.WrapErrParameterInvalidMsg("%s.collapse.topk is required for strategy %s", elementScopeKey, strategy)
+			return elementCollapseConfig{}, merr.WrapErrParameterMissingMsg("%s.collapse.topk is required for strategy %s", elementScopeKey, strategy)
 		}
 	default:
 		if cfg.TopK != 0 {
@@ -158,12 +160,26 @@ func isElementCollapseSumFamily(strategy string) bool {
 }
 
 func validateElementCollapseMetricType(config elementCollapseConfig, metricType string) error {
-	if config.Strategy == "" || !isElementCollapseSumFamily(config.Strategy) || metric.PositivelyRelated(metricType) {
+	if config.Strategy == "" ||
+		!isElementCollapseSumFamily(config.Strategy) ||
+		strings.TrimSpace(metricType) == "" ||
+		metric.PositivelyRelated(metricType) {
 		return nil
 	}
 	return merr.WrapErrParameterInvalidMsg(
 		"%s.collapse.strategy %s is only supported for positively related metrics",
 		elementScopeKey, config.Strategy)
+}
+
+func resolveElementCollapseMetricType(requestMetricType string, field *schemapb.FieldSchema) string {
+	if strings.TrimSpace(requestMetricType) != "" || field == nil {
+		return requestMetricType
+	}
+	indexMetricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, field.GetIndexParams())
+	if err != nil {
+		return ""
+	}
+	return indexMetricType
 }
 
 func getStructParentFieldName(schema *schemapb.CollectionSchema, fieldID int64) (string, bool) {

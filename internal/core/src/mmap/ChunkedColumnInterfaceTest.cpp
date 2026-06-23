@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -35,6 +36,9 @@ namespace {
 
 constexpr int32_t kElementSize = 4;
 constexpr int64_t kTestFieldId = 1;
+constexpr int64_t kVectorArrayFieldId = 2;
+constexpr int64_t kVectorArrayRows = 4;
+constexpr int64_t kVectorArrayDim = 2;
 
 struct ColumnFixture {
     std::shared_ptr<ChunkedColumnInterface> column;
@@ -47,6 +51,11 @@ struct ColumnSpec {
     std::vector<int64_t> rows_per_chunk;
     std::vector<std::vector<bool>> valid_patterns;  // empty => all valid
     bool nullable{true};
+};
+
+struct VectorArrayColumnFixture {
+    std::shared_ptr<ChunkedColumnInterface> column;
+    std::shared_ptr<void> buffer_holder;
 };
 
 std::vector<char>
@@ -81,11 +90,58 @@ BuildChunkBuffer(int64_t row_num,
     return buf;
 }
 
+std::vector<char>
+BuildNullableVectorArrayChunkBuffer() {
+    const auto bitmap_bytes = (kVectorArrayRows + 7) / 8;
+    const auto header_bytes = sizeof(uint32_t) * (kVectorArrayRows * 2 + 1);
+    const std::array<float, 6> payload{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
+    const auto payload_bytes = payload.size() * sizeof(float);
+
+    std::vector<char> buf(
+        bitmap_bytes + header_bytes + payload_bytes + MMAP_ARRAY_PADDING, 0);
+    buf[0] = 0b00001101;  // rows 0, 2, and 3 are valid; row 1 is null.
+
+    const auto payload_offset =
+        static_cast<uint32_t>(bitmap_bytes + header_bytes);
+    const auto row0_end =
+        payload_offset + static_cast<uint32_t>(kVectorArrayDim * sizeof(float));
+    const auto row3_end =
+        row0_end + static_cast<uint32_t>(2 * kVectorArrayDim * sizeof(float));
+    const std::array<uint32_t, kVectorArrayRows * 2 + 1> header{
+        payload_offset,
+        1,
+        row0_end,
+        0,
+        row0_end,
+        0,
+        row0_end,
+        2,
+        row3_end,
+    };
+    std::memcpy(buf.data() + bitmap_bytes,
+                header.data(),
+                header.size() * sizeof(uint32_t));
+    std::memcpy(buf.data() + payload_offset, payload.data(), payload_bytes);
+    return buf;
+}
+
 std::unique_ptr<FixedWidthChunk>
 MakeFixedChunk(int64_t row_num, bool nullable, char* data, size_t size) {
     auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
     return std::make_unique<FixedWidthChunk>(
         row_num, 1, data, size, kElementSize, nullable, guard);
+}
+
+std::unique_ptr<VectorArrayChunk>
+MakeVectorArrayChunk(char* data, size_t size) {
+    auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+    return std::make_unique<VectorArrayChunk>(kVectorArrayDim,
+                                              kVectorArrayRows,
+                                              data,
+                                              size,
+                                              DataType::VECTOR_FLOAT,
+                                              guard,
+                                              /*nullable=*/true);
 }
 
 class CountingChunkTranslator : public TestChunkTranslator {
@@ -226,6 +282,66 @@ struct ProxyChunkColumnFactory {
     }
 };
 
+struct ChunkedVectorArrayColumnFactory {
+    static VectorArrayColumnFixture
+    Create() {
+        auto buffers = std::make_shared<std::vector<std::vector<char>>>(1);
+        (*buffers)[0] = BuildNullableVectorArrayChunkBuffer();
+        std::vector<std::unique_ptr<Chunk>> chunks;
+        chunks.push_back(
+            MakeVectorArrayChunk((*buffers)[0].data(), (*buffers)[0].size()));
+
+        auto translator = std::make_unique<TestChunkTranslator>(
+            std::vector<int64_t>{kVectorArrayRows},
+            "cc_vector_array_iface",
+            std::move(chunks));
+        FieldMeta fm(FieldName("va"),
+                     FieldId(kVectorArrayFieldId),
+                     DataType::VECTOR_ARRAY,
+                     kVectorArrayDim,
+                     knowhere::metric::L2,
+                     /*nullable=*/true,
+                     std::nullopt);
+        auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+            std::move(translator), nullptr);
+        auto column =
+            MakeChunkedColumnBase(DataType::VECTOR_ARRAY, std::move(slot), fm);
+        return {column, std::static_pointer_cast<void>(buffers)};
+    }
+};
+
+struct ProxyVectorArrayColumnFactory {
+    static VectorArrayColumnFixture
+    Create() {
+        auto buffers = std::make_shared<std::vector<std::vector<char>>>(1);
+        (*buffers)[0] = BuildNullableVectorArrayChunkBuffer();
+        std::unordered_map<FieldId, std::shared_ptr<Chunk>> fields;
+        fields[FieldId(kVectorArrayFieldId)] =
+            MakeVectorArrayChunk((*buffers)[0].data(), (*buffers)[0].size());
+
+        std::vector<std::unique_ptr<GroupChunk>> group_chunks;
+        group_chunks.push_back(std::make_unique<GroupChunk>(fields));
+        auto translator = std::make_unique<TestGroupChunkTranslator>(
+            /*num_fields=*/1,
+            std::vector<int64_t>{kVectorArrayRows},
+            "pcc_vector_array_iface",
+            std::move(group_chunks));
+        auto group =
+            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+        FieldMeta fm(FieldName("va"),
+                     FieldId(kVectorArrayFieldId),
+                     DataType::VECTOR_ARRAY,
+                     kVectorArrayDim,
+                     knowhere::metric::L2,
+                     /*nullable=*/true,
+                     std::nullopt);
+        auto column = std::make_shared<ProxyChunkColumn>(
+            group, FieldId(kVectorArrayFieldId), fm);
+        return {std::static_pointer_cast<ChunkedColumnInterface>(column),
+                std::static_pointer_cast<void>(buffers)};
+    }
+};
+
 }  // namespace
 
 template <typename Factory>
@@ -340,6 +456,52 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
                      nullptr, &value, null_offset, kElementSize, 1),
                  std::exception);
     EXPECT_FALSE(fx.column->GetOffsetMapping().IsEnabled());
+}
+
+template <typename Factory>
+class VectorArrayColumnInterfaceTest : public ::testing::Test {};
+
+using VectorArrayFactories = ::testing::Types<ChunkedVectorArrayColumnFactory,
+                                              ProxyVectorArrayColumnFactory>;
+TYPED_TEST_SUITE(VectorArrayColumnInterfaceTest, VectorArrayFactories);
+
+TYPED_TEST(VectorArrayColumnInterfaceTest,
+           BulkVectorArrayAtUsesLogicalOffsetsForNullableRows) {
+    auto fx = TypeParam::Create();
+
+    const int64_t offsets[] = {0, 2, 3};
+    std::vector<VectorFieldProto> values(std::size(offsets));
+    fx.column->BulkVectorArrayAt(
+        nullptr,
+        [&](VectorFieldProto&& value, size_t i) {
+            values[i] = std::move(value);
+        },
+        offsets,
+        std::size(offsets));
+
+    ASSERT_EQ(values[0].float_vector().data().size(), 2);
+    EXPECT_FLOAT_EQ(values[0].float_vector().data(0), 1.0F);
+    EXPECT_FLOAT_EQ(values[0].float_vector().data(1), 2.0F);
+    EXPECT_EQ(values[1].float_vector().data().size(), 0);
+    ASSERT_EQ(values[2].float_vector().data().size(), 4);
+    EXPECT_FLOAT_EQ(values[2].float_vector().data(0), 3.0F);
+    EXPECT_FLOAT_EQ(values[2].float_vector().data(1), 4.0F);
+    EXPECT_FLOAT_EQ(values[2].float_vector().data(2), 5.0F);
+    EXPECT_FLOAT_EQ(values[2].float_vector().data(3), 6.0F);
+
+    bool valid = true;
+    fx.column->BulkIsValid(
+        nullptr,
+        [&](bool is_valid, size_t) { valid = is_valid; },
+        offsets + 1,
+        1);
+    EXPECT_TRUE(valid);
+
+    const int64_t null_offset[] = {1};
+    EXPECT_THROW(
+        fx.column->BulkVectorArrayAt(
+            nullptr, [](VectorFieldProto&&, size_t) {}, null_offset, 1),
+        std::exception);
 }
 
 }  // namespace milvus

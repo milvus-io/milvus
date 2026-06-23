@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -36,6 +37,12 @@ type CompactionView interface {
 	ForceTrigger() (CompactionView, string)
 	ForceTriggerAll() ([]CompactionView, string)
 	GetTriggerID() int64
+	GetTotalSize() float64
+	GetCollectionTTL() time.Duration
+}
+
+func sumSegmentSize(views []*SegmentView) float64 {
+	return lo.SumBy(views, func(v *SegmentView) float64 { return v.Size })
 }
 
 type FullViews struct {

@@ -1,7 +1,6 @@
 package resolver
 
 import (
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/resolver"
 
@@ -45,7 +44,7 @@ func (r *watchBasedGRPCResolver) Close() {
 // Return error if the resolver is closed.
 func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 	if !r.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return errors.New("resolver is closed")
+		return errResolverClosed
 	}
 	defer r.lifetime.Done()
 

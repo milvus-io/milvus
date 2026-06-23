@@ -154,6 +154,7 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 			Name:        field.Name,
 			Description: field.Description,
 			TypeParams:  MapKvPairs(field.TypeParams),
+			Nullable:    field.Nullable,
 		}
 		// max_capacity declared on the parent struct field must be carried onto each sub-field's
 		// type params — the server validates it per sub-field on insert.
@@ -222,6 +223,7 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 // original (scalar or vector) type.
 func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 	structSchema := NewStructSchema()
+	typeParams := KvPairsMap(p.GetTypeParams())
 	for _, sf := range p.GetFields() {
 		field := NewField().ReadProto(sf)
 		// unwrap Array/ArrayOfVector wrapper added by ProtoMessage()
@@ -229,6 +231,11 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 		case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector:
 			field.DataType = FieldType(sf.GetElementType())
 			field.ElementType = 0
+		}
+		if _, ok := typeParams[TypeParamMaxCapacity]; !ok {
+			if maxCapacity, has := field.TypeParams[TypeParamMaxCapacity]; has {
+				typeParams[TypeParamMaxCapacity] = maxCapacity
+			}
 		}
 		structSchema.WithField(field)
 	}
@@ -238,7 +245,8 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 		Description:  p.GetDescription(),
 		DataType:     FieldTypeArray,
 		ElementType:  FieldTypeStruct,
-		TypeParams:   KvPairsMap(p.GetTypeParams()),
+		TypeParams:   typeParams,
+		Nullable:     p.GetNullable(),
 		StructSchema: structSchema,
 	}
 }

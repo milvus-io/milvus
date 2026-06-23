@@ -18,6 +18,7 @@ package merr
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type ErrSuite struct {
@@ -34,7 +34,6 @@ type ErrSuite struct {
 }
 
 func (s *ErrSuite) SetupSuite() {
-	paramtable.Init()
 }
 
 func (s *ErrSuite) TestCode() {
@@ -46,8 +45,19 @@ func (s *ErrSuite) TestCode() {
 	s.Equal(CanceledCode, Code(context.Canceled))
 	s.Equal(errUnexpected.errCode, Code(errUnexpected))
 
-	sameCodeErr := newMilvusError("new error", ErrCollectionNotFound.errCode, false)
+	sameCodeErr := makeMilvusError("new error", ErrCollectionNotFound.errCode, false)
 	s.True(sameCodeErr.Is(ErrCollectionNotFound))
+}
+
+func (s *ErrSuite) TestDuplicateSentinelCodePanics() {
+	// milvusError.Is matches by code alone, so defining a second sentinel on an
+	// occupied code must fail loudly at init instead of silently satisfying
+	// errors.Is against an unrelated sentinel.
+	s.PanicsWithValue(
+		fmt.Sprintf("merr: duplicate sentinel error code %d: %q vs %q",
+			ErrCollectionNotFound.errCode, ErrCollectionNotFound.msg, "duplicate probe"),
+		func() { newMilvusError("duplicate probe", ErrCollectionNotFound.errCode, false) },
+	)
 }
 
 func (s *ErrSuite) TestStatus() {
@@ -104,7 +114,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrResourceGroupReachLimit("test_ResourceGroup", 1, "failed to get ResourceGroup"), ErrResourceGroupReachLimit)
 	s.ErrorIs(WrapErrResourceGroupIllegalConfig("test_ResourceGroup", nil, "failed to get ResourceGroup"), ErrResourceGroupIllegalConfig)
 	s.ErrorIs(WrapErrResourceGroupNodeNotEnough("test_ResourceGroup", 1, 2, "failed to get ResourceGroup"), ErrResourceGroupNodeNotEnough)
-	s.ErrorIs(WrapErrResourceGroupServiceAvailable("test_ResourceGroup", "failed to get ResourceGroup"), ErrResourceGroupServiceAvailable)
+	s.ErrorIs(WrapErrResourceGroupServiceUnAvailable("test_ResourceGroup", "failed to get ResourceGroup"), ErrResourceGroupServiceUnAvailable)
 
 	// Replica related
 	s.ErrorIs(WrapErrReplicaNotFound(1, "failed to get replica"), ErrReplicaNotFound)
@@ -179,6 +189,14 @@ func (s *ErrSuite) TestOldCode() {
 	s.ErrorIs(OldCodeToMerr(commonpb.ErrorCode_RateLimit), ErrServiceRateLimit)
 	s.ErrorIs(OldCodeToMerr(commonpb.ErrorCode_ForceDeny), ErrServiceQuotaExceeded)
 	s.ErrorIs(OldCodeToMerr(commonpb.ErrorCode_UnexpectedError), errUnexpected)
+
+	// Every parameter-class error must project to IllegalArgument for old SDKs
+	// that still read the deprecated ErrorCode; otherwise the finer-grained
+	// ParameterMissing/ParameterTooLarge codes regress them to UnexpectedError.
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterInvalid).GetErrorCode())
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterMissing).GetErrorCode())
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterTooLarge).GetErrorCode())
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(WrapErrParameterMissingMsg("collection names cannot be empty")).GetErrorCode())
 }
 
 func (s *ErrSuite) TestCombine() {
@@ -228,7 +246,7 @@ func (s *ErrSuite) TestIsHealthy() {
 	}
 	for _, tc := range cases {
 		s.Run(tc.code.String(), func() {
-			s.Equal(tc.expect, IsHealthy(tc.code) == nil)
+			s.Equal(tc.expect, CheckHealthy(tc.code) == nil)
 		})
 	}
 }
@@ -278,4 +296,89 @@ func TestNewIOErrors(t *testing.T) {
 
 func TestErrors(t *testing.T) {
 	suite.Run(t, new(ErrSuite))
+}
+
+// TestWrapErrPreservesInnerChain locks in the contract that WrapErr*Err helpers
+// keep the inner error chain reachable via errors.Is while still attributing
+// the milvus sentinel for code lookup. Regression guard against the previous
+// implementation that string-flattened the inner error and lost its identity.
+func TestWrapErrPreservesInnerChain(t *testing.T) {
+	inner := errors.New("inner-error")
+
+	for _, tc := range []struct {
+		name     string
+		wrap     func() error
+		sentinel error
+		other    error
+		code     int32
+	}{
+		{
+			name:     "ServiceInternal",
+			wrap:     func() error { return WrapErrServiceInternalErr(inner, "ctx %s", "test") },
+			sentinel: ErrServiceInternal,
+			other:    ErrParameterInvalid,
+			code:     ErrServiceInternal.errCode,
+		},
+		{
+			name:     "ParameterInvalid",
+			wrap:     func() error { return WrapErrParameterInvalidErr(inner, "ctx %d", 42) },
+			sentinel: ErrParameterInvalid,
+			other:    ErrServiceInternal,
+			code:     ErrParameterInvalid.errCode,
+		},
+		{
+			name:     "MqInternal",
+			wrap:     func() error { return WrapErrMqInternal(inner, "step1", "step2") },
+			sentinel: ErrMqInternal,
+			other:    ErrServiceInternal,
+			code:     ErrMqInternal.errCode,
+		},
+		{
+			name:     "BuildCompactionRequestFail",
+			wrap:     func() error { return WrapErrBuildCompactionRequestFail(inner) },
+			sentinel: ErrBuildCompactionRequestFail,
+			other:    ErrServiceInternal,
+			code:     ErrBuildCompactionRequestFail.errCode,
+		},
+		{
+			name:     "GetCompactionPlanResultFail",
+			wrap:     func() error { return WrapErrGetCompactionPlanResultFail(inner) },
+			sentinel: ErrGetCompactionPlanResultFail,
+			other:    ErrServiceInternal,
+			code:     ErrGetCompactionPlanResultFail.errCode,
+		},
+		{
+			name:     "OperationNotSupported",
+			wrap:     func() error { return WrapErrOperationNotSupported(inner, "op %s", "drop") },
+			sentinel: ErrOperationNotSupported,
+			other:    ErrServiceInternal,
+			code:     ErrOperationNotSupported.errCode,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := tc.wrap()
+			assert.True(t, errors.Is(w, tc.sentinel), "must match its sentinel")
+			assert.True(t, errors.Is(w, inner), "must preserve inner chain")
+			assert.False(t, errors.Is(w, tc.other), "must not match unrelated sentinel")
+			assert.Equal(t, tc.code, Code(w), "Code() must report sentinel's code")
+			assert.Contains(t, w.Error(), inner.Error(), "message must include inner")
+
+			// The wrapped error must carry the SENTINEL's classification, not the
+			// inner error's. These walk via errors.As(err, &milvusError); without
+			// wrappedMilvusError.As they would resolve to the inner error and drop
+			// the sentinel's InputError / retriable marks.
+			assert.Equal(t, GetErrorType(tc.sentinel), GetErrorType(w),
+				"GetErrorType must match the sentinel's classification")
+			assert.Equal(t, IsRetryableErr(tc.sentinel), IsRetryableErr(w),
+				"IsRetryableErr must match the sentinel's retriable flag")
+			if GetErrorType(tc.sentinel) == InputError {
+				assert.Equal(t, "true", Status(w).ExtraInfo[InputErrorFlagKey],
+					"Status must surface is_input_error for an InputError sentinel")
+				assert.False(t, Status(w).Retriable, "InputError status must be non-retriable")
+			}
+		})
+	}
+
+	// nil err falls back to the Msg variant; just make sure that still works.
+	assert.True(t, errors.Is(WrapErrServiceInternalErr(nil, "no underlying err"), ErrServiceInternal))
 }

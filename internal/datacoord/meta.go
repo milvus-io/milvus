@@ -816,7 +816,7 @@ func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, err
 	for _, segmentID := range segmentIDs {
 		segment := m.segments.GetSegment(segmentID)
 		if segment == nil {
-			return nil, errors.New(fmt.Sprintf("cannot find segment %d", segmentID))
+			return nil, merr.WrapErrServiceInternalMsg("cannot find segment %d", segmentID)
 		}
 		segChannels[segmentID] = segment.GetInsertChannel()
 	}
@@ -840,7 +840,7 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 		if targetState == commonpb.SegmentState_Dropped {
 			return nil
 		}
-		return fmt.Errorf("segment is not exist with ID = %d", segmentID)
+		return merr.WrapErrSegmentNotFound(segmentID)
 	}
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone()
@@ -941,12 +941,12 @@ func (p *updateSegmentPack) Validate() error {
 		segmentInMeta := p.meta.segments.GetSegment(segment.ID)
 		if segmentInMeta.State == commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Dropped {
 			// if the segment is flushed, we should not update the segment meta, ignore the operation directly.
-			return errors.Wrapf(ErrIgnoredSegmentMetaOperation,
+			return merr.Wrapf(errIgnoredSegmentMetaOperation,
 				"segment is flushed, segmentID: %d",
 				segment.ID)
 		}
 		if segment.GetDmlPosition().GetTimestamp() < segmentInMeta.GetDmlPosition().GetTimestamp() {
-			return errors.Wrapf(ErrIgnoredSegmentMetaOperation,
+			return merr.Wrapf(errIgnoredSegmentMetaOperation,
 				"dml time tick is less than the segment meta, segmentID: %d, new incoming time tick: %d, existing time tick: %d",
 				segment.ID,
 				segment.GetDmlPosition().GetTimestamp(),
@@ -1223,7 +1223,7 @@ func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error 
 		return err
 	}
 	if currentBase != incomingBase {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("manifest base path mismatch for segment %d: current %s, incoming %s", segment.GetID(), currentBase, incomingBase))
+		return merr.WrapErrServiceInternalMsg("manifest base path mismatch for segment %d: current %s, incoming %s", segment.GetID(), currentBase, incomingBase)
 	}
 	if incomingVersion > currentVersion {
 		segment.ManifestPath = manifestPath
@@ -1824,6 +1824,14 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 
 	// Validate the update pack.
 	if err := updatePack.Validate(); err != nil {
+		// A stale save-binlog-paths update (segment already flushed, or an
+		// outdated time tick) is a benign no-op: skip the meta write and
+		// report success so the caller does not retry. The signal stays
+		// inside this package on purpose; see errIgnoredSegmentMetaOperation.
+		if errors.Is(err, errIgnoredSegmentMetaOperation) {
+			log.Ctx(ctx).Info("meta update: ignored stale segment meta operation", zap.Error(err))
+			return nil
+		}
 		return err
 	}
 	updatePack.prepareSegmentMetricUpdates()
@@ -2100,7 +2108,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	if curSegInfo == nil {
 		// TODO: Error handling.
 		log.Ctx(m.ctx).Error("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
-		return errors.New("meta update: add allocation failed - segment not found")
+		return merr.WrapErrSegmentNotFound(segmentID, "meta update: add allocation failed")
 	}
 	// As we use global segment lastExpire to guarantee data correctness after restart
 	// there is no need to persist allocation to meta store, only update allocation in-memory meta.
@@ -2276,21 +2284,29 @@ func normalizePositionTimestamp(pos *msgpb.MsgPosition, commitTs uint64) *msgpb.
 	}
 }
 
-func validateCompactionFallbackStartPosition(compactFromSegInfos []*SegmentInfo, fallbackStart *msgpb.MsgPosition) error {
-	if fallbackStart == nil {
-		return nil
-	}
+func maxCommitTimestamp(compactFromSegInfos []*SegmentInfo) uint64 {
 	var maxCommitTs uint64
 	for _, info := range compactFromSegInfos {
 		maxCommitTs = max(maxCommitTs, info.GetCommitTimestamp())
 	}
-	if maxCommitTs == 0 || fallbackStart.GetTimestamp() >= maxCommitTs {
-		return nil
-	}
-	return errors.Errorf(
-		"compaction fallback start position timestamp %d is earlier than max input commit timestamp %d",
-		fallbackStart.GetTimestamp(),
-		maxCommitTs)
+	return maxCommitTs
+}
+
+func getCompactionFallbackPositions(compactFromSegInfos []*SegmentInfo) (fallbackStart, fallbackDml *msgpb.MsgPosition) {
+	maxCommitTs := maxCommitTimestamp(compactFromSegInfos)
+
+	// Fallback positions are used only when output binlog timestamps are
+	// unavailable. Keep the raw minimum start timestamp so normal rows in mixed
+	// compaction still receive deletes after their original start. Normalize the
+	// fallback DML timestamp to commit_ts so temporal cleanup does not treat the
+	// compacted output as complete before committed import rows become visible.
+	fallbackStart = getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetStartPosition()
+	}))
+	fallbackDml = normalizePositionTimestamp(getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetDmlPosition()
+	})), maxCommitTs)
+	return fallbackStart, fallbackDml
 }
 
 func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
@@ -2328,22 +2344,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		compactFromSegIDs = append(compactFromSegIDs, cloned.GetID())
 	}
 
-	// Compaction normalizes import segments: row timestamps in the output
-	// binlogs are already rewritten to commit_ts by the compactor, so
-	// recalculateSegmentPosition will pick up commit_ts from output binlogs.
-	// The fallback start position must not be earlier than any input import
-	// segment's commit_ts. The check below pins that invariant so a future
-	// change to sort-compaction position handling cannot silently expose
-	// compacted import rows too early.
-	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-		return info.GetStartPosition()
-	}))
-	if err := validateCompactionFallbackStartPosition(compactFromSegInfos, fallbackStart); err != nil {
-		return nil, nil, err
-	}
-	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-		return info.GetDmlPosition()
-	}))
+	fallbackStart, fallbackDml := getCompactionFallbackPositions(compactFromSegInfos)
 
 	for _, seg := range result.GetSegments() {
 		startPos, dmlPos := recalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
@@ -2455,23 +2456,7 @@ func (m *meta) completeMixCompactionMutation(
 	}
 	outputSchemaVersion := t.GetSchema().GetVersion()
 
-	// Compaction normalizes import segments: row timestamps in the output
-	// binlogs are already rewritten to commit_ts by the compactor, so the
-	// output segment is a normal segment with CommitTimestamp = 0.
-	// recalculateSegmentPosition will pick up commit_ts from output binlogs.
-	// The fallback start position must not be earlier than any input import
-	// segment's commit_ts. The check below pins that invariant so a future
-	// change to sort-compaction position handling cannot silently expose
-	// compacted import rows too early.
-	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-		return info.GetStartPosition()
-	}))
-	if err := validateCompactionFallbackStartPosition(compactFromSegInfos, fallbackStart); err != nil {
-		return nil, nil, err
-	}
-	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-		return info.GetDmlPosition()
-	}))
+	fallbackStart, fallbackDml := getCompactionFallbackPositions(compactFromSegInfos)
 
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
@@ -2661,7 +2646,7 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 
 	for _, segID := range segIDs {
 		if _, ok := m.segments.segments[segID]; !ok {
-			return false, fmt.Errorf("segment is not exist with ID = %d", segID)
+			return false, merr.WrapErrServiceInternalMsg("segment is not exist with ID = %d", segID)
 		}
 	}
 	return true, nil
@@ -2747,7 +2732,7 @@ func (m *meta) collectionHasTextFields(collectionID int64) bool {
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
 func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	if pos == nil || pos.GetMsgID() == nil {
-		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
+		return merr.WrapErrServiceInternalMsg("channelCP is nil, vChannel=%s", vChannel)
 	}
 
 	// Clamp checkpoint to not advance beyond min growing segment checkpoint.
@@ -3331,7 +3316,7 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	if currentManifest != resultManifest {
 		manifestCompare, err := packed.CompareManifestPath(resultManifest, currentManifest)
 		if err != nil {
-			return nil, nil, merr.WrapErrIllegalCompactionPlan(fmt.Sprintf("schema bump compaction result manifest is not comparable with current manifest: %v", err))
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump compaction result manifest is not comparable with current manifest: %v", err)
 		}
 		if manifestCompare <= 0 {
 			return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction result manifest is not newer than current manifest")
@@ -3392,7 +3377,7 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 ) ([]*SegmentInfo, *segMetricMutation, error) {
 	idRange := t.GetPreAllocatedSegmentIDs()
 	if idRange == nil || idRange.GetBegin()+1 != idRange.GetEnd() || resultSegment.GetSegmentID() != idRange.GetBegin() {
-		return nil, nil, merr.WrapErrIllegalCompactionPlan(fmt.Sprintf("schema bump replacement result segment ID %d does not match the pre-allocated segment ID", resultSegment.GetSegmentID()))
+		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump replacement result segment ID %d does not match the pre-allocated segment ID", resultSegment.GetSegmentID())
 	}
 
 	dropped := oldSegment.Clone()
@@ -3555,7 +3540,7 @@ func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*i
 		if resource, ok := m.resourceIDMap[id]; ok {
 			resources = append(resources, resource)
 		} else {
-			return nil, errors.Errorf("file resource %d not found", id)
+			return nil, merr.WrapErrServiceInternalMsg("file resource %d not found", id)
 		}
 	}
 	return resources, nil

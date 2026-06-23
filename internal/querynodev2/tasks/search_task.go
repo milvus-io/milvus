@@ -194,7 +194,7 @@ func (t *SearchTask) Execute() error {
 	// counts so the delegator can optimize search params for stage-2.
 	if searchReq.FilterOnly() {
 		if len(results) != len(searchedSegments) {
-			return fmt.Errorf("filter-only search: result count %d != segment count %d", len(results), len(searchedSegments))
+			return merr.WrapErrServiceInternalMsg("filter-only search: result count %d != segment count %d", len(results), len(searchedSegments))
 		}
 		segmentIDs := make([]int64, 0, len(searchedSegments))
 		validCounts := make([]int64, 0, len(searchedSegments))
@@ -291,7 +291,9 @@ func (t *SearchTask) Execute() error {
 		}
 	}()
 
-	// TODO: if L0 rerank is configured, run rerank chain on segDFs here
+	if err := t.applyBoostScores(segDFs, searchedSegments, searchReq); err != nil {
+		return err
+	}
 
 	if err := t.executeGoReduce(segDFs, results, searchReq, metricType, tr, relatedDataSize, allSearchCount); err != nil {
 		return err

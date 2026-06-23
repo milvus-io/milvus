@@ -19,7 +19,6 @@ package mock
 import (
 	"context"
 	"crypto/x509"
-	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/generic"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
@@ -142,7 +142,7 @@ func (c *GRPCClientBase[T]) ReCall(ctx context.Context, caller func(client T) (a
 		return ret, nil
 	}
 
-	traceErr := fmt.Errorf("err: %s\n, %s", err.Error(), tracer.StackTrace())
+	traceErr := merr.WrapErrParameterInvalidMsg("err: %s\n, %s", err.Error(), tracer.StackTrace())
 	log.Warn("GRPCClientBase[T] client grpc first call get error ", zap.Error(traceErr))
 
 	if !funcutil.CheckCtxValid(ctx) {
@@ -151,7 +151,7 @@ func (c *GRPCClientBase[T]) ReCall(ctx context.Context, caller func(client T) (a
 
 	ret, err = c.callOnce(ctx, caller)
 	if err != nil {
-		traceErr = fmt.Errorf("err: %s\n, %s", err.Error(), tracer.StackTrace())
+		traceErr = merr.WrapErrParameterInvalidMsg("err: %s\n, %s", err.Error(), tracer.StackTrace())
 		log.Error("GRPCClientBase[T] client grpc second call get error ", zap.Error(traceErr))
 		return nil, traceErr
 	}

@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	_ "github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -292,7 +293,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			newManifest, err := packed.AddStatsToManifest(
 				st.manifestPath, st.req.GetStorageConfig(), statEntries)
 			if err != nil {
-				return nil, fmt.Errorf("failed to add stats to manifest: %w", err)
+				return nil, merr.Wrap(err, "failed to add stats to manifest")
 			}
 			st.manifestPath = newManifest
 		}
@@ -496,7 +497,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok && !enableNull {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrServiceInternalMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
@@ -618,7 +619,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
-			return fmt.Errorf("failed to add text index stats to manifest: %w", err)
+			return merr.Wrap(err, "failed to add text index stats to manifest")
 		}
 		st.manifestPath = newManifest
 		// Dual-write: keep textIndexLogs populated so it is stored in segment metadata as a
@@ -685,7 +686,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok && !enableNull {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrServiceInternalMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
@@ -796,7 +797,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
-			return fmt.Errorf("failed to add JSON key stats to manifest: %w", err)
+			return merr.Wrap(err, "failed to add JSON key stats to manifest")
 		}
 		st.manifestPath = newManifest
 		// Dual-write: keep jsonKeyIndexStats populated so it is stored in segment metadata as a
@@ -829,7 +830,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 	if req.GetStorageVersion() == storage.StorageV3 {
 		basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 		if err != nil {
-			return "", fmt.Errorf("failed to unmarshal manifest path for %s basePath: %w", statsType, err)
+			return "", merr.Wrapf(err, "failed to unmarshal manifest path for %s basePath", statsType)
 		}
 		return fmt.Sprintf("%s/_stats/%s.%d", basePath, statsType, fieldID), nil
 	}
@@ -845,7 +846,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
 	}
-	return "", fmt.Errorf("unknown stats type: %s", statsType)
+	return "", merr.WrapErrParameterInvalidMsg("unknown stats type: %s", statsType)
 }
 
 func buildIndexParams(

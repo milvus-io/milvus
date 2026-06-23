@@ -1431,11 +1431,6 @@ arrow::Result<std::shared_ptr<arrow::Array>>
 BuildVectorArrayForChunk(const FieldInfo& field_info,
                          int64_t start_offset,
                          int64_t num_rows) {
-    if (field_info.valid_data) {
-        return arrow::Status::Invalid(
-            "VECTOR_ARRAY does not support null rows");
-    }
-
     auto vector_array_vec = dynamic_cast<
         const milvus::segcore::ConcurrentVector<milvus::VectorArray>*>(
         field_info.vec_base);
@@ -1451,7 +1446,21 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
 
     for (int64_t i = 0; i < num_rows; i++) {
-        const auto& vector_array = (*vector_array_vec)[start_offset + i];
+        auto logical_offset = start_offset + i;
+        if (field_info.valid_data &&
+            !field_info.valid_data->is_valid(logical_offset)) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+            continue;
+        }
+
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(logical_offset);
+        if (physical_offset < 0) {
+            return arrow::Status::Invalid(
+                "valid nullable vector array row missing physical data");
+        }
+
+        const auto& vector_array = (*vector_array_vec)[physical_offset];
         if (vector_array.get_element_type() != field_info.element_type) {
             return arrow::Status::Invalid("VECTOR_ARRAY element type mismatch");
         }

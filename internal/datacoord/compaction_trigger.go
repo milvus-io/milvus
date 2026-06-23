@@ -225,7 +225,7 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	defer cancel()
 	coll, err := t.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("collection ID %d not found, err: %w", collectionID, err)
+		return nil, merr.Wrapf(err, "collection ID %d not found", collectionID)
 	}
 	return coll, nil
 }
@@ -394,8 +394,14 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			}
 			totalRows, inputSegmentIDs := plan.A, plan.B
 
-			n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
-			startID, endID, err := t.allocator.AllocN(n)
+			inputs := typeutil.NewSet[int64](inputSegmentIDs...)
+			totalSize := lo.SumBy(group.segments, func(s *SegmentInfo) int64 {
+				if inputs.Contain(s.GetID()) {
+					return s.getSegmentSize()
+				}
+				return 0
+			})
+			planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(t.allocator, float64(totalSize), float64(expectedSize))
 			if err != nil {
 				log.Warn("fail to allocate id", zap.Error(err))
 				return err
@@ -403,24 +409,21 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			start := time.Now()
 			pts, _ := tsoutil.ParseTS(ct.startTime)
 			task := &datapb.CompactionTask{
-				PlanID:         startID,
-				TriggerID:      signal.id,
-				State:          datapb.CompactionTaskState_pipelining,
-				StartTime:      pts.Unix(),
-				Type:           datapb.CompactionType_MixCompaction,
-				CollectionTtl:  ct.collectionTTL.Nanoseconds(),
-				CollectionID:   group.collectionID,
-				PartitionID:    group.partitionID,
-				Channel:        group.channelName,
-				InputSegments:  inputSegmentIDs,
-				ResultSegments: []int64{},
-				TotalRows:      totalRows,
-				Schema:         coll.Schema,
-				MaxSize:        expectedSize,
-				PreAllocatedSegmentIDs: &datapb.IDRange{
-					Begin: startID + 1,
-					End:   endID,
-				},
+				PlanID:                 planID,
+				TriggerID:              signal.id,
+				State:                  datapb.CompactionTaskState_pipelining,
+				StartTime:              pts.Unix(),
+				Type:                   datapb.CompactionType_MixCompaction,
+				CollectionTtl:          ct.collectionTTL.Nanoseconds(),
+				CollectionID:           group.collectionID,
+				PartitionID:            group.partitionID,
+				Channel:                group.channelName,
+				InputSegments:          inputSegmentIDs,
+				ResultSegments:         []int64{},
+				TotalRows:              totalRows,
+				Schema:                 coll.Schema,
+				MaxSize:                expectedSize,
+				PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 			}
 			err = t.inspector.enqueueCompaction(task)
 			if err != nil {
@@ -588,7 +591,10 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	segments := t.meta.SelectSegments(context.TODO(), filters...)
 	// some criterion not met or conflicted
 	if len(signal.segmentIDs) > 0 && len(segments) != len(signal.segmentIDs) {
-		return nil, merr.WrapErrServiceInternal("not all segment ids provided could be compacted")
+		// SelectSegments also filters segments that are transiently mid-flush /
+		// compacting / just dropped, so a count mismatch is usually server-side
+		// state, not a bad id from the caller.
+		return nil, merr.WrapErrServiceInternalMsg("not all segment ids provided could be compacted")
 	}
 
 	type category struct {

@@ -250,7 +250,7 @@ func (p *producerImpl) sendLoop() (err error) {
 	for {
 		select {
 		case <-p.recvExitCh:
-			return errors.New("recv arm of stream closed")
+			return status.NewOnShutdownError("recv arm of stream closed")
 		case req, ok := <-p.requestCh:
 			if !ok {
 				// all message has been sent, sent close response.

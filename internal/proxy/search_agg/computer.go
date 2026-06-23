@@ -2,12 +2,12 @@ package search_agg
 
 import (
 	"context"
-	"fmt"
 	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -54,10 +54,10 @@ func NewSearchAggregationComputer(
 
 func (c *SearchAggregationComputer) Compute(ctx context.Context) ([][]*AggBucketResult, error) {
 	if c.ctx == nil {
-		return nil, fmt.Errorf("search aggregation context is nil")
+		return nil, merr.WrapErrServiceInternalMsg("search aggregation context is nil")
 	}
 	if len(c.ctx.Levels) == 0 {
-		return nil, fmt.Errorf("search aggregation context has no levels")
+		return nil, merr.WrapErrServiceInternalMsg("search aggregation context has no levels")
 	}
 
 	output := make([][]*AggBucketResult, c.ctx.NQ)
@@ -74,7 +74,7 @@ func (c *SearchAggregationComputer) Compute(ctx context.Context) ([][]*AggBucket
 func (c *SearchAggregationComputer) computeForQi(ctx context.Context, qi int64) ([]*AggBucketResult, error) {
 	topks := c.data.GetTopks()
 	if qi < 0 || qi >= int64(len(topks)) {
-		return nil, fmt.Errorf("invalid qi %d, topks length=%d", qi, len(topks))
+		return nil, merr.WrapErrServiceInternalMsg("invalid qi %d, topks length=%d", qi, len(topks))
 	}
 	var start int64
 	for i := int64(0); i < qi; i++ {
@@ -90,7 +90,7 @@ func (c *SearchAggregationComputer) computeForQi(ctx context.Context, qi int64) 
 
 func (c *SearchAggregationComputer) computeLevel(ctx context.Context, qi int64, levelIdx int, rows []reduce.RowRef) ([]*AggBucketResult, error) {
 	if levelIdx < 0 || levelIdx >= len(c.ctx.Levels) {
-		return nil, fmt.Errorf("invalid level index %d", levelIdx)
+		return nil, merr.WrapErrServiceInternalMsg("invalid level index %d", levelIdx)
 	}
 	level := c.ctx.Levels[levelIdx]
 	isLeaf := levelIdx == len(c.ctx.Levels)-1
@@ -340,7 +340,7 @@ func (c *SearchAggregationComputer) updateMetrics(bucket *bucketState, ref reduc
 	for _, plan := range plans {
 		targets := bucket.metricStates[plan.alias]
 		if targets == nil {
-			return fmt.Errorf("metric %q: missing bucket state", plan.alias)
+			return merr.WrapErrServiceInternalMsg("metric %q: missing bucket state", plan.alias)
 		}
 
 		var raw any
@@ -362,7 +362,7 @@ func (c *SearchAggregationComputer) updateMetrics(bucket *bucketState, ref reduc
 		}
 
 		if err := plan.aggregate.UpdateState(targets, agg.NewFieldValue(raw)); err != nil {
-			return fmt.Errorf("metric %q update failed: %w", plan.alias, err)
+			return merr.WrapErrServiceInternalMsg("metric %q update failed: %v", plan.alias, err)
 		}
 	}
 	return nil
@@ -370,13 +370,13 @@ func (c *SearchAggregationComputer) updateMetrics(bucket *bucketState, ref reduc
 
 func (c *SearchAggregationComputer) readValueByFieldID(ref reduce.RowRef, fieldID int64) (any, bool, error) {
 	if c.data == nil {
-		return nil, true, fmt.Errorf("nil SearchResultData")
+		return nil, true, merr.WrapErrServiceInternalMsg("nil SearchResultData")
 	}
 
 	if fieldID == ScoreFieldID {
 		scores := c.data.GetScores()
 		if ref.RowIdx < 0 || ref.RowIdx >= int64(len(scores)) {
-			return nil, true, fmt.Errorf("score index %d out of range", ref.RowIdx)
+			return nil, true, merr.WrapErrServiceInternalMsg("score index %d out of range", ref.RowIdx)
 		}
 		return scores[ref.RowIdx], false, nil
 	}
@@ -384,9 +384,9 @@ func (c *SearchAggregationComputer) readValueByFieldID(ref reduce.RowRef, fieldI
 	fd := c.fieldsByID[fieldID]
 	if fd == nil {
 		if c.ctx.IsGroupByField(fieldID) {
-			return nil, true, fmt.Errorf("group-by field %d missing from group_by_field_values", fieldID)
+			return nil, true, merr.WrapErrServiceInternalMsg("group-by field %d missing from group_by_field_values", fieldID)
 		}
-		return nil, true, fmt.Errorf("field %d missing from fields_data", fieldID)
+		return nil, true, merr.WrapErrServiceInternalMsg("field %d missing from fields_data", fieldID)
 	}
 
 	iter := typeutil.GetDataIterator(fd)
@@ -423,11 +423,11 @@ func finalizeMetrics(plans []metricPlan, states map[string][]*agg.FieldValue) (m
 	for _, plan := range plans {
 		slots := states[plan.alias]
 		if plan.aggregate == nil {
-			return nil, fmt.Errorf("metric %q: semantic aggregate is nil", plan.alias)
+			return nil, merr.WrapErrServiceInternalMsg("metric %q: semantic aggregate is nil", plan.alias)
 		}
 		value, err := plan.aggregate.Terminate(slots)
 		if err != nil {
-			return nil, fmt.Errorf("metric %q: %w", plan.alias, err)
+			return nil, merr.WrapErrServiceInternalMsg("metric %q: %v", plan.alias, err)
 		}
 		metrics[plan.alias] = value
 	}
@@ -470,90 +470,90 @@ func compareValues(a, b any) (int, error) {
 	case int:
 		bv, ok := b.(int)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case int8:
 		bv, ok := b.(int8)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case int16:
 		bv, ok := b.(int16)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case int32:
 		bv, ok := b.(int32)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case int64:
 		bv, ok := b.(int64)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case uint:
 		bv, ok := b.(uint)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case uint8:
 		bv, ok := b.(uint8)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case uint16:
 		bv, ok := b.(uint16)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case uint32:
 		bv, ok := b.(uint32)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case uint64:
 		bv, ok := b.(uint64)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	case float32:
 		bv, ok := b.(float32)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareFloat64(float64(av), float64(bv)), nil
 	case float64:
 		bv, ok := b.(float64)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareFloat64(av, bv), nil
 	case bool:
 		bv, ok := b.(bool)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareBool(av, bv), nil
 	case string:
 		bv, ok := b.(string)
 		if !ok {
-			return 0, fmt.Errorf("type mismatch: %T vs %T", a, b)
+			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
 		return compareOrdered(av, bv), nil
 	}
 
-	return 0, fmt.Errorf("unsupported comparable types: %T and %T", a, b)
+	return 0, merr.WrapErrServiceInternalMsg("unsupported comparable types: %T and %T", a, b)
 }
 
 func compareOrdered[T ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~string](a, b T) int {

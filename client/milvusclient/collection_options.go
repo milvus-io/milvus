@@ -465,3 +465,46 @@ func NewAddCollectionFieldOption(collectionName string, field *entity.Field) *ad
 		fieldSch:       field,
 	}
 }
+
+type AddCollectionStructFieldOption interface {
+	Request() *milvuspb.AddCollectionStructFieldRequest
+	// Validate validates the option before sending request
+	Validate() error
+}
+
+type addCollectionStructFieldOption struct {
+	collectionName string
+	fieldSch       *entity.Field
+}
+
+func (c *addCollectionStructFieldOption) Request() *milvuspb.AddCollectionStructFieldRequest {
+	collSchema := entity.NewSchema().WithField(c.fieldSch).ProtoMessage()
+	return &milvuspb.AddCollectionStructFieldRequest{
+		CollectionName:         c.collectionName,
+		StructArrayFieldSchema: collSchema.GetStructArrayFields()[0],
+	}
+}
+
+// Validate validates the option before sending request
+func (c *addCollectionStructFieldOption) Validate() error {
+	if c == nil {
+		return fmt.Errorf("add collection struct field option is nil")
+	}
+	if c.fieldSch == nil {
+		return fmt.Errorf("struct array field schema is required")
+	}
+	if c.fieldSch.DataType != entity.FieldTypeArray || c.fieldSch.ElementType != entity.FieldTypeStruct {
+		return fmt.Errorf("adding struct array field requires data type Array and element type Struct, field name = %s", c.fieldSch.Name)
+	}
+	if c.fieldSch.StructSchema == nil {
+		return fmt.Errorf("struct schema is required for struct array field %s", c.fieldSch.Name)
+	}
+	return c.fieldSch.StructSchema.Validate(c.fieldSch.Name)
+}
+
+func NewAddCollectionStructFieldOption(collectionName string, field *entity.Field) *addCollectionStructFieldOption {
+	return &addCollectionStructFieldOption{
+		collectionName: collectionName,
+		fieldSch:       field,
+	}
+}

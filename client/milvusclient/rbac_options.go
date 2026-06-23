@@ -67,14 +67,16 @@ type CreateUserOption interface {
 }
 
 type createUserOption struct {
-	userName string
-	password string
+	userName    string
+	password    string
+	description *string
 }
 
 func (opt *createUserOption) Request() *milvuspb.CreateCredentialRequest {
 	return &milvuspb.CreateCredentialRequest{
-		Username: opt.userName,
-		Password: crypto.Base64Encode(opt.password),
+		Username:    opt.userName,
+		Password:    crypto.Base64Encode(opt.password),
+		Description: opt.description,
 	}
 }
 
@@ -85,6 +87,11 @@ func NewCreateUserOption(userName, password string) *createUserOption {
 	}
 }
 
+func (opt *createUserOption) WithDescription(description string) *createUserOption {
+	opt.description = &description
+	return opt
+}
+
 type UpdatePasswordOption interface {
 	Request() *milvuspb.UpdateCredentialRequest
 }
@@ -93,6 +100,7 @@ type updatePasswordOption struct {
 	userName    string
 	oldPassword string
 	newPassword string
+	description *string
 }
 
 func (opt *updatePasswordOption) Request() *milvuspb.UpdateCredentialRequest {
@@ -100,6 +108,7 @@ func (opt *updatePasswordOption) Request() *milvuspb.UpdateCredentialRequest {
 		Username:    opt.userName,
 		OldPassword: crypto.Base64Encode(opt.oldPassword),
 		NewPassword: crypto.Base64Encode(opt.newPassword),
+		Description: opt.description,
 	}
 }
 
@@ -109,6 +118,11 @@ func NewUpdatePasswordOption(userName, oldPassword, newPassword string) *updateP
 		oldPassword: oldPassword,
 		newPassword: newPassword,
 	}
+}
+
+func (opt *updatePasswordOption) WithDescription(description string) *updatePasswordOption {
+	opt.description = &description
+	return opt
 }
 
 type DropUserOption interface {
@@ -152,17 +166,50 @@ type CreateRoleOption interface {
 }
 
 type createRoleOption struct {
-	roleName string
+	roleName    string
+	description string
+}
+
+func (opt *createRoleOption) WithDescription(description string) *createRoleOption {
+	opt.description = description
+	return opt
 }
 
 func (opt *createRoleOption) Request() *milvuspb.CreateRoleRequest {
 	return &milvuspb.CreateRoleRequest{
-		Entity: &milvuspb.RoleEntity{Name: opt.roleName},
+		Entity: &milvuspb.RoleEntity{Name: opt.roleName, Description: opt.description},
 	}
 }
 
 func NewCreateRoleOption(roleName string) *createRoleOption {
 	return &createRoleOption{
+		roleName: roleName,
+	}
+}
+
+type AlterRoleOption interface {
+	Request() *milvuspb.AlterRoleRequest
+}
+
+type alterRoleOption struct {
+	roleName    string
+	description string
+}
+
+func (opt *alterRoleOption) WithDescription(description string) *alterRoleOption {
+	opt.description = description
+	return opt
+}
+
+func (opt *alterRoleOption) Request() *milvuspb.AlterRoleRequest {
+	return &milvuspb.AlterRoleRequest{
+		RoleName:    opt.roleName,
+		Description: opt.description,
+	}
+}
+
+func NewAlterRoleOption(roleName string) *alterRoleOption {
+	return &alterRoleOption{
 		roleName: roleName,
 	}
 }

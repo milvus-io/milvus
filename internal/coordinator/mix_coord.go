@@ -603,6 +603,10 @@ func (s *mixCoordImpl) CreateRole(ctx context.Context, req *milvuspb.CreateRoleR
 	return s.rootcoordServer.CreateRole(ctx, req)
 }
 
+func (s *mixCoordImpl) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.AlterRole(ctx, req)
+}
+
 func (s *mixCoordImpl) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.DropRole(ctx, req)
 }

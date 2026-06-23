@@ -287,7 +287,7 @@ func validateUniqueOutputColumns(outCols []string) error {
 	seen := make(map[string]struct{}, len(outCols))
 	for _, name := range outCols {
 		if _, ok := seen[name]; ok {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("column %s already exists", name))
+			return merr.WrapErrServiceInternalMsg("column %s already exists", name)
 		}
 		seen[name] = struct{}{}
 	}
@@ -823,7 +823,7 @@ func pickGroupByValues(
 			return arr.(*array.String).Value(idx)
 		}, array.NewStringBuilder), nil
 	default:
-		return nil, fmt.Errorf("unsupported group-by arrow type %s at group index %d", firstArr.DataType(), groupIdx)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported group-by arrow type %s at group index %d", firstArr.DataType(), groupIdx)
 	}
 }
 

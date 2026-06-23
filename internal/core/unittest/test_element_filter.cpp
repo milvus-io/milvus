@@ -3590,6 +3590,126 @@ MakeNullableElementSearchFixture() {
     return f;
 }
 
+inline bool
+IsBitmapRowValid(const std::vector<uint8_t>& valid_bitmap, int64_t row) {
+    return (valid_bitmap[row >> 3] >> (row & 0x07)) & 1;
+}
+
+inline std::vector<uint8_t>
+BuildFieldValidBitmap(const GeneratedData& data, FieldId field_id) {
+    const auto row_count = data.raw_->num_rows();
+    std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+    for (int i = 0; i < data.raw_->fields_data_size(); ++i) {
+        const auto& fd = data.raw_->fields_data(i);
+        if (fd.field_id() != field_id.get()) {
+            continue;
+        }
+        for (int row = 0; row < row_count; ++row) {
+            const bool valid =
+                fd.valid_data_size() == 0 ? true : fd.valid_data(row);
+            if (valid) {
+                valid_bitmap[row >> 3] |= (1 << (row & 0x07));
+            }
+        }
+        return valid_bitmap;
+    }
+    return valid_bitmap;
+}
+
+inline NullableElementSearchFixture
+MakeNullableElementSearchWithNullAndEmptyRowsFixture() {
+    constexpr int kRows = 3;
+    constexpr int kTargetRow = 2;
+    constexpr int kTargetElem = 0;
+
+    NullableElementSearchFixture f;
+    f.schema = std::make_shared<Schema>();
+    f.vec_fid = f.schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                   DataType::VECTOR_FLOAT,
+                                                   kNullableElemDim,
+                                                   knowhere::metric::L2,
+                                                   /*nullable=*/true);
+    f.int64_fid = f.schema->AddDebugField("id", DataType::INT64);
+    f.schema->set_primary_field_id(f.int64_fid);
+
+    f.raw_data = DataGen(f.schema, kRows, 42, 0, 1, kNullableElemArrayLen);
+
+    for (int i = 0; i < f.raw_data.raw_->fields_data_size(); ++i) {
+        auto* fd = f.raw_data.raw_->mutable_fields_data(i);
+        if (fd->field_id() != f.vec_fid.get()) {
+            continue;
+        }
+
+        auto* vec_array = fd->mutable_vectors()->mutable_vector_array();
+        for (int row = 0; row < kRows; ++row) {
+            vec_array->mutable_data(row)
+                ->mutable_float_vector()
+                ->mutable_data()
+                ->Clear();
+        }
+
+        auto* target_row = vec_array->mutable_data(kTargetRow)
+                               ->mutable_float_vector()
+                               ->mutable_data();
+        const std::array<float, kNullableElemArrayLen * kNullableElemDim>
+            target_values{7.0F, 7.0F, 7.0F, 7.0F, 1.0F, 0.0F, 0.0F, 0.0F};
+        target_row->Add(target_values.begin(), target_values.end());
+
+        auto* valid_data = fd->mutable_valid_data();
+        valid_data->Clear();
+        valid_data->Add(false);  // row 0: null
+        valid_data->Add(true);   // row 1: empty
+        valid_data->Add(true);   // row 2: two vectors
+        break;
+    }
+
+    f.flat_data = {7.0F, 7.0F, 7.0F, 7.0F, 1.0F, 0.0F, 0.0F, 0.0F};
+    f.query_data.assign(f.flat_data.begin(),
+                        f.flat_data.begin() + kNullableElemDim);
+    return f;
+}
+
+inline NullableElementSearchFixture
+MakeNullableElementSearchWithOnlyNullRowsFixture() {
+    NullableElementSearchFixture f;
+    f.schema = std::make_shared<Schema>();
+    f.vec_fid = f.schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                   DataType::VECTOR_FLOAT,
+                                                   kNullableElemDim,
+                                                   knowhere::metric::L2,
+                                                   /*nullable=*/true);
+    f.int64_fid = f.schema->AddDebugField("id", DataType::INT64);
+    f.schema->set_primary_field_id(f.int64_fid);
+
+    f.raw_data =
+        DataGen(f.schema, kNullableElemN, 42, 0, 1, kNullableElemArrayLen);
+
+    for (int i = 0; i < f.raw_data.raw_->fields_data_size(); ++i) {
+        auto* fd = f.raw_data.raw_->mutable_fields_data(i);
+        if (fd->field_id() != f.vec_fid.get()) {
+            continue;
+        }
+
+        auto* vec_array = fd->mutable_vectors()->mutable_vector_array();
+        for (int row = 0; row < kNullableElemN; ++row) {
+            vec_array->mutable_data(row)
+                ->mutable_float_vector()
+                ->mutable_data()
+                ->Clear();
+        }
+
+        auto* valid_data = fd->mutable_valid_data();
+        valid_data->Clear();
+        for (int row = 0; row < kNullableElemN; ++row) {
+            valid_data->Add(false);
+        }
+        break;
+    }
+
+    f.query_data.assign(kNullableElemDim, 0.0F);
+    return f;
+}
+
 inline proto::common::PlaceholderGroup
 MakeElementLevelPlaceholder(const std::vector<float>& query_data) {
     auto raw = CreatePlaceholderGroupFromBlob<milvus::FloatVector>(
@@ -3624,23 +3744,23 @@ CreateNullableSealedSegment(const NullableElementSearchFixture& f) {
         f.raw_data, segment.get(), false, GetExcludedFieldIds(f.schema, {}));
 
     auto vec_array_values = f.raw_data.get_col<VectorFieldProto>(f.vec_fid);
+    auto valid_bitmap = BuildFieldValidBitmap(f.raw_data, f.vec_fid);
     std::vector<milvus::VectorArray> vector_arrays;
     vector_arrays.reserve(vec_array_values.size());
-    for (const auto& value : vec_array_values) {
-        vector_arrays.emplace_back(value);
-    }
-
-    std::vector<uint8_t> valid_bitmap((kNullableElemN + 7) / 8, 0);
-    for (int row = 0; row < kNullableElemN; ++row) {
-        valid_bitmap[row >> 3] |= (1 << (row & 0x07));
+    for (int64_t row = 0; row < f.raw_data.raw_->num_rows(); ++row) {
+        if (IsBitmapRowValid(valid_bitmap, row)) {
+            vector_arrays.emplace_back(vec_array_values[row]);
+        }
     }
 
     auto field_data = storage::CreateFieldData(DataType::VECTOR_ARRAY,
                                                DataType::VECTOR_FLOAT,
                                                /*nullable=*/true,
                                                kNullableElemDim);
-    field_data->FillFieldData(
-        vector_arrays.data(), valid_bitmap.data(), kNullableElemN, 0);
+    field_data->FillFieldData(vector_arrays.data(),
+                              valid_bitmap.data(),
+                              f.raw_data.raw_->num_rows(),
+                              0);
 
     auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);
@@ -3668,6 +3788,33 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
         valid_rows[row] = true;
     }
     indexing->BuildValidData(valid_rows.get(), kNullableElemN);
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+}
+
+inline void
+LoadNullableElementFlatIndexWithValidRows(SegmentSealed* segment,
+                                          FieldId vec_fid,
+                                          const std::vector<float>& flat_data,
+                                          const std::vector<bool>& valid_rows) {
+    auto indexing = GenVecIndexing(flat_data.size() / kNullableElemDim,
+                                   kNullableElemDim,
+                                   flat_data.data(),
+                                   knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+
+    std::unique_ptr<bool[]> valid_data(new bool[valid_rows.size()]);
+    for (size_t row = 0; row < valid_rows.size(); ++row) {
+        valid_data[row] = valid_rows[row];
+    }
+    indexing->BuildValidData(valid_data.get(), valid_rows.size());
 
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
@@ -3775,6 +3922,17 @@ ExpectNullableTargetTopOne(const milvus::SearchResult& sr) {
     ASSERT_NEAR(sr.distances_[0], 0.0f, 1e-5f);
 }
 
+inline void
+ExpectTopOne(const milvus::SearchResult& sr,
+             int64_t expected_doc,
+             int32_t expected_elem) {
+    ASSERT_TRUE(sr.element_level_);
+    ASSERT_FALSE(sr.seg_offsets_.empty());
+    ASSERT_EQ(sr.seg_offsets_[0], expected_doc);
+    ASSERT_EQ(sr.element_indices_[0], expected_elem);
+    ASSERT_NEAR(sr.distances_[0], 0.0f, 1e-5f);
+}
+
 }  // namespace
 
 TEST(ElementVectorSearch, NullableSealedBruteForce_ElementBitset) {
@@ -3786,6 +3944,29 @@ TEST(ElementVectorSearch, NullableSealedBruteForce_ElementBitset) {
     ExpectNullableTargetTopOne(*sr);
 }
 
+TEST(ElementVectorSearch, DirectSearchWithOnlyNullRowsReturnsEmpty) {
+    auto f = MakeNullableElementSearchWithOnlyNullRowsFixture();
+    auto segment = CreateNullableSealedSegment(f);
+
+    std::unique_ptr<SearchResult> sr;
+    ASSERT_NO_THROW(sr = RunNullableElementSearch(segment.get(), f));
+    ASSERT_NE(sr, nullptr);
+    EXPECT_TRUE(sr->element_level_);
+    EXPECT_TRUE(sr->seg_offsets_.empty());
+    EXPECT_EQ(sr->total_data_cnt_, 0);
+}
+
+TEST(ElementVectorSearch, DirectSearchMarksConvertedBitsetElementLevel) {
+    auto f = MakeNullableElementSearchFixture();
+    auto segment = CreateNullableSealedSegment(f);
+
+    std::unique_ptr<SearchResult> sr;
+    ASSERT_NO_THROW(sr = RunNullableElementSearch(segment.get(), f));
+    ASSERT_NE(sr, nullptr);
+    EXPECT_EQ(sr->total_data_cnt_, kNullableElemN * kNullableElemArrayLen);
+    ExpectNullableTargetTopOne(*sr);
+}
+
 TEST(ElementVectorSearch, NullableSealedIndex_ElementBitset) {
     auto f = MakeNullableElementSearchFixture();
     auto segment = CreateNullableSealedSegment(f);
@@ -3794,6 +3975,26 @@ TEST(ElementVectorSearch, NullableSealedIndex_ElementBitset) {
     auto sr = RunNullableElementSearch(segment.get(), f);
     ASSERT_NE(sr, nullptr);
     ExpectNullableTargetTopOne(*sr);
+}
+
+TEST(ElementVectorSearch, NullableSealedBruteForce_NullAndEmptyRows) {
+    auto f = MakeNullableElementSearchWithNullAndEmptyRowsFixture();
+    auto segment = CreateNullableSealedSegment(f);
+
+    auto sr = RunNullableElementSearch(segment.get(), f);
+    ASSERT_NE(sr, nullptr);
+    ExpectTopOne(*sr, /*expected_doc=*/2, /*expected_elem=*/0);
+}
+
+TEST(ElementVectorSearch, NullableSealedIndex_NullAndEmptyRows) {
+    auto f = MakeNullableElementSearchWithNullAndEmptyRowsFixture();
+    auto segment = CreateNullableSealedSegment(f);
+    LoadNullableElementFlatIndexWithValidRows(
+        segment.get(), f.vec_fid, f.flat_data, {false, true, true});
+
+    auto sr = RunNullableElementSearch(segment.get(), f);
+    ASSERT_NE(sr, nullptr);
+    ExpectTopOne(*sr, /*expected_doc=*/2, /*expected_elem=*/0);
 }
 
 TEST(ElementVectorSearch, NullableGrowingBruteForce_ElementBitset) {

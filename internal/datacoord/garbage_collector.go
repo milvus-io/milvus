@@ -514,9 +514,10 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	defer func() { log.Info("recycleUnusedBinlogFiles done", zap.Duration("timeCost", time.Since(start))) }()
 
 	type scanTask struct {
-		prefix  string
-		checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool
-		label   string
+		prefix            string
+		checker           func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool
+		segmentIDFromPath func(rootPath, filePath string) (int64, error)
+		label             string
 	}
 	scanTasks := []scanTask{
 		{
@@ -524,7 +525,8 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				return segment != nil
 			},
-			label: metrics.InsertFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.InsertFileLabel,
 		},
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath),
@@ -536,7 +538,8 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 				}
 				return segment != nil && segment.IsStatsLogExists(logID)
 			},
-			label: metrics.StatFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.StatFileLabel,
 		},
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath),
@@ -548,19 +551,56 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 				}
 				return segment != nil && segment.IsDeltaLogExists(logID)
 			},
-			label: metrics.DeleteFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.DeleteFileLabel,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.TextIndexPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getTextLogPaths(segment, gc.option.cli.RootPath())[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromTextIndexPath,
+			label:             common.TextIndexPath,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.JSONStatsPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getJSONKeyLogs(segment, gc)[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromJSONStatsPath,
+			label:             common.JSONStatsPath,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.JSONIndexPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getJSONKeyLogs(segment, gc)[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromJSONIndexPath,
+			label:             common.JSONIndexPath,
 		},
 	}
 
 	for _, task := range scanTasks {
-		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.checker)
+		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.segmentIDFromPath, task.checker)
 	}
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recycleUnusedBinLogWithChecker scans the prefix and checks the path with checker.
 // GC the file if checker returns false.
-func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, prefix string, label string, checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool) {
+func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, prefix string, label string, segmentIDFromPath func(rootPath, filePath string) (int64, error), checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool) {
 	logger := log.With(zap.String("prefix", prefix))
 	logger.Info("garbageCollector recycleUnusedBinlogFiles start", zap.String("prefix", prefix))
 	lastFilePath := ""
@@ -599,7 +639,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 
 		// Parse segmentID from file path.
 		// TODO: Does all files in the same segment have the same segmentID?
-		segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.cli.RootPath(), chunkInfo.FilePath)
+		segmentID, err := segmentIDFromPath(gc.option.cli.RootPath(), chunkInfo.FilePath)
 		if err != nil {
 			// Try V3 path format: insert_log/{coll}/{part}/{seg}/...
 			// V3 orphan files are managed by loon (milvus-storage), skip them.
@@ -1067,15 +1107,46 @@ func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
 // Returns segmentID or error if path doesn't match.
 func parseV3SegmentID(rootPath, filePath string) (int64, error) {
 	if !strings.HasPrefix(filePath, rootPath) {
-		return 0, fmt.Errorf("path %q does not contain rootPath %q", filePath, rootPath)
+		return 0, merr.WrapErrServiceInternalMsg("path %q does not contain rootPath %q", filePath, rootPath)
 	}
 	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
 	parts := strings.Split(p, "/")
-	// Minimum: insert_log/coll/part/seg/something
 	if len(parts) < 5 || parts[0] != common.SegmentInsertLogPath {
-		return 0, fmt.Errorf("not a V3 insert_log path: %s", filePath)
+		return 0, merr.WrapErrServiceInternalMsg("not a V3 insert_log path: %s", filePath)
 	}
 	return strconv.ParseInt(parts[3], 10, 64)
+}
+
+func parseSegmentIDFromAuxIndexPath(rootPath, filePath string) (int64, error) {
+	if !strings.HasPrefix(filePath, rootPath) {
+		return 0, merr.WrapErrServiceInternalMsg("path %q does not contain rootPath %q", filePath, rootPath)
+	}
+	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
+	parts := strings.Split(p, "/")
+	if len(parts) < 8 || (parts[0] != common.TextIndexPath && parts[0] != common.JSONIndexPath) {
+		return 0, merr.WrapErrServiceInternalMsg("not an auxiliary index path: %s", filePath)
+	}
+	return strconv.ParseInt(parts[5], 10, 64)
+}
+
+func parseSegmentIDFromJSONStatsPath(rootPath, filePath string) (int64, error) {
+	if !strings.HasPrefix(filePath, rootPath) {
+		return 0, merr.WrapErrServiceInternalMsg("path %q does not contain rootPath %q", filePath, rootPath)
+	}
+	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
+	parts := strings.Split(p, "/")
+	if len(parts) < 9 || parts[0] != common.JSONStatsPath {
+		return 0, merr.WrapErrServiceInternalMsg("not a json stats path: %s", filePath)
+	}
+	return strconv.ParseInt(parts[6], 10, 64)
+}
+
+func parseSegmentIDFromTextIndexPath(rootPath, filePath string) (int64, error) {
+	return parseSegmentIDFromAuxIndexPath(rootPath, filePath)
+}
+
+func parseSegmentIDFromJSONIndexPath(rootPath, filePath string) (int64, error) {
+	return parseSegmentIDFromAuxIndexPath(rootPath, filePath)
 }
 
 func getLogs(sinfo *SegmentInfo) map[string]struct{} {
@@ -1104,9 +1175,20 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 }
 
 func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
+	return getTextLogPaths(sinfo, "")
+}
+
+func getTextLogPaths(sinfo *SegmentInfo, rootPath string) map[string]struct{} {
 	textLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetTextStatsLogs() {
-		for _, file := range flog.GetFiles() {
+		files := flog.GetFiles()
+		if rootPath != "" {
+			basePath := metautil.BuildTextIndexPrefix(rootPath,
+				flog.GetBuildID(), flog.GetVersion(),
+				sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			files = metautil.BuildStatsFilePaths(basePath, files)
+		}
+		for _, file := range files {
 			textLogs[file] = struct{}{}
 		}
 	}
@@ -1118,8 +1200,22 @@ func getJSONKeyLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{
 	jsonkeyLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetJsonKeyStats() {
 		for _, file := range flog.GetFiles() {
-			prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONIndexPath,
-				flog.GetBuildID(), flog.GetVersion(), sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			var prefix string
+			if flog.GetJsonKeyStatsDataFormat() >= 2 {
+				prefix = metautil.BuildJSONKeyStatsPrefix(
+					gc.option.cli.RootPath(),
+					flog.GetJsonKeyStatsDataFormat(),
+					flog.GetBuildID(),
+					flog.GetVersion(),
+					sinfo.GetCollectionID(),
+					sinfo.GetPartitionID(),
+					sinfo.GetID(),
+					flog.GetFieldID(),
+				)
+			} else {
+				prefix = fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONIndexPath,
+					flog.GetBuildID(), flog.GetVersion(), sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			}
 			file = path.Join(prefix, file)
 			jsonkeyLogs[file] = struct{}{}
 		}
@@ -1186,10 +1282,17 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 	defer func() { log.Info("recycleUnusedSegIndexes done", zap.Duration("timeCost", time.Since(start))) }()
 
 	segIndexes := gc.meta.indexMeta.GetAllSegIndexes()
-	for _, segIdx := range segIndexes {
+	for _, candidate := range segIndexes {
 		if ctx.Err() != nil {
 			// process canceled.
 			return
+		}
+		// GetAllSegIndexes returns a point-in-time snapshot. Refresh by buildID
+		// before making deletion decisions so GC does not act on stale task state
+		// or stale index file keys.
+		segIdx, ok := gc.getLatestSegmentIndexForGC(candidate)
+		if !ok {
+			continue
 		}
 		if gc.collectionGCPaused(segIdx.CollectionID) {
 			continue
@@ -1199,7 +1302,24 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
 		if gc.meta.GetSegment(ctx, segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			// Non-terminal tasks may still be writing index files or updating meta.
+			// Keep the SegmentIndex until the task reaches a terminal state.
+			if segIdx.IndexState == commonpb.IndexState_Unissued ||
+				segIdx.IndexState == commonpb.IndexState_InProgress ||
+				segIdx.IndexState == commonpb.IndexState_Retry {
+				log.Info("skip GC segment index since index task is not terminal",
+					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Int64("partitionID", segIdx.PartitionID),
+					zap.Int64("segmentID", segIdx.SegmentID),
+					zap.Int64("indexID", segIdx.IndexID),
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.String("state", segIdx.IndexState.String()))
+				continue
+			}
 			indexFiles := gc.getAllIndexFilesOfIndex(segIdx)
+			// Empty indexFiles is valid for fake-finished small/no-train indexes.
+			// removeObjectFiles is a no-op in that case; the stale meta still needs
+			// to be removed when its segment or field index is gone.
 			log := log.With(zap.Int64("collectionID", segIdx.CollectionID),
 				zap.Int64("partitionID", segIdx.PartitionID),
 				zap.Int64("segmentID", segIdx.SegmentID),
@@ -1235,6 +1355,19 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 			log.Info("index meta recycle success")
 		}
 	}
+}
+
+// getLatestSegmentIndexForGC takes a SegmentIndex candidate from GC scanning and
+// returns the latest SegmentIndex meta for the same buildID. The bool return
+// value is false when the candidate is nil or the buildID no longer exists.
+func (gc *garbageCollector) getLatestSegmentIndexForGC(candidate *model.SegmentIndex) (*model.SegmentIndex, bool) {
+	if candidate == nil {
+		return nil, false
+	}
+	if gc.meta == nil || gc.meta.indexMeta == nil || gc.meta.indexMeta.segmentBuildInfo == nil {
+		return candidate, true
+	}
+	return gc.meta.indexMeta.GetIndexJob(candidate.BuildID)
 }
 
 // recycleUnusedIndexFilesV0 deletes orphan files under the legacy v0 index_files prefix.

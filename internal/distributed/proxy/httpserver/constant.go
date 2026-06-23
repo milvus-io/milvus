@@ -37,6 +37,7 @@ const (
 	ExternalCollectionJobCategory = "/jobs/external_collection/"
 	PrivilegeGroupCategory        = "/privilege_groups/"
 	CollectionFieldCategory       = "/collections/fields/"
+	CollectionStructFieldCategory = "/collections/struct_fields/"
 	ResourceGroupCategory         = "/resource_groups/"
 	SegmentCategory               = "/segments/"
 	QuotaCenterCategory           = "/quotacenter/"
@@ -144,6 +145,7 @@ const (
 	HTTPReturnLoadState      = "loadState"
 	HTTPReturnLoadProgress   = "loadProgress"
 	HTTPReturnTopks          = "topks"
+	HTTPReturnAggTopks       = "aggTopks"
 
 	HTTPReturnHas = "has"
 

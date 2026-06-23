@@ -82,7 +82,7 @@ type ShardDelegator interface {
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
-	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, version uint64) error
+	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -168,9 +168,9 @@ type shardDelegator struct {
 	// current forward policy
 	l0ForwardPolicy string
 
-	// schema version
+	// schemaBarrierTs fences load results started before the latest schema update.
 	schemaChangeMutex sync.RWMutex
-	schemaVersion     uint64
+	schemaBarrierTs   uint64
 
 	// limits delegator-side post-load work after worker LoadSegments returns.
 	postLoadSem           *syncutil.Semaphore
@@ -233,30 +233,24 @@ func (sd *shardDelegator) Stopped() bool {
 	return sd.NotStopped(sd.lifetime.GetState()) != nil
 }
 
-func (sd *shardDelegator) prepareSearchFunction(req *internalpb.SearchRequest) (float64, bool, error) {
+func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
 	var avgdl float64
 	isBM25 := false
-	err := sd.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType, functionRunner function.FunctionRunner, ok bool) error {
+	err := sd.functionState.withSearchFunction(req.GetFieldId(), func(functionType schemapb.FunctionType) error {
 		switch functionType {
 		case schemapb.FunctionType_BM25:
 			isBM25 = true
 			if req.GetMetricType() != metric.BM25 && req.GetMetricType() != metric.EMPTY {
 				return merr.WrapErrParameterInvalid("BM25", req.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
 			}
-			if !ok {
-				return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-			}
 			var buildErr error
-			avgdl, buildErr = sd.buildBM25IDFWithRunner(req, functionRunner)
+			avgdl, buildErr = sd.buildBM25IDF(ctx, req)
 			return buildErr
 		case schemapb.FunctionType_MinHash:
 			if req.GetMetricType() != metric.MHJACCARD && req.GetMetricType() != metric.EMPTY {
 				return merr.WrapErrParameterInvalid("MHJACCARD", req.GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
 			}
-			if !ok {
-				return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
-			}
-			return sd.parseMinHashWithRunner(req, functionRunner)
+			return sd.parseMinHash(ctx, req)
 		default:
 			return nil
 		}
@@ -391,7 +385,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		)
 	}
 
-	avgdl, skipSearch, err := sd.prepareSearchFunction(req.GetReq())
+	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +458,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("delegator received search request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -597,14 +591,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
 	log := sd.getLogger(ctx)
 	if !sd.Serviceable() {
-		return errors.New("delegator is not serviceable")
+		return merr.WrapErrServiceUnavailable("delegator", "not serviceable")
 	}
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		log.Warn("deletgator received query request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -692,7 +686,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		log.Warn("delegator received query request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -808,7 +802,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		log.Warn("delegator received GetStatistics request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, GetStatistics channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("GetStatistics channels %v", req.GetDmlChannels()))
 	}
 
 	// wait tsafe
@@ -958,11 +952,11 @@ func executeSubTasks[T any, R interface {
 				} else {
 					segments = []int64{}
 				}
-				err = fmt.Errorf("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
+				err = merr.WrapErrServiceInternalMsg("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
 			} else {
 				result, err = execute(ctx, task.req, task.worker)
 				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-					err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+					err = merr.Wrapf(merr.Error(result.GetStatus()), "worker(%d) query failed", task.targetID)
 				}
 			}
 
@@ -1209,22 +1203,39 @@ func (sd *shardDelegator) CatchingUpStreamingData() bool {
 	return sd.catchingUpStreamingData.Load()
 }
 
-func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schVersion uint64) error {
+func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return err
 	}
 	defer sd.lifetime.Done()
 
-	log.Info("delegator received update schema event")
+	schemaVersion := uint64(schema.GetVersion())
+	log.Info("delegator received update schema event",
+		zap.Uint64("schemaVersion", schemaVersion),
+		zap.Uint64("schemaBarrierTs", schemaBarrierTs),
+	)
+
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+
+	// This pre-check is a best-effort guard for delegator side effects. Load
+	// paths can still call collectionManager.PutOrRef under collectionManager's
+	// own lock and advance the collection snapshot before the final
+	// collectionManager.UpdateSchema below. The collection manager remains the
+	// source-of-truth freshness gate and will skip that stale final apply.
+	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
+		log.Info("delegator skip stale or no-op schema event",
+			zap.Uint64("schemaVersion", schemaVersion),
+			zap.Uint64("schemaBarrierTs", schemaBarrierTs),
+		)
+		return nil
+	}
 
 	newFunctionState, err := buildFunctionRuntimeState(schema)
 	if err != nil {
 		return err
 	}
-
-	sd.schemaChangeMutex.Lock()
-	defer sd.schemaChangeMutex.Unlock()
 
 	oldSet := newBM25FunctionSet(sd.collection.Schema())
 	newSet := newBM25FunctionSet(schema)
@@ -1234,9 +1245,12 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return merr.WrapErrServiceInternal("unsupported non-additive BM25 function schema change on loaded collection")
 	}
 
-	// set updated schema version as load barrier
-	// prevent concurrent load segment with old schema
-	sd.schemaVersion = schVersion
+	// Keep the load barrier monotonic. A higher logical schema version can be
+	// replayed with a smaller barrier than an earlier same-version property
+	// refresh, but that must not reopen older load results.
+	if sd.schemaBarrierTs < schemaBarrierTs {
+		sd.schemaBarrierTs = schemaBarrierTs
+	}
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
 	defer sd.distribution.Unpin(version)
@@ -1252,7 +1266,10 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
-		Version:      schVersion,
+		// SchemaBarrierTs fences stale load results and lets QueryNode refresh
+		// same-version schema payloads such as collection properties. Logical
+		// schema freshness is still guarded by schema.version in collectionManager.
+		SchemaBarrierTs: schemaBarrierTs,
 	},
 		sealed,
 		growing,
@@ -1278,7 +1295,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return err
 	}
 
-	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schVersion); err != nil {
+	// Apply the local collection update with the same barrier used for remote
+	// workers. collectionManager keeps schema.Version as the logical freshness key.
+	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
 		newFunctionState.Close()
 		return err
 	}
@@ -1300,7 +1319,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}
 	sd.functionState.swap(newFunctionState).Close()
 	log.Info("delegator finished update schema event",
-		zap.Uint64("schemaVersion", schVersion),
+		zap.Uint64("schemaVersion", schemaVersion),
+		zap.Uint64("schemaBarrierTs", schemaBarrierTs),
+		zap.Uint64("loadBarrierTs", sd.schemaBarrierTs),
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
 		zap.Int("bm25FunctionNum", len(newSet)),
@@ -1414,7 +1435,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
-		return nil, fmt.Errorf("collection(%d) not found in manager", collectionID)
+		return nil, merr.WrapErrCollectionNotFound(collectionID, "not in delegator manager")
 	}
 
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
@@ -1482,7 +1503,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		sd.growingSourceProvider = newDelegatorGrowingSourceProvider(manager.Segment, func(ctx context.Context, fenceTs uint64) error {
 			_, err := sd.waitTSafe(ctx, fenceTs)
 			return err
-		})
+		}, sd.GetTSafe)
 		sd.growingSourceRegistration = syncmgr.DefaultGrowingSourceRegistry().Register(sd.vchannelName, sd.growingSourceProvider)
 		sd.growingSourceProvider.SetRegistration(sd.growingSourceRegistration)
 		log.Info("registered growing-source source support")
@@ -1504,6 +1525,40 @@ func (sd *shardDelegator) useGrowingSourceFlush() bool {
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
 }
 
+func (sd *shardDelegator) runWithAnalyzer(ctx context.Context, fieldID int64, run func(function.Analyzer) error) (bool, error) {
+	schema := sd.collection.Schema()
+	ok, err := function.RunWithAnalyzer(ctx, sd.collectionID, schema.GetVersion(), fieldID, run)
+	if ok || err != nil {
+		return ok, err
+	}
+	if fieldHasBM25Analyzer(schema, fieldID) {
+		return false, nil
+	}
+
+	field := typeutil.GetField(schema, fieldID)
+	if field == nil || !typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
+		return false, nil
+	}
+
+	analyzer, err := function.NewAnalyzerRunner(field)
+	if err != nil {
+		return false, err
+	}
+	if runner, ok := analyzer.(function.FunctionRunner); ok {
+		defer runner.Close()
+	}
+	return true, run(analyzer)
+}
+
+func fieldHasBM25Analyzer(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	for _, fn := range schema.GetFunctions() {
+		if fn.GetType() == schemapb.FunctionType_BM25 && slices.Contains(fn.GetInputFieldIds(), fieldID) {
+			return true
+		}
+	}
+	return false
+}
+
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
 	var result [][]*milvuspb.AnalyzerToken
 	var analyzeErr error
@@ -1511,7 +1566,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 		return string(bytes)
 	})
 
-	ok, err := sd.functionState.withAnalyzerRunner(req.GetFieldId(), func(analyzer function.Analyzer) error {
+	ok, err := sd.runWithAnalyzer(ctx, req.GetFieldId(), func(analyzer function.Analyzer) error {
 		if len(analyzer.GetInputFields()) == 1 {
 			result, analyzeErr = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts)
 			return analyzeErr
@@ -1519,7 +1574,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 
 		analyzerNames := req.GetAnalyzerNames()
 		if len(analyzerNames) == 0 {
-			return merr.WrapErrAsInputError(fmt.Errorf("analyzer names must be set for multi analyzer"))
+			return merr.WrapErrParameterMissingMsg("analyzer names must be set for multi analyzer")
 		}
 
 		if len(analyzerNames) == 1 && len(texts) > 1 {
@@ -1535,7 +1590,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25/minhash input field", req.GetFieldId())
+		return nil, merr.WrapErrParameterInvalidMsg("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25/minhash input field", req.GetFieldId())
 	}
 
 	return lo.Map(result, func(tokens []*milvuspb.AnalyzerToken, _ int) *milvuspb.AnalyzerResult {

@@ -33,6 +33,19 @@ var (
 	ErrNotInitial   = errors.New("config is not initialized")
 	ErrIgnoreChange = errors.New("ignore change")
 	ErrKeyNotFound  = errors.New("key not found")
+
+	// config source management
+	ErrSourceDuplicate = errors.New("duplicate config source")
+	ErrSourceInvalid   = errors.New("invalid config source or source not added")
+
+	// etcd config read/write
+	ErrEtcdClientUnavailable     = errors.New("etcd client is not available")
+	ErrImmutableConfigSaveFailed = errors.New("failed to save immutable configs to etcd")
+	ErrNoConfigsToAlter          = errors.New("no configs to alter")
+
+	// config file parsing
+	ErrUnsupportedConfigType  = errors.New("unsupported config file type")
+	ErrAllConfigFilesNotExist = errors.New("all config files not exist")
 )
 
 const (

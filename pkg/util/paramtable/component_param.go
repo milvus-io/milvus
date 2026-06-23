@@ -277,6 +277,7 @@ type commonConfig struct {
 	RootShouldBindRole    ParamItem `refreshable:"true"`
 	EnablePublicPrivilege ParamItem `refreshable:"false"`
 	ExprEnabled           ParamItem `refreshable:"false"`
+	ExprAuthMode          ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -662,7 +663,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.storageType",
 		Version:      "2.0.0",
 		DefaultValue: "remote",
-		Doc:          "please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead",
+		Doc:          "please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
@@ -934,10 +935,21 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Key:          "common.security.exprEnabled",
 		Version:      "2.6.0",
 		DefaultValue: "false",
-		Doc:          "Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.",
+		Doc:          "Whether to enable the /expr endpoint for debugging.",
 		Export:       true,
 	}
 	p.ExprEnabled.Init(base.mgr)
+
+	p.ExprAuthMode = ParamItem{
+		Key:          "common.security.exprAuthMode",
+		Version:      "2.6.0",
+		DefaultValue: "rootOnly",
+		Doc: "Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. " +
+			"rootOnly accepts only the root credentials via HTTP Basic Auth. " +
+			"rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.",
+		Export: true,
+	}
+	p.ExprAuthMode.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
@@ -2053,6 +2065,7 @@ type proxyConfig struct {
 	MaxNameLength                     ParamItem `refreshable:"true"`
 	MaxCollectionDescriptionLength    ParamItem `refreshable:"true"`
 	MaxUsernameLength                 ParamItem `refreshable:"true"`
+	MaxUserDescriptionLength          ParamItem `refreshable:"true"`
 	MinPasswordLength                 ParamItem `refreshable:"true"`
 	MaxPasswordLength                 ParamItem `refreshable:"true"`
 	MaxFieldNum                       ParamItem `refreshable:"true"`
@@ -2063,6 +2076,7 @@ type proxyConfig struct {
 	GinLogSkipPaths                   ParamItem `refreshable:"false"`
 	MaxUserNum                        ParamItem `refreshable:"true"`
 	MaxRoleNum                        ParamItem `refreshable:"true"`
+	MaxRoleDescriptionLength          ParamItem `refreshable:"true"`
 	NameValidationAllowedChars        ParamItem `refreshable:"true"`
 	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
 	MaxTaskNum                        ParamItem `refreshable:"false"`
@@ -2085,6 +2099,7 @@ type proxyConfig struct {
 	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
 	MaxVarCharLength                  ParamItem `refreshable:"false"`
 	MaxTextLength                     ParamItem `refreshable:"false"`
+	MaxArrayCapacity                  ParamItem `refreshable:"true"`
 	MaxIndexParamsSize                ParamItem `refreshable:"true"`
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
@@ -2174,6 +2189,14 @@ func (p *proxyConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.MaxUsernameLength.Init(base.mgr)
+
+	p.MaxUserDescriptionLength = ParamItem{
+		Key:          "proxy.maxUserDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "2.6.19",
+		PanicIfEmpty: true,
+	}
+	p.MaxUserDescriptionLength.Init(base.mgr)
 
 	p.MaxPasswordLength = ParamItem{
 		Key:          "proxy.maxPasswordLength",
@@ -2295,6 +2318,16 @@ please adjust in embedded Milvus: false`,
 		PanicIfEmpty: true,
 	}
 	p.MaxRoleNum.Init(base.mgr)
+
+	p.MaxRoleDescriptionLength = ParamItem{
+		Key:          "proxy.maxRoleDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "3.0.0",
+		PanicIfEmpty: true,
+		Doc:          "Maximum role description length in bytes.",
+		Export:       true,
+	}
+	p.MaxRoleDescriptionLength.Init(base.mgr)
 
 	p.NameValidationAllowedChars = ParamItem{
 		Key:          "proxy.nameValidation.allowedChars",
@@ -2564,6 +2597,22 @@ please adjust in embedded Milvus: false`,
 	}
 	p.MaxTextLength.Init(base.mgr)
 
+	p.MaxArrayCapacity = ParamItem{
+		Key:          "proxy.maxArrayCapacity",
+		Version:      "2.6.19",
+		DefaultValue: "4096",
+		PanicIfEmpty: true,
+		Doc:          "maximum number of elements in an array field for a single row",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				return "4096"
+			}
+			return v
+		},
+	}
+	p.MaxArrayCapacity.Init(base.mgr)
+
 	p.MaxIndexParamsSize = ParamItem{
 		Key:          "proxy.maxIndexParamsSize",
 		Version:      "3.0.0",
@@ -2714,6 +2763,7 @@ type queryCoordConfig struct {
 	ChannelTaskTimeout         ParamItem `refreshable:"true"`
 	SegmentTaskTimeout         ParamItem `refreshable:"true"`
 	DistPullInterval           ParamItem `refreshable:"false"`
+	DispatchInterval           ParamItem `refreshable:"false"`
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
 
@@ -3090,6 +3140,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.DistPullInterval.Init(base.mgr)
+
+	p.DispatchInterval = ParamItem{
+		Key:          "queryCoord.dispatchInterval",
+		Version:      "2.6.0",
+		DefaultValue: "500",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.DispatchInterval.Init(base.mgr)
 
 	p.LoadTimeoutSeconds = ParamItem{
 		Key:          "queryCoord.loadTimeoutSeconds",
@@ -3611,8 +3670,14 @@ type queryNodeConfig struct {
 	EnableLatestDeleteSnapshotOptimization ParamItem `refreshable:"true"`
 
 	// expr cache
-	ExprResCacheEnabled       ParamItem `refreshable:"false"`
-	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
+	ExprResCacheEnabled               ParamItem `refreshable:"true"`
+	ExprResCacheMode                  ParamItem `refreshable:"true"`
+	ExprResCacheMinEvalDurationUs     ParamItem `refreshable:"true"`
+	ExprResCacheAdmissionThreshold    ParamItem `refreshable:"true"`
+	ExprResCacheMemMaxBytes           ParamItem `refreshable:"true"`
+	ExprResCacheMemCompressionEnabled ParamItem `refreshable:"true"`
+	ExprResCacheDiskMaxBytes          ParamItem `refreshable:"true"`
+	ExprResCacheDiskMaxFileSizeBytes  ParamItem `refreshable:"true"`
 
 	// pipeline
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
@@ -4812,22 +4877,79 @@ user-task-polling:
 	p.ExprResCacheEnabled = ParamItem{
 		Key:          "queryNode.exprCache.enabled",
 		FallbackKeys: []string{"enable_expr_cache"},
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "false",
 		Doc:          "enable expression result cache",
 		Export:       true,
 	}
 	p.ExprResCacheEnabled.Init(base.mgr)
 
-	p.ExprResCacheCapacityBytes = ParamItem{
-		Key:          "queryNode.exprCache.capacityBytes",
-		FallbackKeys: []string{"max_expr_cache_size"},
-		Version:      "2.6.0",
-		DefaultValue: "268435456", // 256MB
-		Doc:          "max capacity in bytes for expression result cache",
+	p.ExprResCacheMode = ParamItem{
+		Key:          "queryNode.exprCache.mode",
+		Version:      "3.0.0",
+		DefaultValue: "disk",
+		Doc:          "cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)",
 		Export:       true,
 	}
-	p.ExprResCacheCapacityBytes.Init(base.mgr)
+	p.ExprResCacheMode.Init(base.mgr)
+
+	p.ExprResCacheMinEvalDurationUs = ParamItem{
+		Key:          "queryNode.exprCache.minEvalDurationUs",
+		FallbackKeys: []string{"queryNode.exprCache.memory.minEvalDurationUs", "queryNode.exprCache.disk.minEvalDurationUs"},
+		Version:      "3.0.0",
+		DefaultValue: "1000",
+		Doc:          "global latency filter: skip expressions that eval faster than this (0=disabled)",
+		Export:       true,
+	}
+	p.ExprResCacheMinEvalDurationUs.Init(base.mgr)
+
+	p.ExprResCacheMemMaxBytes = ParamItem{
+		Key:          "queryNode.exprCache.memory.maxBytes",
+		FallbackKeys: []string{"queryNode.exprCache.maxTotalSizeBytes"},
+		Version:      "3.0.0",
+		DefaultValue: "268435456",
+		Doc:          "max memory for expression cache in memory mode (default 256MB)",
+		Export:       true,
+	}
+	p.ExprResCacheMemMaxBytes.Init(base.mgr)
+
+	p.ExprResCacheMemCompressionEnabled = ParamItem{
+		Key:          "queryNode.exprCache.memory.compressionEnabled",
+		FallbackKeys: []string{"queryNode.exprCache.compressionEnabled"},
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "enable Roaring/Raw adaptive compression in memory mode",
+		Export:       true,
+	}
+	p.ExprResCacheMemCompressionEnabled.Init(base.mgr)
+
+	p.ExprResCacheAdmissionThreshold = ParamItem{
+		Key:          "queryNode.exprCache.admissionThreshold",
+		Version:      "3.0.0",
+		DefaultValue: "2",
+		Doc:          "frequency admission for memory and disk mode: cache after N+ occurrences (1=no gating)",
+		Export:       true,
+	}
+	p.ExprResCacheAdmissionThreshold.Init(base.mgr)
+
+	p.ExprResCacheDiskMaxBytes = ParamItem{
+		Key:          "queryNode.exprCache.disk.maxBytes",
+		Version:      "3.0.0",
+		DefaultValue: "10737418240",
+		Doc:          "max total disk usage for expression cache in disk mode (default 10GB)",
+		Export:       true,
+	}
+	p.ExprResCacheDiskMaxBytes.Init(base.mgr)
+
+	p.ExprResCacheDiskMaxFileSizeBytes = ParamItem{
+		Key:          "queryNode.exprCache.disk.maxFileSizeBytes",
+		FallbackKeys: []string{"queryNode.exprCache.maxSegmentFileSizeBytes"},
+		Version:      "3.0.0",
+		DefaultValue: "268435456",
+		Doc:          "max file size per sealed segment in disk mode (default 256MB)",
+		Export:       true,
+	}
+	p.ExprResCacheDiskMaxFileSizeBytes.Init(base.mgr)
 
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",

@@ -35,6 +35,7 @@
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
+#include "pb/index_coord.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
@@ -239,6 +240,82 @@ TEST_F(SegmentLoadInfoTest, IndexInfo) {
     // Test non-existent field
     auto empty_infos = info.GetFieldIndexInfos(FieldId(999));
     EXPECT_TRUE(empty_infos.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadIndexInfoCopyPreservesIndexStorePathVersion) {
+    LoadIndexInfo original;
+    original.index_store_path_version = proto::index::IndexStorePathVersion::
+        INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
+
+    LoadIndexInfo copied(original);
+    EXPECT_EQ(copied.index_store_path_version,
+              proto::index::IndexStorePathVersion::
+                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+
+    LoadIndexInfo assigned;
+    assigned = original;
+    EXPECT_EQ(assigned.index_store_path_version,
+              proto::index::IndexStorePathVersion::
+                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ConvertFieldIndexInfoToLoadIndexInfoPreservesIndexStorePathVersion) {
+    auto* index_info = proto_.add_index_infos();
+    index_info->set_fieldid(101);
+    index_info->set_indexid(201);
+    index_info->set_buildid(301);
+    index_info->set_index_version(1);
+    index_info->set_current_index_version(1);
+    index_info->set_index_size(1024);
+    index_info->set_num_rows(1000);
+    index_info->add_index_file_paths("index_v1/1/2/3/301/1/index_data");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+    index_info->set_index_store_path_version(
+        proto::index::IndexStorePathVersion::
+            INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+
+    SegmentLoadInfo info(proto_, schema_);
+    auto load_index_info = info.ConvertFieldIndexInfoToLoadIndexInfo(
+        index_info, proto_.segmentid());
+
+    EXPECT_EQ(load_index_info.index_store_path_version,
+              proto::index::IndexStorePathVersion::
+                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+}
+
+TEST_F(SegmentLoadInfoTest, BuildCacheSkipsHybridScalarResourceEstimate) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    auto* hybrid_index = proto.add_index_infos();
+    hybrid_index->set_fieldid(108);
+    hybrid_index->set_indexid(5001);
+    hybrid_index->add_index_file_paths("/path/to/hybrid_index");
+    auto* hybrid_param = hybrid_index->add_index_params();
+    hybrid_param->set_key(milvus::index::INDEX_TYPE);
+    hybrid_param->set_value(milvus::index::HYBRID_INDEX_TYPE);
+
+    auto* inverted_index = proto.add_index_infos();
+    inverted_index->set_fieldid(109);
+    inverted_index->set_indexid(5002);
+    inverted_index->add_index_file_paths("/path/to/inverted_index");
+    auto* inverted_param = inverted_index->add_index_params();
+    inverted_param->set_key(milvus::index::INDEX_TYPE);
+    inverted_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo segment_info(proto, schema_);
+
+    auto hybrid_infos = segment_info.GetFieldIndexInfos(FieldId(108));
+    ASSERT_EQ(hybrid_infos.size(), 1);
+    EXPECT_FALSE(hybrid_infos[0].load_resource_request.has_value());
+
+    auto inverted_infos = segment_info.GetFieldIndexInfos(FieldId(109));
+    ASSERT_EQ(inverted_infos.size(), 1);
+    EXPECT_TRUE(inverted_infos[0].load_resource_request.has_value());
 }
 
 TEST_F(SegmentLoadInfoTest, BinlogInfo) {

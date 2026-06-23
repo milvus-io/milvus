@@ -69,7 +69,7 @@ type Client struct {
 func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
-		err := errors.New("new session error, maybe can not connect to etcd")
+		err := merr.WrapErrServiceUnavailable("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("New MixCoord Client failed", zap.Error(err))
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (c *Client) getMixCoordAddr() (string, error) {
 			return c.getCompatibleMixCoordAddr()
 		} else {
 			log.Warn("MixCoordClient mess key not exist", zap.Any("key", key))
-			return "", errors.New("find no available mixcoord, check mixcoord state")
+			return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 		}
 	}
 	log.Debug("MixCoordClient GetSessions success",
@@ -137,12 +137,12 @@ func (c *Client) getCompatibleMixCoordAddr() (string, error) {
 	msess, _, err := c.sess.GetSessions(c.ctx, typeutil.RootCoordRole)
 	if err != nil {
 		log.Debug("mixCoordClient getSessions failed", zap.Any("key", typeutil.RootCoordRole), zap.Error(err))
-		return "", errors.New("find no available mixcoord, check mixcoord state")
+		return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 	}
 	ms, ok := msess[typeutil.RootCoordRole]
 	if !ok {
 		log.Warn("MixCoordClient mess key not exist", zap.Any("key", typeutil.RootCoordRole))
-		return "", errors.New("find no available mixcoord, check mixcoord state")
+		return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 	}
 	log.Debug("MixCoordClient GetSessions use rootCoord", zap.Any("key", typeutil.RootCoordRole))
 	c.grpcClient.SetNodeID(ms.ServerID)
@@ -659,6 +659,17 @@ func (c *Client) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
 		return client.CreateRole(ctx, req)
+	})
+}
+
+func (c *Client) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AlterRole(ctx, req)
 	})
 }
 

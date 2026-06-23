@@ -99,7 +99,6 @@ EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 USE_DYNAMIC_SIMD="ON"
-USE_OPENDAL="OFF"
 USE_SVS="OFF"
 TANTIVY_FEATURES=""
 INDEX_ENGINE="KNOWHERE"
@@ -112,7 +111,7 @@ fi
 : "${USE_PCH:="ON"}"
 : "${USE_UNITY_BUILD:="OFF"}"
 
-while getopts "p:t:s:n:a:y:x:o:f:S:ulcgbZh" arg; do
+while getopts "p:t:s:n:a:y:x:f:S:ulcgbZh" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -155,9 +154,6 @@ while getopts "p:t:s:n:a:y:x:o:f:S:ulcgbZh" arg; do
   x)
     INDEX_ENGINE=$OPTARG
     ;;
-  o)
-    USE_OPENDAL=$OPTARG
-    ;;
   S)
     USE_SVS=$OPTARG
     ;;
@@ -180,7 +176,6 @@ parameter:
 -b: build embedded milvus(default: OFF)
 -a: build milvus with AddressSanitizer(default: false)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
--o: build milvus with opendal(default: false)
 -S: build milvus with SVS/Intel Scalable Vector Search(default: OFF)
 -f: build milvus with tantivy features(default: '')
 -h: help
@@ -254,7 +249,6 @@ ${CMAKE_EXTRA_ARGS} \
 -DUSE_ASAN=${USE_ASAN} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
 -DCPU_ARCH=${CPU_ARCH} \
--DUSE_OPENDAL=${USE_OPENDAL} \
 -DWITH_SVS=${USE_SVS} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \

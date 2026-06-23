@@ -1,9 +1,8 @@
 package reduce
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -39,7 +38,7 @@ func ValidateGroupByFieldsPresent(searchResultData []*schemapb.SearchResultData,
 		}
 		for _, fieldID := range fieldIDs {
 			if FindGroupByFieldData(data, fieldID, allowSingularFallback) == nil {
-				return fmt.Errorf("group-by field %d missing from search result %d", fieldID, resultIdx)
+				return merr.WrapErrParameterInvalidMsg("group-by field %d missing from search result %d", fieldID, resultIdx)
 			}
 		}
 	}
@@ -85,7 +84,7 @@ func WriteGroupByFieldValues(
 			}
 		}
 		if template == nil {
-			return fmt.Errorf("group-by field %d missing from all source shards", fid)
+			return merr.WrapErrParameterInvalidMsg("group-by field %d missing from all source shards", fid)
 		}
 
 		builder, err := typeutil.NewFieldDataBuilder(template.GetType(), true, len(acceptedRows))
@@ -95,7 +94,7 @@ func WriteGroupByFieldValues(
 		for _, row := range acceptedRows {
 			iter := iters[row.ResultIdx]
 			if iter == nil {
-				return fmt.Errorf("group-by field %d missing at source shard index %d", fid, row.ResultIdx)
+				return merr.WrapErrParameterInvalidMsg("group-by field %d missing at source shard index %d", fid, row.ResultIdx)
 			}
 			builder.Add(iter(int(row.RowIdx)))
 		}

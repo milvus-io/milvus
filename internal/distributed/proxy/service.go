@@ -227,7 +227,15 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	http2Server := &http2.Server{}
-	s.httpServer = &http.Server{Handler: h2c.NewHandler(s.httpHandler(ginHandler), http2Server), ReadHeaderTimeout: time.Second}
+	Params := &proxy.Params.HTTPCfg
+	s.httpServer = &http.Server{
+		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
+		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
+		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
+		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),
+		IdleTimeout:       Params.IdleTimeout.GetAsDurationByParse(),
+		MaxHeaderBytes:    Params.MaxHeaderBytes.GetAsInt(),
+	}
 	if err := http2.ConfigureServer(s.httpServer, http2Server); err != nil {
 		errChan <- err
 		return
@@ -350,7 +358,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		}
 		if !certPool.AppendCertsFromPEM(rootBuf) {
 			log.Warn("fail to append ca to cert")
-			errChan <- errors.New("fail to append ca to cert")
+			errChan <- merr.WrapErrParameterInvalidMsg("fail to append ca to cert")
 			return
 		}
 
@@ -1043,6 +1051,10 @@ func (s *Server) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersR
 
 func (s *Server) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateRole(ctx, req)
+}
+
+func (s *Server) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterRole(ctx, req)
 }
 
 func (s *Server) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {

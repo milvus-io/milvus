@@ -524,7 +524,9 @@ func TestSnapshotReader_ListSnapshots_Success(t *testing.T) {
 
 func TestFieldBinlog_RoundtripConversion(t *testing.T) {
 	originalFieldBinlog := &datapb.FieldBinlog{
-		FieldID: 123,
+		FieldID:     123,
+		ChildFields: []int64{123, 124, 125},
+		Format:      "parquet",
 		Binlogs: []*datapb.Binlog{
 			{
 				EntriesNum:    1000,
@@ -551,6 +553,8 @@ func TestFieldBinlog_RoundtripConversion(t *testing.T) {
 	resultFieldBinlog := convertAvroToFieldBinlog(avroFieldBinlog)
 
 	assert.Equal(t, originalFieldBinlog.FieldID, resultFieldBinlog.FieldID)
+	assert.Equal(t, originalFieldBinlog.ChildFields, resultFieldBinlog.ChildFields)
+	assert.Equal(t, originalFieldBinlog.Format, resultFieldBinlog.Format)
 	assert.Len(t, resultFieldBinlog.Binlogs, len(originalFieldBinlog.Binlogs))
 
 	for i, originalBinlog := range originalFieldBinlog.Binlogs {
@@ -720,6 +724,122 @@ func TestSnapshotManifest_LegacyV2NoCommitTimestamp(t *testing.T) {
 		"V2 manifest must decode with CommitTimestamp=0 (field absent in schema)")
 }
 
+func TestSnapshotManifest_FieldBinlogChildFieldsAndFormatRoundtripV4(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		Binlogs: []*datapb.FieldBinlog{
+			{
+				FieldID:     900,
+				ChildFields: []int64{100, 101},
+				Format:      "parquet",
+				Binlogs: []*datapb.Binlog{{
+					EntriesNum: 10,
+					LogPath:    "files/insert_log/1/2/3/900/1",
+				}},
+			},
+		},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.Contains(t, getAvroSchemaV4(), "child_fields")
+	assert.Contains(t, getAvroSchemaV4(), `"format"`)
+	v4Schema, err := getManifestSchemaByVersion(4)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(v4Schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v4_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 4)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetBinlogs(), 1)
+	assert.Equal(t, []int64{100, 101}, segments[0].GetBinlogs()[0].GetChildFields())
+	assert.Equal(t, "parquet", segments[0].GetBinlogs()[0].GetFormat())
+}
+
+func TestSnapshotManifest_LegacyV3NoChildFieldsOrFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     900,
+			ChildFields: []int64{100, 101},
+			Format:      "parquet",
+			Binlogs: []*datapb.Binlog{{
+				EntriesNum: 10,
+				LogPath:    "files/insert_log/1/2/3/900/1",
+			}},
+		}},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.NotContains(t, getAvroSchemaV3(), "child_fields")
+	assert.NotContains(t, getAvroSchemaV3(), `"format"`)
+	v3Schema, err := getManifestSchemaByVersion(3)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(v3Schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v3_manifest.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 3)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetBinlogs(), 1)
+	assert.Empty(t, segments[0].GetBinlogs()[0].GetChildFields())
+	assert.Equal(t, "", segments[0].GetBinlogs()[0].GetFormat())
+}
+
+func TestSnapshotManifest_LegacyV2NoChildFieldsOrFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	segment := &datapb.SegmentDescription{
+		SegmentId:   1001,
+		PartitionId: 2001,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     900,
+			ChildFields: []int64{100, 101},
+			Format:      "parquet",
+			Binlogs: []*datapb.Binlog{{
+				EntriesNum: 10,
+				LogPath:    "files/insert_log/1/2/3/900/1",
+			}},
+		}},
+	}
+	entry := convertSegmentToManifestEntry(segment)
+
+	assert.NotContains(t, getAvroSchemaV2(), "child_fields")
+	assert.NotContains(t, getAvroSchemaV2(), `"format"`)
+	v2Schema, err := getManifestSchemaByVersion(2)
+	require.NoError(t, err)
+	binaryData, err := avro.Marshal(v2Schema, entry)
+	require.NoError(t, err)
+
+	manifestPath := path.Join(tempDir, "v2_no_child_fields.avro")
+	require.NoError(t, cm.Write(context.Background(), manifestPath, binaryData))
+
+	segments, err := reader.readManifestFile(context.Background(), manifestPath, 2)
+	require.NoError(t, err)
+	require.Len(t, segments, 1)
+	require.Len(t, segments[0].GetBinlogs(), 1)
+	assert.Empty(t, segments[0].GetBinlogs()[0].GetChildFields())
+	assert.Equal(t, "", segments[0].GetBinlogs()[0].GetFormat())
+}
+
 // =========================== Integration Tests ===========================
 
 func TestSnapshotWriter_ManifestList_Roundtrip(t *testing.T) {
@@ -765,6 +885,11 @@ func TestSnapshot_CompleteWorkflow(t *testing.T) {
 	if len(readSnapshot.Segments) > 0 {
 		assert.Equal(t, snapshotData.Segments[0].SegmentId, readSnapshot.Segments[0].SegmentId)
 		assert.Equal(t, snapshotData.Segments[0].PartitionId, readSnapshot.Segments[0].PartitionId)
+		if len(snapshotData.Segments[0].GetBinlogs()) > 0 {
+			require.Len(t, readSnapshot.Segments[0].GetBinlogs(), len(snapshotData.Segments[0].GetBinlogs()))
+			assert.Equal(t, snapshotData.Segments[0].GetBinlogs()[0].GetChildFields(), readSnapshot.Segments[0].GetBinlogs()[0].GetChildFields())
+			assert.Equal(t, snapshotData.Segments[0].GetBinlogs()[0].GetFormat(), readSnapshot.Segments[0].GetBinlogs()[0].GetFormat())
+		}
 	}
 
 	// 7. Verify indexes information
@@ -859,12 +984,27 @@ func TestSnapshot_NewFields_Serialization(t *testing.T) {
 	assert.Equal(t, len(original.Bm25Statslogs), len(restored.Bm25Statslogs), "Bm25Statslogs count should match")
 	if len(original.Bm25Statslogs) > 0 {
 		assert.Equal(t, original.Bm25Statslogs[0].FieldID, restored.Bm25Statslogs[0].FieldID)
+		assert.Equal(t, original.Bm25Statslogs[0].ChildFields, restored.Bm25Statslogs[0].ChildFields)
+		assert.Equal(t, original.Bm25Statslogs[0].Format, restored.Bm25Statslogs[0].Format)
 		assert.Equal(t, len(original.Bm25Statslogs[0].Binlogs), len(restored.Bm25Statslogs[0].Binlogs))
 		if len(original.Bm25Statslogs[0].Binlogs) > 0 {
 			assert.Equal(t, original.Bm25Statslogs[0].Binlogs[0].LogPath, restored.Bm25Statslogs[0].Binlogs[0].LogPath)
 			assert.Equal(t, original.Bm25Statslogs[0].Binlogs[0].LogSize, restored.Bm25Statslogs[0].Binlogs[0].LogSize)
 		}
 	}
+
+	// 3.5 Verify insert binlog metadata fields
+	require.NotEmpty(t, restored.Binlogs)
+	assert.Equal(t, original.Binlogs[0].ChildFields, restored.Binlogs[0].ChildFields)
+	assert.Equal(t, original.Binlogs[0].Format, restored.Binlogs[0].Format)
+
+	// 3.6 Verify stats/delta binlog metadata fields
+	require.NotEmpty(t, restored.Statslogs)
+	require.NotEmpty(t, restored.Deltalogs)
+	assert.Equal(t, original.Statslogs[0].ChildFields, restored.Statslogs[0].ChildFields)
+	assert.Equal(t, original.Statslogs[0].Format, restored.Statslogs[0].Format)
+	assert.Equal(t, original.Deltalogs[0].ChildFields, restored.Deltalogs[0].ChildFields)
+	assert.Equal(t, original.Deltalogs[0].Format, restored.Deltalogs[0].Format)
 
 	// 4. Verify TextIndexFiles field (map type)
 	assert.Equal(t, len(original.TextIndexFiles), len(restored.TextIndexFiles), "TextIndexFiles count should match")
@@ -1150,10 +1290,9 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_4_future",
-			version:     4,
-			wantErr:     true,
-			errContains: "too new",
+			name:    "version_4_current",
+			version: 4,
+			wantErr: false,
 		},
 		{
 			name:        "version_100_future",
@@ -1204,10 +1343,9 @@ func TestGetManifestSchemaByVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_4_unsupported",
-			version:     4,
-			wantErr:     true,
-			errContains: "unsupported manifest schema version",
+			name:    "version_4_current",
+			version: 4,
+			wantErr: false,
 		},
 		{
 			name:        "version_99_unsupported",

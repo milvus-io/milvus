@@ -183,7 +183,7 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Suc
 		{0.7, 0.6},
 	}
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
@@ -216,7 +216,7 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Err
 	texts := []string{"doc1", "doc2", "doc3"}
 	expectedError := errors.New("highlight service error")
 
-	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string, _ int64) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()

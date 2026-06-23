@@ -509,7 +509,7 @@ func TestParseSparseFloatVectorStructs(t *testing.T) {
 
 	isValidFunc := func(indices arrow.Array, values arrow.Array) {
 		byteArr, maxDim := checkFunc(indices, values, true)
-		assert.Equal(t, uint32(78), maxDim)
+		assert.Equal(t, uint32(79), maxDim)
 		assert.Equal(t, 1, len(byteArr))
 		assert.Equal(t, rowBytes, byteArr[0])
 	}
@@ -633,6 +633,11 @@ func checkNullableSparseFloatVectorStructRead(t *testing.T, validData []bool, co
 	gotSparse := gotInsertData.Data[sparseFieldID].(*storage.SparseFloatVectorFieldData)
 	require.Equal(t, validData, gotSparse.ValidData)
 	require.Len(t, gotSparse.GetContents(), len(contents))
+	expectedDim := int64(0)
+	for _, row := range contents {
+		expectedDim = max(expectedDim, typeutil.SparseFloatRowDim(row))
+	}
+	require.Equal(t, expectedDim, gotSparse.Dim)
 	if len(contents) > 0 {
 		require.Equal(t, contents, gotSparse.GetContents())
 	}

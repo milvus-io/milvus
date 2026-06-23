@@ -179,28 +179,39 @@ class FileManagerImpl : public milvus::FileManager {
     virtual bool
     AddFileMeta(const FileMeta& file_meta) override = 0;
 
+    /**
+     * @brief Open an input stream for loading an index file from remote storage.
+     *
+     * @param local_full_file_path Local full file path. The local file may not
+     * exist yet; FileManager uses its basename and index metadata to resolve the
+     * remote object path.
+     */
     std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename) override final {
-        return OpenInputStream(filename, /*is_index_file=*/true);
+    OpenInputStream(const std::string& local_full_file_path) override final {
+        return OpenInputStream(local_full_file_path, /*is_index_file=*/true);
     }
 
+    /**
+     * @brief Open an output stream for uploading a built local index file to
+     * remote storage.
+     *
+     * @param local_full_file_path Local full path of the already-built index
+     * file. FileManager uses its basename and index metadata to resolve the
+     * remote object path.
+     */
     std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename) override final {
-        return OpenOutputStream(filename, /*is_index_file=*/true);
+    OpenOutputStream(const std::string& local_full_file_path) override final {
+        return OpenOutputStream(local_full_file_path, /*is_index_file=*/true);
     }
 
     std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename, bool is_index_file) {
+    OpenInputStream(const std::string& local_full_file_path,
+                    bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
-        std::string remote_file_path;
-        if (ShouldOpenIndexFileDirectly(filename, is_index_file)) {
-            remote_file_path = NormalizePath(filename);
-        } else {
-            auto local_file_name = GetFileName(filename);
-            remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
-                                             : GetRemoteTextLogPrefix();
-            remote_file_path += "/" + local_file_name;
-        }
+        auto local_file_name = GetFileName(local_full_file_path);
+        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                              : GetRemoteTextLogPrefix();
+        remote_file_path += "/" + local_file_name;
         auto remote_file = fs_->OpenInputFile(remote_file_path);
         AssertInfo(remote_file.ok(),
                    "failed to open remote file, reason: {}",
@@ -211,9 +222,10 @@ class FileManagerImpl : public milvus::FileManager {
     }
 
     std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename, bool is_index_file) {
+    OpenOutputStream(const std::string& local_full_file_path,
+                     bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open output stream");
-        auto local_file_name = GetFileName(filename);
+        auto local_file_name = GetFileName(local_full_file_path);
         auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
                                               : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
@@ -327,23 +339,6 @@ class FileManagerImpl : public milvus::FileManager {
     static std::string
     GetFileName(const std::string& filepath) {
         return boost::filesystem::path(filepath).filename().string();
-    }
-
-    bool
-    ShouldOpenIndexFileDirectly(const std::string& filename,
-                                bool is_index_file) const {
-        if (!is_index_file || filename.find('/') == std::string::npos) {
-            return false;
-        }
-
-        // Absolute local paths are legacy caller inputs, not object keys.
-        // Local Arrow FS already applies its own root path.
-        if (milvus_storage::IsLocalFileSystem(fs_) &&
-            boost::filesystem::path(filename).is_absolute()) {
-            return false;
-        }
-
-        return true;
     }
 
     std::string

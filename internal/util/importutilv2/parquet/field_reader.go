@@ -23,7 +23,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/constraints"
 
@@ -254,8 +253,8 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		data, err := ReadVectorArrayData(c, count)
 		return data, nil, err
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for field '%s'",
-			c.field.GetDataType().String(), c.field.GetName()))
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported data type '%s' for field '%s'",
+			c.field.GetDataType().String(), c.field.GetName())
 	}
 }
 
@@ -886,7 +885,7 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 				return nil, err
 			}
 			if err = checkListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+				return nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String())
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
@@ -944,8 +943,8 @@ func ReadNullableBinaryData(pcr *FieldReader, count int64) (any, []bool, error) 
 				} else {
 					value := binaryReader.Value(i)
 					if len(value) != int(expectedRowWidth) {
-						return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("vector row width mismatch: field %s, row %d, expected %d bytes but got %d bytes, data type: %s",
-							pcr.field.GetName(), len(validData), expectedRowWidth, len(value), dataType.String()))
+						return nil, nil, merr.WrapErrImportFailedMsg("vector row width mismatch: field %s, row %d, expected %d bytes but got %d bytes, data type: %s",
+							pcr.field.GetName(), len(validData), expectedRowWidth, len(value), dataType.String())
 					}
 					data = append(data, value...)
 					validData = append(validData, true)
@@ -957,7 +956,7 @@ func ReadNullableBinaryData(pcr *FieldReader, count int64) (any, []bool, error) 
 				return nil, nil, err
 			}
 			if err = checkNullableListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
-				return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+				return nil, nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String())
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
@@ -1003,7 +1002,7 @@ func ReadNullableBinaryData(pcr *FieldReader, count int64) (any, []bool, error) 
 func parseSparseFloatRowVector(str string) ([]byte, uint32, error) {
 	rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
 	if err != nil {
-		return nil, 0, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err))
+		return nil, 0, merr.WrapErrImportFailedMsg("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err)
 	}
 	elemCount := len(rowVec) / 8
 	maxIdx := uint32(0)
@@ -1132,9 +1131,9 @@ func parseSparseFloatVectorStructRow(st map[string]arrow.Array, row int) ([]byte
 	}
 
 	maxDim := uint32(0)
-	// set the maxDim as the last value of sortedIndices since it has been sorted
+	// Sparse vector dim is the largest index plus one.
 	if len(sortedIndices) > 0 {
-		maxDim = sortedIndices[len(sortedIndices)-1]
+		maxDim = sortedIndices[len(sortedIndices)-1] + 1
 	}
 	return rowVec, maxDim, nil // rowVec could be an empty sparse
 }
@@ -1312,7 +1311,7 @@ func ReadNullableSparseFloatVectorData(pcr *FieldReader, count int64) (any, []bo
 func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 	for i := 1; i < len(offsets); i++ {
 		if offsets[i]-offsets[i-1] != dim {
-			return fmt.Errorf("expected %d but got %d", dim, offsets[i]-offsets[i-1])
+			return merr.WrapErrParameterInvalidMsg("expected %d but got %d", dim, offsets[i]-offsets[i-1])
 		}
 	}
 	return nil
@@ -1320,7 +1319,7 @@ func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 
 func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) error {
 	if len(offsets) < 1 {
-		return errors.New("empty offsets")
+		return merr.WrapErrParameterInvalidMsg("empty offsets")
 	}
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
@@ -1335,7 +1334,7 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 	case schemapb.DataType_Int8Vector:
 		return checkVectorAlignWithDim(offsets, int32(dim))
 	default:
-		return fmt.Errorf("unexpected vector data type %s", dataType.String())
+		return merr.WrapErrParameterInvalidMsg("unexpected vector data type %s", dataType.String())
 	}
 }
 
@@ -1422,7 +1421,7 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 		dataType := pcr.field.GetDataType()
 		if typeutil.IsVectorType(dataType) {
 			if err = checkListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+				return nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String())
 			}
 		}
 		if err = readIntegerOrFloatListLikeData(pcr.field, listReader, func(arr []T, valid bool) {
@@ -1459,7 +1458,7 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 			dataType := pcr.field.GetDataType()
 			if typeutil.IsVectorType(dataType) {
 				if err = checkListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
-					return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+					return nil, nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String())
 				}
 			}
 			if err = readIntegerOrFloatListLikeData(pcr.field, listReader, func(arr []T, valid bool) {
@@ -1501,7 +1500,7 @@ func ReadNullableFloatVectorData(pcr *FieldReader, count int64) (any, []bool, er
 
 		dataType := pcr.field.GetDataType()
 		if err = checkNullableListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+			return nil, nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String())
 		}
 
 		valueReader := listReader.ListValues()
@@ -1583,7 +1582,7 @@ func ReadFP16BF16FloatVectorData(pcr *FieldReader, count int64) (any, error) {
 			return nil, err
 		}
 		if err = checkListLikeVectorAlignedWithExpected(listReader, int32(pcr.dim)); err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), pcr.field.GetDataType().String()))
+			return nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), pcr.field.GetDataType().String())
 		}
 		floatRows := make([][]float32, 0, int(count))
 		if err = readFloatListLikeDataAsFloat32(pcr.field, listReader, func(arr []float32, valid bool) {
@@ -1621,7 +1620,7 @@ func ReadNullableFP16BF16FloatVectorData(pcr *FieldReader, count int64) (any, []
 			return nil, nil, err
 		}
 		if err = checkNullableListLikeVectorAlignedWithExpected(listReader, int32(pcr.dim)); err != nil {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), pcr.field.GetDataType().String()))
+			return nil, nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), pcr.field.GetDataType().String())
 		}
 		floatRows := make([][]float32, 0, int(count))
 		if err = readFloatListLikeDataAsFloat32(pcr.field, listReader, func(arr []float32, valid bool) {
@@ -1666,7 +1665,7 @@ func ReadNullableInt8VectorData(pcr *FieldReader, count int64) (any, []bool, err
 
 		dataType := pcr.field.GetDataType()
 		if err = checkNullableListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+			return nil, nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String())
 		}
 
 		valueReader := listReader.ListValues()
@@ -1893,7 +1892,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 		}
 		for _, elementArray := range float32Array.([][]float32) {
 			if err := typeutil.VerifyFloats32(elementArray); err != nil {
-				return nil, fmt.Errorf("float32 verification failed: %w", err)
+				return nil, merr.Wrap(err, "float32 verification failed")
 			}
 			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
@@ -1916,7 +1915,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 		}
 		for _, elementArray := range float64Array.([][]float64) {
 			if err := typeutil.VerifyFloats64(elementArray); err != nil {
-				return nil, fmt.Errorf("float64 verification failed: %w", err)
+				return nil, merr.Wrap(err, "float64 verification failed")
 			}
 			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
@@ -1970,8 +1969,8 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			})
 		}
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
-			elementType.String(), pcr.field.GetName()))
+		return nil, merr.WrapErrImportFailedMsg("unsupported data type '%s' for array field '%s'",
+			elementType.String(), pcr.field.GetName())
 	}
 	return data, nil
 }
@@ -2174,8 +2173,8 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 		}
 		return data, validData, nil
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
-			elementType.String(), pcr.field.GetName()))
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported data type '%s' for array field '%s'",
+			elementType.String(), pcr.field.GetName())
 	}
 }
 
@@ -2309,7 +2308,7 @@ func vectorArrayBytesPerVector(elementType schemapb.DataType, dim int64) (int, e
 	case schemapb.DataType_SparseFloatVector:
 		return 0, merr.WrapErrImportFailed("ArrayOfVector with SparseFloatVector element type is not implemented yet")
 	default:
-		return 0, merr.WrapErrImportFailed(fmt.Sprintf("unsupported ArrayOfVector element type: %v", elementType))
+		return 0, merr.WrapErrImportFailedMsg("unsupported ArrayOfVector element type: %v", elementType)
 	}
 }
 
@@ -2320,8 +2319,8 @@ func buildVectorArrayFieldFromFixedSizeBinary(field *schemapb.FieldSchema, dim i
 	}
 	actualByteSize := values.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
 	if actualByteSize != bytesPerVector {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("vector byte size mismatch: expected %d, got %d for field '%s'",
-			bytesPerVector, actualByteSize, field.GetName()))
+		return nil, merr.WrapErrImportFailedMsg("vector byte size mismatch: expected %d, got %d for field '%s'",
+			bytesPerVector, actualByteSize, field.GetName())
 	}
 
 	switch field.GetElementType() {
@@ -2392,7 +2391,7 @@ func buildVectorArrayFieldFromFixedSizeBinary(field *schemapb.FieldSchema, dim i
 			Data: &schemapb.VectorField_Int8Vector{Int8Vector: int8Data},
 		}, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported ArrayOfVector element type: %v", field.GetElementType()))
+		return nil, merr.WrapErrImportFailedMsg("unsupported ArrayOfVector element type: %v", field.GetElementType())
 	}
 }
 
@@ -2483,7 +2482,7 @@ func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vecto
 	case schemapb.DataType_SparseFloatVector:
 		return nil, merr.WrapErrImportFailed("ArrayOfVector with SparseFloatVector element type is not implemented yet")
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported ArrayOfVector element type: %v", field.GetElementType()))
+		return nil, merr.WrapErrImportFailedMsg("unsupported ArrayOfVector element type: %v", field.GetElementType())
 	}
 }
 

@@ -1607,6 +1607,133 @@ func getUserInfoMetaString(username string) string {
 	return string(validBytes)
 }
 
+func TestGetUserResultIncludesDescriptionWithoutRoleInfo(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-description"
+	description := "stored description"
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	credential := &model.Credential{
+		Username:    username,
+		Description: description,
+	}
+
+	result, err := c.getUserResult(ctx, tenant, credential, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, username, result.GetUser().GetName())
+	assert.Equal(t, description, result.GetDescription())
+	assert.Empty(t, result.GetRoles())
+}
+
+func TestListUserReturnsCredentialLoadError(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-credential-load-error"
+	credentialKey := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	expectedErr := errors.New("credential load failed")
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return("", expectedErr)
+
+	results, err := c.ListUser(ctx, tenant, &milvuspb.UserEntity{Name: username}, false)
+
+	require.ErrorIs(t, err, expectedErr)
+	assert.Empty(t, results)
+}
+
+func TestListUserSingleUserReusesLoadedCredentialDescription(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-description"
+	description := "single user description"
+	credentialKey := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	credentialValue, err := json.Marshal(&internalpb.CredentialInfo{Description: &description})
+	require.NoError(t, err)
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return(string(credentialValue), nil).Once()
+
+	results, err := c.ListUser(ctx, tenant, &milvuspb.UserEntity{Name: username}, false)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, username, results[0].GetUser().GetName())
+	assert.Equal(t, description, results[0].GetDescription())
+	assert.Empty(t, results[0].GetRoles())
+}
+
+func TestListUserAllUsersReusesLoadedCredentialDescriptions(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	user1Description := "first user"
+	user2Description := "second user"
+	ghostDescription := "ghost user"
+	user1Credential, err := json.Marshal(&internalpb.CredentialInfo{Description: &user1Description})
+	require.NoError(t, err)
+	user2Credential, err := json.Marshal(&internalpb.CredentialInfo{Description: &user2Description})
+	require.NoError(t, err)
+	ghostCredential, err := json.Marshal(&internalpb.CredentialInfo{Description: &ghostDescription})
+	require.NoError(t, err)
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, CredentialPrefix+"/").Return(
+		[]string{
+			fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
+			fmt.Sprintf("%s/%s", CredentialPrefix, "user2"),
+			fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "ghost"),
+		},
+		[]string{string(user1Credential), string(user2Credential), string(ghostCredential)},
+		nil,
+	)
+
+	results, err := c.ListUser(ctx, tenant, nil, false)
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "user1", results[0].GetUser().GetName())
+	assert.Equal(t, user1Description, results[0].GetDescription())
+	assert.Empty(t, results[0].GetRoles())
+	assert.Equal(t, "user2", results[1].GetUser().GetName())
+	assert.Equal(t, user2Description, results[1].GetDescription())
+	assert.Empty(t, results[1].GetRoles())
+}
+
+func TestBackupRBACReusesLoadedCredentials(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-password"
+	password := "encrypted-password"
+	credentialValue, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: password})
+	require.NoError(t, err)
+
+	var credentialPrefixLoads int
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			if key == CredentialPrefix+"/" {
+				credentialPrefixLoads++
+				return []string{fmt.Sprintf("%s/%s", CredentialPrefix, username)}, []string{string(credentialValue)}, nil
+			}
+			return nil, nil, nil
+		})
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, credentialPrefixLoads)
+	require.Len(t, backup.GetUsers(), 1)
+	assert.Equal(t, username, backup.GetUsers()[0].GetUser())
+	assert.Equal(t, password, backup.GetUsers()[0].GetPassword())
+	assert.Empty(t, backup.GetUsers()[0].GetRoles())
+}
+
 func TestRBAC_Credential(t *testing.T) {
 	ctx := context.TODO()
 
@@ -1711,6 +1838,32 @@ func TestRBAC_Credential(t *testing.T) {
 		}
 	})
 
+	t.Run("test AlterCredential does not persist sha256 password", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = NewCatalog(kvmock)
+		)
+
+		kvmock.EXPECT().
+			Save(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, "user1"), mock.MatchedBy(func(value string) bool {
+				credential := &internalpb.CredentialInfo{}
+				require.NoError(t, json.Unmarshal([]byte(value), credential))
+				return credential.GetEncryptedPassword() == "password" &&
+					credential.GetSha256Password() == "" &&
+					credential.GetDescription() == "description"
+			})).
+			Return(nil)
+
+		description := "description"
+		err := c.AlterCredential(ctx, &model.Credential{
+			Username:          "user1",
+			EncryptedPassword: "password",
+			Sha256Password:    "sha256-password",
+			Description:       description,
+		})
+		assert.NoError(t, err)
+	})
+
 	t.Run("test DropCredential", func(t *testing.T) {
 		var (
 			kvmock = mocks.NewTxnKV(t)
@@ -1780,6 +1933,8 @@ func TestRBAC_Credential(t *testing.T) {
 
 		// Return valid keys if count==0
 		// return error if count!=0
+		credentialValue, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: crypto.Base64Encode("passwd")})
+		require.NoError(t, err)
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
 			func(ctx context.Context, key string) []string {
 				cmu.RLock()
@@ -1789,6 +1944,7 @@ func TestRBAC_Credential(t *testing.T) {
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user2"),
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user3"),
+						fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "ghost"),
 						"random",
 					}
 				}
@@ -1797,13 +1953,13 @@ func TestRBAC_Credential(t *testing.T) {
 			func(ctx context.Context, key string) []string {
 				cmu.RLock()
 				defer cmu.RUnlock()
-				passwd, _ := json.Marshal(&model.Credential{EncryptedPassword: crypto.Base64Encode("passwd")})
 				if count == 0 {
 					return []string{
-						string(passwd),
-						string(passwd),
-						string(passwd),
-						string(passwd),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
 					}
 				}
 				return nil
@@ -1905,6 +2061,140 @@ func TestRBAC_Role(t *testing.T) {
 			Name: "role1",
 		})
 		assert.NoError(t, err)
+	})
+	t.Run("test AlterRole load error", func(t *testing.T) {
+		var (
+			kvmock   = mocks.NewTxnKV(t)
+			c        = NewCatalog(kvmock)
+			roleName = "role_load_error"
+			loadErr  = errors.New("mock load role error")
+		)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("", loadErr).Once()
+
+		err := c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, loadErr)
+		kvmock.AssertNotCalled(t, "Save", mock.Anything, mock.Anything, mock.Anything)
+	})
+	t.Run("test AlterRole malformed stored role value", func(t *testing.T) {
+		var (
+			kvmock     = mocks.NewTxnKV(t)
+			c          = NewCatalog(kvmock)
+			roleName   = "role_malformed_alter"
+			newDesc    = "new description"
+			expectedKV string
+		)
+
+		expectedKV, err := model.MarshalRoleModel(&model.Role{
+			Name:        roleName,
+			Description: newDesc,
+		})
+		require.NoError(t, err)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("not-json", nil).Once()
+		kvmock.EXPECT().Save(mock.Anything, RolePrefix+"/"+roleName, expectedKV).Return(nil).Once()
+
+		err = c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: newDesc,
+		})
+		require.NoError(t, err)
+	})
+	t.Run("test ListRole malformed exact role value", func(t *testing.T) {
+		var (
+			kvmock   = mocks.NewTxnKV(t)
+			c        = NewCatalog(kvmock)
+			roleName = "role_malformed_exact"
+		)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("{", nil).Once()
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, roleName, roles[0].GetRole().GetName())
+		assert.Empty(t, roles[0].GetRole().GetDescription())
+	})
+	t.Run("test ListRole empty exact role name", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = NewCatalog(kvmock)
+		)
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: ""}, false)
+		require.Error(t, err)
+		assert.Empty(t, roles)
+		assert.Contains(t, err.Error(), "role name in the role entity is empty")
+	})
+	t.Run("test role description persistence", func(t *testing.T) {
+		etcdCli, err := etcd.GetEtcdClient(
+			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+			Params.EtcdCfg.Endpoints.GetAsStrings(),
+			Params.EtcdCfg.EtcdTLSCert.GetValue(),
+			Params.EtcdCfg.EtcdTLSKey.GetValue(),
+			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		require.NoError(t, err)
+		rootPath := "/test/rbac/role-description/" + funcutil.RandomString(8)
+		metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+		defer metaKV.RemoveWithPrefix(context.TODO(), "")
+		defer metaKV.Close()
+		c := NewCatalog(metaKV)
+
+		roleName := "role_desc"
+		require.NoError(t, c.CreateRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "初始角色描述",
+		}))
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "初始角色描述", roles[0].GetRole().GetDescription())
+
+		require.NoError(t, c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "updated role description",
+		}))
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, roleName, roles[0].GetRole().GetName())
+		assert.Equal(t, "updated role description", roles[0].GetRole().GetDescription())
+
+		require.NoError(t, metaKV.Save(ctx, RolePrefix+"/legacy_role", ""))
+		roles, err = c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: "legacy_role"}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Empty(t, roles[0].GetRole().GetDescription())
+
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 2)
+		roleDescriptions := lo.SliceToMap(roles, func(role *milvuspb.RoleResult) (string, string) {
+			return role.GetRole().GetName(), role.GetRole().GetDescription()
+		})
+		assert.Equal(t, "updated role description", roleDescriptions[roleName])
+		assert.Empty(t, roleDescriptions["legacy_role"])
+
+		require.NoError(t, metaKV.Save(ctx, RolePrefix+"/malformed_role", "{"))
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 3)
+		roleDescriptions = lo.SliceToMap(roles, func(role *milvuspb.RoleResult) (string, string) {
+			return role.GetRole().GetName(), role.GetRole().GetDescription()
+		})
+		assert.Equal(t, "updated role description", roleDescriptions[roleName])
+		assert.Empty(t, roleDescriptions["legacy_role"])
+		assert.Empty(t, roleDescriptions["malformed_role"])
+
+		roles, err = c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: "malformed_role"}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Empty(t, roles[0].GetRole().GetDescription())
 	})
 	t.Run("test DropRole", func(t *testing.T) {
 		var (
@@ -2119,11 +2409,12 @@ func TestRBAC_Role(t *testing.T) {
 			kvmock = mocks.NewTxnKV(t)
 			c      = NewCatalog(kvmock).(*Catalog)
 
-			invalidUser    = "invalid-user"
-			invalidUserKey = funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, invalidUser)
+			invalidUser        = "invalid-user"
+			invalidRoleUser    = "invalid-role-user"
+			invalidRoleUserKey = funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, invalidRoleUser)
 		)
-		// returns error for invalidUserKey
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, invalidUserKey).Call.Return(
+		// returns error for invalidRoleUserKey
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, invalidRoleUserKey).Call.Return(
 			nil, nil, errors.New("Mock load with prefix wrong"))
 
 		// Returns keys for RoleMappingPrefix/tenant/user1/ (with trailing slash after the fix)
@@ -2136,6 +2427,9 @@ func TestRBAC_Role(t *testing.T) {
 					user1Key + "role3/error",
 				}
 			}, nil, nil)
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, "user1")).Return(getUserInfoMetaString("user1"), nil).Maybe()
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, invalidUser)).Return("", errors.New("mock load credential error")).Maybe()
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, invalidRoleUser)).Return(getUserInfoMetaString(invalidRoleUser), nil).Maybe()
 
 		// Returns keys for CredentialPrefix
 		var loadCredentialPrefixReturn atomic.Bool
@@ -2143,7 +2437,7 @@ func TestRBAC_Role(t *testing.T) {
 			func(ctx context.Context, key string) []string {
 				if loadCredentialPrefixReturn.Load() {
 					return []string{
-						fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "user1"),
+						fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
 					}
 				}
 				return nil
@@ -2168,20 +2462,19 @@ func TestRBAC_Role(t *testing.T) {
 				description string
 				isValid     bool
 
-				user            string
+				credential      *model.Credential
 				includeRoleInfo bool
 			}{
-				{"valid user1 not include RoleInfo", true, "user1", false},
-				{"valid user1 include RoleInfo", true, "user1", true},
-				{"invalid user not include RoleInfo", true, invalidUser, false},
-				{"invalid user include RoleInfo", false, invalidUser, true},
+				{"valid user1 not include RoleInfo", true, &model.Credential{Username: "user1"}, false},
+				{"valid user1 include RoleInfo", true, &model.Credential{Username: "user1"}, true},
+				{"invalid role user include RoleInfo", false, &model.Credential{Username: invalidRoleUser}, true},
 			}
 
 			for _, test := range tests {
 				t.Run(test.description, func(t *testing.T) {
-					res, err := c.getUserResult(ctx, tenant, test.user, test.includeRoleInfo)
+					res, err := c.getUserResult(ctx, tenant, test.credential, test.includeRoleInfo)
 
-					assert.Equal(t, test.user, res.GetUser().GetName())
+					assert.Equal(t, test.credential.Username, res.GetUser().GetName())
 
 					if test.isValid {
 						assert.NoError(t, err)
@@ -2231,6 +2524,7 @@ func TestRBAC_Role(t *testing.T) {
 				{true, true, &milvuspb.UserEntity{Name: "user1"}, false, "valid entity user1 not include RoleInfo"},
 				{true, true, &milvuspb.UserEntity{Name: "user1"}, true, "valid entity user1 include RoleInfo"},
 				{false, true, &milvuspb.UserEntity{Name: invalidUser}, true, "invalid entity invalidUser include RoleInfo"},
+				{false, true, &milvuspb.UserEntity{Name: invalidRoleUser}, true, "invalid entity invalidRoleUser include RoleInfo"},
 			}
 
 			for _, test := range tests {
@@ -3282,10 +3576,11 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.NoError(t, err)
 
 	// check user
-	users, err := c.ListCredentialsWithPasswd(ctx)
+	credentials, err := c.(*Catalog).listCredentials(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, users, 1)
-	assert.Equal(t, users["user1"], "passwd")
+	assert.Len(t, credentials, 1)
+	assert.Equal(t, "user1", credentials[0].Username)
+	assert.Equal(t, "passwd", credentials[0].EncryptedPassword)
 	// check role
 	roles, err := c.ListRole(ctx, util.DefaultTenant, nil, false)
 	assert.NoError(t, err)
@@ -3353,9 +3648,9 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.NoError(t, err)
 
 	// check user
-	users, err = c.ListCredentialsWithPasswd(ctx)
+	credentials, err = c.(*Catalog).listCredentials(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, users, 2)
+	assert.Len(t, credentials, 2)
 	// check role
 	roles, err = c.ListRole(ctx, util.DefaultTenant, nil, false)
 	assert.NoError(t, err)
@@ -3748,6 +4043,162 @@ func TestRBACPrefixMatch(t *testing.T) {
 		}
 		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Insert"))
 		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Delete"))
+	})
+}
+
+func TestRBACReadSkipsEmptyKeySegments(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+
+	t.Run("getRolesByUsername", func(t *testing.T) {
+		username := "ai_voice"
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, username)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock).(*Catalog)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "default_db_rw",
+				prefix,
+				prefix + "kb_db_rw",
+			},
+			nil,
+			nil,
+		)
+
+		roles, err := c.getRolesByUsername(ctx, tenant, username)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"default_db_rw", "kb_db_rw"}, roles)
+		require.NotContains(t, roles, "")
+	})
+
+	t.Run("ListUserRole", func(t *testing.T) {
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "user1/role1",
+				prefix + "user1/",
+				prefix + "/role2",
+			},
+			nil,
+			nil,
+		)
+
+		userRoles, err := c.ListUserRole(ctx, tenant)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"user1/role1"}, userRoles)
+	})
+
+	t.Run("ListRole", func(t *testing.T) {
+		roleName := "role1"
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "user1/" + roleName,
+				prefix + "/" + roleName,
+				prefix + "user2/",
+			},
+			nil,
+			nil,
+		)
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("", nil)
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, true)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		require.Equal(t, roleName, roles[0].GetRole().GetName())
+		require.Len(t, roles[0].GetUsers(), 1)
+		require.Equal(t, "user1", roles[0].GetUsers()[0].GetName())
+	})
+
+	t.Run("ListRoleAllRoles", func(t *testing.T) {
+		prefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "role1",
+				prefix + "   ",
+			},
+			nil,
+			nil,
+		)
+
+		roles, err := c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		require.Equal(t, "role1", roles[0].GetRole().GetName())
+	})
+
+	t.Run("ListGrant", func(t *testing.T) {
+		roleName := "role1"
+		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, roleName)
+		validIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).Return(
+			[]string{
+				granteePrefix + "Collection/default.coll",
+				granteePrefix + "Collection/",
+			},
+			[]string{"grant-id", "bad-id"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, validIDPrefix).Return(
+			[]string{validIDPrefix + "PrivilegeLoad", validIDPrefix},
+			[]string{"root", "root"},
+			nil,
+		)
+
+		grants, err := c.ListGrant(ctx, tenant, &milvuspb.GrantEntity{
+			Role:   &milvuspb.RoleEntity{Name: roleName},
+			DbName: util.AnyWord,
+		})
+		require.NoError(t, err)
+		require.Len(t, grants, 1)
+		require.Equal(t, roleName, grants[0].GetRole().GetName())
+		require.Equal(t, "Collection", grants[0].GetObject().GetName())
+		require.Equal(t, "coll", grants[0].GetObjectName())
+		require.Equal(t, util.DefaultDBName, grants[0].GetDbName())
+		require.Equal(t, util.PrivilegeNameForAPI("PrivilegeLoad"), grants[0].GetGrantor().GetPrivilege().GetName())
+	})
+
+	t.Run("ListPolicy", func(t *testing.T) {
+		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		validIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).Return(
+			[]string{
+				granteePrefix + "role1/Collection/default.coll",
+				granteePrefix + "role2/Collection/",
+			},
+			[]string{"grant-id", "bad-id"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, validIDPrefix).Return(
+			[]string{validIDPrefix + "PrivilegeLoad", validIDPrefix},
+			nil,
+			nil,
+		)
+
+		policy, err := c.ListPolicy(ctx, tenant)
+		require.NoError(t, err)
+		require.Len(t, policy, 1)
+		require.Equal(t, "role1", policy[0].GetRole().GetName())
+		require.Equal(t, "Collection", policy[0].GetObject().GetName())
+		require.Equal(t, "coll", policy[0].GetObjectName())
+		require.Equal(t, util.DefaultDBName, policy[0].GetDbName())
+		require.Equal(t, util.PrivilegeNameForAPI("PrivilegeLoad"), policy[0].GetGrantor().GetPrivilege().GetName())
 	})
 }
 

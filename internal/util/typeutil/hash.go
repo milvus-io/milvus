@@ -3,10 +3,9 @@ package typeutil
 import (
 	"strconv"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -22,7 +21,7 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 				partitionName := partitionNames[value%numPartitions]
 				selectedPartitions[partitionName] = struct{}{}
 			} else {
-				return nil, errors.New("the data type of the data and the schema do not match")
+				return nil, merr.WrapErrParameterInvalidMsg("the data type of the data and the schema do not match")
 			}
 		}
 	case schemapb.DataType_VarChar:
@@ -32,11 +31,11 @@ func HashKey2Partitions(fieldSchema *schemapb.FieldSchema, keys []*planpb.Generi
 				partitionName := partitionNames[value%numPartitions]
 				selectedPartitions[partitionName] = struct{}{}
 			} else {
-				return nil, errors.New("the data type of the data and the schema do not match")
+				return nil, merr.WrapErrParameterInvalidMsg("the data type of the data and the schema do not match")
 			}
 		}
 	default:
-		return nil, errors.New("currently only support DataType Int64 or VarChar as partition keys")
+		return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as partition keys")
 	}
 
 	result := make([]string, 0)

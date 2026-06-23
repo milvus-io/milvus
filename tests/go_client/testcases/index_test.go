@@ -635,7 +635,7 @@ func TestCreateIndexWithOtherFieldName(t *testing.T) {
 	// create index in binary field with default name
 	idxBinary := index.NewBinFlatIndex(entity.JACCARD)
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultBinaryVecFieldName, idxBinary))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 }
 
 // create all scalar index on json field -> error
@@ -813,7 +813,7 @@ func TestCreateIndexDup(t *testing.T) {
 	common.CheckIndex(t, _index, expIndex, common.TNewCheckIndexOpt(common.DefaultNb))
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfSq8))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 }
 
 func TestCreateIndexSparseVectorGeneric(t *testing.T) {
@@ -1007,7 +1007,8 @@ func TestCreateIndexVanillaFaissGeneric(t *testing.T) {
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
 		WithANNSField(common.DefaultFloatVecFieldName).
-		WithSearchParam("nprobe", "8").
+		// nprobe=nlist (IVF64) scans all lists so topK results are returned deterministically (#50392)
+		WithSearchParam("nprobe", "64").
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
@@ -1198,7 +1199,7 @@ func TestIndexMultiVectorDupName(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloat16VecFieldName, idx).WithIndexName("index_1"))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 
 	// create different index on same field
 	idxRe := index.NewIvfSQ8Index(entity.COSINE, 32)

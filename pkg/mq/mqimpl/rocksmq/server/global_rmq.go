@@ -21,10 +21,10 @@ import (
 	"os"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Rmq is global rocksmq instance that will be initialized only once
@@ -48,7 +48,7 @@ func InitRocksMQ(path string) error {
 		} else {
 			if !fi.IsDir() {
 				errMsg := "can't create a directory because there exists a file with the same name"
-				finalErr = errors.New(errMsg)
+				finalErr = merr.WrapErrServiceInternal(errMsg)
 				return
 			}
 		}

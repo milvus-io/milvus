@@ -19,6 +19,7 @@ from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import FixedType, FloatType, LongType, NestedField
 from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
+from utils.constant import CaseLabel
 from utils.utils import gen_collection_name
 
 DIM = 8
@@ -873,7 +874,6 @@ def _assert_basic_row_body(row, row_id, include_embedding=True):
         _assert_vector_close(row["embedding"], _expected_embedding(row_id))
 
 
-@pytest.mark.ExternalCollection
 class TestRestExternalCollection(TestBase):
     def _external_job_post(self, action, payload):
         url = f"{self.endpoint}/v2/vectordb/jobs/external_collection/{action}"
@@ -1070,7 +1070,7 @@ class TestRestExternalCollection(TestBase):
         all_records = _assert_job_list_response(all_jobs)
         assert job_id in [job["jobId"] for job in all_records]
 
-    @pytest.mark.L0
+    @pytest.mark.tags(CaseLabel.L0)
     def test_rest_external_collection_create_describe_metadata_parquet(self, external_store):
         """
         target: verify REST v2 external collection metadata for parquet
@@ -1091,7 +1091,7 @@ class TestRestExternalCollection(TestBase):
         assert fields["value"]["externalField"] == "value"
         assert fields["embedding"]["externalField"] == "embedding"
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_refresh_query_by_format(self, fmt, external_store):
         """
@@ -1136,7 +1136,7 @@ class TestRestExternalCollection(TestBase):
             if "distance" in hit:
                 assert isinstance(hit["distance"], (int, float)), hit
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_refresh_override_persists_and_reuses(self, external_store):
         """
         target: verify refresh override source/spec semantics
@@ -1180,7 +1180,7 @@ class TestRestExternalCollection(TestBase):
         self._load_and_wait(name)
         assert self._query_count(name, "id >= 1000") == 20
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_create_rejections(self, external_store):
         """
         target: verify REST v2 create-time external collection validation
@@ -1293,7 +1293,7 @@ class TestRestExternalCollection(TestBase):
             rsp = self.collection_client.collection_create(copy.deepcopy(payload))
             _assert_error_response(rsp, message)
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_refresh_rejections(self, external_store):
         """
         target: verify REST v2 external refresh/job API validation
@@ -1386,7 +1386,7 @@ class TestRestExternalCollection(TestBase):
         rsp = self._describe_external_collection_job(9223372036854775807)
         _assert_error_response(rsp, "not found")
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_raw_request_body_validation(self):
         """
         target: verify REST v2 external job raw body validation
@@ -1402,7 +1402,7 @@ class TestRestExternalCollection(TestBase):
             rsp = self._external_job_raw_post(action, body)
             _assert_error_response(rsp, message)
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_zero_row_refresh_boundary_by_format(self, fmt, external_store):
         """
@@ -1431,7 +1431,7 @@ class TestRestExternalCollection(TestBase):
             assert progress["data"]["reason"], progress
         self._assert_job_list_contains(name, job_id)
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_nullable_scalar_by_format(self, fmt, external_store):
         """
@@ -1460,7 +1460,7 @@ class TestRestExternalCollection(TestBase):
         _assert_vector_close(rows_by_id[1]["embedding"], _expected_embedding(1))
         _assert_basic_row_body(rows_by_id[2], 2)
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("fmt", FORMAT_CASES, ids=FORMAT_IDS)
     def test_rest_external_collection_nullable_vector_by_format(self, fmt, external_store):
         """
@@ -1498,7 +1498,7 @@ class TestRestExternalCollection(TestBase):
         _assert_close(rows_by_id[1]["value"], _expected_value(1), tolerance=1e-4)
         _assert_basic_row_body(rows_by_id[2], 2)
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_custom_db_e2e(self, external_store):
         """
         target: verify REST v2 external collection lifecycle in a custom database
@@ -1531,7 +1531,7 @@ class TestRestExternalCollection(TestBase):
         assert len(rows) == 1, rows
         _assert_basic_row_body(rows[0], 0)
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_rest_external_collection_job_api_invalid_token(self):
         """
         target: verify external job APIs reject invalid tokens when auth is enforced
@@ -1550,7 +1550,7 @@ class TestRestExternalCollection(TestBase):
             assert rsp["code"] == 1800, f"{action} did not reject invalid token: {rsp}"
             assert "message" in rsp and rsp["message"], rsp
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_duplicate_refresh_rejected_or_reuses_job(self, external_store):
         """
         target: verify duplicate refresh behavior while a job is in progress
@@ -1582,7 +1582,7 @@ class TestRestExternalCollection(TestBase):
         _assert_job_info_response(progress, expected_collection=name, expected_job_id=first_job_id)
         self._assert_job_list_contains(name, first_job_id)
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_job_list_includes_multiple_refreshes(self, external_store):
         """
         target: verify REST v2 external job list includes multiple refresh jobs
@@ -1604,7 +1604,7 @@ class TestRestExternalCollection(TestBase):
         assert first_job_id in listed_ids, records
         assert second_job_id in listed_ids, records
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_add_field_external_mapping_rejected(self):
         """
         target: verify external field mappings cannot be added to regular collections

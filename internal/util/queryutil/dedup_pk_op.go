@@ -18,13 +18,13 @@ package queryutil
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -125,7 +125,7 @@ func (op *DeduplicatePKOperator) Run(ctx context.Context, span trace.Span, input
 			}
 
 			if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
-				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
+				return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
 			}
 		}
 	}
@@ -216,7 +216,7 @@ func (op *ConcatAndCheckPKOperator) Run(ctx context.Context, span trace.Span, in
 		for j := int64(0); j < int64(idCount); j++ {
 			pk := typeutil.GetPK(r.GetIds(), j)
 			if _, exists := seenPKs[pk]; exists {
-				return nil, fmt.Errorf("duplicate PK %v found across shards, possible data integrity issue", pk)
+				return nil, merr.WrapErrDataIntegrityMsg("duplicate PK %v found across shards", pk)
 			}
 			seenPKs[pk] = struct{}{}
 			selectedRows = append(selectedRows, rowRef{resultIdx: i, rowIdx: j})

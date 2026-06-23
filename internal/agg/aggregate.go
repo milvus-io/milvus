@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -57,7 +58,7 @@ func isSupportedAggregateName(aggregateName string) bool {
 
 func NewAggregate(aggregateName string, aggFieldID int64, originalName string, fieldType schemapb.DataType) ([]AggregateBase, error) {
 	if !isSupportedAggregateName(aggregateName) {
-		return nil, fmt.Errorf("invalid Aggregation operator %s", aggregateName)
+		return nil, merr.WrapErrParameterInvalidMsg("invalid Aggregation operator %s", aggregateName)
 	}
 
 	if err := ValidateAggFieldType(aggregateName, fieldType); err != nil {
@@ -78,7 +79,7 @@ func NewAggregate(aggregateName string, aggFieldID int64, originalName string, f
 		return []AggregateBase{&MaxAggregate{fieldID: aggFieldID, originalName: originalName}}, nil
 	default:
 		// should never happen due to isSupportedAggregateName check
-		return nil, fmt.Errorf("invalid Aggregation operator %s", aggregateName)
+		return nil, merr.WrapErrParameterInvalidMsg("invalid Aggregation operator %s", aggregateName)
 	}
 }
 
@@ -93,13 +94,13 @@ func FromPB(pb *planpb.Aggregate) (AggregateBase, error) {
 	case planpb.AggregateOp_max:
 		return &MaxAggregate{fieldID: pb.GetFieldId()}, nil
 	default:
-		return nil, fmt.Errorf("invalid Aggregation operator %d", pb.Op)
+		return nil, merr.WrapErrParameterInvalidMsg("invalid Aggregation operator %d", pb.Op)
 	}
 }
 
 func AccumulateFieldValue(target *FieldValue, new *FieldValue) error {
 	if target == nil || new == nil {
-		return fmt.Errorf("target or new field value is nil")
+		return merr.WrapErrServiceInternalMsg("target or new field value is nil")
 	}
 
 	// Skip null values during accumulation
@@ -121,7 +122,7 @@ func AccumulateFieldValue(target *FieldValue, new *FieldValue) error {
 	}
 	// Verify types match
 	if reflect.TypeOf(target.val) != reflect.TypeOf(new.val) {
-		return fmt.Errorf("type mismatch: target is %T, new is %T", target.val, new.val)
+		return merr.WrapErrParameterInvalidMsg("type mismatch: target is %T, new is %T", target.val, new.val)
 	}
 
 	switch target.val.(type) {
@@ -136,7 +137,7 @@ func AccumulateFieldValue(target *FieldValue, new *FieldValue) error {
 	case float64:
 		target.val = target.val.(float64) + new.val.(float64)
 	default:
-		return fmt.Errorf("unsupported type: %T", target.val)
+		return merr.WrapErrParameterInvalidMsg("unsupported type: %T", target.val)
 	}
 	return nil
 }
@@ -255,17 +256,17 @@ func (bucket *Bucket) RowCount() int {
 
 func (bucket *Bucket) Accumulate(row *Row, idx int, keyCount int, aggs []AggregateBase) error {
 	if idx >= len(bucket.rows) || idx < 0 {
-		return fmt.Errorf("wrong idx:%d for bucket", idx)
+		return merr.WrapErrParameterInvalidMsg("wrong idx:%d for bucket", idx)
 	}
 	targetRow := bucket.rows[idx]
 	if targetRow == nil {
-		return fmt.Errorf("nil row at the target idx:%d, cannot accumulate the row", idx)
+		return merr.WrapErrServiceInternalMsg("nil row at the target idx:%d, cannot accumulate the row", idx)
 	}
 	if row.ColumnCount() != targetRow.ColumnCount() {
-		return fmt.Errorf("column count:%d in the row must be equal to the target row:%d", row.ColumnCount(), bucket.rows[idx].ColumnCount())
+		return merr.WrapErrParameterInvalidMsg("column count:%d in the row must be equal to the target row:%d", row.ColumnCount(), bucket.rows[idx].ColumnCount())
 	}
 	if row.ColumnCount() != keyCount+len(aggs) {
-		return fmt.Errorf("column count:%d in the row must be sum of keyCount:%d and the number of aggs:%d", row.ColumnCount(), keyCount, len(aggs))
+		return merr.WrapErrParameterInvalidMsg("column count:%d in the row must be sum of keyCount:%d and the number of aggs:%d", row.ColumnCount(), keyCount, len(aggs))
 	}
 	for col := keyCount; col < row.ColumnCount(); col++ {
 		targetRow.UpdateFieldValue(row, col, aggs[col-keyCount])

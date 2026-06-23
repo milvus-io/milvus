@@ -576,12 +576,15 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Uint64("schemaVersion", req.GetVersion()),
+		zap.Uint64("schemaBarrierTs", req.GetSchemaBarrierTs()),
+		zap.Int32("schemaVersion", req.GetSchema().GetVersion()),
 	)
 
 	log.Info("querynode received update schema request")
 
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetVersion())
+	// Pass the barrier timestamp through; collectionManager derives the logical
+	// schema version from the schema payload when it is present.
+	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
 	if err != nil {
 		log.Warn("failed to update schema", zap.Error(err))
 	}
@@ -899,7 +902,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	if len(req.GetDmlChannels()) != 1 {
-		err := merr.WrapErrParameterInvalid(1, len(req.GetDmlChannels()), "count of channel to be searched should only be 1, wrong code")
+		// internal protocol assertion: the proxy always targets exactly one
+		// channel per request, so a violation is a Milvus bug, not user input
+		err := merr.WrapErrServiceInternalMsg("count of channels to be searched should only be 1, got %d, wrong code", len(req.GetDmlChannels()))
 		resp.Status = merr.Status(err)
 		log.Warn("got wrong number of channels to be searched", zap.Error(err))
 		return resp, nil
@@ -1042,8 +1047,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 	}()
 	if len(req.GetDmlChannels()) != 1 {
+		// internal protocol assertion: the proxy always targets exactly one
+		// channel per request, so a violation is a Milvus bug, not user input
 		return &internalpb.RetrieveResults{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("query request to querynode should "+
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("query request to querynode should "+
 				"only target at one channel, but got:%d", len(req.GetDmlChannels()))),
 		}, nil
 	}

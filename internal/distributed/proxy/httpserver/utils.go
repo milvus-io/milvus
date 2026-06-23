@@ -27,7 +27,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/tidwall/gjson"
@@ -239,7 +238,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) (string, error) {
 	primaryField, ok := getPrimaryField(coll)
 	if !ok {
-		return "", fmt.Errorf("collection: %s has no primary field", coll.Name)
+		return "", merr.WrapErrParameterInvalidMsg("collection: %s has no primary field", coll.Name)
 	}
 	resultStr, err := convertRange(primaryField, idResult)
 	if err != nil {
@@ -253,7 +252,7 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 // based on the primary key field type
 func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (*schemapb.IDs, error) {
 	if len(ids) == 0 {
-		return nil, errors.New("ids array cannot be empty")
+		return nil, merr.WrapErrParameterMissingMsg("ids array cannot be empty")
 	}
 
 	switch pkField.DataType {
@@ -270,18 +269,18 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 				// JSON numbers are decoded as float64
 				// Check if the float has a fractional part
 				if v != math.Trunc(v) {
-					return nil, fmt.Errorf("invalid int64 id at index %d: %v has fractional part", i, v)
+					return nil, merr.WrapErrParameterInvalidMsg("invalid int64 id at index %d: %v has fractional part", i, v)
 				}
 				int64ID = int64(v)
 			case string:
 				// Try to parse string as int64
 				parsed, err := strconv.ParseInt(v, 10, 64)
 				if err != nil {
-					return nil, fmt.Errorf("invalid int64 id at index %d: %v, error: %v", i, id, err)
+					return nil, merr.WrapErrParameterInvalidErr(err, "invalid int64 id at index %d: %v", i, id)
 				}
 				int64ID = parsed
 			default:
-				return nil, fmt.Errorf("invalid id type at index %d: expected int64, got %T", i, id)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid id type at index %d: expected int64, got %T", i, id)
 			}
 			int64IDs = append(int64IDs, int64ID)
 		}
@@ -304,10 +303,10 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 				// Convert number to string
 				stringID = fmt.Sprintf("%v", v)
 			default:
-				return nil, fmt.Errorf("invalid id type at index %d: expected string, got %T", i, id)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid id type at index %d: expected string, got %T", i, id)
 			}
 			if stringID == "" {
-				return nil, fmt.Errorf("empty string id at index %d", i)
+				return nil, merr.WrapErrParameterInvalidMsg("empty string id at index %d", i)
 			}
 			stringIDs = append(stringIDs, stringID)
 		}
@@ -320,7 +319,7 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 		}, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported primary key type: %s", pkField.DataType.String())
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported primary key type: %s", pkField.DataType.String())
 	}
 }
 
@@ -408,11 +407,12 @@ func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) [
 			subs = append(subs, detail)
 		}
 		entry := gin.H{
-			HTTPReturnFieldName:   sf.GetName(),
-			HTTPReturnFieldID:     sf.GetFieldID(),
-			HTTPReturnDescription: sf.GetDescription(),
-			HTTPReturnFieldType:   schemapb.DataType_ArrayOfStruct.String(),
-			"fields":              subs,
+			HTTPReturnFieldName:     sf.GetName(),
+			HTTPReturnFieldID:       sf.GetFieldID(),
+			HTTPReturnDescription:   sf.GetDescription(),
+			HTTPReturnFieldNullable: sf.GetNullable(),
+			HTTPReturnFieldType:     schemapb.DataType_ArrayOfStruct.String(),
+			"fields":                subs,
 		}
 		if len(sf.GetTypeParams()) > 0 {
 			entry[Params] = sf.GetTypeParams()
@@ -783,7 +783,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				if !containsString(fieldNames, mapKey) {
 					if collSchema.EnableDynamicField {
 						if mapKey == common.MetaFieldName {
-							return nil, nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("use the invalid field name(%s) when enable dynamicField", mapKey))
+							return nil, nil, merr.WrapErrParameterInvalidMsg("use the invalid field name(%s) when enable dynamicField", mapKey)
 						}
 						mapValueStr := mapValue.String()
 						switch mapValue.Type {
@@ -1105,7 +1105,7 @@ func decodeByteVectorElement(v gjson.Result, dim, bytesPerVec int64, isFloat16 b
 			return nil, err
 		}
 		if int64(len(row)) != dim {
-			return nil, fmt.Errorf("vector dim mismatch: expect %d, got %d", dim, len(row))
+			return nil, merr.WrapErrParameterInvalidMsg("vector dim mismatch: expect %d, got %d", dim, len(row))
 		}
 		if isFloat16 {
 			return typeutil.Float32ArrayToFloat16Bytes(row), nil
@@ -1113,14 +1113,14 @@ func decodeByteVectorElement(v gjson.Result, dim, bytesPerVec int64, isFloat16 b
 		return typeutil.Float32ArrayToBFloat16Bytes(row), nil
 	}
 	if v.Type != gjson.String {
-		return nil, fmt.Errorf("expect float vector array or base64 string")
+		return nil, merr.WrapErrParameterInvalidMsg("expect float vector array or base64 string")
 	}
 	var row []byte
 	if err := json.Unmarshal([]byte(v.Raw), &row); err != nil {
 		return nil, err
 	}
 	if int64(len(row)) != bytesPerVec {
-		return nil, fmt.Errorf("byte length mismatch: expect %d, got %d", bytesPerVec, len(row))
+		return nil, merr.WrapErrParameterInvalidMsg("byte length mismatch: expect %d, got %d", bytesPerVec, len(row))
 	}
 	return row, nil
 }
@@ -1292,7 +1292,7 @@ func encodeEmbListQuery(vecs []gjson.Result, elemType schemapb.DataType, dim int
 
 func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, perRow []structArrayRow) (*schemapb.FieldData, error) {
 	if len(perRow) == 0 {
-		return nil, fmt.Errorf("struct array field %s has no rows", structSchema.GetName())
+		return nil, merr.WrapErrParameterInvalidMsg("struct array field %s has no rows", structSchema.GetName())
 	}
 	subs := structSchema.GetFields()
 	subFieldData := make([]*schemapb.FieldData, 0, len(subs))
@@ -1307,12 +1307,12 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 			for rowIdx, row := range perRow {
 				val, ok := row[short]
 				if !ok {
-					return nil, fmt.Errorf("struct %s row %d missing sub-field %s",
+					return nil, merr.WrapErrParameterInvalidMsg("struct %s row %d missing sub-field %s",
 						structSchema.GetName(), rowIdx, short)
 				}
 				scalar, ok := val.(*schemapb.ScalarField)
 				if !ok {
-					return nil, fmt.Errorf("struct %s sub-field %s row %d: unexpected payload type %T",
+					return nil, merr.WrapErrParameterInvalidMsg("struct %s sub-field %s row %d: unexpected payload type %T",
 						structSchema.GetName(), short, rowIdx, val)
 				}
 				arrayArray.Data = append(arrayArray.Data, scalar)
@@ -1340,12 +1340,12 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 			for rowIdx, row := range perRow {
 				val, ok := row[short]
 				if !ok {
-					return nil, fmt.Errorf("struct %s row %d missing sub-field %s",
+					return nil, merr.WrapErrParameterInvalidMsg("struct %s row %d missing sub-field %s",
 						structSchema.GetName(), rowIdx, short)
 				}
 				vf, ok := val.(*schemapb.VectorField)
 				if !ok {
-					return nil, fmt.Errorf("struct %s sub-field %s row %d: unexpected payload type %T",
+					return nil, merr.WrapErrParameterInvalidMsg("struct %s sub-field %s row %d: unexpected payload type %T",
 						structSchema.GetName(), short, rowIdx, val)
 				}
 				vecArray.Data = append(vecArray.Data, vf)
@@ -1364,7 +1364,7 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 				},
 			})
 		default:
-			return nil, fmt.Errorf("unsupported struct sub-field data type: %s", sub.GetDataType())
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field data type: %s", sub.GetDataType())
 		}
 	}
 	return &schemapb.FieldData{
@@ -1402,11 +1402,11 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.
 		case schemapb.DataType_Array:
 			rowData := sub.GetScalars().GetArrayData().GetData()
 			if rowIdx >= len(rowData) {
-				return nil, fmt.Errorf("struct sub-field %s missing row %d", short, rowIdx)
+				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, rowIdx)
 			}
 			values := scalarArrayToInterfaces(rowData[rowIdx])
 			if len(values) != elemCount {
-				return nil, fmt.Errorf("struct sub-field %s element count mismatch: expect %d got %d",
+				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s element count mismatch: expect %d got %d",
 					short, elemCount, len(values))
 			}
 			for i, v := range values {
@@ -1415,28 +1415,28 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.
 		case schemapb.DataType_ArrayOfVector:
 			va := sub.GetVectors().GetVectorArray()
 			if va == nil {
-				return nil, fmt.Errorf("struct sub-field %s has no vector array", short)
+				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s has no vector array", short)
 			}
 			if rowIdx >= len(va.GetData()) {
-				return nil, fmt.Errorf("struct sub-field %s missing row %d", short, rowIdx)
+				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, rowIdx)
 			}
 			dim, ok := subDims[short]
 			if !ok || dim <= 0 {
-				return nil, fmt.Errorf("schema missing dim for struct sub-field %s", short)
+				return nil, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
 			}
 			values, err := vectorFieldToInterfaces(va.GetData()[rowIdx], va.GetElementType(), dim)
 			if err != nil {
 				return nil, err
 			}
 			if len(values) != elemCount {
-				return nil, fmt.Errorf("struct sub-field %s vector element count mismatch: expect %d got %d",
+				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s vector element count mismatch: expect %d got %d",
 					short, elemCount, len(values))
 			}
 			for i, v := range values {
 				out[i][short] = v
 			}
 		default:
-			return nil, fmt.Errorf("unsupported struct sub-field type %s", sub.GetType())
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s", sub.GetType())
 		}
 	}
 	return out, nil
@@ -1454,7 +1454,7 @@ func structArraySubDims(fieldName string, schema *schemapb.CollectionSchema) (ma
 			}
 			dim, err := getDim(sub)
 			if err != nil {
-				return nil, fmt.Errorf("schema sub-field %s has no dim: %w", sub.GetName(), err)
+				return nil, merr.WrapErrParameterInvalidErr(err, "schema sub-field %s has no dim", sub.GetName())
 			}
 			subDims[subShortName(sub)] = dim
 		}
@@ -1468,22 +1468,22 @@ func structSubElemCount(sub *schemapb.FieldData, rowIdx int, subDims map[string]
 	case schemapb.DataType_Array:
 		rowData := sub.GetScalars().GetArrayData().GetData()
 		if rowIdx >= len(rowData) {
-			return 0, fmt.Errorf("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
+			return 0, merr.WrapErrParameterInvalidMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
 		}
 		return len(scalarArrayToInterfaces(rowData[rowIdx])), nil
 	case schemapb.DataType_ArrayOfVector:
 		va := sub.GetVectors().GetVectorArray()
 		if va == nil || rowIdx >= len(va.GetData()) {
-			return 0, fmt.Errorf("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
+			return 0, merr.WrapErrParameterInvalidMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
 		}
 		short := structFieldShortName(sub.GetFieldName())
 		dim, ok := subDims[short]
 		if !ok || dim <= 0 {
-			return 0, fmt.Errorf("schema missing dim for struct sub-field %s", short)
+			return 0, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
 		}
 		return vectorFieldElemCount(va.GetData()[rowIdx], va.GetElementType(), dim)
 	default:
-		return 0, fmt.Errorf("unsupported struct sub-field type %s", sub.GetType())
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s", sub.GetType())
 	}
 }
 
@@ -1538,7 +1538,7 @@ func scalarArrayToInterfaces(sf *schemapb.ScalarField) []interface{} {
 
 func vectorFieldElemCount(vf *schemapb.VectorField, elemType schemapb.DataType, dim int64) (int, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("invalid dim %d", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("invalid dim %d", dim)
 	}
 	switch elemType {
 	case schemapb.DataType_FloatVector:
@@ -1552,13 +1552,13 @@ func vectorFieldElemCount(vf *schemapb.VectorField, elemType schemapb.DataType, 
 	case schemapb.DataType_Int8Vector:
 		return len(vf.GetInt8Vector()) / int(dim), nil
 	default:
-		return 0, fmt.Errorf("unsupported vector element type %s", elemType)
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported vector element type %s", elemType)
 	}
 }
 
 func vectorFieldToInterfaces(vf *schemapb.VectorField, elemType schemapb.DataType, dim int64) ([]interface{}, error) {
 	if dim <= 0 {
-		return nil, fmt.Errorf("invalid dim %d", dim)
+		return nil, merr.WrapErrParameterInvalidMsg("invalid dim %d", dim)
 	}
 	switch elemType {
 	case schemapb.DataType_FloatVector:
@@ -1611,7 +1611,7 @@ func vectorFieldToInterfaces(vf *schemapb.VectorField, elemType schemapb.DataTyp
 		}
 		return out, nil
 	default:
-		return nil, fmt.Errorf("unsupported vector element type %s", elemType)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported vector element type %s", elemType)
 	}
 }
 
@@ -1619,7 +1619,7 @@ func convertFloatVectorToArray(vector [][]float32, dim int64) ([]float32, error)
 	floatArray := make([]float32, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
-			return nil, fmt.Errorf("[]float32 size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]float32 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_FloatVector)])
 		}
 		for i := int64(0); i < dim; i++ {
@@ -1642,7 +1642,7 @@ func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.Da
 	binaryArray := make([]byte, 0, len(vector)*int(bytesLen))
 	for _, arr := range vector {
 		if int64(len(arr)) != bytesLen {
-			return nil, fmt.Errorf("[]byte size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]byte size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(dataType)])
 		}
 		for i := int64(0); i < bytesLen; i++ {
@@ -1656,7 +1656,7 @@ func convertInt8VectorToArray(vector [][]int8, dim int64) ([]byte, error) {
 	byteArray := make([]byte, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
-			return nil, fmt.Errorf("[]int8 size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]int8 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)])
 		}
 		for i := int64(0); i < dim; i++ {
@@ -1690,7 +1690,7 @@ func reflectValueCandi(v reflect.Value) (map[string]fieldCandi, error) {
 		}
 		return result, nil
 	default:
-		return nil, fmt.Errorf("unsupport row type: %s", v.Kind().String())
+		return nil, merr.WrapErrParameterInvalidMsg("unsupport row type: %s", v.Kind().String())
 	}
 }
 
@@ -1712,7 +1712,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool, partialUpdate bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
-		return []*schemapb.FieldData{}, errors.New("no row need to be convert to columns")
+		return []*schemapb.FieldData{}, merr.WrapErrParameterInvalidMsg("no row need to be convert to columns")
 	}
 
 	isDynamic := sch.EnableDynamicField
@@ -1801,7 +1801,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			dim, _ := getDim(field)
 			nameDims[field.Name] = dim
 		default:
-			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
+			return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 		}
 		nameColumns[field.Name] = data
 		fieldData[field.Name] = &schemapb.FieldData{
@@ -1812,7 +1812,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		}
 	}
 	if len(nameDims) == 0 && len(sch.Functions) == 0 && !partialUpdate {
-		return nil, fmt.Errorf("collection: %s has no vector field or functions", sch.Name)
+		return nil, merr.WrapErrParameterInvalidMsg("collection: %s has no vector field or functions", sch.Name)
 	}
 
 	dynamicCol := make([][]byte, 0, rowsLen)
@@ -1835,7 +1835,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					continue
 				}
 				if !allowInsertAutoID {
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no need to pass pk field(%s) when autoid==true in insert", field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("no need to pass pk field(%s) when autoid==true in insert", field.Name)
 				}
 			}
 			if (field.Nullable || field.DefaultValue != nil) && !ok {
@@ -1850,7 +1850,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				if partialUpdate {
 					continue
 				}
-				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)
+				return nil, merr.WrapErrParameterInvalidMsg("row %d does not has field %s", idx, field.Name)
 			}
 			fieldLen[field.Name] += 1
 			switch field.DataType {
@@ -1892,7 +1892,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					vec := typeutil.Float32ArrayToFloat16Bytes(candi.v.Interface().([]float32))
 					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), vec)
 				default:
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%v) of field(%v) ", field.DataType, field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("invalid type(%v) of field(%v) ", field.DataType, field.Name)
 				}
 			case schemapb.DataType_BFloat16Vector:
 				switch candi.v.Interface().(type) {
@@ -1902,7 +1902,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					vec := typeutil.Float32ArrayToBFloat16Bytes(candi.v.Interface().([]float32))
 					nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), vec)
 				default:
-					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%v) of field(%v) ", field.DataType, field.Name))
+					return nil, merr.WrapErrParameterInvalidMsg("invalid type(%v) of field(%v) ", field.DataType, field.Name)
 				}
 			case schemapb.DataType_SparseFloatVector:
 				content := candi.v.Interface().([]byte)
@@ -1914,7 +1914,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			case schemapb.DataType_Int8Vector:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]int8), candi.v.Interface().([]int8))
 			default:
-				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
+				return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 			}
 
 			delete(set, field.Name)
@@ -1930,7 +1930,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			}
 			bs, err := json.Marshal(m)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal dynamic field %w", err)
+				return nil, merr.WrapErrParameterInvalidErr(err, "failed to marshal dynamic field")
 			}
 			dynamicCol = append(dynamicCol, bs)
 		}
@@ -1948,7 +1948,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 						zap.String("fieldName", name),
 						zap.Int("fieldLen", len(validData)),
 						zap.Int("rowsLen", rowsLen))
-					return nil, fmt.Errorf("column %s has length %d, expected %d", name, len(validData), rowsLen)
+					return nil, merr.WrapErrParameterInvalidMsg("column %s has length %d, expected %d", name, len(validData), rowsLen)
 				}
 			} else {
 				log.Info("skip empty field for partial update",
@@ -1962,7 +1962,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				zap.String("fieldName", name),
 				zap.Int("fieldLen", fieldLen[name]),
 				zap.Int("rowsLen", rowsLen))
-			return nil, fmt.Errorf("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
+			return nil, merr.WrapErrParameterInvalidMsg("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
 		}
 
 		colData := fieldData[name]
@@ -2182,7 +2182,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				},
 			}
 		default:
-			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
+			return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
 		}
 		colData.ValidData = validDataMap[name]
 		columns = append(columns, colData)
@@ -2211,11 +2211,11 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				if partialUpdate {
 					continue
 				}
-				return nil, fmt.Errorf("row %d does not has struct field %s", rowIdx, structField.GetName())
+				return nil, merr.WrapErrParameterInvalidMsg("row %d does not has struct field %s", rowIdx, structField.GetName())
 			}
 			sr, ok := val.(structArrayRow)
 			if !ok {
-				return nil, fmt.Errorf("row %d struct field %s has unexpected payload type %T",
+				return nil, merr.WrapErrParameterInvalidMsg("row %d struct field %s has unexpected payload type %T",
 					rowIdx, structField.GetName(), val)
 			}
 			perRow = append(perRow, sr)
@@ -2436,27 +2436,27 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim / 8
 		if bytesPerRow <= 0 {
-			return 0, fmt.Errorf("invalid binary vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid binary vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetBinaryVector())) / bytesPerRow, nil
 	case schemapb.DataType_FloatVector:
 		dim := fieldData.GetVectors().GetDim()
 		if dim <= 0 {
-			return 0, fmt.Errorf("invalid float vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid float vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetFloatVector().GetData())) / dim, nil
 	case schemapb.DataType_Float16Vector:
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim * 2
 		if bytesPerRow <= 0 {
-			return 0, fmt.Errorf("invalid float16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid float16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetFloat16Vector())) / bytesPerRow, nil
 	case schemapb.DataType_BFloat16Vector:
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim * 2
 		if bytesPerRow <= 0 {
-			return 0, fmt.Errorf("invalid bfloat16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid bfloat16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetBfloat16Vector())) / bytesPerRow, nil
 	case schemapb.DataType_SparseFloatVector:
@@ -2464,7 +2464,7 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 	case schemapb.DataType_Int8Vector:
 		dim := fieldData.GetVectors().GetDim()
 		if dim <= 0 {
-			return 0, fmt.Errorf("invalid int8 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("invalid int8 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetInt8Vector())) / dim, nil
 	case schemapb.DataType_ArrayOfStruct:
@@ -2478,10 +2478,10 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		case schemapb.DataType_ArrayOfVector:
 			return int64(len(subs[0].GetVectors().GetVectorArray().GetData())), nil
 		default:
-			return 0, fmt.Errorf("unsupported struct sub-field type %s for field %s", subs[0].GetType(), fieldData.GetFieldName())
+			return 0, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s for field %s", subs[0].GetType(), fieldData.GetFieldName())
 		}
 	default:
-		return 0, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
+		return 0, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
 	}
 }
 
@@ -2531,7 +2531,7 @@ func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccess
 		return accessor, nil
 	}
 	if valueCount != validCount {
-		return nil, fmt.Errorf("field %s has %d valid rows, but data length is %d", fieldData.GetFieldName(), validCount, valueCount)
+		return nil, merr.WrapErrParameterInvalidMsg("field %s has %d valid rows, but data length is %d", fieldData.GetFieldName(), validCount, valueCount)
 	}
 	accessor.compactIndices = compactIndices
 	return accessor, nil
@@ -2542,7 +2542,7 @@ func (accessor *fieldDataRowAccessor) rowIndex(rowIdx int64) (int64, bool, error
 		return rowIdx, true, nil
 	}
 	if rowIdx >= int64(len(accessor.validData)) {
-		return 0, false, fmt.Errorf("row index %d out of range for field %s valid data length %d", rowIdx, accessor.fieldData.GetFieldName(), len(accessor.validData))
+		return 0, false, merr.WrapErrParameterInvalidMsg("row index %d out of range for field %s valid data length %d", rowIdx, accessor.fieldData.GetFieldName(), len(accessor.validData))
 	}
 	if !accessor.validData[rowIdx] {
 		return 0, false, nil
@@ -2574,7 +2574,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
 			default:
-				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
+				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
 			}
 		}
 	}
@@ -2715,7 +2715,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				row[pkFieldName] = stringPks[i]
 			default:
-				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
+				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {
@@ -2725,6 +2725,223 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	}
 
 	return queryResp, nil
+}
+
+func hasSearchAggregationResult(results *schemapb.SearchResultData) bool {
+	return results != nil && (len(results.GetAggTopks()) > 0 || len(results.GetAggBuckets()) > 0)
+}
+
+func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
+	if results == nil {
+		// The aggregation payload is produced by the server-side reduce, never
+		// by the request: a malformed shape is an internal contract violation.
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation result is nil")
+	}
+	aggTopks := results.GetAggTopks()
+	pbBuckets := results.GetAggBuckets()
+	if len(aggTopks) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation response missing agg_topks")
+	}
+	if results.GetNumQueries() <= 0 {
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation response missing nq")
+	}
+	if len(aggTopks) != int(results.GetNumQueries()) {
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks length %d does not match nq %d", len(aggTopks), results.GetNumQueries())
+	}
+
+	total := int64(0)
+	for _, topk := range aggTopks {
+		if topk < 0 {
+			return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks cannot contain negative values")
+		}
+		total += topk
+	}
+	if total != int64(len(pbBuckets)) {
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks sum %d does not match bucket count %d", total, len(pbBuckets))
+	}
+
+	output := make([]gin.H, 0, len(aggTopks))
+	offset := 0
+	for _, topk := range aggTopks {
+		buckets := make([]gin.H, 0, int(topk))
+		for i := int64(0); i < topk; i++ {
+			bucket, err := buildAggBucketResp(pbBuckets[offset], enableInt64, collectionSchema)
+			if err != nil {
+				return nil, err
+			}
+			buckets = append(buckets, bucket)
+			offset++
+		}
+		output = append(output, gin.H{"buckets": buckets})
+	}
+	return output, nil
+}
+
+func buildAggBucketResp(pb *schemapb.AggBucket, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) (gin.H, error) {
+	if pb == nil {
+		return nil, merr.WrapErrServiceInternalMsg("search_aggregation bucket is nil")
+	}
+	bucket := gin.H{
+		"key":       buildAggBucketKeyResp(pb.GetKey(), enableInt64),
+		"count":     formatRESTInt64(pb.GetCount(), enableInt64),
+		"metrics":   buildAggMetricsResp(pb.GetMetrics(), enableInt64),
+		"hits":      buildAggHitsResp(pb.GetHits(), enableInt64, collectionSchema),
+		"subGroups": []gin.H{},
+	}
+	subGroups := make([]gin.H, 0, len(pb.GetSubGroups()))
+	for _, sub := range pb.GetSubGroups() {
+		subGroup, err := buildAggBucketResp(sub, enableInt64, collectionSchema)
+		if err != nil {
+			return nil, err
+		}
+		subGroups = append(subGroups, subGroup)
+	}
+	bucket["subGroups"] = subGroups
+	return bucket, nil
+}
+
+func buildAggBucketKeyResp(keys []*schemapb.BucketKeyEntry, enableInt64 bool) []gin.H {
+	resp := make([]gin.H, 0, len(keys))
+	for _, key := range keys {
+		if key == nil {
+			resp = append(resp, gin.H{})
+			continue
+		}
+		fieldName := key.GetFieldName()
+		if fieldName == "" {
+			fieldName = strconv.FormatInt(key.GetFieldId(), 10)
+		}
+		resp = append(resp, gin.H{
+			"fieldName": fieldName,
+			"fieldId":   formatRESTInt64(key.GetFieldId(), enableInt64),
+			"value":     bucketKeyEntryValueToRESTAny(key, enableInt64),
+		})
+	}
+	return resp
+}
+
+func buildAggMetricsResp(metrics map[string]*schemapb.MetricValue, enableInt64 bool) gin.H {
+	resp := make(gin.H, len(metrics))
+	for alias, metric := range metrics {
+		resp[alias] = metricValueToRESTAny(metric, enableInt64)
+	}
+	return resp
+}
+
+func buildAggHitsResp(hits []*schemapb.AggHit, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) []gin.H {
+	resp := make([]gin.H, 0, len(hits))
+	pkFieldName := getRESTPrimaryFieldName(collectionSchema)
+	for _, hit := range hits {
+		if hit == nil {
+			resp = append(resp, gin.H{})
+			continue
+		}
+		row := gin.H{
+			pkFieldName:        aggHitPKToRESTAny(hit, enableInt64),
+			HTTPReturnDistance: hit.GetScore(),
+		}
+		for _, field := range hit.GetFields() {
+			if field == nil {
+				continue
+			}
+			fieldName := field.GetFieldName()
+			if fieldName == "" {
+				fieldName = strconv.FormatInt(field.GetFieldId(), 10)
+			}
+			row[fieldName] = aggHitFieldValueToRESTAny(field, enableInt64)
+		}
+		resp = append(resp, row)
+	}
+	return resp
+}
+
+func getRESTPrimaryFieldName(collectionSchema *schemapb.CollectionSchema) string {
+	if collectionSchema == nil {
+		return DefaultPrimaryFieldName
+	}
+	for _, field := range collectionSchema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			return field.GetName()
+		}
+	}
+	return DefaultPrimaryFieldName
+}
+
+func formatRESTInt64(v int64, enableInt64 bool) interface{} {
+	if enableInt64 {
+		return v
+	}
+	return strconv.FormatInt(v, 10)
+}
+
+func metricValueToRESTAny(pb *schemapb.MetricValue, enableInt64 bool) interface{} {
+	if pb == nil {
+		return nil
+	}
+	switch v := pb.GetValue().(type) {
+	case *schemapb.MetricValue_IntVal:
+		return formatRESTInt64(v.IntVal, enableInt64)
+	case *schemapb.MetricValue_DoubleVal:
+		return v.DoubleVal
+	case *schemapb.MetricValue_StringVal:
+		return v.StringVal
+	case *schemapb.MetricValue_BoolVal:
+		return v.BoolVal
+	default:
+		return nil
+	}
+}
+
+func bucketKeyEntryValueToRESTAny(pb *schemapb.BucketKeyEntry, enableInt64 bool) interface{} {
+	if pb == nil {
+		return nil
+	}
+	switch v := pb.GetValue().(type) {
+	case *schemapb.BucketKeyEntry_IntVal:
+		return formatRESTInt64(v.IntVal, enableInt64)
+	case *schemapb.BucketKeyEntry_StringVal:
+		return v.StringVal
+	case *schemapb.BucketKeyEntry_BoolVal:
+		return v.BoolVal
+	default:
+		return nil
+	}
+}
+
+func aggHitPKToRESTAny(pb *schemapb.AggHit, enableInt64 bool) interface{} {
+	if pb == nil {
+		return nil
+	}
+	switch v := pb.GetPk().(type) {
+	case *schemapb.AggHit_IntPk:
+		return formatRESTInt64(v.IntPk, enableInt64)
+	case *schemapb.AggHit_StrPk:
+		return v.StrPk
+	default:
+		return nil
+	}
+}
+
+func aggHitFieldValueToRESTAny(pb *schemapb.AggHitField, enableInt64 bool) interface{} {
+	if pb == nil {
+		return nil
+	}
+	switch v := pb.GetValue().(type) {
+	case *schemapb.AggHitField_IntVal:
+		return formatRESTInt64(v.IntVal, enableInt64)
+	case *schemapb.AggHitField_BoolVal:
+		return v.BoolVal
+	case *schemapb.AggHitField_FloatVal:
+		return v.FloatVal
+	case *schemapb.AggHitField_DoubleVal:
+		return v.DoubleVal
+	case *schemapb.AggHitField_StringVal:
+		return v.StringVal
+	case *schemapb.AggHitField_BytesVal:
+		return v.BytesVal
+	default:
+		return nil
+	}
 }
 
 func formatInt64(intArray []int64) []string {
@@ -2770,7 +2987,7 @@ func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLe
 	if reqConsistencyLevel != "" {
 		level, ok := commonpb.ConsistencyLevel_value[reqConsistencyLevel]
 		if !ok {
-			return 0, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter:'%s' is incorrect, please check it", reqConsistencyLevel))
+			return 0, false, merr.WrapErrParameterInvalidMsg("parameter:'%s' is incorrect, please check it", reqConsistencyLevel)
 		}
 		return commonpb.ConsistencyLevel(level), false, nil
 	}
@@ -2880,7 +3097,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		}
 		return data, nil
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected default value type: %s", dataType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("Unexpected default value type: %s", dataType.String())
 	}
 }
 
@@ -3215,6 +3432,29 @@ func WrapErrorToResponse(err error) *milvuspb.BoolResponse {
 	}
 }
 
+func searchParamsContainAny(reqSearchParams map[string]interface{}, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := reqSearchParams[key]; ok {
+			return true
+		}
+	}
+
+	params, ok := reqSearchParams[Params]
+	if !ok {
+		return false
+	}
+	paramsMap, ok := params.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for _, key := range keys {
+		if _, ok := paramsMap[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // after 2.5.2, all parameters of search_params can be written into one layer
 // no more parameters will be written searchParams.params
 // to ensure compatibility and milvus can still get a json format parameter
@@ -3252,7 +3492,7 @@ func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.K
 	for key, value := range reqSearchParams {
 		if val, ok := paramsMap[key]; ok {
 			if !deepEqual(val, value) {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val))
+				return nil, merr.WrapErrParameterInvalidMsg("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val)
 			}
 		} else if key != Params {
 			paramsMap[key] = value
@@ -3274,6 +3514,106 @@ func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.K
 	// need to exposure ParamRoundDecimal in req?
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	return searchParams, nil
+}
+
+func convertSearchAggregationReq(req *SearchAggregationReq) (*commonpb.SearchAggregationSpec, error) {
+	if req == nil {
+		return nil, nil
+	}
+	if len(req.Fields) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.fields must be non-empty")
+	}
+	fields := make([]string, 0, len(req.Fields))
+	for _, field := range req.Fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.fields must contain non-empty field names")
+		}
+		fields = append(fields, field)
+	}
+	if req.Size <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.size must be positive")
+	}
+	if req.SearchSize < 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.searchSize must be non-negative")
+	}
+	if req.SearchSize > 0 && req.SearchSize < req.Size {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.searchSize must be greater than or equal to size")
+	}
+
+	spec := &commonpb.SearchAggregationSpec{
+		Fields:     fields,
+		Size:       req.Size,
+		SearchSize: req.SearchSize,
+	}
+
+	if len(req.Metrics) > 0 {
+		spec.Metrics = make(map[string]*commonpb.MetricAggSpec, len(req.Metrics))
+	}
+	for alias, metric := range req.Metrics {
+		alias = strings.TrimSpace(alias)
+		op := strings.TrimSpace(metric.Op)
+		fieldName := strings.TrimSpace(metric.FieldName)
+		if alias == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.metrics alias must be non-empty")
+		}
+		if op == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.metrics.%s.op must be non-empty", alias)
+		}
+		if fieldName == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.metrics.%s.fieldName must be non-empty", alias)
+		}
+		spec.Metrics[alias] = &commonpb.MetricAggSpec{Op: op, FieldName: fieldName}
+	}
+
+	for _, order := range req.Order {
+		key := strings.TrimSpace(order.Key)
+		direction := strings.TrimSpace(order.Direction)
+		if key == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.order key must be non-empty")
+		}
+		if direction == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.order direction must be non-empty")
+		}
+		spec.Order = append(spec.Order, &commonpb.OrderSpec{Key: key, Direction: direction})
+	}
+
+	if req.TopHits != nil {
+		topHits, err := convertTopHitsReq(req.TopHits)
+		if err != nil {
+			return nil, err
+		}
+		spec.TopHits = topHits
+	}
+
+	if req.SubAggregation != nil {
+		sub, err := convertSearchAggregationReq(req.SubAggregation)
+		if err != nil {
+			return nil, err
+		}
+		spec.SubAggregation = sub
+	}
+
+	return spec, nil
+}
+
+func convertTopHitsReq(req *TopHitsReq) (*commonpb.TopHitsSpec, error) {
+	if req.Size <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.topHits.size must be positive")
+	}
+	spec := &commonpb.TopHitsSpec{Size: req.Size}
+	for _, sort := range req.Sort {
+		fieldName := strings.TrimSpace(sort.FieldName)
+		direction := strings.TrimSpace(sort.Direction)
+		if fieldName == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.topHits.sort fieldName must be non-empty")
+		}
+		if direction == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("searchAggregation.topHits.sort direction must be non-empty")
+		}
+		spec.Sort = append(spec.Sort, &commonpb.SortSpec{FieldName: fieldName, Direction: direction})
+	}
+	return spec, nil
 }
 
 func genFunctionSchema(ctx context.Context, function *FunctionSchema) (*schemapb.FunctionSchema, error) {

@@ -85,6 +85,7 @@ FinalizeVectorSearchOffsets(SearchResult& result,
             ApplyElementIDMapping(result.seg_offsets_, *array_offsets);
         result.seg_offsets_ = std::move(doc_offsets);
         result.element_indices_ = std::move(elem_indices);
+        result.element_level_ = true;
     } else {
         if (offset_mapping.IsEnabled()) {
             offset_mapping.TransformOffsets(result.seg_offsets_);

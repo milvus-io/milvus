@@ -189,7 +189,7 @@ func (s *schemaInfo) IsPartitionKeyCollection() bool {
 
 func (s *schemaInfo) GetPkField() (*schemapb.FieldSchema, error) {
 	if s.pkField == nil {
-		return nil, merr.WrapErrServiceInternal("pk field not found")
+		return nil, merr.WrapErrFieldNotFound("pk field")
 	}
 	return s.pkField, nil
 }
@@ -408,6 +408,9 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
 	// Register password verify function for /expr endpoint authentication
 	internalhttp.RegisterPasswordVerifyFunc(PasswordVerify)
 
+	// Register get user role function for /expr endpoint RBAC check
+	internalhttp.RegisterGetUserRoleFunc(GetRole)
+
 	return nil
 }
 
@@ -576,7 +579,16 @@ func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName s
 	collection, err, _ := m.sfGlobal.Do(buildSfKeyByName(database, collectionName), func() (*collectionInfo, error) {
 		return m.update(ctx, database, collectionName, 0)
 	})
-	return collection, err
+	// Name resolution failed -> the caller named a collection/db that does not
+	// exist, which is the user's input error, not a system fault. Mark it here,
+	// the single name-resolution chokepoint shared by every name-based
+	// GetCollection* path (data-plane and control-plane proxy tasks), so the
+	// error_type is Input. The id-based UpdateByID path is deliberately left as
+	// SystemError: a by-id lookup miss is an internal/component query (e.g.
+	// rootcoord answering another component by collectionID), not user input.
+	// The sentinel itself stays SystemError so datacoord's internal retry.Do
+	// recovery loops still retry a transient not-found.
+	return collection, merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 }
 
 func (m *MetaCache) UpdateByID(ctx context.Context, database string, collectionID UniqueID) (*collectionInfo, error) {
@@ -869,7 +881,12 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 	if ok && entry.state == EntryStateActive && entry.value != nil {
 		return entry.value, nil
 	}
-	return nil, merr.WrapErrPartitionNotFound(partitionName)
+	// partitionName is caller-supplied; a failed name resolution is the user's
+	// input error, not a system fault. Mark it here, the single partition-name
+	// chokepoint (GetPartitionID also routes through here), so the proxy reports
+	// InputError without per-task wrappers. ErrPartitionNotFound stays
+	// SystemError by default so id-based lookups (GetPartitionName) are unaffected.
+	return nil, merr.WrapErrAsInputError(merr.WrapErrPartitionNotFound(partitionName))
 }
 
 func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error) {
@@ -977,13 +994,15 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 		return nil, err
 	}
 
+	// The response shape is produced by the coordinator, not the caller: a
+	// misaligned array is backend metadata inconsistency, not user input.
 	if len(partitions.PartitionIDs) != len(partitions.PartitionNames) {
-		return nil, fmt.Errorf("partition ids len: %d doesn't equal Partition name len %d",
+		return nil, merr.WrapErrServiceInternalMsg("partition ids len: %d doesn't equal Partition name len %d",
 			len(partitions.PartitionIDs), len(partitions.PartitionNames))
 	}
 	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) ||
 		len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
-		return nil, merr.WrapErrParameterInvalidMsg(
+		return nil, merr.WrapErrServiceInternalMsg(
 			"partition names and timestamps number is not aligned, response: %s",
 			partitions.String(),
 		)
@@ -1182,7 +1201,13 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*data
 		return dbInfo, nil
 	})
 
-	return dbInfo, err
+	// Symmetric with UpdateByName: a failed database-name resolution means the
+	// caller named a database that does not exist — the user's input error, not a
+	// system fault. Mark it here, the single database-name chokepoint, so every
+	// caller (data-plane and control-plane proxy tasks) gets InputError without a
+	// per-callsite wrapper. The sentinel stays SystemError so internal id-based
+	// lookups and retry loops elsewhere are unaffected.
+	return dbInfo, merr.WrapErrAsInputErrorWhen(err, merr.ErrDatabaseNotFound)
 }
 
 func (m *MetaCache) safeGetDBInfo(database string) *databaseInfo {
@@ -1209,7 +1234,7 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 		}
 		if resp.GetStatus().GetCode() != 0 {
 			log.Warn("Refreshing ID cache from rootcoord failed", zap.String("failed detail", resp.GetStatus().GetDetail()))
-			return 0, merr.WrapErrServiceInternal(resp.GetStatus().GetDetail())
+			return 0, merr.Error(resp.GetStatus())
 		}
 		m.IDStart, m.IDCount = resp.GetID(), int64(resp.GetCount())
 		m.IDIndex = 0

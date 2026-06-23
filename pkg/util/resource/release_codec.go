@@ -17,8 +17,6 @@
 package resource
 
 import (
-	"fmt"
-
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/mem"
 	"google.golang.org/protobuf/proto"
@@ -45,7 +43,7 @@ func (releaseCodec) Name() string { return "proto" }
 func (releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
 	msg := messageV2Of(v)
 	if msg == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("releaseCodec: %T does not implement proto.Message", v))
+		return nil, merr.WrapErrServiceInternalMsg("releaseCodec: %T does not implement proto.Message", v)
 	}
 
 	// Only release messages that opt in via MsgPinnable. This avoids a map
@@ -82,7 +80,7 @@ func (releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
 func (releaseCodec) Unmarshal(data mem.BufferSlice, v any) error {
 	msg := messageV2Of(v)
 	if msg == nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("releaseCodec: %T does not implement proto.Message", v))
+		return merr.WrapErrServiceInternalMsg("releaseCodec: %T does not implement proto.Message", v)
 	}
 
 	buf := data.MaterializeToBuffer(mem.DefaultBufferPool())

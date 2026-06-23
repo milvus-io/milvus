@@ -945,6 +945,14 @@ func (h *HandlersV1) search(c *gin.Context) {
 		})
 		return
 	}
+	if httpReq.SearchAggregation != nil {
+		err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for REST v1 search")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return
+	}
 	if httpReq.CollectionName == "" || httpReq.Vector == nil {
 		log.Warn("high level restful api, search require parameter: [collectionName, vector], but miss")
 		HTTPAbortReturn(c, http.StatusOK, gin.H{

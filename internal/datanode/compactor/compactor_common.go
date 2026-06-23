@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -80,7 +81,7 @@ func createTextIndex(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrParameterInvalidMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
@@ -136,7 +137,7 @@ func createTextIndex(ctx context.Context,
 			if segment.GetManifest() != "" {
 				basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
 				if err != nil {
-					return fmt.Errorf("failed to unmarshal manifest path for text_index basePath: %w", err)
+					return merr.Wrap(err, "failed to unmarshal manifest path for text_index basePath")
 				}
 				statsBasePath = fmt.Sprintf("%s/_stats/text_index.%d", basePath, field.GetFieldID())
 			}

@@ -23,15 +23,14 @@ if [[ ${SKIP_3RDPARTY} -eq 1 ]]; then
 fi
 
 usage() {
-  echo "Usage: $0 [-o BUILD_OPENDAL] [-t BUILD_TYPE] [-h]"
-  echo "  -o BUILD_OPENDAL  Enable/disable OpenDAL build (ON/OFF, default: OFF)"
+  echo "Usage: $0 [-t BUILD_TYPE] [-h]"
   echo "  -t BUILD_TYPE     Set build type (Debug/Release/RelWithDebInfo/MinSizeRel, default: Release)"
   echo "  -h                Show this help message"
   echo ""
   echo "Examples:"
-  echo "  $0                          # Build with default settings (Release, OpenDAL OFF)"
+  echo "  $0                          # Build with default settings (Release)"
   echo "  $0 -t Debug                 # Build in Debug mode"
-  echo "  $0 -o ON -t RelWithDebInfo  # Build with OpenDAL enabled and RelWithDebInfo"
+  echo "  $0 -t RelWithDebInfo        # Build with RelWithDebInfo"
 }
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -41,13 +40,9 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 
-BUILD_OPENDAL="OFF"
 BUILD_TYPE="Release"
-while getopts "o:t:h" arg; do
+while getopts "t:h" arg; do
   case $arg in
-  o)
-    BUILD_OPENDAL=$OPTARG
-    ;;
   t)
     BUILD_TYPE=$OPTARG
     ;;
@@ -146,7 +141,10 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     arm_crypto_flags=""
     if [[ "$(uname -m)" == "arm64" ]]; then
         # Homebrew LLVM needs ARM crypto enabled for libsodium armcrypto sources on macOS arm64.
-        arm_crypto_flags=" -march=armv8-a+crypto"
+        # +crc: Apple Silicon enables __ARM_FEATURE_CRC32 by default, so milvus core/knowhere
+        # compile folly's F14 hash table in SimdAndCrc mode. 3rdparty deps (folly) must match,
+        # else folly::f14::F14LinkCheck<mode> is undefined at link time.
+        arm_crypto_flags=" -march=armv8-a+crypto+crc"
     fi
     export CFLAGS="${CFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
     export CXXFLAGS="${CXXFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"

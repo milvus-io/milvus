@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -787,4 +788,104 @@ func TestPrepareInsertWithMissingFields(t *testing.T) {
 			assert.Equal(t, "default_string", insertData.Data[103].GetRow(i))
 		}
 	})
+}
+
+func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
+	collSchema := &schemapb.CollectionSchema{
+		Name: "bm25_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "1024"},
+				},
+			},
+			{
+				FieldID:          102,
+				Name:             "sparse",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "bm25",
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{101},
+				OutputFieldIds: []int64{102},
+			},
+			{
+				Name:          "rerank",
+				Type:          schemapb.FunctionType_Rerank,
+				InputFieldIds: []int64{101},
+			},
+		},
+	}
+	pkField := collSchema.GetFields()[2]
+	insertMsg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: 1000,
+			EndTimestamp:   1002,
+		},
+		InsertRequest: &msgpb.InsertRequest{
+			SegmentID:    1,
+			PartitionID:  1,
+			CollectionID: 1,
+			NumRows:      3,
+			Version:      msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:       []int64{10, 11, 12},
+			Timestamps:   []uint64{1000, 1001, 1002},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId: 100,
+					Type:    schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+							},
+						},
+					},
+				},
+				{
+					FieldId: 101,
+					Type:    schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: []string{"hello world", "milvus bm25", "legacy message"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	errCh := function.AllocFunctionRunners(1, "v1", collSchema)
+	if errCh != nil {
+		assert.NoError(t, <-errCh)
+	}
+	_, err := function.FillFunctionData(context.Background(), 1, collSchema, insertMsg.InsertRequest)
+	assert.NoError(t, err)
+	defer function.ReleaseFunctionRunners(1, "v1")
+
+	result, err := PrepareInsert(collSchema, pkField, []*msgstream.InsertMsg{insertMsg})
+
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Contains(t, result[0].bm25Stats, int64(102))
+	assert.Equal(t, int64(3), result[0].bm25Stats[102].NumRow())
+	assert.NotNil(t, insertMsg.GetFieldsData()[2])
+	assert.Equal(t, int64(102), insertMsg.GetFieldsData()[2].GetFieldId())
 }

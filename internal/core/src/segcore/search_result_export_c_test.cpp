@@ -351,6 +351,49 @@ TEST(SearchResultExport,
     EXPECT_EQ((*batch_result)->num_columns(), 3);
 }
 
+TEST(
+    SearchResultExport,
+    ExportSearchResultAsArrowRecordBatch_EmptyElementLevelResultHasElementIndices) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    Plan plan(schema);
+    plan.plan_node_ = std::make_unique<VectorPlanNode>();
+
+    SearchResult sr;
+    sr.total_nq_ = 1;
+    sr.unity_topK_ = 0;
+    sr.element_level_ = true;
+
+    ArrowSchema stream_schema{};
+    ArrowArray stream_array{};
+    int64_t* stream_chunk_sizes = nullptr;
+    int64_t stream_num_chunks = 0;
+    auto status = ExportSearchResultAsArrowRecordBatch(
+        reinterpret_cast<CSearchResult>(&sr),
+        reinterpret_cast<CSearchPlan>(&plan),
+        nullptr,
+        0,
+        &stream_schema,
+        &stream_array,
+        &stream_chunk_sizes,
+        &stream_num_chunks,
+        nullptr);
+    [[maybe_unused]] auto stream_chunk_sizes_guard =
+        AdoptChunkSizes(stream_chunk_sizes);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+
+    auto batch_result =
+        ImportExportedRecordBatch(&stream_array, &stream_schema);
+    ASSERT_TRUE(batch_result.ok()) << batch_result.status().ToString();
+    ASSERT_NE(*batch_result, nullptr);
+    EXPECT_EQ((*batch_result)->num_rows(), 0);
+    ASSERT_EQ((*batch_result)->num_columns(), 4);
+    EXPECT_EQ((*batch_result)->schema()->field(3)->name(), "$element_indices");
+    EXPECT_TRUE(
+        (*batch_result)->schema()->field(3)->type()->Equals(arrow::int32()));
+}
+
 TEST(SearchResultExport,
      ExportSearchResultAsArrowRecordBatch_MultiFieldGroupByColumns) {
     auto schema = std::make_shared<Schema>();

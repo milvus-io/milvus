@@ -562,6 +562,115 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	})
 }
 
+func TestSearchTask_NamespacePartitionModeSkipsRequery(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+		},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	makePlaceholderGroup := func() []byte {
+		phg := &commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{{
+				Tag:    "$0",
+				Type:   commonpb.PlaceholderType_FloatVector,
+				Values: [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+			}},
+		}
+		bs, err := proto.Marshal(phg)
+		require.NoError(t, err)
+		return bs
+	}
+
+	t.Run("search", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "Always")
+		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: "test_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:   1,
+				PartitionIDs:   []int64{1},
+				DslType:        commonpb.DslType_BoolExprV1,
+				OutputFieldsId: []int64{101},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_collection",
+				OutputFields:   []string{"vec"},
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "vec"},
+					{Key: TopKKey, Value: "10"},
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				},
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: nil,
+				},
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: []string{"vec"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+		}
+
+		err := task.initSearchRequest(ctx)
+		require.NoError(t, err)
+		require.False(t, task.needRequery)
+	})
+
+	t.Run("hybrid search", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.HybridSearchRequeryPolicy.Key, "Always")
+		defer Params.Save(Params.CommonCfg.HybridSearchRequeryPolicy.Key, "OutputFields")
+
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: "test_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:   1,
+				PartitionIDs:   []int64{1},
+				OutputFieldsId: []int64{101},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_collection",
+				OutputFields:   []string{"vec"},
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: LimitKey, Value: "10"},
+				},
+				SubReqs: []*milvuspb.SubSearchRequest{
+					{
+						Nq:               1,
+						PlaceholderGroup: makePlaceholderGroup(),
+						SearchParams: []*commonpb.KeyValuePair{
+							{Key: common.MetricTypeKey, Value: metric.L2},
+							{Key: ParamsKey, Value: `{"nprobe": 10}`},
+							{Key: AnnsFieldKey, Value: "vec"},
+							{Key: TopKKey, Value: "10"},
+						},
+					},
+				},
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: []string{"vec"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+		}
+
+		err := task.initAdvancedSearchRequest(ctx)
+		require.NoError(t, err)
+		require.False(t, task.needRequery)
+	})
+}
+
 func createCollWithFields(t *testing.T, collName string, rc types.MixCoordClient) (*schemapb.CollectionSchema, map[string]int64) {
 	fieldName2Types := map[string]schemapb.DataType{
 		testInt64Field:    schemapb.DataType_Int64,
@@ -3292,7 +3401,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	if enableMultipleVectorFields {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
-		assert.Equal(t, err.Error(), "multiple anns_fields exist, please specify a anns_field in search_params")
+		assert.Contains(t, err.Error(), "multiple anns_fields exist, please specify a anns_field in search_params")
 	} else {
 		assert.NoError(t, task.PreExecute(ctx))
 	}
@@ -4949,6 +5058,39 @@ func (s *MaterializedViewTestSuite) getSearchTask() *searchTask {
 	return task
 }
 
+func (s *MaterializedViewTestSuite) getHybridSearchTask(dsl string) *searchTask {
+	placeholderGroup, err := proto.Marshal(constructPlaceholderGroup(1, testVecDim))
+	s.NoError(err)
+
+	subReqs := make([]*milvuspb.SubSearchRequest, 0, 2)
+	for i := 0; i < 2; i++ {
+		subReqs = append(subReqs, &milvuspb.SubSearchRequest{
+			Dsl:              dsl,
+			DslType:          commonpb.DslType_BoolExprV1,
+			PlaceholderGroup: placeholderGroup,
+			Nq:               1,
+			SearchParams:     getValidSearchParams(),
+		})
+	}
+
+	task := &searchTask{
+		ctx:            s.ctx,
+		collectionName: s.colName,
+		SearchRequest:  &internalpb.SearchRequest{},
+		request: &milvuspb.SearchRequest{
+			DbName:         s.dbName,
+			CollectionName: s.colName,
+			Nq:             1,
+			SearchParams: []*commonpb.KeyValuePair{
+				{Key: LimitKey, Value: "5"},
+			},
+			SubReqs: subReqs,
+		},
+	}
+	s.NoError(task.OnEnqueue())
+	return task
+}
+
 func (s *MaterializedViewTestSuite) TestMvNotEnabledWithNoPartitionKey() {
 	task := s.getSearchTask()
 	task.enableMaterializedView = false
@@ -5060,6 +5202,40 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		schemaInfo := newSchemaInfo(schema)
 		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
 		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
+	}
+}
+
+func (s *MaterializedViewTestSuite) TestHybridSearchPartitionKeyIsolationWithoutMaterializedView() {
+	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Maybe()
+	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil).Maybe()
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil).Maybe()
+
+	testCases := []struct {
+		name     string
+		dsl      string
+		errorMsg string
+	}{
+		{
+			name:     "missing partition key filter",
+			dsl:      "",
+			errorMsg: "partition key not found in expr or the expr is invalid when validating partition key isolation",
+		},
+		{
+			name:     "multiple partition key values",
+			dsl:      testVarCharField + " in [\"a\", \"b\"]",
+			errorMsg: "partition key isolation does not support IN",
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			task := s.getHybridSearchTask(tc.dsl)
+			task.enableMaterializedView = false
+
+			s.ErrorContains(task.PreExecute(s.ctx), tc.errorMsg)
+		})
 	}
 }
 
@@ -6098,6 +6274,7 @@ func TestSearchTask_ArrayOfVectorGroupBy(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.Contains(t, err.Error(), "only group by primary key is supported")
+		assert.NotContains(t, err.Error(), "embedding list fields")
 	})
 
 	t.Run("element-level search with group by PK and non-PK should fail", func(t *testing.T) {
@@ -6108,6 +6285,7 @@ func TestSearchTask_ArrayOfVectorGroupBy(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.Contains(t, err.Error(), "only group by primary key is supported")
+		assert.NotContains(t, err.Error(), "embedding list fields")
 	})
 
 	t.Run("emblist search with group by should fail", func(t *testing.T) {
@@ -6234,6 +6412,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.Contains(t, err.Error(), "legacy search iterator is not supported for element-level search")
+		assert.NotContains(t, err.Error(), "embedding list fields")
 	})
 
 	t.Run("element-level iterator v2 should succeed", func(t *testing.T) {
@@ -6563,6 +6742,9 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 
+	indexMetricParams := func(metricType string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: metricType}}
+	}
 	schema := &schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -6574,15 +6756,15 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 				FieldID: 200,
 				Name:    "struct_a",
 				Fields: []*schemapb.FieldSchema{
-					{FieldID: 201, Name: "a_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
-					{FieldID: 202, Name: "a_text_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+					{FieldID: 201, Name: "a_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}, IndexParams: indexMetricParams(metric.IP)},
+					{FieldID: 202, Name: "a_text_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}, IndexParams: indexMetricParams(metric.IP)},
 				},
 			},
 			{
 				FieldID: 300,
 				Name:    "struct_b",
 				Fields: []*schemapb.FieldSchema{
-					{FieldID: 301, Name: "b_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+					{FieldID: 301, Name: "b_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}, IndexParams: indexMetricParams(metric.L2)},
 				},
 			},
 		},
@@ -6606,6 +6788,7 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 		params     string
 		phType     commonpb.PlaceholderType
 		metricType string
+		omitMetric bool
 	}
 	makeTask := func(specs ...subSpec) *searchTask {
 		subReqs := make([]*milvuspb.SubSearchRequest, 0, len(specs))
@@ -6614,15 +6797,18 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 			if metricType == "" {
 				metricType = metric.L2
 			}
+			searchParams := []*commonpb.KeyValuePair{
+				{Key: ParamsKey, Value: spec.params},
+				{Key: AnnsFieldKey, Value: spec.annsField},
+				{Key: TopKKey, Value: "10"},
+			}
+			if !spec.omitMetric {
+				searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.MetricTypeKey, Value: metricType})
+			}
 			subReqs = append(subReqs, &milvuspb.SubSearchRequest{
 				PlaceholderGroup: makePlaceholderGroup(spec.phType),
 				Nq:               1,
-				SearchParams: []*commonpb.KeyValuePair{
-					{Key: common.MetricTypeKey, Value: metricType},
-					{Key: ParamsKey, Value: spec.params},
-					{Key: AnnsFieldKey, Value: spec.annsField},
-					{Key: TopKKey, Value: "10"},
-				},
+				SearchParams:     searchParams,
 			})
 		}
 		return &searchTask{
@@ -6697,6 +6883,34 @@ func TestSearchTask_StructHybridElementScopeValidation(t *testing.T) {
 		assert.False(t, task.hybridElementLevel)
 		assert.Equal(t, elementCollapseTopKSum, task.hybridSubSearchInfos[0].Collapse.Strategy)
 		assert.Equal(t, 2, task.hybridSubSearchInfos[0].Collapse.TopK)
+	})
+
+	t.Run("accepts sum collapse with omitted metric type", func(t *testing.T) {
+		task := makeTask(
+			subSpec{annsField: "a_vec", params: topKScope, phType: commonpb.PlaceholderType_FloatVector, omitMetric: true},
+			subSpec{annsField: "regular_vec", params: noScope, phType: commonpb.PlaceholderType_FloatVector},
+		)
+
+		err := task.initAdvancedSearchRequest(ctx)
+
+		require.NoError(t, err)
+		require.Len(t, task.hybridSubSearchInfos, 2)
+		assert.False(t, task.hybridElementLevel)
+		assert.Equal(t, elementCollapseTopKSum, task.hybridSubSearchInfos[0].Collapse.Strategy)
+		assert.Empty(t, task.queryInfos[0].GetMetricType())
+	})
+
+	t.Run("rejects sum collapse with omitted negative index metric", func(t *testing.T) {
+		task := makeTask(
+			subSpec{annsField: "b_vec", params: topKScope, phType: commonpb.PlaceholderType_FloatVector, omitMetric: true},
+			subSpec{annsField: "regular_vec", params: noScope, phType: commonpb.PlaceholderType_FloatVector},
+		)
+
+		err := task.initAdvancedSearchRequest(ctx)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "only supported for positively related metrics")
 	})
 
 	t.Run("rejects sum collapse on negative metric", func(t *testing.T) {

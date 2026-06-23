@@ -573,6 +573,121 @@ TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
     boost::filesystem::remove_all(TestLocalPath + test_dir);
 }
 
+TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
+    const FieldId text_field_id(101);
+    const std::string large_token = "zzgrowingloblarge";
+    const std::string second_batch_token = "zzgrowinglobbatch";
+    const std::string null_token = "zzgrowinglobnull";
+    constexpr int64_t row_count = 1030;
+
+    auto test_dir =
+        "growing_text_lob_index_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+    boost::filesystem::remove_all(TestLocalPath + test_dir);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(
+        FieldName("pk"), FieldId(100), DataType::INT64, false, std::nullopt));
+    schema->set_primary_field_id(FieldId(100));
+    std::map<std::string, std::string> text_params = {
+        {"enable_match", "true"},
+        {"enable_analyzer", "true"},
+        {"analyzer_params", R"({"tokenizer": "standard"})"},
+    };
+    schema->AddField(FieldMeta(FieldName("str"),
+                               text_field_id,
+                               DataType::TEXT,
+                               65536,
+                               true,
+                               true,
+                               true,
+                               text_params,
+                               std::nullopt));
+
+    auto lob_base_path =
+        test_dir + "/lobs/" + std::to_string(text_field_id.get());
+    milvus_storage::lob_column::LobColumnConfig lob_config;
+    lob_config.lob_base_path = lob_base_path;
+    lob_config.field_id = text_field_id.get();
+    lob_config.inline_threshold = 1;
+    lob_config.max_lob_file_bytes = 256 * 1024;
+    lob_config.flush_threshold_bytes = 64 * 1024;
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    ASSERT_NE(properties, nullptr);
+    lob_config.properties = *properties;
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto manager_result =
+        milvus_storage::lob_column::LobColumnManager::Create(fs, lob_config);
+    ASSERT_TRUE(manager_result.ok()) << manager_result.status().ToString();
+    auto manager = std::move(manager_result).ValueOrDie();
+    auto writer_result = manager->CreateWriter();
+    ASSERT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    auto writer = std::move(writer_result).ValueOrDie();
+
+    std::vector<std::string> encoded_refs;
+    encoded_refs.reserve(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        std::string text = "plain growing text row " + std::to_string(i);
+        if (i == 3) {
+            text = std::string(72 * 1024, 'x') + " " + large_token;
+        } else if (i == 1025) {
+            text = "second batch decoded text " + second_batch_token;
+        } else if (i == 7) {
+            text = "invalid nullable row " + null_token;
+        }
+
+        auto ref_result = writer->WriteText(text);
+        ASSERT_TRUE(ref_result.ok()) << ref_result.status().ToString();
+        auto ref = std::move(ref_result).ValueOrDie();
+        ASSERT_EQ(ref.size(), milvus_storage::lob_column::LOB_REFERENCE_SIZE);
+        ASSERT_TRUE(milvus_storage::lob_column::IsLOBReference(ref.data()));
+        encoded_refs.emplace_back(reinterpret_cast<const char*>(ref.data()),
+                                  ref.size());
+    }
+    auto close_result = writer->Close();
+    ASSERT_TRUE(close_result.ok()) << close_result.status().ToString();
+    auto lob_files = std::move(close_result).ValueOrDie();
+    ASSERT_FALSE(lob_files.empty());
+
+    auto field_data =
+        storage::CreateFieldData(DataType::TEXT, DataType::NONE, true);
+    std::vector<bool> valids(row_count, true);
+    valids[7] = false;
+    std::vector<uint8_t> valid_bytes((row_count + 7) / 8, 0);
+    for (int64_t i = 0; i < row_count; ++i) {
+        if (valids[i]) {
+            valid_bytes[i >> 3] |= (1u << (i & 7));
+        }
+    }
+    field_data->FillFieldData(
+        encoded_refs.data(), valid_bytes.data(), row_count, 0);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    growing->SetTextLobPathForTesting(text_field_id, lob_base_path);
+    growing->BuildTextIndexFromTextLobRefs(
+        text_field_id, {field_data}, 0, (*schema)[text_field_id]);
+
+    auto index_pin = growing->GetTextIndex(nullptr, text_field_id);
+    auto large_hits = index_pin.get()->MatchQuery(large_token, 1);
+    ASSERT_EQ(large_hits.size(), row_count);
+    EXPECT_TRUE(large_hits[3]);
+
+    auto second_batch_hits = index_pin.get()->MatchQuery(second_batch_token, 1);
+    ASSERT_EQ(second_batch_hits.size(), row_count);
+    EXPECT_TRUE(second_batch_hits[1025]);
+
+    auto null_hits = index_pin.get()->MatchQuery(null_token, 1);
+    ASSERT_EQ(null_hits.size(), row_count);
+    EXPECT_FALSE(null_hits[7]);
+
+    boost::filesystem::remove_all(TestLocalPath + test_dir);
+}
+
 // Regression test: BuildIndexFromFieldData with a single batch should still
 // work correctly (i == offset in this case, so the old bug was hidden).
 TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
@@ -1647,11 +1762,13 @@ TEST(TextMatch, ExprResCacheFilterBitsDoesNotDuplicateTextMatchEntry) {
     ExprResCacheManager::Key filter_key{seg->get_segment_id(),
                                         expr->ToString()};
     ExprResCacheManager::Value filter_value;
+    filter_value.active_count = N;
     ASSERT_TRUE(mgr.Get(filter_key, filter_value));
 
     ExprResCacheManager::Key text_match_key{seg->get_segment_id(),
                                             expr->filter()->ToString()};
     ExprResCacheManager::Value text_match_value;
+    text_match_value.active_count = N;
     ASSERT_FALSE(mgr.Get(text_match_key, text_match_value));
 
     mgr.Clear();

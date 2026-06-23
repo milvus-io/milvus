@@ -990,6 +990,7 @@ func TestExpr_VectorArrayOnlyStructParentIsNull(t *testing.T) {
 				Name:        "vector_struct[embeddings]",
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_FloatVector,
+				Nullable:    true,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.DimKey, Value: "4"},
 				},
@@ -2149,6 +2150,7 @@ func Test_ArrayLength(t *testing.T) {
 		`array_length(StringArrayField) > 5`,
 		`array_length(StringArrayField) >= 5`,
 		// struct array sub-field
+		`array_length(struct_array) == 2`,
 		`array_length(struct_array[sub_str]) == 3`,
 		`array_length(struct_array[sub_int]) > 1`,
 		`array_length(struct_array[sub_int]) <= 10`,
@@ -3188,7 +3190,7 @@ func TestExpr_StructIndexField_PlanShape(t *testing.T) {
 func TestExpr_StructFieldArrayLength(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 
-	ret := handleExpr(schema, `array_length(struct_array[sub_int])`)
+	ret := handleExpr(schema, `array_length(struct_array)`)
 	ewt, ok := ret.(*ExprWithType)
 	require.True(t, ok, "handleExpr should return *ExprWithType")
 	assert.Equal(t, schemapb.DataType_Int64, ewt.dataType)
@@ -3200,12 +3202,30 @@ func TestExpr_StructFieldArrayLength(t *testing.T) {
 
 	columnInfo := bae.GetLeft().GetColumnExpr().GetInfo()
 	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(133), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
+	assert.Empty(t, columnInfo.GetNestedPath())
+
+	ret = handleExpr(schema, `array_length(struct_array[sub_int])`)
+	ewt, ok = ret.(*ExprWithType)
+	require.True(t, ok, "handleExpr should return *ExprWithType")
+	assert.Equal(t, schemapb.DataType_Int64, ewt.dataType)
+
+	bae = ewt.expr.GetBinaryArithExpr()
+	require.NotNil(t, bae)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, bae.GetOp())
+	require.Nil(t, bae.GetRight())
+
+	columnInfo = bae.GetLeft().GetColumnExpr().GetInfo()
+	require.NotNil(t, columnInfo)
 	assert.Equal(t, int64(134), columnInfo.GetFieldId())
 	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
 	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
 	assert.Empty(t, columnInfo.GetNestedPath())
 
 	validExprs := []string{
+		`array_length(struct_array) == 10`,
 		`array_length(struct_array[sub_int]) == 10`,
 		`array_length(struct_array[sub_str]) > 0`,
 	}
@@ -3218,6 +3238,58 @@ func TestExpr_StructFieldArrayLength(t *testing.T) {
 		}, nil, nil)
 		assert.NoError(t, err, expr)
 	}
+}
+
+func TestExpr_VectorArrayOnlyStructParentArrayLength(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.StructArrayFields = append(schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
+		FieldID:  10000,
+		Name:     "vector_struct",
+		Nullable: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     10001,
+				Name:        "vector_struct[embeddings]",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				Nullable:    true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				},
+			},
+		},
+	})
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for _, expr := range []string{
+		`array_length(vector_struct)`,
+		`array_length(vector_struct[embeddings])`,
+	} {
+		ret := handleExpr(helper, expr)
+		ewt, ok := ret.(*ExprWithType)
+		require.True(t, ok, "handleExpr should return *ExprWithType")
+		assert.Equal(t, schemapb.DataType_Int64, ewt.dataType)
+
+		bae := ewt.expr.GetBinaryArithExpr()
+		require.NotNil(t, bae)
+		assert.Equal(t, planpb.ArithOpType_ArrayLength, bae.GetOp())
+
+		columnInfo := bae.GetLeft().GetColumnExpr().GetInfo()
+		require.NotNil(t, columnInfo)
+		assert.Equal(t, int64(10001), columnInfo.GetFieldId())
+		assert.Equal(t, schemapb.DataType_ArrayOfVector, columnInfo.GetDataType())
+		assert.Equal(t, schemapb.DataType_FloatVector, columnInfo.GetElementType())
+		assert.True(t, columnInfo.GetNullable())
+	}
+
+	_, err = CreateSearchPlan(helper, `array_length(vector_struct) == 2`, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	require.NoError(t, err)
 }
 
 func TestExpr_StructIndexField_RangeForms(t *testing.T) {

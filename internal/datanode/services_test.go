@@ -594,7 +594,10 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		// taskcommon.GetTaskType classifies an unrecognized task type as
+		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
+		// an internal protocol violation, not user input.
+		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
 	})
 }
 
@@ -685,7 +688,10 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		// taskcommon.GetTaskType classifies an unrecognized task type as
+		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
+		// an internal protocol violation, not user input.
+		s.Equal(merr.Code(merr.ErrServiceInternal), resp.GetStatus().GetCode())
 	})
 }
 
@@ -771,7 +777,10 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 		}
 		status, err := s.node.DropTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		// taskcommon.GetTaskType classifies an unrecognized task type as
+		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
+		// an internal protocol violation, not user input.
+		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
 	})
 }
 
