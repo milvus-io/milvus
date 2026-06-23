@@ -2284,21 +2284,29 @@ func normalizePositionTimestamp(pos *msgpb.MsgPosition, commitTs uint64) *msgpb.
 	}
 }
 
-func validateCompactionFallbackStartPosition(compactFromSegInfos []*SegmentInfo, fallbackStart *msgpb.MsgPosition) error {
-	if fallbackStart == nil {
-		return nil
-	}
+func maxCommitTimestamp(compactFromSegInfos []*SegmentInfo) uint64 {
 	var maxCommitTs uint64
 	for _, info := range compactFromSegInfos {
 		maxCommitTs = max(maxCommitTs, info.GetCommitTimestamp())
 	}
-	if maxCommitTs == 0 || fallbackStart.GetTimestamp() >= maxCommitTs {
-		return nil
-	}
-	return merr.WrapErrServiceInternalMsg(
-		"compaction fallback start position timestamp %d is earlier than max input commit timestamp %d",
-		fallbackStart.GetTimestamp(),
-		maxCommitTs)
+	return maxCommitTs
+}
+
+func getCompactionFallbackPositions(compactFromSegInfos []*SegmentInfo) (fallbackStart, fallbackDml *msgpb.MsgPosition) {
+	maxCommitTs := maxCommitTimestamp(compactFromSegInfos)
+
+	// Fallback positions are used only when output binlog timestamps are
+	// unavailable. Keep the raw minimum start timestamp so normal rows in mixed
+	// compaction still receive deletes after their original start. Normalize the
+	// fallback DML timestamp to commit_ts so temporal cleanup does not treat the
+	// compacted output as complete before committed import rows become visible.
+	fallbackStart = getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetStartPosition()
+	}))
+	fallbackDml = normalizePositionTimestamp(getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetDmlPosition()
+	})), maxCommitTs)
+	return fallbackStart, fallbackDml
 }
 
 func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
@@ -2336,22 +2344,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		compactFromSegIDs = append(compactFromSegIDs, cloned.GetID())
 	}
 
-	// Compaction normalizes import segments: row timestamps in the output
-	// binlogs are already rewritten to commit_ts by the compactor, so
-	// recalculateSegmentPosition will pick up commit_ts from output binlogs.
-	// The fallback start position must not be earlier than any input import
-	// segment's commit_ts. The check below pins that invariant so a future
-	// change to sort-compaction position handling cannot silently expose
-	// compacted import rows too early.
-	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-		return info.GetStartPosition()
-	}))
-	if err := validateCompactionFallbackStartPosition(compactFromSegInfos, fallbackStart); err != nil {
-		return nil, nil, err
-	}
-	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-		return info.GetDmlPosition()
-	}))
+	fallbackStart, fallbackDml := getCompactionFallbackPositions(compactFromSegInfos)
 
 	for _, seg := range result.GetSegments() {
 		startPos, dmlPos := recalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
@@ -2463,23 +2456,7 @@ func (m *meta) completeMixCompactionMutation(
 	}
 	outputSchemaVersion := t.GetSchema().GetVersion()
 
-	// Compaction normalizes import segments: row timestamps in the output
-	// binlogs are already rewritten to commit_ts by the compactor, so the
-	// output segment is a normal segment with CommitTimestamp = 0.
-	// recalculateSegmentPosition will pick up commit_ts from output binlogs.
-	// The fallback start position must not be earlier than any input import
-	// segment's commit_ts. The check below pins that invariant so a future
-	// change to sort-compaction position handling cannot silently expose
-	// compacted import rows too early.
-	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-		return info.GetStartPosition()
-	}))
-	if err := validateCompactionFallbackStartPosition(compactFromSegInfos, fallbackStart); err != nil {
-		return nil, nil, err
-	}
-	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-		return info.GetDmlPosition()
-	}))
+	fallbackStart, fallbackDml := getCompactionFallbackPositions(compactFromSegInfos)
 
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
