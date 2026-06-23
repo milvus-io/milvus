@@ -1894,7 +1894,8 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
 
 		schema := &schemapb.CollectionSchema{
-			Name: collectionName,
+			Name:            collectionName,
+			EnableNamespace: true,
 			Fields: []*schemapb.FieldSchema{
 				{Name: field1, DataType: schemapb.DataType_Int64},
 			},
@@ -1920,6 +1921,10 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		require.NoError(t, err)
 		props := common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()
 		assert.Equal(t, common.NamespaceModePartition, props[common.NamespaceModeKey])
+		assert.NotContains(t, props, common.PartitionKeyIsolationKey)
+		for _, field := range task.body.CollectionSchema.GetFields() {
+			assert.NotEqual(t, common.NamespaceFieldName, field.GetName())
+		}
 	})
 }
 
@@ -2140,6 +2145,27 @@ func TestNamespaceProperty(t *testing.T) {
 
 		err := task.handleNamespaceField(ctx, schema)
 		assert.Error(t, err)
+	})
+
+	t.Run("test namespace partition mode", func(t *testing.T) {
+		schema := initSchema()
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.handleNamespaceField(ctx, schema)
+		assert.NoError(t, err)
+		assert.False(t, hasNamespaceField(schema))
+		assert.False(t, hasIsolationProperty(task.Req.Properties...))
 	})
 
 	t.Run("test namespace enabled with external collection", func(t *testing.T) {
