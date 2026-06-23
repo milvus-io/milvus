@@ -17,37 +17,38 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
-// teardownTest
-func teardownTest(t *testing.T) func(t *testing.T) {
+// teardownTest returns a cleanup function that drops only the specified databases.
+// This avoids interfering with databases created by other parallel tests.
+func teardownTest(t *testing.T, dbNames ...string) func(t *testing.T) {
 	log.Info("setup test func")
 	return func(t *testing.T) {
-		log.Info("teardown func drop all non-default db")
-		// drop all db
+		log.Info("teardown func drop test databases", zap.Strings("databases", dbNames))
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 		mc := hp.CreateDefaultMilvusClient(ctx, t)
-		dbs, _ := mc.ListDatabase(ctx, client.NewListDatabaseOption())
-		for _, db := range dbs {
-			if db != common.DefaultDb {
-				_ = mc.UseDatabase(ctx, client.NewUseDatabaseOption(db))
-				collections, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
-				for _, coll := range collections {
-					_ = mc.DropCollection(ctx, client.NewDropCollectionOption(coll))
-				}
-				_ = mc.DropDatabase(ctx, client.NewDropDatabaseOption(db))
+		for _, db := range dbNames {
+			if db == common.DefaultDb {
+				continue
 			}
+			_ = mc.UseDatabase(ctx, client.NewUseDatabaseOption(db))
+			collections, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
+			for _, coll := range collections {
+				_ = mc.DropCollection(ctx, client.NewDropCollectionOption(coll))
+			}
+			_ = mc.DropDatabase(ctx, client.NewDropDatabaseOption(db))
 		}
 	}
 }
 
 func TestDatabase(t *testing.T) {
-	teardownSuite := teardownTest(t)
+	dbName1 := common.GenRandomString("db1", 4)
+	dbName2 := common.GenRandomString("db2", 4)
+	teardownSuite := teardownTest(t, dbName1, dbName2)
 	defer teardownSuite(t)
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	clientDefault := hp.CreateMilvusClient(ctx, t, hp.GetDefaultClientConfig())
 
 	// create db1
-	dbName1 := common.GenRandomString("db1", 4)
 	err := clientDefault.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName1))
 	common.CheckErr(t, err, true)
 
@@ -68,7 +69,6 @@ func TestDatabase(t *testing.T) {
 	require.Containsf(t, collections, db1Col2.CollectionName, fmt.Sprintf("The collection %s not in: %v", db1Col2.CollectionName, collections))
 
 	// create db2
-	dbName2 := common.GenRandomString("db2", 4)
 	err = clientDefault.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName2))
 	common.CheckErr(t, err, true)
 	dbs, err = clientDefault.ListDatabase(ctx, client.NewListDatabaseOption())
@@ -92,7 +92,7 @@ func TestDatabase(t *testing.T) {
 	common.CheckErr(t, err, true)
 	require.NotContains(t, dbs, dbName2)
 
-	// drop db1 which has some collections
+	// drop db1 which has some collections — should fail
 	err = clientDB1.DropDatabase(ctx, client.NewDropDatabaseOption(dbName1))
 	common.CheckErr(t, err, false, "must drop all collections before drop database")
 
@@ -118,13 +118,13 @@ func TestDatabase(t *testing.T) {
 
 // test create with invalid db name
 func TestCreateDb(t *testing.T) {
-	teardownSuite := teardownTest(t)
+	dbName := common.GenRandomString("db", 4)
+	teardownSuite := teardownTest(t, dbName)
 	defer teardownSuite(t)
 
 	// create db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 
@@ -142,7 +142,8 @@ func TestCreateDb(t *testing.T) {
 
 // test drop db
 func TestDropDb(t *testing.T) {
-	teardownSuite := teardownTest(t)
+	dbName := common.GenRandomString("db", 4)
+	teardownSuite := teardownTest(t, dbName)
 	defer teardownSuite(t)
 
 	// create collection in default db
@@ -154,7 +155,6 @@ func TestDropDb(t *testing.T) {
 	require.Contains(t, collections, defCol.CollectionName)
 
 	// create db
-	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 
@@ -221,7 +221,8 @@ func TestUsingDb(t *testing.T) {
 }
 
 func TestClientWithDb(t *testing.T) {
-	teardownSuite := teardownTest(t)
+	dbName := common.GenRandomString("db", 5)
+	teardownSuite := teardownTest(t, dbName)
 	defer teardownSuite(t)
 
 	listCollOpt := client.NewListCollectionOption()
@@ -243,7 +244,6 @@ func TestClientWithDb(t *testing.T) {
 	log.Debug("default db collections:", zap.Any("default collections", defCollections))
 
 	// create a db and create collection in db
-	dbName := common.GenRandomString("db", 5)
 	err = mcDefault.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 
@@ -276,13 +276,13 @@ func TestClientWithDb(t *testing.T) {
 
 func TestDatabasePropertiesCollectionsNum(t *testing.T) {
 	// create db with properties
-	teardownSuite := teardownTest(t)
+	dbName := common.GenRandomString("db", 4)
+	teardownSuite := teardownTest(t, dbName)
 	defer teardownSuite(t)
 
 	// create db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 
@@ -334,13 +334,13 @@ func TestDatabasePropertiesCollectionsNum(t *testing.T) {
 
 func TestDatabasePropertiesRgReplicas(t *testing.T) {
 	// create db with properties
-	teardownSuite := teardownTest(t)
+	dbName := common.GenRandomString("db", 4)
+	teardownSuite := teardownTest(t, dbName)
 	defer teardownSuite(t)
 
 	// create db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 
@@ -391,13 +391,13 @@ func TestDatabasePropertiesRgReplicas(t *testing.T) {
 func TestDatabasePropertyDeny(t *testing.T) {
 	t.Skip("https://zilliz.atlassian.net/browse/VDC-7858")
 	// create db with properties
-	teardownSuite := teardownTest(t)
+	dbName := common.GenRandomString("db", 4)
+	teardownSuite := teardownTest(t, dbName)
 	defer teardownSuite(t)
 
 	// create db and use db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 
@@ -433,13 +433,13 @@ func TestDatabasePropertyDeny(t *testing.T) {
 
 func TestDatabaseFakeProperties(t *testing.T) {
 	// create db with properties
-	teardownSuite := teardownTest(t)
+	dbName := common.GenRandomString("db", 4)
+	teardownSuite := teardownTest(t, dbName)
 	defer teardownSuite(t)
 
 	// create db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 
