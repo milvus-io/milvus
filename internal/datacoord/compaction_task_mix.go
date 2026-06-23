@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -96,7 +97,7 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan)
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
 		//  to enable a retry in compaction.checkCompaction().
@@ -234,6 +235,9 @@ func (t *mixCompactionTask) SaveTaskMeta() error {
 
 func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) error {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
+	if err := binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
+		return err
+	}
 	// Also prepare metric updates.
 	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.taskProto.Load().(*datapb.CompactionTask), result)
 	if err != nil {
@@ -365,7 +369,12 @@ func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
+	taskSchema := taskProto.GetSchema()
+	if taskSchema == nil {
+		return nil, merr.WrapErrIllegalCompactionPlan("compaction task schema is nil")
+	}
+	taskSchemaVersion := taskSchema.GetVersion()
+	compactionParams, err := compaction.GenerateJSONParams(taskSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +385,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		Channel:                   taskProto.GetChannel(),
 		CollectionTtl:             taskProto.GetCollectionTtl(),
 		TotalRows:                 taskProto.GetTotalRows(),
-		Schema:                    taskProto.GetSchema(),
+		Schema:                    taskSchema,
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
@@ -385,11 +394,11 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	}
 
 	// set analyzer resource for text match index if use ref mode
-	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) && taskProto.GetType() == datapb.CompactionType_SortCompaction && len(taskProto.GetSchema().GetFileResourceIds()) > 0 {
-		resources, err := t.meta.GetFileResources(context.Background(), taskProto.GetSchema().GetFileResourceIds()...)
+	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) && taskProto.GetType() == datapb.CompactionType_SortCompaction && len(taskSchema.GetFileResourceIds()) > 0 {
+		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)
 		if err != nil {
 			log.Warn("get file resources for collection failed", zap.Int64("collectionID", taskProto.GetCollectionID()), zap.Error(err))
-			return nil, errors.Errorf("get file resources for sort compaction failed: %v", err)
+			return nil, merr.Wrap(err, "get file resources for sort compaction failed")
 		}
 		plan.FileResources = resources
 	}
@@ -400,6 +409,9 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
 			return nil, merr.WrapErrSegmentNotFound(segID)
+		}
+		if taskSchemaVersion < segInfo.GetSchemaVersion() {
+			return nil, merr.WrapErrIllegalCompactionPlanMsg("compaction task schema version %d is older than input segment %d schema version %d", taskSchemaVersion, segInfo.GetID(), segInfo.GetSchemaVersion())
 		}
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           segID,
@@ -414,12 +426,13 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 		segments = append(segments, segInfo)
 	}
 
-	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskProto.GetSchema())
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +440,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	// BeginLogID is deprecated, but still assign it for compatibility.
 	plan.BeginLogID = logIDRange.Begin
 
-	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
+	WrapPluginContext(taskProto.GetCollectionID(), taskSchema.GetProperties(), plan)
 
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()),
 		zap.Any("PreAllocatedLogIDs", logIDRange), zap.Any("segID2DeltaLogs", segIDMap))

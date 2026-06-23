@@ -25,13 +25,16 @@ package packed
 import "C"
 
 import (
-	"fmt"
+	"strings"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // TextColumnConfig represents configuration for a TEXT column.
@@ -44,20 +47,16 @@ type TextColumnConfig struct {
 	RewriteMode         bool // true = input is LOB references, decode & rewrite during compaction
 }
 
-// SegmentWriterConfig represents configuration for SegmentWriter.
-// ReadVersion and RetryLimit are used by the Go-layer transaction logic,
+// SegmentWriterConfig represents configuration for SegmentWriter. The
+// writer is concerned only with file output; manifest-level concerns
+// (version, retry) live in CommitManifestUpdates.
 type SegmentWriterConfig struct {
-	SegmentPath string
-	ReadVersion int64  // manifest version for transaction (Go-layer only)
-	RetryLimit  uint32 // transaction retry limit (Go-layer only)
-	TextColumns []TextColumnConfig
-}
-
-// SegmentWriterResult contains the result of closing a SegmentWriter.
-type SegmentWriterResult struct {
-	ManifestPath     string
-	CommittedVersion int64
-	RowsWritten      int64
+	SegmentPath        string
+	TextColumns        []TextColumnConfig
+	ColumnGroups       []storagecommon.ColumnGroup
+	WriterFormat       string
+	SchemaBasedPattern string
+	SchemaBasedFormats []string
 }
 
 // FFISegmentWriter wraps the C SegmentWriter handle for incremental writes.
@@ -65,8 +64,7 @@ type FFISegmentWriter struct {
 	handle      C.LoonSegmentWriterHandle
 	cProperties *C.LoonProperties
 	schema      *arrow.Schema
-	basePath    string // segment base path for transaction
-	readVersion int64  // manifest read version for transaction
+	closed      bool
 }
 
 // NewFFISegmentWriter creates a new segment writer via FFI.
@@ -82,11 +80,11 @@ func NewFFISegmentWriter(
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	if storageConfig == nil {
-		return nil, fmt.Errorf("storageConfig must not be nil")
+		return nil, merr.WrapErrStorageMsg("storageConfig must not be nil")
 	}
 
-	// create properties
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	extra := segmentWriterProperties(schema, config)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -107,9 +105,44 @@ func NewFFISegmentWriter(
 		handle:      writerHandle,
 		cProperties: cProperties,
 		schema:      schema,
-		basePath:    config.SegmentPath,
-		readVersion: config.ReadVersion,
 	}, nil
+}
+
+func segmentWriterProperties(schema *arrow.Schema, config *SegmentWriterConfig) map[string]string {
+	extra := map[string]string{
+		PropertyWriterFormat: "parquet",
+	}
+	if config == nil {
+		extra[PropertyWriterPolicy] = "single"
+		return extra
+	}
+	if config.WriterFormat != "" {
+		extra[PropertyWriterFormat] = config.WriterFormat
+	}
+	if len(config.SchemaBasedFormats) > 0 {
+		extra[PropertyWriterSchemaBasedFormats] = strings.Join(config.SchemaBasedFormats, ",")
+	}
+	if config.SchemaBasedPattern != "" {
+		extra[PropertyWriterPolicy] = "schema_based"
+		extra[PropertyWriterSchemaBasedPattern] = config.SchemaBasedPattern
+		return extra
+	}
+
+	columnGroups := config.ColumnGroups
+	if len(columnGroups) == 0 {
+		extra[PropertyWriterPolicy] = "single"
+		return extra
+	}
+
+	pattern := strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
+		return strings.Join(lo.Map(columnGroup.Columns, func(index int, _ int) string {
+			return schema.Field(index).Name
+		}), "|")
+	}), ",")
+
+	extra[PropertyWriterPolicy] = "schema_based"
+	extra[PropertyWriterSchemaBasedPattern] = pattern
+	return extra
 }
 
 // Write writes a record batch to the segment writer.
@@ -127,83 +160,95 @@ func (w *FFISegmentWriter) Write(record arrow.Record) error {
 	return HandleLoonFFIResult(result)
 }
 
-// Flush flushes buffered data to storage.
-func (w *FFISegmentWriter) Flush() error {
+// SyncBuffered syncs buffered data to storage without closing the writer.
+// Used for mid-stream flushes; Close detaches output and finalizes the writer.
+func (w *FFISegmentWriter) SyncBuffered() error {
 	result := C.loon_segment_writer_flush(w.handle)
 	return HandleLoonFFIResult(result)
 }
 
-// Close closes the writer and commits the manifest via Transaction.
-// Returns SegmentWriterResult with the committed manifest path.
-// Pattern matches FFIPackedWriter.Close(): C++ writer returns ColumnGroups + LobFiles,
-// Go layer handles Transaction begin → append_files → add_lob_files → commit.
-func (w *FFISegmentWriter) Close() (*SegmentWriterResult, error) {
-	var cOutput C.LoonSegmentWriteOutput
+// SegmentOutput is the data carrier returned by FFISegmentWriter.Close.
+// It holds the column-groups + LOB payload produced by the C writer and
+// owns C memory; the caller MUST call Destroy after passing the handle to
+// CommitManifestUpdates (success or failure). Destroy is idempotent; a
+// nil column_groups pointer indicates the handle has already been released.
+type SegmentOutput struct {
+	cOutput     C.LoonSegmentWriteOutput
+	rowsWritten int64
+}
 
+// RowsWritten returns the number of rows the segment writer reported.
+func (f *SegmentOutput) RowsWritten() int64 { return f.rowsWritten }
+
+// Destroy releases the C output (LOB file strings + array). Safe to call
+// multiple times — the nil column_groups pointer left behind serves as
+// the already-released marker.
+func (f *SegmentOutput) Destroy() {
+	if f == nil || f.cOutput.column_groups == nil {
+		return
+	}
+	C.loon_segment_write_output_free(&f.cOutput)
+	f.cOutput.column_groups = nil
+	f.cOutput.lob_files = nil
+	f.cOutput.num_lob_files = 0
+}
+
+// applyTo stages the column-groups + LOB payload onto a loon transaction.
+// Column groups (when present) are appended via loon_transaction_append_files,
+// and each LOB file is registered via loon_transaction_add_lob_file.
+func (f *SegmentOutput) applyTo(handle C.LoonTransactionHandle) error {
+	if f == nil {
+		return nil
+	}
+	if f.cOutput.column_groups != nil {
+		if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, f.cOutput.column_groups)); err != nil {
+			return merr.Wrap(err, "commit manifest append_files (segment)")
+		}
+	}
+	if f.cOutput.num_lob_files > 0 && f.cOutput.lob_files != nil {
+		lob := unsafe.Slice(f.cOutput.lob_files, f.cOutput.num_lob_files)
+		for i := range lob {
+			if err := HandleLoonFFIResult(C.loon_transaction_add_lob_file(handle, &lob[i])); err != nil {
+				return merr.Wrap(err, "commit manifest add_lob_file")
+			}
+		}
+	}
+	return nil
+}
+
+// Close closes the underlying segment writer and returns the column-groups
+// + LOB payload. The writer never touches the manifest — the caller is
+// responsible for passing the returned handle to CommitManifestUpdates
+// and calling Destroy on the returned WriterOutput when done.
+//
+// Close releases the writer's C resources (segment-writer handle and
+// cProperties) in a defer, so even when loon_segment_writer_close fails
+// those resources are reclaimed. After Close the writer is exhausted;
+// further Close or Write calls fail.
+func (w *FFISegmentWriter) Close() (WriterOutput, error) {
+	if w.closed {
+		return nil, merr.WrapErrServiceInternal("FFISegmentWriter already closed")
+	}
+	w.closed = true
+	defer func() {
+		if w.handle != 0 {
+			C.loon_segment_writer_destroy(w.handle)
+			w.handle = 0
+		}
+		if w.cProperties != nil {
+			C.loon_properties_free(w.cProperties)
+			w.cProperties = nil
+		}
+	}()
+	var cOutput C.LoonSegmentWriteOutput
 	result := C.loon_segment_writer_close(w.handle, &cOutput)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, err
 	}
-
-	rowsWritten := int64(cOutput.rows_written)
-
-	cBasePath := C.CString(w.basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	var transactionHandle C.LoonTransactionHandle
-	result = C.loon_transaction_begin(cBasePath, w.cProperties,
-		C.int64_t(w.readVersion), C.int32_t(0), getRetryLimit(), &transactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, err
-	}
-	defer C.loon_transaction_destroy(transactionHandle)
-
-	// append column groups
-	if cOutput.column_groups != nil {
-		result = C.loon_transaction_append_files(transactionHandle, cOutput.column_groups)
-		if err := HandleLoonFFIResult(result); err != nil {
-			return nil, err
-		}
-	}
-
-	// add LOB files
-	if cOutput.num_lob_files > 0 && cOutput.lob_files != nil {
-		cLobSlice := unsafe.Slice(cOutput.lob_files, cOutput.num_lob_files)
-		for _, cLob := range cLobSlice {
-			result = C.loon_transaction_add_lob_file(transactionHandle, &cLob)
-			if err := HandleLoonFFIResult(result); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	// commit
-	var cCommitVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &cCommitVersion)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, err
-	}
-
-	// free C output (LOB file strings + array)
-	C.loon_segment_write_output_free(&cOutput)
-
-	return &SegmentWriterResult{
-		ManifestPath:     MarshalManifestPath(w.basePath, int64(cCommitVersion)),
-		CommittedVersion: int64(cCommitVersion),
-		RowsWritten:      rowsWritten,
+	return &SegmentOutput{
+		cOutput:     cOutput,
+		rowsWritten: int64(cOutput.rows_written),
 	}, nil
-}
-
-// Destroy destroys the writer and releases resources.
-func (w *FFISegmentWriter) Destroy() {
-	if w.handle != 0 {
-		C.loon_segment_writer_destroy(w.handle)
-		w.handle = 0
-	}
-	if w.cProperties != nil {
-		C.loon_properties_free(w.cProperties)
-		w.cProperties = nil
-	}
 }
 
 // buildCSegmentWriterConfig converts Go config to C config.

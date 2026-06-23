@@ -410,9 +410,17 @@ func (s *Server) AddCollectionField(ctx context.Context, in *milvuspb.AddCollect
 	return s.mixCoord.AddCollectionField(ctx, in)
 }
 
+func (s *Server) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AddCollectionStructField(ctx, in)
+}
+
 // CreatePartition creates a partition in a collection
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.mixCoord.CreatePartition(ctx, in)
+}
+
+func (s *Server) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	return s.mixCoord.CreatePartitionV2(ctx, in)
 }
 
 // DropPartition drops the specified partition.
@@ -497,6 +505,10 @@ func (s *Server) ListCredUsers(ctx context.Context, request *milvuspb.ListCredUs
 
 func (s *Server) CreateRole(ctx context.Context, request *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	return s.mixCoord.CreateRole(ctx, request)
+}
+
+func (s *Server) AlterRole(ctx context.Context, request *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AlterRole(ctx, request)
 }
 
 func (s *Server) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
@@ -685,6 +697,10 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 
 func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
 	return s.mixCoord.GetQueryNodeDistribution(ctx, req)
+}
+
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.mixCoord.ClearReadTaskQueue(ctx, req)
 }
 
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
@@ -939,6 +955,18 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 
 func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
 	return s.mixCoord.ListImports(ctx, in)
+}
+
+func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CommitImport(ctx, req)
+}
+
+func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AbortImport(ctx, req)
+}
+
+func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	return s.mixCoord.HandleCommitVchannel(ctx, req)
 }
 
 func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {

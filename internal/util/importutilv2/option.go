@@ -46,6 +46,9 @@ const (
 	CSVNullKey = "nullkey"
 )
 
+// AutoCommitKey is the option key for enabling/disabling auto-commit of import jobs.
+const AutoCommitKey = "auto_commit"
+
 // Options for backup-restore mode.
 const (
 	// BackupFlag indicates whether the import is in backup-restore mode, default to false.
@@ -79,7 +82,7 @@ func GetTimeoutTs(options Options) (uint64, error) {
 		var dur time.Duration
 		dur, err = time.ParseDuration(timeoutStr)
 		if err != nil {
-			return 0, fmt.Errorf("parse timeout failed, err=%w", err)
+			return 0, merr.Wrap(err, "parse timeout failed")
 		}
 		curTs := tsoutil.GetCurrentTime()
 		timeoutTs = tsoutil.AddPhysicalDurationOnTs(curTs, dur)
@@ -95,10 +98,10 @@ func ParseTimeRange(options Options) (uint64, uint64, error) {
 				if strings.EqualFold(key, targetKey) {
 					ts, err := strconv.ParseUint(value, 10, 64)
 					if err != nil {
-						return 0, merr.WrapErrImportFailed(fmt.Sprintf("parse %s failed, value=%s, err=%s", targetKey, value, err))
+						return 0, merr.WrapErrImportFailedMsg("parse %s failed, value=%s, err=%s", targetKey, value, err)
 					}
 					if !tsoutil.IsValidHybridTs(ts) {
-						return 0, merr.WrapErrImportFailed(fmt.Sprintf("%s is not a valid hybrid timestamp, value=%s", targetKey, value))
+						return 0, merr.WrapErrImportFailedMsg("%s is not a valid hybrid timestamp, value=%s", targetKey, value)
 					}
 					return ts, nil
 				}
@@ -145,7 +148,7 @@ func GetStorageVersion(options Options) (int64, error) {
 	}
 	version, err := strconv.ParseInt(storageVersion, 10, 64)
 	if err != nil {
-		return 0, merr.WrapErrImportFailed(fmt.Sprintf("parse storage_version failed, value=%s, err=%s", storageVersion, err))
+		return 0, merr.WrapErrImportFailedMsg("parse storage_version failed, value=%s, err=%s", storageVersion, err)
 	}
 	switch version {
 	case storage.StorageV2:
@@ -179,7 +182,7 @@ func GetCSVSep(options Options) (rune, error) {
 	if err != nil || len(sep) == 0 {
 		return defaultSep, nil
 	} else if lo.Contains(unsupportedSep, []rune(sep)[0]) {
-		return 0, merr.WrapErrImportFailed(fmt.Sprintf("unsupported csv separator: %s", sep))
+		return 0, merr.WrapErrImportFailedMsg("unsupported csv separator: %s", sep)
 	}
 	return []rune(sep)[0], nil
 }
@@ -199,4 +202,13 @@ func GetEZK(options Options) (string, error) {
 		return "", nil
 	}
 	return ezk, nil
+}
+
+// IsAutoCommit parses the auto_commit option. Defaults to true if absent.
+func IsAutoCommit(options Options) bool {
+	val, err := funcutil.GetAttrByKeyFromRepeatedKV(AutoCommitKey, options)
+	if err != nil || strings.ToLower(val) != "false" {
+		return true
+	}
+	return false
 }

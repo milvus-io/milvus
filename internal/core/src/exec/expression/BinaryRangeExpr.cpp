@@ -420,12 +420,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         // there is a batch operation in BinaryRangeElementFunc,
         // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
         // but to mask res with valid_data after the batch operation.
-        if (valid_data != nullptr) {
+        if constexpr (filter_type == FilterType::sequential) {
+            // contiguous rows: reuse the vectorized shared helper
+            ApplyValidMask(valid_data, res, valid_res, size);
+        } else if (valid_data != nullptr) {
+            // scattered by offsets: gather, keep the per-row loop
             for (int i = 0; i < size; i++) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
+                auto offset = (offsets) ? offsets[i] : i;
                 if (!valid_data[offset]) {
                     res[i] = valid_res[i] = false;
                 }
@@ -435,20 +436,20 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     };
 
     auto skip_index_func =
-        [val1, val2, lower_inclusive, upper_inclusive](
+        [op_ctx = op_ctx_, val1, val2, lower_inclusive, upper_inclusive](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
             if (lower_inclusive && upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, true, true);
+                    op_ctx, field_id, chunk_id, val1, val2, true, true);
             } else if (lower_inclusive && !upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, true, false);
+                    op_ctx, field_id, chunk_id, val1, val2, true, false);
             } else if (!lower_inclusive && upper_inclusive) {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, false, true);
+                    op_ctx, field_id, chunk_id, val1, val2, false, true);
             } else {
                 return skip_index.CanSkipBinaryRange<T>(
-                    field_id, chunk_id, val1, val2, false, false);
+                    op_ctx, field_id, chunk_id, val1, val2, false, false);
             }
         };
     int64_t processed_size;
@@ -651,8 +652,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
     ValueType val1 = GetValueWithCastNumber<ValueType>(expr_->lower_val_);
     ValueType val2 = GetValueWithCastNumber<ValueType>(expr_->upper_val_);
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -811,6 +815,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
     auto res = MoveOrSliceBitmap(

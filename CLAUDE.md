@@ -10,6 +10,30 @@ Coordinators manage metadata and scheduling; nodes execute work.
 - Nodes: proxy (user-facing), querynodev2, datanode, streamingnode
 - All component interfaces defined in `internal/types/types.go`
 
+## Subsystems & Code Map
+
+Each subsystem has a **top-level doc** (overview with links to sub-documents) and multiple **sub-documents** (detailed design, invariants, interfaces). The top-level doc alone is NOT sufficient — it is an index, not the content.
+
+### Mandatory reading procedure
+
+When your task modifies, explains, depends on, or affects a subsystem below, execute these steps IN ORDER before responding or writing code:
+
+**Step 1 — Read the top-level doc.** Identify all sub-documents it links to.
+
+**Step 2 — Read sub-documents.** The scope depends on task type:
+- **Design tasks** (new feature, architecture change, cross-component change): Read **every** sub-document under the subsystem. No exceptions — design requires full-picture understanding. Do NOT judge relevance yourself; read all of them.
+- **Targeted tasks** (bug fix, single-component change, code explanation): Read sub-documents that cover the components your task touches. When uncertain whether a sub-document is relevant, read it.
+
+**Step 3 — Read source code** listed in each doc's "Key Packages" section. At minimum read the files directly related to your task.
+
+**Step 4 — Cross-check** documentation against code. If they contradict, STOP and ask the user to resolve before proceeding.
+
+NEVER answer based on documentation alone or code alone. NEVER skip Step 2 — this is the most common failure mode.
+
+### Subsystems Reference
+
+- [**Streaming System**](docs/agent_guides/streaming-system/streaming-system.md): Write path, WAL, DDL/DCL execution, replication && CDC.
+
 ## Testing
 
 Go tests MUST use `-tags dynamic,test` and `-gcflags="all=-N -l"` (disable optimizations/inlining) or they won't compile / mockey-based monkey patching will fail:
@@ -32,17 +56,30 @@ scripts/standalone_embed.sh    # embedded standalone (no external deps)
 
 ## Code Conventions
 
-- Error handling: use `merr` package, not fmt.Errorf
+- Error handling: use `merr` package, not fmt.Errorf — see mandatory procedure below
 - Logging: use `pkg/v2/log`, not standard `"log"` or fmt.Println
 - Import order: standard → third-party → github.com/milvus-io (enforced by gci)
 - Config params: paramtable (`pkg/v2/util/paramtable`), config in `configs/milvus.yaml`
+
+### Error handling (mandatory when originating, wrapping, or classifying errors)
+
+Read [error_handling_guide.md](docs/dev/error_handling_guide.md) (decision tree,
+Input-vs-System) and [error_handling_casebook.md](docs/dev/error_handling_casebook.md)
+(the 7 mistake patterns) BEFORE writing the change. Non-negotiable rules:
+
+1. Blame test: is the **request content itself** what forces this branch? → Input factory. A Milvus bug, or an internal/transient failure (not-ready, TOCTOU race), → System factory — even when a correct Milvus does reach it on a valid request (transient errors are System, and must stay retriable). "Looks like validation" is not the test.
+2. Add context to an existing error with `merr.Wrap/Wrapf` ONLY — `WrapErrXxxErr(err, …)` masks the inner code; cause never goes into a format string.
+3. Before marking anything InputError: grep `retry.Do` consumers. Before converting an `errors.New` sentinel to merr: grep `errors.Is` guards.
+4. Pick codes from the existing family ranges in `pkg/util/merr/errors.go` (scan first; see the partition table in [error_sentinel_convention.md](docs/dev/error_sentinel_convention.md)); never hand-pick 20xx segcore codes.
+5. Touched a wire projection, oldCode mapping, or metric label? Run the merr guard tests AND a full `make test-go` — contract changes break packages you didn't touch.
 
 ## PR and Commit Conventions
 
 PR title format: `{type}: {description}`. Valid types: `feat:`, `fix:`, `enhance:`, `test:`, `doc:`, `auto:`, `build(deps):`.
 PR body must be non-empty. Issue/doc linking rules:
 - `fix:` — must link issue (e.g. `issue: #123`)
-- `feat:` — must link issue + design doc from milvus-io/milvus-design-docs
+- `feat:` — must link issue + design doc under `docs/design-docs`
+- Every Milvus feature should have a related design doc under `docs/design-docs`; submit the doc in this repository and link it from the Milvus feature PR.
 - `enhance:` — must link issue if size L/XL/XXL
 - `doc:`, `test:` — no issue required
 - 2.x branch PRs must link the corresponding master PR (e.g. `pr: #123`)

@@ -57,11 +57,8 @@ func (policy *storageVersionUpgradePolicy) Name() string {
 }
 
 func (policy *storageVersionUpgradePolicy) Enable() bool {
-	return paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool()
-}
-
-func (policy *storageVersionUpgradePolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	return nil, nil
+	return paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool() ||
+		paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.GetAsBool()
 }
 
 func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
@@ -70,6 +67,28 @@ func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
 		targetVersion = storage.StorageV3
 	}
 	return targetVersion
+}
+
+func segmentColumnGroupFormatsAllEqual(segment *SegmentInfo, targetFormat string) bool {
+	if targetFormat == "" || segment.GetStorageVersion() != storage.StorageV3 {
+		return true
+	}
+
+	binlogs := segment.GetBinlogs()
+	if len(binlogs) == 0 {
+		log.Warn("unexpected empty binlogs for V3 segment during storage format compaction",
+			zap.Int64("segmentID", segment.GetID()),
+			zap.Int64("collectionID", segment.GetCollectionID()),
+			zap.String("targetFormat", targetFormat))
+		return false
+	}
+
+	for _, fieldBinlog := range binlogs {
+		if fieldBinlog.GetFormat() != targetFormat {
+			return false
+		}
+	}
+	return true
 }
 
 func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
@@ -128,6 +147,10 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 		log.Warn("fail to apply storageVersionUpgradePolicy, collection not exist")
 		return nil, nil
 	}
+	if collection.IsExternal() {
+		log.Info("skip storage version compaction for external collection")
+		return nil, nil
+	}
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
@@ -156,6 +179,9 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 			}
 		}
 	}
+	versionEnabled := paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool()
+	formatEnabled := paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.GetAsBool()
+	targetFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
@@ -163,8 +189,12 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 			!segment.isCompacting &&
 			!segment.GetIsImporting() &&
 			segment.GetLevel() != datapb.SegmentLevel_L0 &&
-			segment.GetStorageVersion() != targetVersion &&
-			!policy.meta.isSegmentCompactionProtected(segment.GetID())
+			!policy.meta.isSegmentCompactionProtected(segment.GetID()) &&
+			((versionEnabled && segment.GetStorageVersion() != targetVersion) ||
+				(formatEnabled &&
+					targetVersion == storage.StorageV3 &&
+					segment.GetStorageVersion() == storage.StorageV3 &&
+					!segmentColumnGroupFormatsAllEqual(segment, targetFormat)))
 	}))
 
 	views := make([]CompactionView, 0, len(segments))

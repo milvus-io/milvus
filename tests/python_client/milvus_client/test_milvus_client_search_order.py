@@ -1,13 +1,12 @@
 import random
-import pytest
 
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
-from pymilvus import DataType, AnnSearchRequest, WeightedRanker
+from pymilvus import DataType
+from utils.util_log import test_log as log
 
 prefix = "client_search_order"
 default_nb = 3000
@@ -26,10 +25,26 @@ PRICE_MAX = 59.0
 RATING_MIN = 0.0
 RATING_MAX = 4.9
 CATEGORIES = [
-    "electronics", "tools", "books", "sports", "movies",
-    "games", "furniture", "health", "toys", "jewelry",
-    "cosmetics", "clothing", "garden", "food", "travel",
-    "pet_supplies", "beauty", "appliances", "automotive", "music"
+    "electronics",
+    "tools",
+    "books",
+    "sports",
+    "movies",
+    "games",
+    "furniture",
+    "health",
+    "toys",
+    "jewelry",
+    "cosmetics",
+    "clothing",
+    "garden",
+    "food",
+    "travel",
+    "pet_supplies",
+    "beauty",
+    "appliances",
+    "automotive",
+    "music",
 ]
 
 
@@ -63,12 +78,16 @@ def gen_search_order_data(nb, schema):
         row["int8_field"] = i % 127
         row["int16_field"] = i % 1000
         row["float_field"] = round(random.uniform(0.0, 100.0), 2)
-        row["json_field"] = {"nested_price": float(random.randint(1, 100)),
-                             "nested": {"score": round(random.uniform(0, 10), 1)}}
+        row["json_field"] = {
+            "nested_price": float(random.randint(1, 100)),
+            "nested": {"score": round(random.uniform(0, 10), 1)},
+        }
         # Dynamic fields (not in schema, stored via enable_dynamic_field=True)
         row["dyn_age"] = random.randint(18, 80)
-        row["dyn_meta"] = {"price": float(random.randint(1, 100)),
-                           "profile": {"score": round(random.uniform(0, 10), 1)}}
+        row["dyn_meta"] = {
+            "price": float(random.randint(1, 100)),
+            "profile": {"score": round(random.uniform(0, 10), 1)},
+        }
     return rows
 
 
@@ -91,11 +110,13 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         schema = build_search_order_schema(client)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="embeddings", index_type="HNSW",
-                               metric_type="COSINE", M=16, efConstruction=200)
+        index_params.add_index(
+            field_name="embeddings", index_type="HNSW", metric_type="COSINE", M=16, efConstruction=200
+        )
 
-        client.create_collection(collection_name=collection_name, schema=schema,
-                                 index_params=index_params, consistency_level="Strong")
+        client.create_collection(
+            collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         # Insert data in 3 batches to create multiple segments
         nb = default_nb
@@ -114,17 +135,21 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
                     self.drop_collection(self._client(), VALID_COLLECTION_NAME)
             except Exception:
                 pass
+
         request.addfinalizer(teardown)
 
     # ==================== L0: Smoke Tests ====================
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("field_name,order", [
-        ("price", "asc"),
-        ("price", "ascending"),
-        ("rating", "desc"),
-        ("rating", "descending"),
-    ])
+    @pytest.mark.parametrize(
+        "field_name,order",
+        [
+            ("price", "asc"),
+            ("price", "ascending"),
+            ("rating", "desc"),
+            ("rating", "descending"),
+        ],
+    )
     def test_milvus_client_search_order_by_single_field(self, field_name, order):
         """
         target: test search with order_by_fields on a single field with all direction forms
@@ -135,12 +160,16 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "price", "rating", "category"],
-                          order_by_fields=[{"field": field_name, "order": order}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price", "rating", "category"],
+            order_by_fields=[{"field": field_name, "order": order}],
+            consistency_level="Strong",
+        )[0]
 
         assert len(res) == 1, f"Expected 1 query result, got {len(res)}"
         results = res[0]
@@ -156,11 +185,13 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         values = [r["entity"][field_name] for r in results]
         for i in range(len(values) - 1):
             if is_asc:
-                assert values[i] <= values[i + 1], \
+                assert values[i] <= values[i + 1], (
                     f"{field_name} not ascending at index {i}: {values[i]} > {values[i + 1]}"
+                )
             else:
-                assert values[i] >= values[i + 1], \
+                assert values[i] >= values[i + 1], (
                     f"{field_name} not descending at index {i}: {values[i]} < {values[i + 1]}"
+                )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_search_order_by_multi_fields(self):
@@ -173,15 +204,16 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "price", "rating", "category"],
-                          order_by_fields=[
-                              {"field": "price", "order": "asc"},
-                              {"field": "rating", "order": "desc"}
-                          ],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price", "rating", "category"],
+            order_by_fields=[{"field": "price", "order": "asc"}, {"field": "rating", "order": "desc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) == default_limit
@@ -189,16 +221,16 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         # Verify primary sort: price ascending
         prices = [r["entity"]["price"] for r in results]
         for i in range(len(prices) - 1):
-            assert prices[i] <= prices[i + 1], \
-                f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
+            assert prices[i] <= prices[i + 1], f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
 
         # Verify secondary sort: within same price, rating descending
         for i in range(len(results) - 1):
             if results[i]["entity"]["price"] == results[i + 1]["entity"]["price"]:
-                assert results[i]["entity"]["rating"] >= results[i + 1]["entity"]["rating"], \
-                    f"Rating not descending within same price at index {i}: " \
-                    f"price={results[i]['entity']['price']}, " \
+                assert results[i]["entity"]["rating"] >= results[i + 1]["entity"]["rating"], (
+                    f"Rating not descending within same price at index {i}: "
+                    f"price={results[i]['entity']['price']}, "
                     f"rating {results[i]['entity']['rating']} < {results[i + 1]['entity']['rating']}"
+                )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_search_group_by_with_order_by(self):
@@ -211,15 +243,19 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "price", "rating", "category"],
-                          group_by_field="category",
-                          group_size=3,
-                          strict_group_size=True,
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price", "rating", "category"],
+            group_by_field="category",
+            group_size=3,
+            strict_group_size=True,
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) > 0
@@ -234,8 +270,7 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
 
         # Verify each group has at most group_size entities
         for cat, group_results in groups.items():
-            assert len(group_results) <= 3, \
-                f"Category '{cat}' has {len(group_results)} results, expected <= 3"
+            assert len(group_results) <= 3, f"Category '{cat}' has {len(group_results)} results, expected <= 3"
 
         # Verify top1 of each group is sorted by price ascending
         group_top1_prices = []
@@ -247,25 +282,28 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
                 group_top1_prices.append(r["entity"]["price"])
 
         for i in range(len(group_top1_prices) - 1):
-            assert group_top1_prices[i] <= group_top1_prices[i + 1], \
-                f"Group top1 price not ascending at index {i}: " \
-                f"{group_top1_prices[i]} > {group_top1_prices[i + 1]}"
+            assert group_top1_prices[i] <= group_top1_prices[i + 1], (
+                f"Group top1 price not ascending at index {i}: {group_top1_prices[i]} > {group_top1_prices[i + 1]}"
+            )
 
     # ==================== L1: Core Functionality ====================
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("field_name,order", [
-        ("bool_field", "asc"),
-        ("int8_field", "asc"),
-        ("int8_field", "desc"),
-        ("int16_field", "asc"),
-        ("int16_field", "desc"),
-        ("int32_field", "asc"),
-        ("int32_field", "desc"),
-        ("float_field", "asc"),
-        ("float_field", "desc"),
-        ("category", "asc"),
-    ])
+    @pytest.mark.parametrize(
+        "field_name,order",
+        [
+            ("bool_field", "asc"),
+            ("int8_field", "asc"),
+            ("int8_field", "desc"),
+            ("int16_field", "asc"),
+            ("int16_field", "desc"),
+            ("int32_field", "asc"),
+            ("int32_field", "desc"),
+            ("float_field", "asc"),
+            ("float_field", "desc"),
+            ("category", "asc"),
+        ],
+    )
     def test_milvus_client_search_order_by_scalar_types(self, field_name, order):
         """
         target: test search order by various scalar data types
@@ -276,23 +314,29 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", field_name],
-                          order_by_fields=[{"field": field_name, "order": order}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", field_name],
+            order_by_fields=[{"field": field_name, "order": order}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) == default_limit
         values = [r["entity"][field_name] for r in results]
         for i in range(len(values) - 1):
             if order == "asc":
-                assert values[i] <= values[i + 1], \
+                assert values[i] <= values[i + 1], (
                     f"{field_name} not ascending at index {i}: {values[i]} > {values[i + 1]}"
+                )
             else:
-                assert values[i] >= values[i + 1], \
+                assert values[i] >= values[i + 1], (
                     f"{field_name} not descending at index {i}: {values[i]} < {values[i + 1]}"
+                )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_field_not_in_output_fields(self):
@@ -305,12 +349,16 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "category"],
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "category"],
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) == default_limit
@@ -318,8 +366,7 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         if "price" in results[0]["entity"]:
             prices = [r["entity"]["price"] for r in results]
             for i in range(len(prices) - 1):
-                assert prices[i] <= prices[i + 1], \
-                    f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
+                assert prices[i] <= prices[i + 1], f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_dynamic_field(self):
@@ -332,19 +379,22 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "dyn_age"],
-                          order_by_fields=[{"field": "dyn_age", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "dyn_age"],
+            order_by_fields=[{"field": "dyn_age", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) == default_limit
         ages = [r["entity"]["dyn_age"] for r in results]
         for i in range(len(ages) - 1):
-            assert ages[i] <= ages[i + 1], \
-                f"dyn_age not ascending at index {i}: {ages[i]} > {ages[i + 1]}"
+            assert ages[i] <= ages[i + 1], f"dyn_age not ascending at index {i}: {ages[i]} > {ages[i + 1]}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_json_path(self):
@@ -357,19 +407,24 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "json_field"],
-                          order_by_fields=[{"field": 'json_field["nested_price"]', "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "json_field"],
+            order_by_fields=[{"field": 'json_field["nested_price"]', "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) == default_limit
         prices = [r["entity"]["json_field"]["nested_price"] for r in results]
         for i in range(len(prices) - 1):
-            assert prices[i] <= prices[i + 1], \
+            assert prices[i] <= prices[i + 1], (
                 f"json nested_price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_nested_json_path(self):
@@ -382,19 +437,24 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "json_field"],
-                          order_by_fields=[{"field": 'json_field["nested"]["score"]', "order": "desc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "json_field"],
+            order_by_fields=[{"field": 'json_field["nested"]["score"]', "order": "desc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) == default_limit
         scores = [r["entity"]["json_field"]["nested"]["score"] for r in results]
         for i in range(len(scores) - 1):
-            assert scores[i] >= scores[i + 1], \
+            assert scores[i] >= scores[i + 1], (
                 f"nested score not descending at index {i}: {scores[i]} < {scores[i + 1]}"
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_dynamic_json_path(self):
@@ -407,19 +467,24 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "dyn_meta"],
-                          order_by_fields=[{"field": 'dyn_meta["price"]', "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "dyn_meta"],
+            order_by_fields=[{"field": 'dyn_meta["price"]', "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) == default_limit
         dyn_prices = [r["entity"]["dyn_meta"]["price"] for r in results]
         for i in range(len(dyn_prices) - 1):
-            assert dyn_prices[i] <= dyn_prices[i + 1], \
+            assert dyn_prices[i] <= dyn_prices[i + 1], (
                 f"dyn_meta.price not ascending at index {i}: {dyn_prices[i]} > {dyn_prices[i + 1]}"
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_with_filter(self):
@@ -433,13 +498,17 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         filter_expr = "price >= 20.0 && price <= 40.0"
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          filter=filter_expr,
-                          output_fields=["id", "price", "rating"],
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            filter=filter_expr,
+            output_fields=["id", "price", "rating"],
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) <= default_limit
@@ -450,8 +519,7 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
             assert 20.0 <= p <= 40.0, f"Price {p} not in filter range [20.0, 40.0]"
         # Verify sort
         for i in range(len(prices) - 1):
-            assert prices[i] <= prices[i + 1], \
-                f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
+            assert prices[i] <= prices[i + 1], f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("limit", [1, 50, 100])
@@ -465,20 +533,23 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "price"],
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         assert len(results) == limit, f"Expected {limit} results, got {len(results)}"
 
         prices = [r["entity"]["price"] for r in results]
         for i in range(len(prices) - 1):
-            assert prices[i] <= prices[i + 1], \
-                f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
+            assert prices[i] <= prices[i + 1], f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_output_fields_complete(self):
@@ -492,18 +563,21 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         output_fields = ["id", "price", "rating", "category", "int32_field"]
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=output_fields,
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=output_fields,
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         for r in results:
             for field in output_fields:
-                assert field in r["entity"], \
-                    f"Field '{field}' missing in result entity: {r['entity'].keys()}"
+                assert field in r["entity"], f"Field '{field}' missing in result entity: {r['entity'].keys()}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_group_by_order_by_with_group_size(self):
@@ -516,14 +590,18 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "price", "category"],
-                          group_by_field="category",
-                          group_size=2,
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price", "category"],
+            group_by_field="category",
+            group_size=2,
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         groups = {}
@@ -534,8 +612,7 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
             groups[cat].append(r)
 
         for cat, group_results in groups.items():
-            assert len(group_results) <= 2, \
-                f"Category '{cat}' has {len(group_results)} results, expected <= 2"
+            assert len(group_results) <= 2, f"Category '{cat}' has {len(group_results)} results, expected <= 2"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_group_by_order_by_strict_group_size(self):
@@ -549,15 +626,19 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         group_size = 3
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "price", "category"],
-                          group_by_field="category",
-                          group_size=group_size,
-                          strict_group_size=True,
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price", "category"],
+            group_by_field="category",
+            group_size=group_size,
+            strict_group_size=True,
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         groups = {}
@@ -569,8 +650,9 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
 
         # With strict_group_size=True, each group should have exactly group_size
         for cat, group_results in groups.items():
-            assert len(group_results) == group_size, \
+            assert len(group_results) == group_size, (
                 f"Category '{cat}' has {len(group_results)} results, expected exactly {group_size}"
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_multi_nq(self):
@@ -584,12 +666,16 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
 
         nq = 3
         vectors_to_search = cf.gen_vectors(nq, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "price"],
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         assert len(res) == nq, f"Expected {nq} result sets, got {len(res)}"
 
@@ -598,8 +684,9 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
             assert len(results) == default_limit
             prices = [r["entity"]["price"] for r in results]
             for i in range(len(prices) - 1):
-                assert prices[i] <= prices[i + 1], \
+                assert prices[i] <= prices[i + 1], (
                     f"nq={q}: Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
+                )
 
     # ==================== L2: Edge Cases & Boundary Tests ====================
 
@@ -614,14 +701,18 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         collection_name = VALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        filter_expr = "category == \"electronics\""
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          filter=filter_expr,
-                          output_fields=["id", "price", "category"],
-                          order_by_fields=[{"field": "price", "order": "asc"}],
-                          consistency_level="Strong")[0]
+        filter_expr = 'category == "electronics"'
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            filter=filter_expr,
+            output_fields=["id", "price", "category"],
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            consistency_level="Strong",
+        )[0]
 
         results = res[0]
         for r in results:
@@ -629,17 +720,15 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
 
         prices = [r["entity"]["price"] for r in results]
         for i in range(len(prices) - 1):
-            assert prices[i] <= prices[i + 1], \
-                f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
-
+            assert prices[i] <= prices[i + 1], f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_nullable_field(self):
         """
-        target: test order_by on nullable field with NULLS FIRST semantics
+        target: test order_by on nullable field with default ASC NULLS LAST semantics
         method: create collection with nullable price field, insert some null values,
                 search with order_by price asc
-        expected: null values appear before all non-null values (NULLS FIRST)
+        expected: null values appear after all non-null values (NULLS LAST)
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -650,11 +739,13 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="embeddings", index_type="HNSW",
-                               metric_type="COSINE", M=16, efConstruction=200)
+        index_params.add_index(
+            field_name="embeddings", index_type="HNSW", metric_type="COSINE", M=16, efConstruction=200
+        )
 
-        client.create_collection(collection_name=collection_name, schema=schema,
-                                 index_params=index_params, consistency_level="Strong")
+        client.create_collection(
+            collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
         try:
             nb = 500
             rows = []
@@ -673,32 +764,97 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
             client.flush(collection_name=collection_name)
 
             vectors_to_search = cf.gen_vectors(1, default_dim)
-            res = self.search(client, collection_name, vectors_to_search,
-                              limit=default_limit,
-                              anns_field="embeddings",
-                              output_fields=["id", "score"],
-                              order_by_fields=[{"field": "score", "order": "asc"}],
-                              consistency_level="Strong")[0]
+            res = self.search(
+                client,
+                collection_name,
+                vectors_to_search,
+                limit=default_limit,
+                anns_field="embeddings",
+                output_fields=["id", "score"],
+                order_by_fields=[{"field": "score", "order": "asc"}],
+                consistency_level="Strong",
+            )[0]
 
             results = res[0]
             assert len(results) == default_limit
 
-            # Verify NULLS FIRST: all nulls come before non-nulls
-            seen_non_null = False
+            # Verify NULLS LAST: all nulls come after non-nulls
+            seen_null = False
             non_null_scores = []
             for r in results:
                 val = r["entity"].get("score")
                 if val is None:
-                    assert not seen_non_null, \
-                        "Null value found after non-null value (expected NULLS FIRST)"
+                    seen_null = True
                 else:
-                    seen_non_null = True
+                    assert not seen_null, "Non-null value found after null value (expected NULLS LAST)"
                     non_null_scores.append(val)
 
             # Verify non-null values are sorted ascending
             for i in range(len(non_null_scores) - 1):
-                assert non_null_scores[i] <= non_null_scores[i + 1], \
+                assert non_null_scores[i] <= non_null_scores[i + 1], (
                     f"Score not ascending at index {i}: {non_null_scores[i]} > {non_null_scores[i + 1]}"
+                )
+        finally:
+            client.drop_collection(collection_name)
+
+
+@pytest.mark.xdist_group("TestMilvusClientSearchOrderIndependent")
+class TestMilvusClientSearchOrderIndependent(TestMilvusClientV2Base):
+    """
+    Test cases for search with order_by_fields that require controlled data.
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(
+        reason="Milvus issue #49879: search with order_by_fields applies offset before scalar ordering",
+        strict=True,
+    )
+    def test_milvus_client_search_order_by_with_offset(self):
+        """
+        target: verify search pagination with order_by_fields applies offset after scalar ordering
+        method: search controlled ANN candidates with order_by price asc, limit=2, offset=1
+        expected: ANN candidates are sorted by price asc first, then offset skips the first sorted result
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("price", DataType.INT64)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=2)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="embeddings", index_type="FLAT", metric_type="IP", params={})
+
+        client.create_collection(
+            collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
+        try:
+            rows = [
+                {"id": 1, "price": 30, "embeddings": [1.0, 0.0]},
+                {"id": 2, "price": 10, "embeddings": [0.9, 0.0]},
+                {"id": 3, "price": 20, "embeddings": [0.8, 0.0]},
+                {"id": 4, "price": 40, "embeddings": [0.7, 0.0]},
+            ]
+            client.insert(collection_name=collection_name, data=rows)
+            client.flush(collection_name=collection_name)
+            client.load_collection(collection_name=collection_name)
+
+            res = self.search(
+                client,
+                collection_name,
+                [[1.0, 0.0]],
+                anns_field="embeddings",
+                limit=2,
+                offset=1,
+                search_params={"metric_type": "IP", "params": {}},
+                output_fields=["price"],
+                order_by_fields=[{"field": "price", "order": "asc"}],
+                consistency_level="Strong",
+            )[0]
+
+            result_ids = [r["id"] for r in res[0]]
+            assert result_ids == [3, 1], f"Expected offset after price ordering to return [3, 1], got {result_ids}"
         finally:
             client.drop_collection(collection_name)
 
@@ -726,11 +882,13 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="embeddings", index_type="HNSW",
-                               metric_type="COSINE", M=16, efConstruction=200)
+        index_params.add_index(
+            field_name="embeddings", index_type="HNSW", metric_type="COSINE", M=16, efConstruction=200
+        )
 
-        client.create_collection(collection_name=collection_name, schema=schema,
-                                 index_params=index_params, consistency_level="Strong")
+        client.create_collection(
+            collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong"
+        )
 
         rows = cf.gen_row_data_by_schema(nb=500, schema=schema)
         for i, row in enumerate(rows):
@@ -745,6 +903,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
                     self.drop_collection(self._client(), INVALID_COLLECTION_NAME)
             except Exception:
                 pass
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -758,14 +917,21 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 65536, ct.err_msg: "order_by field 'nonexistent_field' does not exist in collection schema"}
-        self.search(client, collection_name, vectors_to_search,
-                    limit=default_limit,
-                    anns_field="embeddings",
-                    output_fields=["id", "price"],
-                    order_by_fields=[{"field": "nonexistent_field", "order": "asc"}],
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 65536,
+            ct.err_msg: "order_by field 'nonexistent_field' does not exist in collection schema",
+        }
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "nonexistent_field", "order": "asc"}],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_order_by_vector_field(self):
@@ -783,16 +949,20 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
             ct.err_msg: (
                 "order_by field 'embeddings' has unsortable type FloatVector; supported types: "
                 "bool, int8/16/32/64, float, double, string, varchar; for JSON fields use path "
-                "syntax like field[\"key\"]"
-            )
+                'syntax like field["key"]'
+            ),
         }
-        self.search(client, collection_name, vectors_to_search,
-                    limit=default_limit,
-                    anns_field="embeddings",
-                    output_fields=["id", "price"],
-                    order_by_fields=[{"field": "embeddings", "order": "asc"}],
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "embeddings", "order": "asc"}],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_order_by_invalid_order_value(self):
@@ -805,14 +975,21 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 65536, ct.err_msg: "invalid order direction 'invalid' for field 'price', expected 'asc' or 'desc'"}
-        self.search(client, collection_name, vectors_to_search,
-                    limit=default_limit,
-                    anns_field="embeddings",
-                    output_fields=["id", "price"],
-                    order_by_fields=[{"field": "price", "order": "invalid"}],
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 65536,
+            ct.err_msg: "invalid order direction 'invalid' for field 'price', expected 'asc' or 'desc'",
+        }
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "price", "order": "invalid"}],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_order_by_empty_list(self):
@@ -826,12 +1003,16 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         # Empty list should either work as normal search or return error
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "price"],
-                          order_by_fields=[],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[],
+            consistency_level="Strong",
+        )[0]
 
         # Should return results (normal search without ordering)
         results = res[0]
@@ -848,14 +1029,21 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1, ct.err_msg: "Invalid order_by_fields item: 'field' key is required and cannot be empty"}
-        self.search(client, collection_name, vectors_to_search,
-                    limit=default_limit,
-                    anns_field="embeddings",
-                    output_fields=["id", "price"],
-                    order_by_fields=[{"order": "asc"}],
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: "Invalid order_by_fields item: 'field' key is required and cannot be empty",
+        }
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"order": "asc"}],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_order_by_missing_order_key(self):
@@ -870,12 +1058,16 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(1, default_dim)
         # Missing 'order' key - may default to asc or return error
         try:
-            res = self.search(client, collection_name, vectors_to_search,
-                              limit=default_limit,
-                              anns_field="embeddings",
-                              output_fields=["id", "price"],
-                              order_by_fields=[{"field": "price"}],
-                              consistency_level="Strong")[0]
+            res = self.search(
+                client,
+                collection_name,
+                vectors_to_search,
+                limit=default_limit,
+                anns_field="embeddings",
+                output_fields=["id", "price"],
+                order_by_fields=[{"field": "price"}],
+                consistency_level="Strong",
+            )[0]
             # If it succeeds, verify it defaults to some ordering
             results = res[0]
             assert len(results) == default_limit
@@ -893,15 +1085,18 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: "order_by is not supported when using search iterator"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             batch_size=10,
-                             anns_field="embeddings",
-                             output_fields=["id", "price"],
-                             order_by_fields=[{"field": "price", "order": "asc"}],
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: "order_by is not supported when using search iterator"}
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=10,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "price", "order": "asc"}],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_order_by_json_field_without_path(self):
@@ -914,19 +1109,25 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 65535,
-                 ct.err_msg: (
-                     "order_by field 'json_field' has unsortable type JSON; supported types: "
-                     "bool, int8/16/32/64, float, double, string, varchar; for JSON fields use "
-                     "path syntax like field[\"key\"]"
-                 )}
-        self.search(client, collection_name, vectors_to_search,
-                    limit=default_limit,
-                    anns_field="embeddings",
-                    output_fields=["id", "price"],
-                    order_by_fields=[{"field": "json_field", "order": "asc"}],
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: (
+                "order_by field 'json_field' has unsortable type JSON; supported types: "
+                "bool, int8/16/32/64, float, double, string, varchar; for JSON fields use "
+                'path syntax like field["key"]'
+            ),
+        }
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "json_field", "order": "asc"}],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_order_by_empty_field_name(self):
@@ -939,15 +1140,21 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: "Invalid order_by_fields item: 'field' key is required and cannot be empty"}
-        self.search(client, collection_name, vectors_to_search,
-                    limit=default_limit,
-                    anns_field="embeddings",
-                    output_fields=["id", "price"],
-                    order_by_fields=[{"field": "", "order": "asc"}],
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: "Invalid order_by_fields item: 'field' key is required and cannot be empty",
+        }
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "", "order": "asc"}],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_order_by_invalid_json_path(self):
@@ -960,12 +1167,18 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "order_by field 'json_field[invalid:asc' does not exist in collection schema"}
-        self.search(client, collection_name, vectors_to_search,
-                    limit=default_limit,
-                    anns_field="embeddings",
-                    output_fields=["id", "price"],
-                    order_by_fields=[{"field": 'json_field[invalid', "order": "asc"}],
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: "order_by field 'json_field[invalid:asc' does not exist in collection schema",
+        }
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            anns_field="embeddings",
+            output_fields=["id", "price"],
+            order_by_fields=[{"field": "json_field[invalid", "order": "asc"}],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )

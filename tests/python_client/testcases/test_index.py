@@ -233,7 +233,7 @@ class TestIndexOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
         self.index_wrap.init_index(
             collection_w.collection,
             default_field_name,
@@ -1291,7 +1291,7 @@ class TestIndexInvalid(TestcaseBase):
             ct.default_float_vec_field_name,
             index_params=scalar_index_params,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "invalid index params"},
+            check_items={ct.err_code: 1100, ct.err_msg: "metric type not set for vector index"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1524,7 +1524,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("ratio", [-0.5, 1, 3])
-    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     def test_invalid_sparse_ratio(self, ratio, index):
         """
         target: index creation for unsupported ratio parameter
@@ -1551,7 +1551,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("inverted_index_algo", ["INVALID_ALGO"])
-    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     def test_invalid_sparse_inverted_index_algo(self, inverted_index_algo, index):
         """
         target: index creation for unsupported sparse inverted index algo parameter
@@ -1565,7 +1565,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.insert(data=data)
         params = {"index_type": index, "metric_type": "IP", "params": {"inverted_index_algo": inverted_index_algo}}
         error = {
-            ct.err_code: 999,
+            ct.err_code: 1100,
             ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported",
         }
         index, _ = self.index_wrap.init_index(
@@ -1790,7 +1790,7 @@ class TestIndexString(TestcaseBase):
             default_index_params,
             index_name=index_name2,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"},
+            check_items={ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)

@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -238,7 +238,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 			zap.String("messageType", task.msg.MessageType().String()),
 			zap.Int("pendingVChannels", len(pending.pendingMessages)))
 		if _, err := s.bm.broadcastScheduler.AddTask(ctx, pending); err != nil {
-			return errors.Wrapf(err, "failed to supplement task %d via broadcastScheduler", task.Header().BroadcastID)
+			return merr.Wrapf(err, "failed to supplement task %d via broadcastScheduler", task.Header().BroadcastID)
 		}
 	}
 	s.Logger().Info("All incomplete broadcasts fixed and tombstoned")

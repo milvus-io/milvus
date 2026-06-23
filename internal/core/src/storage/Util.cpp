@@ -14,7 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <filesystem>
 #include <memory>
+#include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
 #include "arrow/array/builder_nested.h"
@@ -48,9 +50,6 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/minio/MinioChunkManager.h"
-#ifdef USE_OPENDAL
-#include "storage/opendal/OpenDALChunkManager.h"
-#endif
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "common/Common.h"
@@ -64,10 +63,14 @@
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
+#include "milvus-storage/common/constants.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/lob_column/lob_column_manager.h"
 #include "milvus-storage/reader.h"
+#include "milvus-storage/segment/segment_reader.h"
+#include "nlohmann/json.hpp"
 
 namespace milvus::storage {
 
@@ -76,8 +79,7 @@ constexpr const char* TEMP = "tmp";
 std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
     {"local", ChunkManagerType::Local},
     {"minio", ChunkManagerType::Minio},
-    {"remote", ChunkManagerType::Remote},
-    {"opendal", ChunkManagerType::OpenDAL}};
+    {"remote", ChunkManagerType::Remote}};
 
 static std::shared_ptr<arrow::Array>
 NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array,
@@ -334,25 +336,11 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                        "builder must be ListBuilder for VECTOR_ARRAY");
 
             auto vector_arrays = reinterpret_cast<VectorArray*>(raw_data);
+            auto valid_data = payload.valid_data;
+            AssertInfo((nullable && valid_data) || !nullable,
+                       "valid_data is required for nullable VectorArray");
 
             if (length > 0) {
-                auto element_type = vector_arrays[0].get_element_type();
-
-                // Validate element type
-                switch (element_type) {
-                    case DataType::VECTOR_FLOAT:
-                    case DataType::VECTOR_BINARY:
-                    case DataType::VECTOR_FLOAT16:
-                    case DataType::VECTOR_BFLOAT16:
-                    case DataType::VECTOR_INT8:
-                        break;
-                    default:
-                        ThrowInfo(DataTypeInvalid,
-                                  "Unsupported element type in VectorArray: {}",
-                                  element_type);
-                }
-
-                // All supported vector types use FixedSizeBinaryBuilder
                 auto value_builder =
                     static_cast<arrow::FixedSizeBinaryBuilder*>(
                         list_builder->value_builder());
@@ -360,23 +348,60 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                            "value_builder must be FixedSizeBinaryBuilder for "
                            "VectorArray");
 
-                for (int i = 0; i < length; ++i) {
+                DataType element_type = DataType::NONE;
+                auto append_vector_array = [&](const VectorArray& array) {
+                    if (element_type == DataType::NONE) {
+                        element_type = array.get_element_type();
+                        switch (element_type) {
+                            case DataType::VECTOR_FLOAT:
+                            case DataType::VECTOR_BINARY:
+                            case DataType::VECTOR_FLOAT16:
+                            case DataType::VECTOR_BFLOAT16:
+                            case DataType::VECTOR_INT8:
+                                break;
+                            default:
+                                ThrowInfo(
+                                    DataTypeInvalid,
+                                    "Unsupported element type in VectorArray: "
+                                    "{}",
+                                    element_type);
+                        }
+                    } else {
+                        AssertInfo(array.get_element_type() == element_type,
+                                   "Inconsistent element types in "
+                                   "VectorArray");
+                    }
                     auto status = list_builder->Append();
                     AssertInfo(status.ok(),
                                "Failed to append list: {}",
                                status.ToString());
 
-                    const auto& array = vector_arrays[i];
-                    AssertInfo(array.get_element_type() == element_type,
-                               "Inconsistent element types in VectorArray");
-
                     int num_vectors = array.length();
-                    auto ast = value_builder->AppendValues(
-                        reinterpret_cast<const uint8_t*>(array.data()),
-                        num_vectors);
-                    AssertInfo(ast.ok(),
-                               "Failed to batch append vectors: {}",
-                               ast.ToString());
+                    if (num_vectors > 0) {
+                        auto ast = value_builder->AppendValues(
+                            reinterpret_cast<const uint8_t*>(array.data()),
+                            num_vectors);
+                        AssertInfo(ast.ok(),
+                                   "Failed to batch append vectors: {}",
+                                   ast.ToString());
+                    }
+                };
+
+                int valid_index = 0;
+                for (int i = 0; i < length; ++i) {
+                    if (nullable) {
+                        auto bit = (valid_data[i >> 3] >> (i & 0x07)) & 1;
+                        if (!bit) {
+                            auto status = list_builder->AppendNull();
+                            AssertInfo(status.ok(),
+                                       "Failed to append null list: {}",
+                                       status.ToString());
+                            continue;
+                        }
+                        append_vector_array(vector_arrays[valid_index++]);
+                    } else {
+                        append_vector_array(vector_arrays[i]);
+                    }
                 }
             }
             break;
@@ -772,7 +797,10 @@ CreateArrowSchema(DataType data_type, int dim, bool nullable) {
 }
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(DataType data_type, int dim, DataType element_type) {
+CreateArrowSchema(DataType data_type,
+                  int dim,
+                  DataType element_type,
+                  bool nullable) {
     AssertInfo(data_type == DataType::VECTOR_ARRAY,
                "This overload is only for VECTOR_ARRAY type");
     AssertInfo(dim > 0, "invalid dim value");
@@ -782,8 +810,8 @@ CreateArrowSchema(DataType data_type, int dim, DataType element_type) {
         {ELEMENT_TYPE_KEY_FOR_ARROW, DIM_KEY},
         {std::to_string(static_cast<int>(element_type)), std::to_string(dim)});
 
-    // VECTOR_ARRAY is not nullable
-    auto field = arrow::field("val", value_type, false)->WithMetadata(metadata);
+    auto field =
+        arrow::field("val", value_type, nullable)->WithMetadata(metadata);
     return arrow::schema({field});
 }
 
@@ -1148,11 +1176,6 @@ CreateChunkManager(const StorageConfig& storage_config) {
                 }
             }
         }
-#ifdef USE_OPENDAL
-        case ChunkManagerType::OpenDAL: {
-            return std::make_shared<OpenDALChunkManager>(storage_config);
-        }
-#endif
         default: {
             ThrowInfo(ConfigInvalid,
                       "unsupported storage_config.storage_type {}",
@@ -1259,7 +1282,7 @@ CreateFieldData(const DataType& type,
                 dim, type, nullable, total_num_rows);
         case DataType::VECTOR_ARRAY:
             return std::make_shared<FieldData<VectorArray>>(
-                dim, element_type, total_num_rows);
+                dim, element_type, nullable, total_num_rows);
         default:
             ThrowInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +
@@ -1448,7 +1471,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             fs,
             column_group_file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties());
+            GetReaderProperties(),
+            GetArrowReaderProperties());
         AssertInfo(result.ok(),
                    "[StorageV2] Failed to create file row group reader: " +
                        result.status().ToString());
@@ -1519,8 +1543,9 @@ GetFieldDatasFromManifest(
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
-    // Determine the column name to use: external fields use their external name,
-    // internal fields use the numeric field ID string.
+    // Determine the column name to use:
+    //   - external input fields: external column name
+    //   - internal and function-output fields: numeric field ID string
     std::string column_name;
     const auto& ext_field = field_meta.field_schema.external_field();
     if (!ext_field.empty()) {
@@ -1530,16 +1555,17 @@ GetFieldDatasFromManifest(
     }
 
     // TODO remove manual check after loon support read null for non-exists field
-    bool field_exists = false;
-    for (size_t i = 0; i < column_groups->size() && !field_exists; i++) {
-        auto column_group = column_groups->at(i);
-        for (const auto& column : column_group->columns) {
-            if (column == column_name) {
-                field_exists = true;
-                break;
+    auto column_exists = [&](const std::string& name) {
+        for (size_t i = 0; i < column_groups->size(); i++) {
+            for (const auto& column : column_groups->at(i)->columns) {
+                if (column == name) {
+                    return true;
+                }
             }
         }
-    }
+        return false;
+    };
+    bool field_exists = column_exists(column_name);
     if (!field_exists) {
         return {};
     }
@@ -1568,7 +1594,8 @@ GetFieldDatasFromManifest(
             if (data_type.value() == DataType::VECTOR_ARRAY) {
                 arrow_schema = CreateArrowSchema(data_type.value(),
                                                  static_cast<int>(dim),
-                                                 element_type.value());
+                                                 element_type.value(),
+                                                 nullable);
             } else if (IsSparseFloatVectorDataType(data_type.value())) {
                 arrow_schema = CreateArrowSchema(data_type.value(), nullable);
             } else {
@@ -1629,6 +1656,172 @@ GetFieldDatasFromManifest(
         field_data->FillFieldData(chunked_array);
         field_datas.push_back(field_data);
     }
+
+    return field_datas;
+}
+
+static bool
+ManifestContainsColumn(
+    const std::shared_ptr<milvus_storage::api::Manifest>& manifest,
+    const std::string& column_name) {
+    const auto& column_groups = manifest->columnGroups();
+    for (size_t i = 0; i < column_groups.size(); i++) {
+        for (const auto& column : column_groups.at(i)->columns) {
+            if (column == column_name) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static std::string
+GetSegmentBasePathFromManifestPath(const std::string& manifest_path,
+                                   int64_t field_id) {
+    try {
+        auto j = nlohmann::json::parse(manifest_path);
+        return j.at("base_path").get<std::string>();
+    } catch (const std::exception& e) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to parse manifest path for TEXT field {}: {}",
+                  field_id,
+                  e.what());
+    }
+    return {};
+}
+
+static std::string
+BuildTextLobBasePath(const std::string& segment_base_path, int64_t field_id) {
+    // segment_base_path format: {root}/{collectionID}/{partitionID}/{segmentID}
+    // lob_base_path format: {root}/{collectionID}/{partitionID}/lobs/{field_id}
+    std::filesystem::path segment_fs_path(segment_base_path);
+    auto partition_path = segment_fs_path.parent_path();
+    return (partition_path / "lobs" / std::to_string(field_id)).string();
+}
+
+static std::shared_ptr<arrow::Schema>
+BuildTextFieldReaderSchema(const FieldDataMeta& field_meta,
+                           const std::string& column_name) {
+    auto metadata =
+        arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                  {std::to_string(field_meta.field_id)});
+    auto field = arrow::field(column_name,
+                              arrow::utf8(),
+                              field_meta.field_schema.nullable(),
+                              metadata);
+    return arrow::schema({field});
+}
+
+static milvus_storage::segment::SegmentReaderConfig
+BuildTextSegmentReaderConfig(const milvus_storage::api::Properties& properties,
+                             int64_t field_id,
+                             const std::string& lob_base_path) {
+    milvus_storage::segment::SegmentReaderConfig config;
+    config.properties = properties;
+
+    milvus_storage::lob_column::LobColumnConfig lob_config;
+    lob_config.data_type = milvus_storage::lob_column::LobDataType::kText;
+    lob_config.field_id = field_id;
+    lob_config.lob_base_path = lob_base_path;
+    lob_config.properties = properties;
+    config.lob_columns[field_id] = std::move(lob_config);
+    return config;
+}
+
+static std::unique_ptr<milvus_storage::segment::SegmentReader>
+OpenTextFieldSegmentReader(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const std::shared_ptr<milvus_storage::api::Manifest>& loon_manifest,
+    const FieldDataMeta& field_meta,
+    const std::string& column_name) {
+    auto segment_base_path =
+        GetSegmentBasePathFromManifestPath(manifest_path, field_meta.field_id);
+    auto lob_base_path =
+        BuildTextLobBasePath(segment_base_path, field_meta.field_id);
+
+    auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
+        *loon_ffi_properties, segment_base_path);
+    AssertInfo(fs_result.ok(),
+               "Failed to get filesystem for TEXT field {}: {}",
+               field_meta.field_id,
+               fs_result.status().ToString());
+    auto fs = std::move(fs_result.ValueOrDie());
+
+    auto schema = BuildTextFieldReaderSchema(field_meta, column_name);
+    auto config = BuildTextSegmentReaderConfig(
+        *loon_ffi_properties, field_meta.field_id, lob_base_path);
+
+    auto reader_result = milvus_storage::segment::SegmentReader::Open(
+        fs, loon_manifest, schema, {column_name}, config);
+    AssertInfo(reader_result.ok(),
+               "Failed to open SegmentReader for TEXT field {}: {}",
+               field_meta.field_id,
+               reader_result.status().ToString());
+    return std::move(reader_result.ValueOrDie());
+}
+
+std::vector<FieldDataPtr>
+GetTextFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta) {
+    AssertInfo(loon_ffi_properties != nullptr,
+               "loon ffi properties is null when read text field data from "
+               "manifest");
+
+    auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
+
+    std::string column_name = std::to_string(field_meta.field_id);
+
+    if (!ManifestContainsColumn(loon_manifest, column_name)) {
+        LOG_INFO("TEXT field {} not found in manifest", field_meta.field_id);
+        return {};
+    }
+
+    auto reader = OpenTextFieldSegmentReader(manifest_path,
+                                             loon_ffi_properties,
+                                             loon_manifest,
+                                             field_meta,
+                                             column_name);
+
+    std::vector<FieldDataPtr> field_datas;
+    while (true) {
+        std::shared_ptr<arrow::RecordBatch> batch;
+        auto status = reader->ReadNext(&batch);
+        AssertInfo(status.ok(),
+                   "Failed to read TEXT field {} from manifest: {}",
+                   field_meta.field_id,
+                   status.ToString());
+        if (batch == nullptr) {
+            break;
+        }
+
+        auto num_rows = batch->num_rows();
+        if (num_rows == 0) {
+            continue;
+        }
+
+        auto raw_column = batch->GetColumnByName(column_name);
+        AssertInfo(raw_column != nullptr,
+                   "TEXT field {} column {} not found in SegmentReader batch",
+                   field_meta.field_id,
+                   column_name);
+        auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
+        auto field_data = CreateFieldData(DataType::TEXT,
+                                          DataType::NONE,
+                                          field_meta.field_schema.nullable(),
+                                          1,
+                                          num_rows);
+        field_data->FillFieldData(chunked_array);
+        field_datas.push_back(field_data);
+    }
+
+    auto status = reader->Close();
+    AssertInfo(status.ok(),
+               "Failed to close SegmentReader for TEXT field {}: {}",
+               field_meta.field_id,
+               status.ToString());
 
     return field_datas;
 }
@@ -1695,7 +1888,8 @@ GetFieldIDList(FieldId column_group_id,
         filepath,
         arrow_schema,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-        GetReaderProperties());
+        GetReaderProperties(),
+        GetArrowReaderProperties());
     AssertInfo(result.ok(),
                "[StorageV2] Failed to create file row group reader: " +
                    result.status().ToString());
@@ -1773,9 +1967,39 @@ ValidateNoNullValuesInRange(const std::shared_ptr<arrow::Array>& values,
     }
 }
 
+bool
+IsByteVectorListInput(DataType data_type) {
+    return data_type == DataType::VECTOR_BINARY ||
+           data_type == DataType::VECTOR_BFLOAT16;
+}
+
+// External function output vectors can round-trip through schemaless Arrow
+// paths that erase the semantic element type and surface the column as a raw
+// list<uint8> (the physical Milvus vector bytes). In that case the uint8 bytes
+// already match our on-disk storage layout, so we accept them as raw bytes
+// instead of demanding the semantic element type (e.g. FLOAT for FloatVector).
+//
+// Restrictions:
+//   - Only dense vector columns qualify (IsVectorDataType).
+//   - Sparse float vectors are excluded: they are not fixed-width and do not
+//     use the raw fixed-size-binary layout.
+//   - VECTOR_ARRAY is excluded: its inner vectors are normalized recursively by
+//     the per-element semantic type, not as a flat byte list at this level.
+bool
+CanTreatVectorListAsRawBytes(
+    DataType data_type, const std::shared_ptr<arrow::DataType>& actual_type) {
+    return actual_type->id() == arrow::Type::UINT8 &&
+           IsVectorDataType(data_type) &&
+           !IsSparseFloatVectorDataType(data_type) &&
+           !IsVectorArrayDataType(data_type);
+}
+
 arrow::Type::type
 ExpectedVectorListElementArrowType(DataType data_type,
                                    const FieldMeta& field_meta) {
+    // This only validates vector columns encoded as List/FixedSizeList input.
+    // FixedSizeBinary and nullable Binary inputs bypass this helper and are
+    // validated by their byte-width checks instead.
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
             return arrow::Type::FLOAT;
@@ -1785,10 +2009,7 @@ ExpectedVectorListElementArrowType(DataType data_type,
             return arrow::Type::HALF_FLOAT;
         case DataType::VECTOR_BINARY:
         case DataType::VECTOR_BFLOAT16:
-            ThrowInfo(ErrorCode::Unsupported,
-                      "vector list input{} is not supported for {}",
-                      FieldErrorSuffix(field_meta),
-                      data_type);
+            return arrow::Type::UINT8;
         default:
             ThrowInfo(ErrorCode::Unsupported,
                       "unsupported vector list input{} for {}",
@@ -1806,9 +2027,27 @@ ArrowTypeName(arrow::Type::type type) {
             return "int8";
         case arrow::Type::HALF_FLOAT:
             return "halffloat";
+        case arrow::Type::UINT8:
+            return "uint8";
         default:
             return "unsupported";
     }
+}
+
+int
+ExpectedVectorListLength(DataType data_type,
+                         int dim,
+                         const std::shared_ptr<arrow::DataType>& actual_type) {
+    // Float-like vector lists are element-counted by dim. Byte vector lists are
+    // raw-byte encoded, so their list length must match the physical byte width.
+    // The same byte-width rule applies when a semantic vector column arrives as
+    // a raw uint8 byte list (CanTreatVectorListAsRawBytes), hence actual_type is
+    // needed here to disambiguate float-element lists from raw-byte lists.
+    if (IsByteVectorListInput(data_type) ||
+        CanTreatVectorListAsRawBytes(data_type, actual_type)) {
+        return GetDataTypeSize(data_type, dim);
+    }
+    return dim;
 }
 
 void
@@ -1818,8 +2057,17 @@ ValidateVectorListElementType(
     const FieldMeta& field_meta) {
     auto expected_type =
         ExpectedVectorListElementArrowType(data_type, field_meta);
-    AssertInfo(actual_type->id() == expected_type,
-               "vector element type mismatch{}, expected {}, actual {}",
+    // Accept either the semantic element type (e.g. FLOAT for FloatVector) or a
+    // raw uint8 byte list carrying the physical vector bytes. The list-length
+    // check downstream still enforces the correct byte width, so mismatched
+    // non-uint8 element types remain rejected below.
+    if (actual_type->id() == expected_type ||
+        CanTreatVectorListAsRawBytes(data_type, actual_type)) {
+        return;
+    }
+    AssertInfo(false,
+               "vector element type mismatch{}, expected {} or raw uint8 "
+               "bytes, actual {}",
                FieldErrorSuffix(field_meta),
                ArrowTypeName(expected_type),
                actual_type->ToString());
@@ -1861,6 +2109,11 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto values = list_array->values();
             ValidateVectorListElementType(
                 values->type(), data_type, field_meta);
+            // Computed per array: the expected length depends on the actual
+            // element type (dim elements for float lists, byte-width for raw
+            // uint8 byte lists), so it cannot be hoisted out of the loop.
+            int expected_list_length =
+                ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
             AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
                        "vector list element{} must be fixed-width "
@@ -1873,19 +2126,20 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             for (int64_t i = 0; i < num_rows; i++) {
                 if (array->IsValid(i)) {
                     auto offset = list_array->value_offset(i);
-                    auto actual_dim = list_array->value_offset(i + 1) - offset;
-                    AssertInfo(actual_dim == dim,
-                               "vector dimension mismatch{}, expected {}, "
+                    auto actual_length =
+                        list_array->value_offset(i + 1) - offset;
+                    AssertInfo(actual_length == expected_list_length,
+                               "vector list length mismatch{}, expected {}, "
                                "actual {} at row {}",
                                FieldErrorSuffix(field_meta),
-                               dim,
-                               actual_dim,
+                               expected_list_length,
+                               actual_length,
                                i);
                     ValidateNoNullValuesInRange(
-                        values, offset, offset + actual_dim, "vector list");
-                    memcpy(dst + i * byte_width,
-                           raw + offset * elem_byte_size,
-                           byte_width);
+                        values, offset, offset + actual_length, "vector list");
+                    milvus::fastmem::FastMemcpy(dst + i * byte_width,
+                                                raw + offset * elem_byte_size,
+                                                byte_width);
                 }
             }
         } else if (type_id == arrow::Type::FIXED_SIZE_LIST) {
@@ -1894,6 +2148,11 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto values = fsl_array->values();
             ValidateVectorListElementType(
                 values->type(), data_type, field_meta);
+            // Computed per array: the expected length depends on the actual
+            // element type (dim elements for float lists, byte-width for raw
+            // uint8 byte lists), so it cannot be hoisted out of the loop.
+            int expected_list_length =
+                ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
             AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
                        "vector list element{} must be fixed-width "
@@ -1901,21 +2160,23 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                        FieldErrorSuffix(field_meta),
                        elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
-            AssertInfo(fsl_array->value_length() == dim,
-                       "vector dimension mismatch{}, expected {}, actual {}",
+            AssertInfo(fsl_array->value_length() == expected_list_length,
+                       "vector list length mismatch{}, expected {}, actual {}",
                        FieldErrorSuffix(field_meta),
-                       dim,
+                       expected_list_length,
                        fsl_array->value_length());
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
             for (int64_t i = 0; i < num_rows; i++) {
                 if (array->IsValid(i)) {
                     auto offset = fsl_array->value_offset(i);
-                    ValidateNoNullValuesInRange(
-                        values, offset, offset + dim, "vector list");
-                    memcpy(dst + i * byte_width,
-                           raw + offset * elem_byte_size,
-                           byte_width);
+                    ValidateNoNullValuesInRange(values,
+                                                offset,
+                                                offset + expected_list_length,
+                                                "vector list");
+                    milvus::fastmem::FastMemcpy(dst + i * byte_width,
+                                                raw + offset * elem_byte_size,
+                                                byte_width);
                 }
             }
         } else {
@@ -1976,7 +2237,7 @@ ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays) {
         auto* dst = data_buf->mutable_data();
         for (int64_t i = 0; i < n; i++) {
             if (fsb->IsValid(i)) {
-                memcpy(dst, fsb->Value(i), byte_width);
+                milvus::fastmem::FastMemcpy(dst, fsb->Value(i), byte_width);
                 dst += byte_width;
             }
         }
@@ -2674,7 +2935,7 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
             continue;
         }
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
-        AssertInfo(list_arr->null_count() == 0,
+        AssertInfo(field_meta.is_nullable() || list_arr->null_count() == 0,
                    "VECTOR_ARRAY does not support null rows");
         if (list_arr->values()->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
             ValidateFixedSizeBinaryVectorWidth(list_arr->values(),
@@ -2689,12 +2950,14 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
                                                    element_type,
                                                    static_cast<int>(dim),
                                                    field_meta);
-        auto rebuilt =
-            arrow::ListArray::FromArrays(*list_arr->offsets(), *normalized[0]);
-        AssertInfo(rebuilt.ok(),
-                   "Failed to rebuild ListArray for VectorArray: {}",
-                   rebuilt.status().ToString());
-        result.push_back(*rebuilt);
+        auto rebuilt_data = arrow::ArrayData::Make(
+            arrow::list(normalized[0]->type()),
+            list_arr->length(),
+            {list_arr->null_bitmap(), list_arr->value_offsets()},
+            {normalized[0]->data()},
+            list_arr->null_count(),
+            list_arr->offset());
+        result.push_back(arrow::MakeArray(rebuilt_data));
     }
     return result;
 }

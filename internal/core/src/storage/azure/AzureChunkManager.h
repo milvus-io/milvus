@@ -45,7 +45,8 @@ AzureErrorMessage(const std::string& func,
                   const std::string& fmt_string,
                   Args&&... args) {
     std::ostringstream oss;
-    const auto& message = fmt::format(fmt_string, std::forward<Args>(args)...);
+    const auto& message =
+        fmt::format(fmt::runtime(fmt_string), std::forward<Args>(args)...);
     oss << "Error in " << func << "[exception:" << err.what()
         << ", params:" << message << "]";
     return oss.str();

@@ -48,17 +48,26 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     const auto& offset_mapping = indexing.GetOffsetMapping();
     TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
-    if (offset_mapping.IsEnabled()) {
-        transformed_bitset = TransformBitset(bitset, offset_mapping);
-        search_bitset = BitsetView(transformed_bitset);
+    const auto has_offset_mapping = offset_mapping.IsEnabled();
+    if (has_offset_mapping) {
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
-            auto total_num = num_queries * search_conf.topk_;
-            search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
-            search_result.distances_.resize(total_num, 0.0f);
-            search_result.total_nq_ = num_queries;
-            search_result.unity_topK_ = search_conf.topk_;
+            FillEmptySearchResult(
+                search_result, num_queries, search_conf.topk_);
             return;
+        }
+        if (!bitset.empty()) {
+            auto status =
+                offset_mapping.TransformBitset(bitset, transformed_bitset);
+            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
+                FillEmptySearchResult(
+                    search_result, num_queries, search_conf.topk_);
+                return;
+            }
+            search_bitset =
+                status == OffsetMapping::BitsetTransformStatus::NoFilter
+                    ? BitsetView{}
+                    : search_result.PinBitset(std::move(transformed_bitset));
         }
     }
 
@@ -75,16 +84,16 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         auto iter =
             CachedSearchIterator(indexing, dataset, search_conf, search_bitset);
         iter.NextBatch(search_conf, search_result);
-        if (offset_mapping.IsEnabled()) {
-            TransformOffset(search_result.seg_offsets_, offset_mapping);
+        if (has_offset_mapping) {
+            offset_mapping.TransformOffsets(search_result.seg_offsets_);
         }
         return;
     }
 
     indexing.Query(
         dataset, search_conf, search_bitset, op_context, search_result);
-    if (offset_mapping.IsEnabled()) {
-        TransformOffset(search_result.seg_offsets_, offset_mapping);
+    if (has_offset_mapping) {
+        offset_mapping.TransformOffsets(search_result.seg_offsets_);
     }
 }
 

@@ -10,7 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <cstdint>
+#include <optional>
+
 #include "cachinglayer/Translator.h"
+#include "common/resource_c.h"
 #include "index/Index.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 
@@ -57,6 +60,9 @@ class SealedIndexTranslator
     }
 
  private:
+    LoadResourceRequest
+    EstimateLoadResource() const;
+
     struct IndexLoadInfo {
         bool enable_mmap;
         std::string mmap_dir_path;
@@ -70,8 +76,10 @@ class SealedIndexTranslator
         std::string field_id;
         int64_t num_rows;
         int64_t dim;
+        std::vector<std::string> index_files;
         std::string
             warmup_policy;  // "disable", "sync", or "async"; empty means use global config
+        std::optional<LoadResourceRequest> load_resource_request;
     };
 
     milvus::index::CreateIndexInfo index_info_;
@@ -80,6 +88,7 @@ class SealedIndexTranslator
     Config config_;
     std::string index_key_;
     IndexLoadInfo index_load_info_;
+    LoadResourceRequest load_resource_request_{};
     milvus::cachinglayer::Meta meta_;
 };
 }  // namespace milvus::segcore::storagev1translator

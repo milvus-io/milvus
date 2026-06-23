@@ -24,6 +24,7 @@
 #include "common/Array.h"
 #include "common/Json.h"
 #include "common/Tracer.h"
+#include "common/VectorArray.h"
 #include "fmt/core.h"
 #include "opentelemetry/trace/span.h"
 
@@ -108,6 +109,26 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
                     result = ExecRangeVisitorImplForArray<double>(input);
+                    break;
+                }
+                default: {
+                    ThrowInfo(
+                        DataTypeInvalid,
+                        fmt::format("unsupported value type {} in expression",
+                                    value_type));
+                }
+            }
+            break;
+        }
+        case DataType::VECTOR_ARRAY: {
+            auto value_type = expr_->value_.val_case();
+            switch (value_type) {
+                case proto::plan::GenericValue::ValCase::kInt64Val: {
+                    result = ExecRangeVisitorImplForVectorArray<int64_t>(input);
+                    break;
+                }
+                case proto::plan::GenericValue::ValCase::kFloatVal: {
+                    result = ExecRangeVisitorImplForVectorArray<double>(input);
                     break;
                 }
                 default: {
@@ -914,6 +935,100 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                                                               right_operand,
                                                               index);
     }
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
+}
+
+template <typename ValueType>
+VectorPtr
+PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
+    OffsetVector* input) {
+    if (expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength) {
+        ThrowInfo(OpTypeInvalid,
+                  "unsupported arith type for vector array field: {}",
+                  expr_->arith_op_type_);
+    }
+
+    auto real_batch_size =
+        has_offset_input_ ? input->size() : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    if (!arg_inited_) {
+        value_arg_.SetValue<ValueType>(expr_->value_);
+        arg_inited_ = true;
+    }
+
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+
+    auto op_type = expr_->op_type_;
+    auto value = value_arg_.GetValue<ValueType>();
+
+    auto compare_length = [op_type, value](int length) {
+        switch (op_type) {
+            case proto::plan::OpType::Equal:
+                return length == value;
+            case proto::plan::OpType::NotEqual:
+                return length != value;
+            case proto::plan::OpType::GreaterThan:
+                return length > value;
+            case proto::plan::OpType::GreaterEqual:
+                return length >= value;
+            case proto::plan::OpType::LessThan:
+                return length < value;
+            case proto::plan::OpType::LessEqual:
+                return length <= value;
+            default:
+                ThrowInfo(OpTypeInvalid,
+                          "unsupported operator type for vector array "
+                          "length eval expr: {}",
+                          op_type);
+        }
+        return false;
+    };
+
+    auto execute_sub_batch = [compare_length]<FilterType filter_type =
+                                                  FilterType::sequential>(
+        const VectorArrayView* data,
+        const bool* valid_data,
+        const int32_t* offsets,
+        const int size,
+        TargetBitmapView res,
+        TargetBitmapView valid_res) {
+        if (data == nullptr) {
+            return;
+        }
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = compare_length(data[offset].length());
+        }
+    };
+
+    int64_t processed_size = 0;
+    if (has_offset_input_) {
+        processed_size = ProcessDataByOffsets<VectorArrayView>(
+            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+    } else {
+        processed_size = ProcessDataChunks<VectorArrayView>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+    }
+
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -1849,12 +1964,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         // there is a batch operation in ArithOpElementFunc,
         // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
         // but to mask res with valid_data after the batch operation.
-        if (valid_data != nullptr) {
+        if constexpr (filter_type == FilterType::sequential) {
+            // contiguous rows: reuse the vectorized shared helper
+            ApplyValidMask(valid_data, res, valid_res, size);
+        } else if (valid_data != nullptr) {
+            // scattered by offsets: gather, keep the per-row loop
             for (int i = 0; i < size; i++) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
+                auto offset = (offsets) ? offsets[i] : i;
                 if (!valid_data[offset]) {
                     res[i] = valid_res[i] = false;
                 }
@@ -1863,10 +1979,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     };
 
     auto skip_index_func =
-        [op_type, arith_type, value, right_operand](
+        [op_ctx = op_ctx_, op_type, arith_type, value, right_operand](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            return skip_index.CanSkipBinaryArithRange<T>(
-                field_id, chunk_id, op_type, arith_type, value, right_operand);
+            return skip_index.CanSkipBinaryArithRange<T>(op_ctx,
+                                                         field_id,
+                                                         chunk_id,
+                                                         op_type,
+                                                         arith_type,
+                                                         value,
+                                                         right_operand);
         };
 
     int64_t processed_size;

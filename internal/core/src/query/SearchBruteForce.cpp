@@ -25,6 +25,7 @@
 #include "common/FieldMeta.h"
 #include "common/QueryInfo.h"
 #include "common/RangeSearchHelper.h"
+#include "common/FastMem.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -135,6 +136,7 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         // ditto
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            query_ds.query_offsets);
+        query_dataset->Set(knowhere::meta::NQ, query_ds.num_queries);
 
         query_dataset->SetRows(query_ds.query_offsets[query_ds.num_queries]);
     }
@@ -221,9 +223,14 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         auto result =
             ReGenRangeSearchResult(res.value(), topk, nq, query_ds.metric_type);
         milvus::tracer::AddEvent("ReGenRangeSearchResult");
-        std::copy_n(GetDatasetIDs(result), nq * topk, sub_result.get_offsets());
-        std::copy_n(
-            GetDatasetDistance(result), nq * topk, sub_result.get_distances());
+        milvus::fastmem::FastMemcpy(
+            sub_result.get_offsets(),
+            GetDatasetIDs(result),
+            nq * topk * sizeof(*sub_result.get_offsets()));
+        milvus::fastmem::FastMemcpy(
+            sub_result.get_distances(),
+            GetDatasetDistance(result),
+            nq * topk * sizeof(*sub_result.get_distances()));
     } else {
         knowhere::Status stat;
         if (data_type == DataType::VECTOR_FLOAT) {

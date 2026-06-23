@@ -27,6 +27,7 @@
 
 #include "FieldMeta.h"
 #include "Types.h"
+#include "common/FastMem.h"
 
 namespace milvus {
 
@@ -43,13 +44,14 @@ class Array {
           const uint32_t* offsets_ptr)
         : size_(size), length_(len), element_type_(element_type) {
         data_ = std::make_unique<char[]>(size);
-        std::copy(data, data + size, data_.get());
+        milvus::fastmem::FastMemcpy(data_.get(), data, size);
         if (IsVariableDataType(element_type)) {
             AssertInfo(offsets_ptr != nullptr,
                        "For variable type elements in array, offsets_ptr must "
                        "be non-null");
             offsets_ptr_ = std::make_unique<uint32_t[]>(len);
-            std::copy(offsets_ptr, offsets_ptr + len, offsets_ptr_.get());
+            milvus::fastmem::FastMemcpy(
+                offsets_ptr_.get(), offsets_ptr, len * sizeof(uint32_t));
         }
     }
 
@@ -123,9 +125,10 @@ class Array {
                 }
                 data_ = std::make_unique<char[]>(size_);
                 for (int i = 0; i < length_; ++i) {
-                    std::copy_n(field_data.string_data().data(i).data(),
-                                field_data.string_data().data(i).size(),
-                                data_.get() + offsets_ptr_[i]);
+                    const auto& value = field_data.string_data().data(i);
+                    milvus::fastmem::FastMemcpy(data_.get() + offsets_ptr_[i],
+                                                value.data(),
+                                                value.size());
                 }
                 break;
             }
@@ -140,15 +143,16 @@ class Array {
           size_{array.size_},
           element_type_{array.element_type_} {
         data_ = std::make_unique<char[]>(array.size_);
-        std::copy(
-            array.data_.get(), array.data_.get() + array.size_, data_.get());
+        milvus::fastmem::FastMemcpy(
+            data_.get(), array.data_.get(), array.size_);
         if (IsVariableDataType(array.element_type_)) {
             AssertInfo(array.get_offsets_data() != nullptr,
                        "for array with variable length elements, offsets_ptr"
                        "must not be nullptr");
             offsets_ptr_ = std::make_unique<uint32_t[]>(length_);
-            std::copy_n(
-                array.get_offsets_data(), array.length(), offsets_ptr_.get());
+            milvus::fastmem::FastMemcpy(offsets_ptr_.get(),
+                                        array.get_offsets_data(),
+                                        array.length() * sizeof(uint32_t));
         }
     }
 

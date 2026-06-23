@@ -669,6 +669,42 @@ func TestApplyUpdates_ExternalSpecMaskOnlyOverwriteNonEmpty(t *testing.T) {
 	})
 }
 
+func TestCollection_IgnoresDoPhysicalBackfill(t *testing.T) {
+	coll := UnmarshalCollectionModel(&pb.CollectionInfo{
+		ID: colID,
+		Schema: &schemapb.CollectionSchema{
+			Name:               colName,
+			DoPhysicalBackfill: true,
+		},
+	})
+
+	assert.False(t, coll.ToCollectionSchemaPB().GetDoPhysicalBackfill())
+	assert.False(t, MarshalCollectionModel(coll).GetSchema().GetDoPhysicalBackfill())
+
+	coll.ApplyUpdates(
+		&message.AlterCollectionMessageHeader{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}}},
+		&message.AlterCollectionMessageBody{Updates: &messagespb.AlterCollectionMessageUpdates{Schema: &schemapb.CollectionSchema{
+			Version:            3,
+			Fields:             []*schemapb.FieldSchema{filedSchemaPb},
+			Functions:          []*schemapb.FunctionSchema{functionSchemaPb},
+			StructArrayFields:  []*schemapb.StructArrayFieldSchema{structFieldPb},
+			DoPhysicalBackfill: true,
+		}}},
+	)
+	assert.False(t, coll.ToCollectionSchemaPB().GetDoPhysicalBackfill())
+
+	marshaled := MarshalCollectionModelWithOption(coll, WithFields(), WithPartitions(), WithStructArrayFields())
+	assert.False(t, marshaled.GetSchema().GetDoPhysicalBackfill())
+	assert.Len(t, marshaled.GetSchema().GetFields(), 1)
+	assert.Len(t, marshaled.GetSchema().GetStructArrayFields(), 1)
+
+	schema := coll.ToCollectionSchemaPB()
+	assert.False(t, schema.GetDoPhysicalBackfill())
+	assert.EqualValues(t, 3, schema.GetVersion())
+	assert.Len(t, schema.GetFields(), 1)
+	assert.Len(t, schema.GetFunctions(), 1)
+}
+
 func TestCollection_ToCollectionSchemaPB(t *testing.T) {
 	// All schema-level fields populated with non-zero values so a future
 	// addition that forgets to wire ToCollectionSchemaPB will trip an
@@ -690,7 +726,6 @@ func TestCollection_ToCollectionSchemaPB(t *testing.T) {
 		FileResourceIds:    []int64{11, 22},
 		ExternalSource:     "s3://bucket/dataset",
 		ExternalSpec:       `{"format":"parquet"}`,
-		DoPhysicalBackfill: true,
 	}
 
 	schema := coll.ToCollectionSchemaPB()
@@ -709,5 +744,4 @@ func TestCollection_ToCollectionSchemaPB(t *testing.T) {
 	assert.Equal(t, []int64{11, 22}, schema.GetFileResourceIds())
 	assert.Equal(t, "s3://bucket/dataset", schema.GetExternalSource())
 	assert.Equal(t, `{"format":"parquet"}`, schema.GetExternalSpec())
-	assert.True(t, schema.GetDoPhysicalBackfill())
 }

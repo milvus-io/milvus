@@ -27,6 +27,10 @@ func TestMessageID(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, kafkaID(1), msgID)
 
+	msgID, err = UnmarshalMessageID(kafkaID(kafka.OffsetBeginning).Marshal())
+	assert.NoError(t, err)
+	assert.Equal(t, kafkaID(kafka.OffsetBeginning), msgID)
+
 	_, err = UnmarshalMessageID(string([]byte{0x01, 0x02, 0x03, 0x04}))
 	assert.Error(t, err)
 }

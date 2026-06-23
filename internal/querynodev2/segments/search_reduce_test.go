@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -55,6 +56,42 @@ func (suite *SearchReduceSuite) TestResult_ReduceSearchResultData() {
 		suite.Nil(err)
 		suite.ElementsMatch([]int64{1, 5, 2, 3}, res.Ids.GetIntId().Data)
 	})
+}
+
+func (suite *SearchReduceSuite) TestCommonReduceEmptySearchResultDataPreservesNQ() {
+	const (
+		nq   = 2
+		topk = 4
+	)
+
+	reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+	res, err := (&SearchCommonReduce{}).ReduceSearchResultData(context.TODO(), nil, reduceInfo)
+	suite.NoError(err)
+	suite.Equal(int64(nq), res.GetNumQueries())
+	suite.Equal(int64(topk), res.GetTopK())
+	suite.Equal([]int64{0, 0}, res.GetTopks())
+	suite.Empty(res.GetScores())
+	suite.Zero(res.GetIds().GetIntId().GetData())
+	suite.Empty(res.GetFieldsData())
+}
+
+func (suite *SearchReduceSuite) TestReduceSearchResultsEmptyInputPreservesNQ() {
+	const (
+		nq   = 2
+		topk = 4
+	)
+
+	reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(1)
+	result, err := ReduceSearchResults(context.TODO(), nil, reduceInfo)
+	suite.NoError(err)
+
+	decoded, err := DecodeSearchResults(context.TODO(), []*internalpb.SearchResults{result})
+	suite.NoError(err)
+	suite.Require().Len(decoded, 1)
+	suite.Equal(int64(nq), decoded[0].GetNumQueries())
+	suite.Equal(int64(topk), decoded[0].GetTopK())
+	suite.Equal([]int64{0, 0}, decoded[0].GetTopks())
+	suite.Empty(decoded[0].GetScores())
 }
 
 func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {

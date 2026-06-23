@@ -20,7 +20,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -103,7 +102,10 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
-		return merr.WrapErrImportFailed("collection schema has no fields")
+		return merr.WrapErrImportSysFailed("collection schema has no fields")
+	}
+	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
+		return err
 	}
 	it.schema = schema
 
@@ -120,7 +122,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	var partitionIDs []int64
 	if isBackup {
 		if req.GetPartitionName() == "" {
-			return merr.WrapErrParameterInvalidMsg("partition not specified")
+			return merr.WrapErrParameterMissingMsg("partition not specified")
 		}
 		// Currently, Backup tool call import must with a partition name, each time restore a partition
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
@@ -182,8 +184,8 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("import request is empty")
 	}
 	if len(req.Files) > Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-		return merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
-			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files)))
+		return merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
+			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))
 	}
 	if !isBackup && !isL0Import {
 		// check file type

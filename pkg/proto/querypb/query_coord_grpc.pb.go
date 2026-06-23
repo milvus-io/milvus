@@ -58,6 +58,7 @@ const (
 	QueryCoord_TransferSegment_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferSegment"
 	QueryCoord_TransferChannel_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferChannel"
 	QueryCoord_CheckQueryNodeDistribution_FullMethodName = "/milvus.proto.query.QueryCoord/CheckQueryNodeDistribution"
+	QueryCoord_ClearReadTaskQueue_FullMethodName         = "/milvus.proto.query.QueryCoord/ClearReadTaskQueue"
 	QueryCoord_UpdateLoadConfig_FullMethodName           = "/milvus.proto.query.QueryCoord/UpdateLoadConfig"
 	QueryCoord_RunAnalyzer_FullMethodName                = "/milvus.proto.query.QueryCoord/RunAnalyzer"
 	QueryCoord_ComputePhraseMatchSlop_FullMethodName     = "/milvus.proto.query.QueryCoord/ComputePhraseMatchSlop"
@@ -108,6 +109,7 @@ type QueryCoordClient interface {
 	TransferSegment(ctx context.Context, in *TransferSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	TransferChannel(ctx context.Context, in *TransferChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	CheckQueryNodeDistribution(ctx context.Context, in *CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
 	UpdateLoadConfig(ctx context.Context, in *UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
@@ -447,6 +449,15 @@ func (c *queryCoordClient) CheckQueryNodeDistribution(ctx context.Context, in *C
 	return out, nil
 }
 
+func (c *queryCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	out := new(internalpb.ClearReadTaskQueueResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_ClearReadTaskQueue_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryCoordClient) UpdateLoadConfig(ctx context.Context, in *UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, QueryCoord_UpdateLoadConfig_FullMethodName, in, out, opts...)
@@ -527,6 +538,7 @@ type QueryCoordServer interface {
 	TransferSegment(context.Context, *TransferSegmentRequest) (*commonpb.Status, error)
 	TransferChannel(context.Context, *TransferChannelRequest) (*commonpb.Status, error)
 	CheckQueryNodeDistribution(context.Context, *CheckQueryNodeDistributionRequest) (*commonpb.Status, error)
+	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
@@ -644,6 +656,9 @@ func (UnimplementedQueryCoordServer) TransferChannel(context.Context, *TransferC
 }
 func (UnimplementedQueryCoordServer) CheckQueryNodeDistribution(context.Context, *CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CheckQueryNodeDistribution not implemented")
+}
+func (UnimplementedQueryCoordServer) ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClearReadTaskQueue not implemented")
 }
 func (UnimplementedQueryCoordServer) UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateLoadConfig not implemented")
@@ -1317,6 +1332,24 @@ func _QueryCoord_CheckQueryNodeDistribution_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryCoord_ClearReadTaskQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.ClearReadTaskQueueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).ClearReadTaskQueue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_ClearReadTaskQueue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).ClearReadTaskQueue(ctx, req.(*internalpb.ClearReadTaskQueueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryCoord_UpdateLoadConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateLoadConfigRequest)
 	if err := dec(in); err != nil {
@@ -1541,6 +1574,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _QueryCoord_CheckQueryNodeDistribution_Handler,
 		},
 		{
+			MethodName: "ClearReadTaskQueue",
+			Handler:    _QueryCoord_ClearReadTaskQueue_Handler,
+		},
+		{
 			MethodName: "UpdateLoadConfig",
 			Handler:    _QueryCoord_UpdateLoadConfig_Handler,
 		},
@@ -1594,6 +1631,7 @@ const (
 	QueryNode_DropIndex_FullMethodName              = "/milvus.proto.query.QueryNode/DropIndex"
 	QueryNode_ValidateAnalyzer_FullMethodName       = "/milvus.proto.query.QueryNode/ValidateAnalyzer"
 	QueryNode_SyncFileResource_FullMethodName       = "/milvus.proto.query.QueryNode/SyncFileResource"
+	QueryNode_ClearReadTaskQueue_FullMethodName     = "/milvus.proto.query.QueryNode/ClearReadTaskQueue"
 	QueryNode_ComputePhraseMatchSlop_FullMethodName = "/milvus.proto.query.QueryNode/ComputePhraseMatchSlop"
 )
 
@@ -1637,6 +1675,7 @@ type QueryNodeClient interface {
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
 	// file resource
 	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
 	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
 }
 
@@ -1982,6 +2021,15 @@ func (c *queryNodeClient) SyncFileResource(ctx context.Context, in *internalpb.S
 	return out, nil
 }
 
+func (c *queryNodeClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	out := new(internalpb.ClearReadTaskQueueResponse)
+	err := c.cc.Invoke(ctx, QueryNode_ClearReadTaskQueue_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryNodeClient) ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error) {
 	out := new(ComputePhraseMatchSlopResponse)
 	err := c.cc.Invoke(ctx, QueryNode_ComputePhraseMatchSlop_FullMethodName, in, out, opts...)
@@ -2031,6 +2079,7 @@ type QueryNodeServer interface {
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
 	// file resource
 	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
+	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
 }
 
@@ -2133,6 +2182,9 @@ func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateA
 }
 func (UnimplementedQueryNodeServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SyncFileResource not implemented")
+}
+func (UnimplementedQueryNodeServer) ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClearReadTaskQueue not implemented")
 }
 func (UnimplementedQueryNodeServer) ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ComputePhraseMatchSlop not implemented")
@@ -2731,6 +2783,24 @@ func _QueryNode_SyncFileResource_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_ClearReadTaskQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.ClearReadTaskQueueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).ClearReadTaskQueue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_ClearReadTaskQueue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).ClearReadTaskQueue(ctx, req.(*internalpb.ClearReadTaskQueueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryNode_ComputePhraseMatchSlop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ComputePhraseMatchSlopRequest)
 	if err := dec(in); err != nil {
@@ -2875,6 +2945,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SyncFileResource",
 			Handler:    _QueryNode_SyncFileResource_Handler,
+		},
+		{
+			MethodName: "ClearReadTaskQueue",
+			Handler:    _QueryNode_ClearReadTaskQueue_Handler,
 		},
 		{
 			MethodName: "ComputePhraseMatchSlop",

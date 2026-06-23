@@ -99,6 +99,50 @@ func TestOrderByLimitOperator_SingleRow(t *testing.T) {
 	assert.Equal(t, int64(1), sorted.GetIds().GetIntId().GetData()[0])
 }
 
+func TestOrderByLimitOperator_NullableCompactVectorWithoutIDsUsesLogicalRows(t *testing.T) {
+	orderByFields := []*orderby.OrderByField{
+		{FieldID: 2, FieldName: "value", Ascending: true, DataType: schemapb.DataType_Int64},
+	}
+	op := NewOrderByLimitOperator(orderByFields, 0)
+	ctx := context.Background()
+
+	result := &internalpb.RetrieveResults{
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vec",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+					},
+				}},
+				ValidData: []bool{true, false, true},
+			},
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "value",
+				FieldId:   2,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{30, 10, 20}},
+					},
+				}},
+			},
+		},
+	}
+
+	outputs, err := op.Run(ctx, nil, result)
+	require.NoError(t, err)
+
+	sorted := outputs[0].(*internalpb.RetrieveResults)
+	require.Len(t, sorted.GetFieldsData(), 2)
+	assert.Equal(t, []int64{10, 20, 30}, sorted.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []bool{false, true, true}, sorted.GetFieldsData()[0].GetValidData())
+	assert.Equal(t, []float32{3, 4, 1, 2}, sorted.GetFieldsData()[0].GetVectors().GetFloatVector().GetData())
+}
+
 func TestOrderByLimitOperator_SortAscending(t *testing.T) {
 	orderByFields := []*orderby.OrderByField{
 		{FieldID: 2, FieldName: "value", Ascending: true, DataType: schemapb.DataType_Int64},

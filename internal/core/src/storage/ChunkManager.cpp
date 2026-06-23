@@ -132,6 +132,7 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
     InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+    ApplyChecksumConfigOverrides(config);
     if (storage_config.useIAM) {
         // Using S3 client instead of google client because of compatible protocol
         client_ = std::make_shared<Aws::S3::S3Client>(
@@ -165,6 +166,7 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
     InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+    ApplyChecksumConfigOverrides(config);
 
     // For aliyun oss, support use virtual host mode
     StorageConfig mutable_config = storage_config;
@@ -212,6 +214,7 @@ TencentCloudChunkManager::TencentCloudChunkManager(
     InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+    ApplyChecksumConfigOverrides(config);
 
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
@@ -257,6 +260,7 @@ HuaweiCloudChunkManager::HuaweiCloudChunkManager(
     use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
     InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+    ApplyChecksumConfigOverrides(config);
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
     if (storage_config.useIAM) {

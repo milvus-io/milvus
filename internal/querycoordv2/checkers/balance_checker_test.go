@@ -1442,9 +1442,9 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 			}).Build()
 		defer mockGetCollection.UnPatch()
 
-		// Mock ChannelDistManager.GetByCollectionAndFilter to return serviceable channels
-		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
-			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+		// Mock ChannelDistManager.GetByFilter to return serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByFilter).To(
+			func(_ *meta.ChannelDistManager, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
 				// Return serviceable channels for all collections
 				return []*meta.DmChannel{
 					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
@@ -1522,9 +1522,9 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 			}).Build()
 		defer mockGetCollection.UnPatch()
 
-		// Mock ChannelDistManager.GetByCollectionAndFilter to return serviceable channels
-		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
-			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+		// Mock ChannelDistManager.GetByFilter to return serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByFilter).To(
+			func(_ *meta.ChannelDistManager, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
 				return []*meta.DmChannel{
 					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 				}
@@ -1584,9 +1584,9 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 			}).Build()
 		defer mockGetCollection.UnPatch()
 
-		// Mock ChannelDistManager.GetByCollectionAndFilter to return serviceable channels
-		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
-			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+		// Mock ChannelDistManager.GetByFilter to return serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByFilter).To(
+			func(_ *meta.ChannelDistManager, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
 				return []*meta.DmChannel{
 					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 				}
@@ -1656,9 +1656,9 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 			}).Build()
 		defer mockGetCollection.UnPatch()
 
-		// Mock ChannelDistManager.GetByCollectionAndFilter to return serviceable channels
-		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
-			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+		// Mock ChannelDistManager.GetByFilter to return serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByFilter).To(
+			func(_ *meta.ChannelDistManager, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
 				return []*meta.DmChannel{
 					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 				}
@@ -1725,19 +1725,27 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 			}).Build()
 		defer mockGetCollection.UnPatch()
 
-		// Mock ChannelDistManager.GetByCollectionAndFilter
+		// Mock ChannelDistManager.GetByFilter
 		// Collection 1: all channels serviceable
 		// Collection 2: one channel not serviceable
-		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
-			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
-				switch collectionID {
-				case 1:
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByFilter).To(
+			func(_ *meta.ChannelDistManager, filters ...meta.ChannelDistFilter) []*meta.DmChannel {
+				matchColl := func(cid int64) bool {
+					ch := &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: cid}}
+					for _, f := range filters {
+						if !f.Match(ch) {
+							return false
+						}
+					}
+					return true
+				}
+				if matchColl(1) {
 					// All serviceable
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 					}
-				case 2:
+				} else if matchColl(2) {
 					// One not serviceable
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
@@ -1812,12 +1820,13 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 			}).Build()
 		defer mockGetCollection.UnPatch()
 
-		// Mock ChannelDistManager.GetByCollectionAndFilter
+		// Mock ChannelDistManager.GetByFilter
 		// Collection 1: has serviceable channels
 		// Collection 2: no channels in distribution
-		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
-			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
-				if collectionID == 1 {
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByFilter).To(
+			func(_ *meta.ChannelDistManager, filters ...meta.ChannelDistFilter) []*meta.DmChannel {
+				ch1 := &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1}}
+				if len(filters) > 0 && filters[0].Match(ch1) {
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 					}
@@ -1891,10 +1900,10 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 			}).Build()
 		defer mockGetCollection.UnPatch()
 
-		// Mock ChannelDistManager.GetByCollectionAndFilter
+		// Mock ChannelDistManager.GetByFilter
 		// Both collections have all serviceable channels
-		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
-			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByFilter).To(
+			func(_ *meta.ChannelDistManager, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
 				return []*meta.DmChannel{
 					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},

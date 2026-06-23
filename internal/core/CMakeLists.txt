@@ -37,10 +37,6 @@ if ( USE_DYNAMIC_SIMD )
     add_definitions(-DUSE_DYNAMIC_SIMD)
 endif()
 
-if (USE_OPENDAL)
-    add_definitions(-DUSE_OPENDAL)
-endif()
-
 project(core)
 include(CheckCXXCompilerFlag)
 if ( APPLE )
@@ -128,7 +124,7 @@ if ( MILVUS_UNITY_BUILD )
     message( STATUS "Unity build enabled (batch size ${CMAKE_UNITY_BUILD_BATCH_SIZE})" )
 endif ()
 
-set( CMAKE_CXX_STANDARD 17 )
+set( CMAKE_CXX_STANDARD 20 )
 set( CMAKE_CXX_STANDARD_REQUIRED on )
 
 # Use std::shared_ptr/std::string_view etc. instead of opentelemetry::nostd::
@@ -147,10 +143,9 @@ set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 # self-installed dynamic libraries will be correctly linked by excutable
 set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" "${CMAKE_INSTALL_PREFIX}/lib64" )
 set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
-# FetchContent-built shared libs (libbson, libbsoncxx, etc.) are placed in
-# ${CMAKE_BINARY_DIR}/lib. The linker needs -rpath-link to resolve transitive
-# shared library dependencies (e.g. libbsoncxx.so -> libbson-1.0.so) when
-# linking test binaries.
+# The FetchContent-built libbson shared lib is placed in ${CMAKE_BINARY_DIR}/lib.
+# The linker needs -rpath-link to resolve it (e.g. libmilvus_core.so ->
+# libbson-1.0.so) when linking test binaries.
 set( CMAKE_BUILD_RPATH "${CMAKE_BINARY_DIR}/lib" )
 
 # **************************** Dependencies ****************************
@@ -190,8 +185,12 @@ find_package(gflags REQUIRED)
 find_package(xsimd REQUIRED)
 find_package(unordered_dense REQUIRED)
 find_package(absl REQUIRED)
-find_package(RapidJSON REQUIRED)
+find_package(bson-1.0 REQUIRED)
 find_package(simde REQUIRED)
+find_package(milvus-common REQUIRED)
+if (LINUX)
+    find_package(OpenBLAS CONFIG REQUIRED)
+endif()
 find_package(LibLZMA REQUIRED)
 find_package(RdKafka REQUIRED)
 find_package(GTest REQUIRED)
@@ -404,6 +403,7 @@ add_subdirectory( src )
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
     add_subdirectory(unittest)
+    add_subdirectory(benchmark)
 endif ()
 
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
@@ -445,6 +445,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         DESTINATION include/common
         FILES_MATCHING PATTERN "*_c.h"
 )
+# cgo consumers need milvus-common headers in the core output include path.
+foreach(MILVUS_COMMON_INCLUDE_DIR IN LISTS milvus-common_INCLUDE_DIRS)
+    install(DIRECTORY ${MILVUS_COMMON_INCLUDE_DIR}/
+            DESTINATION include
+    )
+endforeach()
 
 # Install monitor
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/monitor/

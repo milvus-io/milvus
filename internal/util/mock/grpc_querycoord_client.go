@@ -34,6 +34,10 @@ type GrpcQueryCoordClient struct {
 	Err error
 }
 
+func (m *GrpcQueryCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	return &milvuspb.CheckHealthResponse{}, m.Err
 }

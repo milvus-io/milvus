@@ -18,6 +18,7 @@ package assign
 
 import (
 	"context"
+	"math"
 	"sort"
 	"sync"
 
@@ -104,15 +105,20 @@ func (p *RowCountBasedAssignPolicy) AssignSegment(
 	nodes []int64,
 	forceAssign bool,
 ) []SegmentAssignPlan {
+	balanceBatchSize := math.MaxInt64
+
 	// Filter nodes
-	nodeFilter := newCommonSegmentNodeFilter(p.nodeManager)
-	filteredNodes := nodeFilter.FilterNodes(ctx, nodes, forceAssign)
-	if len(filteredNodes) == 0 {
+	if !forceAssign {
+		nodeFilter := newCommonSegmentNodeFilter(p.nodeManager)
+		nodes = nodeFilter.FilterNodes(ctx, nodes, forceAssign)
+		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
+	}
+	if len(nodes) == 0 {
 		return nil
 	}
 
 	// Convert nodes to node items with row count scores
-	nodeItems := p.convertToNodeItemsBySegment(filteredNodes)
+	nodeItems := p.convertToNodeItemsBySegment(collectionID, nodes)
 	if len(nodeItems) == 0 {
 		return nil
 	}
@@ -128,8 +134,6 @@ func (p *RowCountBasedAssignPolicy) AssignSegment(
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
-	// Apply batch size limit
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 
 	// Assign segments using priority queue
@@ -214,8 +218,9 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 }
 
 // convertToNodeItemsBySegment creates node items with row count scores
-func (p *RowCountBasedAssignPolicy) convertToNodeItemsBySegment(nodeIDs []int64) map[int64]*NodeItem {
+func (p *RowCountBasedAssignPolicy) convertToNodeItemsBySegment(collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
 	status := p.getWorkloadStatus()
+	delta := p.scheduler.GetSegmentTaskDeltaSnapshot(nodeIDs, collectionID)
 
 	ret := make(map[int64]*NodeItem, len(nodeIDs))
 	for _, node := range nodeIDs {
@@ -223,7 +228,7 @@ func (p *RowCountBasedAssignPolicy) convertToNodeItemsBySegment(nodeIDs []int64)
 		rowcnt := status.nodeGlobalRowCount[node] + status.nodeGlobalChannelRowCount[node]
 
 		// Calculate executing task cost in scheduler
-		rowcnt += p.scheduler.GetSegmentTaskDelta(node, -1)
+		rowcnt += delta.GetByNode(node)
 
 		// More row count means less priority
 		NodeItem := NewNodeItem(rowcnt, node)

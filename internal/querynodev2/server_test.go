@@ -291,6 +291,12 @@ func TestRegisterSegcoreConfigWatcher(t *testing.T) {
 	assert.NotPanics(t, func() {
 		pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32")
 	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576")
+	})
 }
 
 func TestQueryNode(t *testing.T) {

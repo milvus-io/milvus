@@ -101,7 +101,8 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<double>(context);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
@@ -182,7 +183,7 @@ PhyTermFilterExpr::CanSkipSegment() {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
             if (!skip_index.CanSkipBinaryRange<T>(
-                    field_id_, i, min, max, true, true)) {
+                    op_ctx_, field_id_, i, min, max, true, true)) {
                 return false;
             } else {
                 res = true;
@@ -611,8 +612,11 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             TargetBitmap(real_batch_size, true));
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -748,6 +752,7 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
     auto res = MoveOrSliceBitmap(
@@ -1153,13 +1158,14 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     };
 
     auto skip_index_func =
-        [&cached_elements = cached_skip_elements_](
+        [op_ctx = op_ctx_, &cached_elements = cached_skip_elements_](
             const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
             auto* elements = std::any_cast<std::vector<T>>(&cached_elements);
             if (elements == nullptr) {
                 return false;
             }
-            return skip_index.CanSkipInQuery<T>(field_id, chunk_id, *elements);
+            return skip_index.CanSkipInQuery<T>(
+                op_ctx, field_id, chunk_id, *elements);
         };
 
     int64_t processed_size;

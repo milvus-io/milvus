@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // TaskKey uniquely identifies an external collection task.
@@ -259,7 +260,8 @@ func (m *ExternalCollectionManager) SubmitTask(
 					zap.ByteString("stack", stack))
 				reason := fmt.Sprintf("task panicked: %v", r)
 				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil)
-				retErr = fmt.Errorf("%s", reason)
+				// A recovered panic is a server-side failure, never caller input.
+				retErr = merr.WrapErrServiceInternalMsg("%s", reason)
 			}
 		}()
 		log.Info("executing external collection task in pool",

@@ -17,6 +17,8 @@
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "query/Plan.h"
 #include "query/PlanProto.h"
 
 namespace {
@@ -69,4 +71,65 @@ TEST(PlanProto, RejectsGlobalRefineRatiosBelowOne) {
 
     EXPECT_ANY_THROW(parser.PlanNodeFromProto(BuildSearchPlanNode(0.5f, 1.5f)));
     EXPECT_ANY_THROW(parser.PlanNodeFromProto(BuildSearchPlanNode(1.5f, 0.5f)));
+}
+
+TEST(PlanProto, VectorArrayFieldIdGapInStructArray) {
+    namespace planpb = milvus::proto::plan;
+    namespace schemapb = milvus::proto::schema;
+
+    schemapb::CollectionSchema schema_proto;
+    auto pk = schema_proto.add_fields();
+    pk->set_name("id");
+    pk->set_fieldid(100);
+    pk->set_is_primary_key(true);
+    pk->set_data_type(schemapb::DataType::Int64);
+
+    auto struct_array = schema_proto.add_struct_array_fields();
+    struct_array->set_name("evidence");
+    struct_array->set_fieldid(146);
+
+    auto evidence_item = struct_array->add_fields();
+    evidence_item->set_name("evidence[evidence_item]");
+    evidence_item->set_fieldid(147);
+    evidence_item->set_data_type(schemapb::DataType::Array);
+    evidence_item->set_element_type(schemapb::DataType::VarChar);
+    auto max_length = evidence_item->add_type_params();
+    max_length->set_key("max_length");
+    max_length->set_value("512");
+    auto max_capacity = evidence_item->add_type_params();
+    max_capacity->set_key("max_capacity");
+    max_capacity->set_value("200");
+
+    auto evidence_vector = struct_array->add_fields();
+    evidence_vector->set_name("evidence[evidence_vector]");
+    evidence_vector->set_fieldid(148);
+    evidence_vector->set_data_type(schemapb::DataType::ArrayOfVector);
+    evidence_vector->set_element_type(schemapb::DataType::FloatVector);
+    auto dim = evidence_vector->add_type_params();
+    dim->set_key("dim");
+    dim->set_value("1024");
+    auto vector_max_capacity = evidence_vector->add_type_params();
+    vector_max_capacity->set_key("max_capacity");
+    vector_max_capacity->set_value("200");
+
+    auto schema = milvus::Schema::ParseFrom(schema_proto);
+    ASSERT_EQ(schema->size(), 3);
+    ASSERT_EQ(schema->get_field_id_bitset_size(), 49);
+
+    planpb::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_vector_type(planpb::VectorType::EmbListFloatVector);
+    vector_anns->set_field_id(148);
+    vector_anns->set_placeholder_tag("$0");
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_metric_type("MAX_SIM_COSINE");
+    query_info->set_topk(10);
+    query_info->set_round_decimal(-1);
+    query_info->set_search_params(R"({"ef": 200})");
+
+    auto plan = milvus::query::CreateSearchPlanFromPlanNode(schema, plan_node);
+    ASSERT_TRUE(plan->extra_info_opt_.has_value());
+    const auto& involved_fields = plan->extra_info_opt_->involved_fields_;
+    ASSERT_EQ(involved_fields.size(), 49);
+    EXPECT_TRUE(involved_fields[48]);
 }

@@ -80,7 +80,8 @@ S3ErrorMessage(const std::string& func,
                const std::string& fmt_string,
                Args&&... args) {
     std::ostringstream oss;
-    const auto& message = fmt::format(fmt_string, std::forward<Args>(args)...);
+    const auto& message =
+        fmt::format(fmt::runtime(fmt_string), std::forward<Args>(args)...);
     oss << "Error in " << func << "[errcode:" << int(err.GetResponseCode())
         << ", exception:" << err.GetExceptionName()
         << ", errmessage:" << err.GetMessage() << ", params:" << message << "]";
@@ -260,6 +261,24 @@ class MinioChunkManager : public ChunkManager {
     void
     BuildAccessKeyClient(const StorageConfig& storage_config,
                          const Aws::Client::ClientConfiguration& config);
+
+    // Restrict the SDK's request/response checksum policy to WHEN_REQUIRED
+    // so the V4 signer does not switch PutObject uploads to aws-chunked /
+    // STREAMING-UNSIGNED-PAYLOAD-TRAILER. Required for non-AWS S3-compatible
+    // backends (Aliyun OSS, GCP, Tencent COS, Huawei OBS) that reject that
+    // streaming form. AWS S3 / MinIO don't need this. Mirrors milvus-storage
+    // PR #500. Exposed for derived ChunkManager subclasses and unit testing.
+    static void
+    ApplyChecksumConfigOverrides(Aws::Client::ClientConfiguration& config);
+
+    // Decide whether the checksum override is required for a given
+    // cloud_provider. Aliyun OSS, Tencent COS, Huawei OBS, and GCP all
+    // reject the streaming aws-chunked encoding the SDK adds when
+    // checksums are computed; AWS S3 / MinIO accept the default. Mirrors
+    // the cloud_provider-based dispatch used by milvus-storage PR #500.
+    // Exposed for unit testing.
+    static bool
+    NeedChecksumOverride(const std::string& cloud_provider);
 
     Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;

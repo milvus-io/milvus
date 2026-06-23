@@ -17,6 +17,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Utils.h"
@@ -43,7 +44,21 @@ CachedSearchIterator::CachedSearchIterator(
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Query dataset is nullptr, cannot initialize iterator");
     }
-    nq_ = query_ds->GetRows();
+    auto offsets =
+        query_ds->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+    if (offsets != nullptr) {
+        nq_ = query_ds->Get<int64_t>(knowhere::meta::NQ);
+        AssertInfo(nq_ > 0, "embedding list query count is missing");
+        auto total_vectors = static_cast<size_t>(query_ds->GetRows());
+        AssertInfo(offsets[nq_] == total_vectors,
+                   "embedding list query offsets are inconsistent with "
+                   "flattened rows: nq={}, terminal_offset={}, rows={}",
+                   nq_,
+                   offsets[nq_],
+                   total_vectors);
+    } else {
+        nq_ = query_ds->GetRows();
+    }
     Init(search_info);
 
     auto search_json = index.PrepareSearchParams(search_info);
@@ -152,7 +167,8 @@ CachedSearchIterator::CachedSearchIterator(
             auto buf = std::make_unique<uint8_t[]>(total_bytes);
             auto* ptr = buf.get();
             for (int64_t i = 0; i < chunk_size; ++i) {
-                memcpy(ptr, va_ptr[i].data(), va_ptr[i].byte_size());
+                milvus::fastmem::FastMemcpy(
+                    ptr, va_ptr[i].data(), va_ptr[i].byte_size());
                 ptr += va_ptr[i].byte_size();
             }
             const void* flat_data = buf.get();
@@ -194,9 +210,8 @@ CachedSearchIterator::CachedSearchIterator(
                           });
             int64_t chunk_size = column->chunk_row_nums(chunk_id);
             const auto& offset_mapping = column->GetOffsetMapping();
-            const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
-            if (offset_mapping.IsEnabled() && !valid_count_per_chunk.empty()) {
-                chunk_size = valid_count_per_chunk[chunk_id];
+            if (offset_mapping.IsEnabled()) {
+                chunk_size = column->GetValidCountInChunk(chunk_id);
             }
             // For element-level search on vector array field, chunk_size
             // must be the element count in this chunk, not the row count.

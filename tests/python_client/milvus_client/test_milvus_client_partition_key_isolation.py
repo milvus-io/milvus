@@ -1,18 +1,20 @@
+import random
+import time
+
+import pandas as pd
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus import AnnSearchRequest, DataType, RRFRanker
 from utils.util_log import test_log as log
-import time
-import pytest
-import random
-from pymilvus import DataType
-import pandas as pd
 
 
 @pytest.mark.tags(CaseLabel.L1)
 class TestPartitionKeyIsolation(TestMilvusClientV2Base):
-    """ Test case of partition key isolation"""
+    """Test case of partition key isolation"""
+
     def test_par_key_isolation_with_valid_expr(self):
         # create
         client = self._client()
@@ -23,16 +25,25 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
         schema = self.create_schema(client, enable_dynamic_field=True)[0]
         self.add_field(schema, "id", DataType.INT64, is_primary=True)
-        self.add_field(schema, "scalar_3", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_3"))
-        self.add_field(schema, "scalar_6", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_6"))
-        self.add_field(schema, "scalar_9", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_9"))
-        self.add_field(schema, "scalar_12", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_12"))
-        self.add_field(schema, "scalar_5_linear", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_5_linear"))
+        self.add_field(
+            schema, "scalar_3", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_3")
+        )
+        self.add_field(
+            schema, "scalar_6", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_6")
+        )
+        self.add_field(
+            schema, "scalar_9", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_9")
+        )
+        self.add_field(
+            schema, "scalar_12", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_12")
+        )
+        self.add_field(
+            schema,
+            "scalar_5_linear",
+            DataType.VARCHAR,
+            max_length=1000,
+            is_partition_key=bool(partition_key == "scalar_5_linear"),
+        )
         self.add_field(schema, "emb", DataType.FLOAT_VECTOR, dim=dim)
         self.create_collection(client, collection_name, schema=schema, num_partitions=1)
 
@@ -53,15 +64,17 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
             t0 = time.time()
             data = []
             for j in range(start_idx, end_idx):
-                data.append({
-                    "id": j,
-                    "scalar_3": str(j % 3),
-                    "scalar_6": str(j % 6),
-                    "scalar_9": str(j % 9),
-                    "scalar_12": str(j % 12),
-                    "scalar_5_linear": str(j % 5),
-                    "emb": [random.random() for _ in range(dim)]
-                })
+                data.append(
+                    {
+                        "id": j,
+                        "scalar_3": str(j % 3),
+                        "scalar_6": str(j % 6),
+                        "scalar_9": str(j % 9),
+                        "scalar_12": str(j % 12),
+                        "scalar_5_linear": str(j % 5),
+                        "emb": [random.random() for _ in range(dim)],
+                    }
+                )
             # collect data as DataFrame for pandas verification later
             df_data = {
                 "id": [j for j in range(start_idx, end_idx)],
@@ -81,8 +94,9 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
         self.wait_for_compaction_ready(client, compact_id)
         t0 = time.time()
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="emb", metric_type="L2", index_type="HNSW",
-                               params={"M": 16, "efConstruction": 64})
+        index_params.add_index(
+            field_name="emb", metric_type="L2", index_type="HNSW", params={"M": 16, "efConstruction": 64}
+        )
         self.create_index(client, collection_name, index_params, timeout=360)
         index_list = self.list_indexes(client, collection_name)[0]
         for index_name in index_list:
@@ -101,17 +115,20 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
             "scalar_6 == '3' and (scalar_12 == '1' or scalar_3 != '1')",
             "scalar_6 == '2' and ('4' < scalar_12 < '6' or scalar_3 == '1')",
             "scalar_6 == '5' and scalar_12 in ['1', '3', '5']",
-            "scalar_6 == '1'"
+            "scalar_6 == '1'",
         ]
         for expr in valid_expressions:
-            res = self.search(client, collection_name,
-                              data=[[random.random() for _ in range(dim)]],
-                              anns_field="emb",
-                              filter=expr,
-                              search_params={"metric_type": "L2", "params": {}},
-                              limit=1000,
-                              output_fields=["scalar_3", "scalar_6", "scalar_12"],
-                              consistency_level="Strong")[0]
+            res = self.search(
+                client,
+                collection_name,
+                data=[[random.random() for _ in range(dim)]],
+                anns_field="emb",
+                filter=expr,
+                search_params={"metric_type": "L2", "params": {}},
+                limit=1000,
+                output_fields=["scalar_3", "scalar_6", "scalar_12"],
+                consistency_level="Strong",
+            )[0]
             true_res = all_df.query(expr)
             assert len(res[0]) == len(true_res)
 
@@ -124,16 +141,25 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
         schema = self.create_schema(client, enable_dynamic_field=True)[0]
         self.add_field(schema, "id", DataType.INT64, is_primary=True)
-        self.add_field(schema, "scalar_3", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_3"))
-        self.add_field(schema, "scalar_6", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_6"))
-        self.add_field(schema, "scalar_9", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_9"))
-        self.add_field(schema, "scalar_12", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_12"))
-        self.add_field(schema, "scalar_5_linear", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_5_linear"))
+        self.add_field(
+            schema, "scalar_3", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_3")
+        )
+        self.add_field(
+            schema, "scalar_6", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_6")
+        )
+        self.add_field(
+            schema, "scalar_9", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_9")
+        )
+        self.add_field(
+            schema, "scalar_12", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_12")
+        )
+        self.add_field(
+            schema,
+            "scalar_5_linear",
+            DataType.VARCHAR,
+            max_length=1000,
+            is_partition_key=bool(partition_key == "scalar_5_linear"),
+        )
         self.add_field(schema, "emb", DataType.FLOAT_VECTOR, dim=128)
         self.create_collection(client, collection_name, schema=schema, num_partitions=1)
 
@@ -153,23 +179,26 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
             t0 = time.time()
             data = []
             for j in range(start_idx, end_idx):
-                data.append({
-                    "id": j,
-                    "scalar_3": str(j % 3),
-                    "scalar_6": str(j % 6),
-                    "scalar_9": str(j % 9),
-                    "scalar_12": str(j % 12),
-                    "scalar_5_linear": str(j % 5),
-                    "emb": [random.random() for _ in range(128)]
-                })
+                data.append(
+                    {
+                        "id": j,
+                        "scalar_3": str(j % 3),
+                        "scalar_6": str(j % 6),
+                        "scalar_9": str(j % 9),
+                        "scalar_12": str(j % 12),
+                        "scalar_5_linear": str(j % 5),
+                        "emb": [random.random() for _ in range(128)],
+                    }
+                )
             log.info(f"generate test data {len(data)} cost time {time.time() - t0}")
             self.insert(client, collection_name, data)
         compact_id = self.compact(client, collection_name)[0]
         self.wait_for_compaction_ready(client, compact_id)
         t0 = time.time()
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="emb", metric_type="L2", index_type="HNSW",
-                               params={"M": 16, "efConstruction": 64})
+        index_params.add_index(
+            field_name="emb", metric_type="L2", index_type="HNSW", params={"M": 16, "efConstruction": 64}
+        )
         self.create_index(client, collection_name, index_params, timeout=360)
         index_list = self.list_indexes(client, collection_name)[0]
         for index_name in index_list:
@@ -191,21 +220,24 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
             "scalar_6 != '1'",
             "scalar_6 > '1'",
             "'1' < scalar_6 < '3'",
-            "scalar_3 == '1'"  # scalar_3 is not partition key
+            "scalar_3 == '1'",  # scalar_3 is not partition key
         ]
         false_result = []
         for expr in invalid_expressions:
             # v2 api_request catches exceptions and returns (Error, False) instead of raising
             # use check_task=check_nothing to skip default assert_succ in ResponseChecker
-            res, check = self.search(client, collection_name,
-                                     data=[[random.random() for _ in range(128)]],
-                                     anns_field="emb",
-                                     filter=expr,
-                                     search_params={"metric_type": "L2", "params": {"nprobe": 16}},
-                                     limit=10,
-                                     output_fields=["scalar_6"],
-                                     consistency_level="Strong",
-                                     check_task=CheckTasks.check_nothing)
+            res, check = self.search(
+                client,
+                collection_name,
+                data=[[random.random() for _ in range(128)]],
+                anns_field="emb",
+                filter=expr,
+                search_params={"metric_type": "L2", "params": {"nprobe": 16}},
+                limit=10,
+                output_fields=["scalar_6"],
+                consistency_level="Strong",
+                check_task=CheckTasks.check_nothing,
+            )
             if check is not False:
                 log.info(f"search with {expr} get res {res}")
                 false_result.append(expr)
@@ -214,6 +246,141 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
         if len(false_result) > 0:
             log.info(f"search with unsupported expr {false_result}, but not raise error\n")
             assert False
+
+    def test_hybrid_search_par_key_isolation_with_unsupported_expr(self):
+        """
+        target: verify hybrid search enforces partition key isolation like search
+        method: create partition key isolation collection, compare search and hybrid_search invalid filters
+        expected: hybrid_search rejects multi-tenant and no-tenant filters
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.drop_collection(client, collection_name)
+
+        dim = 5
+        query_a = [[0.10, 0.20, 0.30, 0.40, 0.50]]
+        query_b = [[0.50, 0.40, 0.30, 0.20, 0.10]]
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        self.add_field(schema, "id", DataType.INT64, is_primary=True)
+        self.add_field(schema, "vector_a", DataType.FLOAT_VECTOR, dim=dim)
+        self.add_field(schema, "vector_b", DataType.FLOAT_VECTOR, dim=dim)
+        self.add_field(schema, "tenant", DataType.VARCHAR, max_length=64, is_partition_key=True)
+        self.add_field(schema, "color", DataType.VARCHAR, max_length=64)
+
+        index_params = self.prepare_index_params(client)[0]
+        for field in ["vector_a", "vector_b"]:
+            index_params.add_index(field_name=field, index_name=field, index_type="AUTOINDEX", metric_type="COSINE")
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            num_partitions=16,
+            properties={"partitionkey.isolation": "true"},
+        )
+
+        rows = [
+            {
+                "id": 1,
+                "vector_a": [0.10, 0.20, 0.30, 0.40, 0.50],
+                "vector_b": [0.50, 0.40, 0.30, 0.20, 0.10],
+                "tenant": "tenant_a",
+                "color": "tenant_a_1",
+            },
+            {
+                "id": 2,
+                "vector_a": [0.11, 0.21, 0.31, 0.41, 0.51],
+                "vector_b": [0.51, 0.41, 0.31, 0.21, 0.11],
+                "tenant": "tenant_a",
+                "color": "tenant_a_2",
+            },
+            {
+                "id": 3,
+                "vector_a": [0.90, 0.80, 0.70, 0.60, 0.50],
+                "vector_b": [0.50, 0.60, 0.70, 0.80, 0.90],
+                "tenant": "tenant_b",
+                "color": "tenant_b_1",
+            },
+            {
+                "id": 4,
+                "vector_a": [0.91, 0.81, 0.71, 0.61, 0.51],
+                "vector_b": [0.51, 0.61, 0.71, 0.81, 0.91],
+                "tenant": "tenant_b",
+                "color": "tenant_b_2",
+            },
+            {
+                "id": 5,
+                "vector_a": [0.10, 0.20, 0.30, 0.40, 0.50],
+                "vector_b": [0.50, 0.40, 0.30, 0.20, 0.10],
+                "tenant": "tenant_c",
+                "color": "tenant_c_control",
+            },
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        res = self.search(
+            client,
+            collection_name,
+            data=query_a,
+            anns_field="vector_a",
+            filter='tenant == "tenant_a"',
+            limit=5,
+            output_fields=["id", "tenant", "color"],
+            search_params={"metric_type": "COSINE", "params": {}},
+        )[0]
+        assert {hit["tenant"] for hit in res[0]} == {"tenant_a"}
+
+        invalid_filters = [
+            ('tenant in ["tenant_a", "tenant_b"]', "partition key isolation does not support IN"),
+            ("", "partition key not found in expr"),
+        ]
+        for expr, err_msg in invalid_filters:
+            res, check = self.search(
+                client,
+                collection_name,
+                data=query_a,
+                anns_field="vector_a",
+                filter=expr,
+                limit=5,
+                output_fields=["id", "tenant", "color"],
+                search_params={"metric_type": "COSINE", "params": {}},
+                check_task=CheckTasks.check_nothing,
+            )
+            assert check is False
+            assert err_msg in str(res)
+
+        for expr, err_msg in invalid_filters:
+            reqs = [
+                AnnSearchRequest(
+                    data=query_a,
+                    anns_field="vector_a",
+                    param={"metric_type": "COSINE", "params": {}},
+                    limit=5,
+                    filter=expr,
+                ),
+                AnnSearchRequest(
+                    data=query_b,
+                    anns_field="vector_b",
+                    param={"metric_type": "COSINE", "params": {}},
+                    limit=5,
+                    filter=expr,
+                ),
+            ]
+            res, check = self.hybrid_search(
+                client,
+                collection_name,
+                reqs=reqs,
+                ranker=RRFRanker(60),
+                limit=5,
+                output_fields=["id", "tenant", "color"],
+                check_task=CheckTasks.check_nothing,
+            )
+            if check is not False:
+                log.info(f"hybrid_search with unsupported expr {expr} got res {res}")
+                pytest.xfail(f"issue: https://github.com/milvus-io/milvus/issues/50398, expr: {expr}")
+            assert err_msg in str(res)
 
     def test_par_key_isolation_without_partition_key(self):
         # create
@@ -224,23 +391,35 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
         schema = self.create_schema(client, enable_dynamic_field=True)[0]
         self.add_field(schema, "id", DataType.INT64, is_primary=True)
-        self.add_field(schema, "scalar_3", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_3"))
-        self.add_field(schema, "scalar_6", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_6"))
-        self.add_field(schema, "scalar_9", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_9"))
-        self.add_field(schema, "scalar_12", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_12"))
-        self.add_field(schema, "scalar_5_linear", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_5_linear"))
+        self.add_field(
+            schema, "scalar_3", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_3")
+        )
+        self.add_field(
+            schema, "scalar_6", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_6")
+        )
+        self.add_field(
+            schema, "scalar_9", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_9")
+        )
+        self.add_field(
+            schema, "scalar_12", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_12")
+        )
+        self.add_field(
+            schema,
+            "scalar_5_linear",
+            DataType.VARCHAR,
+            max_length=1000,
+            is_partition_key=bool(partition_key == "scalar_5_linear"),
+        )
         self.add_field(schema, "emb", DataType.FLOAT_VECTOR, dim=128)
         self.create_collection(client, collection_name, schema=schema)
         err_msg = "partition key isolation mode is enabled but no partition key field is set"
-        self.alter_collection_properties(client, collection_name,
-                                         {"partitionkey.isolation": enable_isolation},
-                                         check_task=CheckTasks.err_res,
-                                         check_items={"err_code": 1100, "err_msg": err_msg})
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            {"partitionkey.isolation": enable_isolation},
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1100, "err_msg": err_msg},
+        )
 
     def test_set_par_key_isolation_after_vector_indexed(self):
         # create
@@ -251,16 +430,25 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
         schema = self.create_schema(client, enable_dynamic_field=True)[0]
         self.add_field(schema, "id", DataType.INT64, is_primary=True)
-        self.add_field(schema, "scalar_3", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_3"))
-        self.add_field(schema, "scalar_6", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_6"))
-        self.add_field(schema, "scalar_9", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_9"))
-        self.add_field(schema, "scalar_12", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_12"))
-        self.add_field(schema, "scalar_5_linear", DataType.VARCHAR, max_length=1000,
-                       is_partition_key=bool(partition_key == "scalar_5_linear"))
+        self.add_field(
+            schema, "scalar_3", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_3")
+        )
+        self.add_field(
+            schema, "scalar_6", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_6")
+        )
+        self.add_field(
+            schema, "scalar_9", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_9")
+        )
+        self.add_field(
+            schema, "scalar_12", DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_12")
+        )
+        self.add_field(
+            schema,
+            "scalar_5_linear",
+            DataType.VARCHAR,
+            max_length=1000,
+            is_partition_key=bool(partition_key == "scalar_5_linear"),
+        )
         self.add_field(schema, "emb", DataType.FLOAT_VECTOR, dim=128)
         self.create_collection(client, collection_name, schema=schema, num_partitions=1)
 
@@ -280,23 +468,26 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
             t0 = time.time()
             data = []
             for j in range(start_idx, end_idx):
-                data.append({
-                    "id": j,
-                    "scalar_3": str(j % 3),
-                    "scalar_6": str(j % 6),
-                    "scalar_9": str(j % 9),
-                    "scalar_12": str(j % 12),
-                    "scalar_5_linear": str(j % 5),
-                    "emb": [random.random() for _ in range(128)]
-                })
+                data.append(
+                    {
+                        "id": j,
+                        "scalar_3": str(j % 3),
+                        "scalar_6": str(j % 6),
+                        "scalar_9": str(j % 9),
+                        "scalar_12": str(j % 12),
+                        "scalar_5_linear": str(j % 5),
+                        "emb": [random.random() for _ in range(128)],
+                    }
+                )
             log.info(f"generate test data {len(data)} cost time {time.time() - t0}")
             self.insert(client, collection_name, data)
         compact_id = self.compact(client, collection_name)[0]
         self.wait_for_compaction_ready(client, compact_id)
         t0 = time.time()
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="emb", metric_type="L2", index_type="HNSW",
-                               params={"M": 16, "efConstruction": 64})
+        index_params.add_index(
+            field_name="emb", metric_type="L2", index_type="HNSW", params={"M": 16, "efConstruction": 64}
+        )
         self.create_index(client, collection_name, index_params, timeout=360)
         index_list = self.list_indexes(client, collection_name)[0]
         for index_name in index_list:
@@ -304,28 +495,38 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
         tt = time.time() - t0
         log.info(f"create index cost time {tt}")
         # try set isolation=true after index exists → expect failure
-        error = {ct.err_code: 702,
-                 ct.err_msg: "can not alter partition key isolation mode if the collection already has a vector index"}
-        self.alter_collection_properties(client, collection_name,
-                                         {"partitionkey.isolation": "true"},
-                                         check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 702,
+            ct.err_msg: "can not alter partition key isolation mode if the collection already has a vector index",
+        }
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            {"partitionkey.isolation": "true"},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         # drop index, then set isolation=true → expect success
         for index_name in index_list:
             self.drop_index(client, collection_name, index_name)
         self.alter_collection_properties(client, collection_name, {"partitionkey.isolation": "true"})
         # recreate index, load, search
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="emb", metric_type="L2", index_type="HNSW",
-                               params={"M": 16, "efConstruction": 64})
+        index_params.add_index(
+            field_name="emb", metric_type="L2", index_type="HNSW", params={"M": 16, "efConstruction": 64}
+        )
         self.create_index(client, collection_name, index_params, timeout=360)
         self.load_collection(client, collection_name)
-        res = self.search(client, collection_name,
-                          data=[[random.random() for _ in range(128)]],
-                          anns_field="emb",
-                          filter="scalar_6 == '1' and scalar_3 == '1'",
-                          search_params={"metric_type": "L2", "params": {"nprobe": 16}},
-                          limit=10,
-                          output_fields=["scalar_6", "scalar_3"],
-                          consistency_level="Strong")[0]
+        res = self.search(
+            client,
+            collection_name,
+            data=[[random.random() for _ in range(128)]],
+            anns_field="emb",
+            filter="scalar_6 == '1' and scalar_3 == '1'",
+            search_params={"metric_type": "L2", "params": {"nprobe": 16}},
+            limit=10,
+            output_fields=["scalar_6", "scalar_3"],
+            consistency_level="Strong",
+        )[0]
         log.info(f"search res {res}")
         assert len(res[0]) > 0

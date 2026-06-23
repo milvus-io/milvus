@@ -22,6 +22,7 @@
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
+#include <chrono>
 #include <functional>
 #include <future>
 #include <memory>
@@ -34,6 +35,7 @@
 
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
 
 #include "SafeQueue.h"
 #include "glog/logging.h"
@@ -128,7 +130,35 @@ class ThreadPool {
         auto task_ptr =
             std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
 
-        std::function<void()> wrap_func = [task_ptr]() { (*task_ptr)(); };
+        auto enqueue_time = std::chrono::steady_clock::now();
+        auto* queue_metric = metric_queue_duration_;
+        auto* execute_metric = metric_execute_duration_;
+        std::function<void()> wrap_func = [task_ptr,
+                                           enqueue_time,
+                                           queue_metric,
+                                           execute_metric]() {
+            auto execute_start = std::chrono::steady_clock::now();
+            if (queue_metric) {
+                queue_metric->Observe(
+                    std::chrono::duration<double>(execute_start - enqueue_time)
+                        .count());
+            }
+            auto observe_execute = [&]() {
+                if (execute_metric) {
+                    execute_metric->Observe(
+                        std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - execute_start)
+                            .count());
+                }
+            };
+            try {
+                (*task_ptr)();
+            } catch (...) {
+                observe_execute();
+                throw;
+            }
+            observe_execute();
+        };
 
         work_queue_.enqueue(wrap_func);
         if (metric_submitted_) {
@@ -142,7 +172,9 @@ class ThreadPool {
 
         if (idle_threads_size_ > 0) {
             condition_lock_.notify_one();
-        } else if (current_threads_size_ < max_threads_size_.load()) {
+        }
+        if (work_queue_.size() > static_cast<size_t>(idle_threads_size_) &&
+            current_threads_size_ < max_threads_size_.load()) {
             // Dynamic increase thread number
             std::thread t(&ThreadPool::Worker, this);
             assert(threads_.find(t.get_id()) == threads_.end());
@@ -180,7 +212,9 @@ class ThreadPool {
                prometheus::Gauge* idle,
                prometheus::Gauge* queue_depth,
                prometheus::Counter* submitted,
-               prometheus::Counter* completed) {
+               prometheus::Counter* completed,
+               prometheus::Histogram* queue_duration,
+               prometheus::Histogram* execute_duration) {
         std::lock_guard<std::mutex> lock(mutex_);
         metric_capacity_ = capacity;
         metric_active_ = active;
@@ -188,6 +222,8 @@ class ThreadPool {
         metric_queue_depth_ = queue_depth;
         metric_submitted_ = submitted;
         metric_completed_ = completed;
+        metric_queue_duration_ = queue_duration;
+        metric_execute_duration_ = execute_duration;
         if (metric_capacity_) {
             metric_capacity_->Set(max_threads_size_.load());
         }
@@ -223,6 +259,8 @@ class ThreadPool {
     prometheus::Gauge* metric_queue_depth_{nullptr};
     prometheus::Counter* metric_submitted_{nullptr};
     prometheus::Counter* metric_completed_{nullptr};
+    prometheus::Histogram* metric_queue_duration_{nullptr};
+    prometheus::Histogram* metric_execute_duration_{nullptr};
 };
 
 }  // namespace milvus

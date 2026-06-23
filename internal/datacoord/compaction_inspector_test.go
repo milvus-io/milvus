@@ -368,6 +368,88 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 	}
 }
 
+func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionConflictsWithExecutingL0SameChannel() {
+	s.SetupTest()
+	s.handler.executingTasks[1] = newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:      1,
+		Type:        datapb.CompactionType_Level0DeleteCompaction,
+		State:       datapb.CompactionTaskState_pipelining,
+		Channel:     "ch-1",
+		PartitionID: 10,
+		NodeID:      102,
+	}, nil, s.mockMeta)
+	s.NoError(s.handler.submitTask(newBumpSchemaVersionTask(&datapb.CompactionTask{
+		PlanID:      2,
+		Type:        datapb.CompactionType_BumpSchemaVersionCompaction,
+		State:       datapb.CompactionTaskState_pipelining,
+		Channel:     "ch-1",
+		PartitionID: 10,
+		NodeID:      102,
+	}, nil, s.mockMeta, newMockVersionManager())))
+
+	gotTasks := s.handler.schedule()
+	s.Empty(gotTasks)
+	s.Equal(1, s.handler.queueTasks.Len())
+}
+
+func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionBlocksQueuedL0SameChannel() {
+	s.SetupTest()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.CompactionTaskPrioritizer.Key, "mix")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.CompactionTaskPrioritizer.Key)
+	s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return().Once()
+
+	s.NoError(s.handler.submitTask(newBumpSchemaVersionTask(&datapb.CompactionTask{
+		PlanID:      2,
+		Type:        datapb.CompactionType_BumpSchemaVersionCompaction,
+		State:       datapb.CompactionTaskState_pipelining,
+		Channel:     "ch-1",
+		PartitionID: 10,
+		NodeID:      102,
+	}, nil, s.mockMeta, newMockVersionManager())))
+	s.NoError(s.handler.submitTask(newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:      1,
+		Type:        datapb.CompactionType_Level0DeleteCompaction,
+		State:       datapb.CompactionTaskState_pipelining,
+		Channel:     "ch-1",
+		PartitionID: 10,
+		NodeID:      102,
+	}, nil, s.mockMeta)))
+
+	gotTasks := s.handler.schedule()
+	s.Equal([]UniqueID{2}, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
+		return t.GetTaskProto().GetPlanID()
+	}))
+	s.Equal(1, s.handler.queueTasks.Len())
+}
+
+func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionBlocksClusteringSameLabel() {
+	s.SetupTest()
+	s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return().Once()
+
+	s.NoError(s.handler.submitTask(newBumpSchemaVersionTask(&datapb.CompactionTask{
+		PlanID:      1,
+		Type:        datapb.CompactionType_BumpSchemaVersionCompaction,
+		State:       datapb.CompactionTaskState_pipelining,
+		Channel:     "ch-1",
+		PartitionID: 10,
+		NodeID:      102,
+	}, nil, s.mockMeta, newMockVersionManager())))
+	s.NoError(s.handler.submitTask(newClusteringCompactionTask(&datapb.CompactionTask{
+		PlanID:      2,
+		Type:        datapb.CompactionType_ClusteringCompaction,
+		State:       datapb.CompactionTaskState_pipelining,
+		Channel:     "ch-1",
+		PartitionID: 10,
+		NodeID:      102,
+	}, nil, s.mockMeta, s.mockHandler, nil)))
+
+	gotTasks := s.handler.schedule()
+	s.Equal([]UniqueID{1}, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
+		return t.GetTaskProto().GetPlanID()
+	}))
+	s.Equal(1, s.handler.queueTasks.Len())
+}
+
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.SetupTest()
 	ch := "ch1"
@@ -1022,6 +1104,10 @@ func TestCheckDelay(t *testing.T) {
 		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
 	}, nil, nil, nil, nil)
 	handler.checkDelay(t3)
+	t4 := newBumpSchemaVersionTask(&datapb.CompactionTask{
+		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
+	}, nil, nil, newMockVersionManager())
+	handler.checkDelay(t4)
 }
 
 func TestGetCompactionTasksNum(t *testing.T) {
@@ -1081,7 +1167,7 @@ func TestGetCompactionTasksNum(t *testing.T) {
 	})
 }
 
-func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BackfillCompaction() {
+func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BumpSchemaVersionCompaction() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
 
@@ -1093,13 +1179,13 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BackfillCompaction() 
 		TriggerID: 1,
 		PlanID:    10,
 		Channel:   "ch-1",
-		Type:      datapb.CompactionType_BackfillCompaction,
+		Type:      datapb.CompactionType_BumpSchemaVersionCompaction,
 	}
 
 	compactTask, err := handler.createCompactTask(t)
 	s.NoError(err)
 	s.NotNil(compactTask)
-	s.Equal(datapb.CompactionType_BackfillCompaction, compactTask.GetTaskProto().GetType())
+	s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, compactTask.GetTaskProto().GetType())
 }
 
 func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {

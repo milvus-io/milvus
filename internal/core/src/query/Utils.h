@@ -26,11 +26,20 @@
 #include "common/Utils.h"
 
 namespace milvus::query {
+inline void
+FillEmptySearchResult(SearchResult& result, int64_t num_queries, int64_t topk) {
+    auto total_num = num_queries * topk;
+    result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
+    result.distances_.resize(total_num, 0.0f);
+    result.total_nq_ = num_queries;
+    result.unity_topK_ = topk;
+}
+
 // Map logical element IDs returned by knowhere to (doc_id, elem_idx) pairs
 // via ArrayOffsets. Caller must ensure the input `element_ids` are already
-// in logical space (i.e. apply TransformOffset first when offset_mapping is
-// enabled), since ArrayOffsets::ElementIDToRowID is keyed on logical
-// element IDs.
+// in logical space (i.e. apply OffsetMapping::TransformOffsets first when
+// offset_mapping is enabled), since ArrayOffsets::ElementIDToRowID is keyed
+// on logical element IDs.
 inline std::pair<std::vector<int64_t>, std::vector<int32_t>>
 ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
                       const milvus::IArrayOffsets& array_offsets) {
@@ -52,32 +61,6 @@ ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
     return std::make_pair(std::move(doc_offsets), std::move(element_indices));
 }
 
-inline TargetBitmap
-TransformBitset(const BitsetView& bitset,
-                const milvus::OffsetMapping& mapping) {
-    TargetBitmap result;
-    auto count = mapping.GetValidCount();
-    result.resize(count);
-    for (int64_t physical_idx = 0; physical_idx < count; physical_idx++) {
-        auto logical_idx = mapping.GetLogicalOffset(physical_idx);
-        if (logical_idx >= 0 &&
-            logical_idx < static_cast<int64_t>(bitset.size())) {
-            result[physical_idx] = bitset.test(logical_idx);
-        }
-    }
-    return result;
-}
-
-inline void
-TransformOffset(std::vector<int64_t>& seg_offsets,
-                const milvus::OffsetMapping& mapping) {
-    for (auto& seg_offset : seg_offsets) {
-        if (seg_offset >= 0) {
-            seg_offset = mapping.GetLogicalOffset(seg_offset);
-        }
-    }
-}
-
 // Map knowhere's raw offsets back to logical space. The two inputs are
 // mutually exclusive:
 //
@@ -91,7 +74,7 @@ TransformOffset(std::vector<int64_t>& seg_offsets,
 // - array_offsets == nullptr (plain vector field): when OffsetMapping is
 //   enabled, the index/chunk was built over valid rows only, so
 //   knowhere's physical row IDs must be remapped to logical via
-//   OffsetMapping. When OffsetMapping is disabled, TransformOffset is a
+//   OffsetMapping. When OffsetMapping is disabled, TransformOffsets is a
 //   no-op.
 inline void
 FinalizeVectorSearchOffsets(SearchResult& result,
@@ -102,8 +85,11 @@ FinalizeVectorSearchOffsets(SearchResult& result,
             ApplyElementIDMapping(result.seg_offsets_, *array_offsets);
         result.seg_offsets_ = std::move(doc_offsets);
         result.element_indices_ = std::move(elem_indices);
+        result.element_level_ = true;
     } else {
-        TransformOffset(result.seg_offsets_, offset_mapping);
+        if (offset_mapping.IsEnabled()) {
+            offset_mapping.TransformOffsets(result.seg_offsets_);
+        }
     }
 }
 

@@ -695,7 +695,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
         # 5. Test np.NAN in vector field
-        rows[0][default_vector_field_name][0] = np.NAN
+        rows[0][default_vector_field_name][0] = np.nan
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 

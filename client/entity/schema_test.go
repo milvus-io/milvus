@@ -214,11 +214,17 @@ func (s *SchemaSuite) TestStructArrayFieldRoundTrip() {
 			WithDataType(FieldTypeArray).
 			WithElementType(FieldTypeStruct).
 			WithMaxCapacity(16).
+			WithNullable(true).
 			WithStructSchema(structSchema))
 
 	p := schema.ProtoMessage()
 	s.Equal(2, len(p.GetFields()))
 	s.Equal(1, len(p.GetStructArrayFields()))
+	s.True(p.GetStructArrayFields()[0].GetNullable())
+	s.Equal("16", KvPairsMap(p.GetStructArrayFields()[0].GetTypeParams())[TypeParamMaxCapacity])
+
+	// DescribeCollection may return max_capacity only on struct sub-fields.
+	p.GetStructArrayFields()[0].TypeParams = nil
 
 	got := (&Schema{}).ReadProto(p)
 	// 3 logical fields including the struct array
@@ -234,6 +240,8 @@ func (s *SchemaSuite) TestStructArrayFieldRoundTrip() {
 	s.Require().NotNil(clips)
 	s.Equal(FieldTypeArray, clips.DataType)
 	s.Equal(FieldTypeStruct, clips.ElementType)
+	s.True(clips.Nullable)
+	s.Equal("16", clips.TypeParams[TypeParamMaxCapacity])
 	s.Require().NotNil(clips.StructSchema)
 	s.Equal(2, len(clips.StructSchema.Fields))
 

@@ -19,6 +19,7 @@ package milvusclient_test
 
 import (
 	"context"
+	"io"
 	"log"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -117,4 +118,61 @@ func ExampleClient_CreateReplicateStream() {
 
 	// Here you can continue to use the stream for data transmission
 	// For example: stream.Send(&milvuspb.ReplicateMessage{...})
+}
+
+func ExampleClient_DumpMessages() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: exampleMilvusAddr,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// After a force failover, use GetReplicateInfo to obtain the salvage
+	// checkpoint, then dump the unsynchronized messages from that position.
+	info, err := cli.GetReplicateInfo(ctx, &milvuspb.GetReplicateInfoRequest{
+		SourceClusterId: "source-cluster",
+		TargetPchannel:  "source-channel-dml_0",
+	})
+	if err != nil {
+		log.Printf("Failed to get replicate information: %v", err)
+		return
+	}
+	ckpt := info.GetSalvageCheckpoint()
+	if ckpt == nil {
+		log.Println("No salvage checkpoint available")
+		return
+	}
+
+	stream, err := cli.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{
+		Pchannel:       ckpt.GetPchannel(),
+		StartMessageId: ckpt.GetMessageId(),
+		StartTimetick:  ckpt.GetTimeTick(),
+	})
+	if err != nil {
+		log.Printf("Failed to dump messages: %v", err)
+		return
+	}
+
+	for {
+		resp, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("Failed to receive dumped message: %v", err)
+			return
+		}
+		if msg := resp.GetMessage(); msg != nil {
+			log.Printf("Dumped message: %v", msg.GetId())
+		} else if status := resp.GetStatus(); status != nil {
+			log.Printf("Received error status: %v", status)
+			break
+		}
+	}
+
+	log.Println("Dump messages completed")
 }

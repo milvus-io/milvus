@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -36,12 +37,12 @@ type CompactionView interface {
 	ForceTrigger() (CompactionView, string)
 	ForceTriggerAll() ([]CompactionView, string)
 	GetTriggerID() int64
-	// IsInlineExecutable reports whether this view should be applied directly inside
-	// datacoord by CompactionTriggerManager rather than dispatched as a compaction
-	// task to the inspector. Inline views consume no inspector slot and do not depend
-	// on a free queue, so they must not be gated by inspector pressure.
-	// Default: false (most views are real compaction work).
-	IsInlineExecutable() bool
+	GetTotalSize() float64
+	GetCollectionTTL() time.Duration
+}
+
+func sumSegmentSize(views []*SegmentView) float64 {
+	return lo.SumBy(views, func(v *SegmentView) float64 { return v.Size })
 }
 
 type FullViews struct {

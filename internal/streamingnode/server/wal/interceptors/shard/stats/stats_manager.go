@@ -33,17 +33,29 @@ var (
 // If there will be a lock contention, we can optimize it by apply lock per segment.
 type StatsManager struct {
 	log.Binder
-	worker        *sealWorker
-	mu            sync.Mutex
-	cfg           statsConfig
-	totalStats    *aggregatedMetrics
-	pchannelStats map[string]*aggregatedMetrics
-	vchannelStats map[string]*aggregatedMetrics
-	segmentStats  map[int64]*SegmentStats       // map[SegmentID]SegmentStats
-	segmentIndex  map[int64]SegmentBelongs      // map[SegmentID]channels
-	pchannelIndex map[string]map[int64]struct{} // map[PChannel]SegmentID
-	sealOperators map[string]SealOperator
-	metricHelper  *metricsHelper
+	worker                     *sealWorker
+	mu                         sync.Mutex
+	cfg                        statsConfig
+	totalStats                 *aggregatedMetrics
+	pchannelStats              map[string]*aggregatedMetrics
+	vchannelStats              map[string]*aggregatedMetrics
+	segmentStats               map[int64]*SegmentStats       // map[SegmentID]SegmentStats
+	segmentIndex               map[int64]SegmentBelongs      // map[SegmentID]channels
+	pchannelIndex              map[string]map[int64]struct{} // map[PChannel]SegmentID
+	growingL1SegmentsByChannel map[channelKey]map[int64]struct{}
+	segmentDeletePressures     map[int64]deletePressure // map[SegmentID]aggregated delete pressure
+	sealOperators              map[string]SealOperator
+	metricHelper               *metricsHelper
+}
+
+type channelKey struct {
+	pchannel string
+	vchannel string
+}
+
+type deletePressure struct {
+	rows  uint64
+	bytes uint64
 }
 
 // sealSegmentIDWithPolicy is the struct that contains the segment ID and the seal policy.
@@ -59,16 +71,18 @@ func NewStatsManager() *StatsManager {
 		panic(err)
 	}
 	m := &StatsManager{
-		mu:            sync.Mutex{},
-		cfg:           cfg,
-		totalStats:    newAggregatedMetrics(),
-		pchannelStats: make(map[string]*aggregatedMetrics),
-		vchannelStats: make(map[string]*aggregatedMetrics),
-		segmentStats:  make(map[int64]*SegmentStats),
-		segmentIndex:  make(map[int64]SegmentBelongs),
-		pchannelIndex: make(map[string]map[int64]struct{}),
-		sealOperators: make(map[string]SealOperator),
-		metricHelper:  newMetricsHelper(),
+		mu:                         sync.Mutex{},
+		cfg:                        cfg,
+		totalStats:                 newAggregatedMetrics(),
+		pchannelStats:              make(map[string]*aggregatedMetrics),
+		vchannelStats:              make(map[string]*aggregatedMetrics),
+		segmentStats:               make(map[int64]*SegmentStats),
+		segmentIndex:               make(map[int64]SegmentBelongs),
+		pchannelIndex:              make(map[string]map[int64]struct{}),
+		growingL1SegmentsByChannel: make(map[channelKey]map[int64]struct{}),
+		segmentDeletePressures:     make(map[int64]deletePressure),
+		sealOperators:              make(map[string]SealOperator),
+		metricHelper:               newMetricsHelper(),
 	}
 	m.worker = newSealWorker(m)
 	go m.worker.loop()
@@ -156,6 +170,13 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 		m.pchannelIndex[belongs.PChannel] = make(map[int64]struct{})
 	}
 	m.pchannelIndex[belongs.PChannel][segmentID] = struct{}{}
+	if stats.Level == datapb.SegmentLevel_L1 {
+		key := channelKey{pchannel: belongs.PChannel, vchannel: belongs.VChannel}
+		if _, ok := m.growingL1SegmentsByChannel[key]; !ok {
+			m.growingL1SegmentsByChannel[key] = make(map[int64]struct{})
+		}
+		m.growingL1SegmentsByChannel[key][segmentID] = struct{}{}
+	}
 	m.totalStats.Collect(stats.Level, stats.Modified)
 	if _, ok := m.pchannelStats[belongs.PChannel]; !ok {
 		m.pchannelStats[belongs.PChannel] = newAggregatedMetrics()
@@ -221,6 +242,28 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics) (bool,
 		return false, ErrTooLargeInsert
 	}
 	return stat.ShouldBeSealed(), ErrNotEnoughSpace
+}
+
+// RecordDelete records local delete metrics on matching growing L1 segments.
+func (m *StatsManager) RecordDelete(pchannel string, vchannel string, timeTick uint64, rows uint64, bytes uint64) {
+	if pchannel == "" || vchannel == "" || timeTick == 0 || (rows == 0 && bytes == 0) {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := channelKey{pchannel: pchannel, vchannel: vchannel}
+	for segmentID := range m.growingL1SegmentsByChannel[key] {
+		stat := m.segmentStats[segmentID]
+		if stat.CreateSegmentTimeTick == 0 || timeTick < stat.CreateSegmentTimeTick {
+			continue
+		}
+		pressure := m.segmentDeletePressures[segmentID]
+		pressure.rows += rows
+		pressure.bytes += bytes
+		m.segmentDeletePressures[segmentID] = pressure
+	}
 }
 
 // notifyIfTotalGrowingBytesOverHWM notifies if the total bytes is over the high water mark.
@@ -303,6 +346,14 @@ func (m *StatsManager) unregisterSealedSegment(segmentID int64) *SegmentStats {
 	m.totalStats.Subtract(stats.Level, stats.Modified)
 	delete(m.segmentStats, segmentID)
 	delete(m.segmentIndex, segmentID)
+	delete(m.segmentDeletePressures, segmentID)
+	if stats.Level == datapb.SegmentLevel_L1 {
+		key := channelKey{pchannel: info.PChannel, vchannel: info.VChannel}
+		delete(m.growingL1SegmentsByChannel[key], segmentID)
+		if len(m.growingL1SegmentsByChannel[key]) == 0 {
+			delete(m.growingL1SegmentsByChannel, key)
+		}
+	}
 	if _, ok := m.pchannelIndex[info.PChannel]; ok {
 		delete(m.pchannelIndex[info.PChannel], segmentID)
 		if len(m.pchannelIndex[info.PChannel]) == 0 {
@@ -353,6 +404,67 @@ func (m *StatsManager) selectSegmentsWithTimePolicy() map[int64]policy.SealPolic
 		}
 	}
 	return sealSegmentIDs
+}
+
+// selectSegmentsWithBlockingL0Policy selects the earliest L1 growing segment per vchannel
+// when local deletes blocked by that segment reach the configured threshold.
+func (m *StatsManager) selectSegmentsWithBlockingL0Policy() map[int64]policy.SealPolicy {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.cfg.blockingL0EntryNum < 0 && m.cfg.blockingL0SizeBytes < 0 {
+		return nil
+	}
+
+	type pressureScope struct {
+		pchannel string
+		vchannel string
+	}
+	type earliestSegment struct {
+		segmentID int64
+		timeTick  uint64
+	}
+
+	earliestByScope := make(map[pressureScope]earliestSegment)
+	for segmentID, stat := range m.segmentStats {
+		if stat.Level != datapb.SegmentLevel_L1 || stat.CreateSegmentTimeTick == 0 {
+			continue
+		}
+		belongs := m.segmentIndex[segmentID]
+		scope := pressureScope{
+			pchannel: belongs.PChannel,
+			vchannel: belongs.VChannel,
+		}
+		earliest, ok := earliestByScope[scope]
+		if !ok || stat.CreateSegmentTimeTick < earliest.timeTick {
+			earliestByScope[scope] = earliestSegment{
+				segmentID: segmentID,
+				timeTick:  stat.CreateSegmentTimeTick,
+			}
+		}
+	}
+
+	sealSegmentIDs := make(map[int64]policy.SealPolicy)
+	for _, earliest := range earliestByScope {
+		pressure := m.segmentDeletePressures[earliest.segmentID]
+		if m.reachBlockingL0Threshold(pressure.rows, pressure.bytes) {
+			sealSegmentIDs[earliest.segmentID] = policy.PolicyBlockingL0(pressure.rows, pressure.bytes, m.cfg.blockingL0EntryNum, m.cfg.blockingL0SizeBytes)
+		}
+	}
+	if len(sealSegmentIDs) == 0 {
+		return nil
+	}
+	return sealSegmentIDs
+}
+
+func (m *StatsManager) reachBlockingL0Threshold(rows uint64, bytes uint64) bool {
+	if m.cfg.blockingL0EntryNum >= 0 && rows >= uint64(m.cfg.blockingL0EntryNum) {
+		return true
+	}
+	if m.cfg.blockingL0SizeBytes >= 0 && bytes >= uint64(m.cfg.blockingL0SizeBytes) {
+		return true
+	}
+	return false
 }
 
 // selectSegmentsUntilLessThanLWM selects segments until the total size is less than the threshold.

@@ -111,6 +111,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     bool
+    ShouldUseOp(proto::plan::OpType op) const override {
+        return internal_index_->ShouldUseOp(op);
+    }
+
+    bool
     SupportPatternMatch() const override {
         return internal_index_->SupportPatternMatch();
     }
@@ -118,21 +123,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
     const TargetBitmap
     PatternMatch(const std::string& pattern, proto::plan::OpType op) override {
         return internal_index_->PatternMatch(pattern, op);
-    }
-
-    bool
-    TryUsePatternQuery() const override {
-        return internal_index_->TryUsePatternQuery();
-    }
-
-    bool
-    SupportPatternQuery() const override {
-        return internal_index_->SupportPatternQuery();
-    }
-
-    const TargetBitmap
-    PatternQuery(const std::string& pattern) override {
-        return internal_index_->PatternQuery(pattern);
     }
 
     const TargetBitmap

@@ -216,7 +216,7 @@ func (s *SortCompactionTaskSuite) TestSortCompactionBasic() {
 
 func (s *SortCompactionTaskSuite) TestSortCompactionWithBM25() {
 	s.setupBM25Test()
-	s.prepareSortCompactionWithBM25Task()
+	s.prepareSortCompactionWithBM25Task(false)
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -232,6 +232,57 @@ func (s *SortCompactionTaskSuite) TestSortCompactionWithBM25() {
 	s.EqualValues(1, len(segment.Field2StatslogPaths))
 	s.EqualValues(1, len(segment.Bm25Logs)) // Should have BM25 logs
 	s.Empty(segment.Deltalogs)
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionMaterializesMissingBM25OutputFromOldSegment() {
+	s.setupBM25Test()
+	s.prepareSortCompactionWithBM25Task(true)
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(1, segment.GetNumOfRows())
+	s.True(segment.GetIsSorted())
+	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102))
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionMaterializesNullableAddedFieldFromOldSegment() {
+	segmentID := int64(1001)
+	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+
+	s.initSegBuffer(1, segmentID)
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	s.Require().NoError(err)
+	removeFieldBinlogForTest(kvs, fBinlogs, StringField)
+
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+		left, right := lo.Difference(keys, lo.Keys(kvs))
+		return len(left) == 0 && len(right) == 0
+	})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+		return downloadValuesForPathsForTest(kvs, keys)
+	}).Once()
+
+	s.task.plan.TotalRows = 1
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		{
+			SegmentID:    segmentID,
+			CollectionID: CollectionID,
+			PartitionID:  PartitionID,
+			FieldBinlogs: lo.Values(fBinlogs),
+		},
+	}
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(1, segment.GetNumOfRows())
+	s.True(segment.GetIsSorted())
+	s.EqualValues(1, fieldBinlogEntriesForTest(segment.GetInsertLogs(), StringField))
 }
 
 func (s *SortCompactionTaskSuite) setupBM25Test() {
@@ -267,7 +318,7 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 	s.task.binlogIO = s.mockBinlogIO
 }
 
-func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
+func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task(removeBM25Output bool) {
 	segmentID := int64(1001)
 	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
@@ -275,11 +326,16 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
 	s.initSegBufferWithBM25(segmentID)
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
+	if removeBM25Output {
+		removeFieldBinlogForTest(kvs, fBinlogs, 102)
+	}
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 		left, right := lo.Difference(keys, lo.Keys(kvs))
 		return len(left) == 0 && len(right) == 0
-	})).Return(lo.Values(kvs), nil).Once()
+	})).RunAndReturn(func(ctx context.Context, keys []string) ([][]byte, error) {
+		return downloadValuesForPathsForTest(kvs, keys)
+	}).Once()
 
 	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{

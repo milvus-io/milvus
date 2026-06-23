@@ -58,3 +58,45 @@ func TestProperties_GetTaskType_Unrecognized(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, "UnknownType", taskType)
 }
+
+func TestProperties_CollectionID(t *testing.T) {
+	t.Run("append and get", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendCollectionID(123456789)
+		assert.Equal(t, "123456789", props[CollectionIDKey])
+		collectionID, err := props.GetCollectionID()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(123456789), collectionID)
+	})
+
+	t.Run("get missing returns error", func(t *testing.T) {
+		props := NewProperties(nil)
+		_, err := props.GetCollectionID()
+		assert.Error(t, err)
+	})
+
+	t.Run("get invalid returns error", func(t *testing.T) {
+		props := NewProperties(map[string]string{
+			CollectionIDKey: "not_a_number",
+		})
+		_, err := props.GetCollectionID()
+		assert.Error(t, err)
+	})
+
+	t.Run("zero value round-trip", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendCollectionID(0)
+		assert.Equal(t, "0", props[CollectionIDKey])
+		collectionID, err := props.GetCollectionID()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(0), collectionID)
+	})
+
+	t.Run("negative value round-trip", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendCollectionID(-1)
+		collectionID, err := props.GetCollectionID()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(-1), collectionID)
+	})
+}

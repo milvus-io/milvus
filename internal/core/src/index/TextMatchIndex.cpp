@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/uuid/random_generator.hpp>
+#include "common/FastMem.h"
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 #include <shared_mutex>
@@ -20,6 +21,18 @@
 #include "storage/ThreadPools.h"
 
 namespace milvus::index {
+
+namespace {
+std::string
+StripTextLogPrefix(const std::string& path, const std::string& base_prefix) {
+    if (path.size() > base_prefix.size() &&
+        path.compare(0, base_prefix.size(), base_prefix) == 0) {
+        return path.substr(base_prefix.size());
+    }
+    return path;
+}
+}  // namespace
+
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* analyzer_name,
@@ -127,26 +140,37 @@ TextMatchIndex::Upload(const Config& config) {
     // This makes the returned paths consistent with JsonKeyStats::Upload()
     // which also returns relative paths.
     auto base_prefix = disk_file_manager_->GetRemoteTextLogPrefix() + "/";
-    auto strip_prefix = [&base_prefix](const std::string& path) -> std::string {
-        if (path.size() > base_prefix.size() &&
-            path.compare(0, base_prefix.size(), base_prefix) == 0) {
-            return path.substr(base_prefix.size());
-        }
-        return path;
-    };
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size() +
                         remote_mem_path_to_size.size());
     for (auto& file : remote_paths_to_size) {
-        index_files.emplace_back(strip_prefix(file.first), file.second);
+        index_files.emplace_back(StripTextLogPrefix(file.first, base_prefix),
+                                 file.second);
     }
     for (auto& file : remote_mem_path_to_size) {
-        index_files.emplace_back(strip_prefix(file.first), file.second);
+        index_files.emplace_back(StripTextLogPrefix(file.first, base_prefix),
+                                 file.second);
     }
     return IndexStats::New(this->file_manager_->GetAddedTotalMemSize() +
                                disk_file_manager_->GetAddedTotalFileSize(),
                            std::move(index_files));
+}
+
+IndexStatsPtr
+TextMatchIndex::UploadUnified(const Config& config) {
+    auto stats = ScalarIndex<std::string>::UploadUnified(config);
+
+    auto base_prefix = this->file_manager_->GetRemoteTextLogPrefix() + "/";
+    std::vector<SerializedIndexFileInfo> index_files;
+    const auto& uploaded = stats->GetSerializedIndexFileInfo();
+    index_files.reserve(uploaded.size());
+    for (const auto& file : uploaded) {
+        index_files.emplace_back(
+            StripTextLogPrefix(file.file_name, base_prefix), file.file_size);
+    }
+
+    return IndexStats::New(stats->GetMemSize(), std::move(index_files));
 }
 
 void
@@ -203,9 +227,9 @@ TextMatchIndex::Load(const Config& config) {
         index_datas.clear();
         auto index_valid_data = binary_set.GetByName("index_null_offset");
         null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        memcpy(null_offset_.data(),
-               index_valid_data->data.get(),
-               (size_t)index_valid_data->size);
+        milvus::fastmem::FastMemcpy(null_offset_.data(),
+                                    index_valid_data->data.get(),
+                                    (size_t)index_valid_data->size);
     }
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(

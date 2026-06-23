@@ -182,14 +182,14 @@ func (job *LoadCollectionJob) Execute() error {
 	if len(toReleasePartitions) > 0 {
 		job.targetObserver.ReleasePartition(req.GetCollectionId(), toReleasePartitions...)
 		if err := job.meta.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
-			return errors.Wrap(err, "failed to remove partitions")
+			return merr.Wrap(err, "failed to remove partitions")
 		}
 	}
 
 	if err = job.meta.PutCollection(job.ctx, collection, partitions...); err != nil {
 		msg := "failed to store collection and partitions"
 		log.Warn(msg, zap.Error(err))
-		return errors.Wrap(err, msg)
+		return merr.Wrapf(err, "%s", msg)
 	}
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))

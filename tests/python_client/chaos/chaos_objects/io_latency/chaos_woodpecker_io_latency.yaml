@@ -1,0 +1,22 @@
+kind: IOChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-woodpecker-io-latency
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: milvus-chaos
+      app.kubernetes.io/name: milvus
+      component: woodpecker
+  mode: all
+  action: latency
+  delay: 10ms
+  methods:
+    - read
+    - write
+    - flush
+  percent: 100
+  volumePath: /milvus/data

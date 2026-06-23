@@ -31,6 +31,9 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT="$( cd -P "$( dirname "$SOURCE" )/../.." && pwd )"
 
+# Shellcheck source=python-env.sh
+source "${ROOT}/tests/scripts/python-env.sh"
+
 
 # Install pytest requirements
 function install_pytest_requirements(){
@@ -43,7 +46,7 @@ export PIP_TRUSTED_HOST="nexus.zilliz.cc"
 export PIP_INDEX_URL="https://nexus.zilliz.cc/repository/pypi-proxy/simple"
 export PIP_INDEX="https://nexus.zilliz.cc/repository/pypi-proxy/pypi"
 export PIP_FIND_LINKS="https://nexus.zilliz.cc/repository/pypi-proxy/pypi"
- python3 -m pip install --no-cache-dir -r requirements.txt --timeout 300 --retries 6
+ python -m pip install --no-cache-dir -r requirements.txt --timeout 300 --retries 6
 }
 
 # Login in ci docker registry
@@ -56,4 +59,3 @@ function docker_login_ci_registry(){
         docker login  -u ${CI_REGISTRY_USERNAME} -p ${CI_REGISTRY_PASSWORD} ${HUB}
     fi
 }
-

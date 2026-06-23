@@ -90,6 +90,44 @@ MakeExternalFieldMetaForTest(DataType data_type,
     return FieldMeta::ParseFrom(field_schema);
 }
 
+template <size_t N>
+void
+AppendFloatVectorBytes(arrow::UInt8Builder& builder,
+                       const std::array<float, N>& row) {
+    auto bytes = reinterpret_cast<const uint8_t*>(row.data());
+    for (size_t i = 0; i < sizeof(float) * row.size(); ++i) {
+        ASSERT_TRUE(builder.Append(bytes[i]).ok());
+    }
+}
+
+template <size_t N>
+void
+AssertFixedSizeBinaryRows(const std::shared_ptr<arrow::Array>& array,
+                          const std::array<float, N>& row0,
+                          const std::array<float, N>& row1) {
+    auto fsb_array =
+        std::static_pointer_cast<arrow::FixedSizeBinaryArray>(array);
+    ASSERT_EQ(fsb_array->byte_width(), sizeof(float) * N);
+    EXPECT_EQ(memcmp(fsb_array->Value(0), row0.data(), sizeof(row0)), 0);
+    EXPECT_EQ(memcmp(fsb_array->Value(1), row1.data(), sizeof(row1)), 0);
+}
+
+// Assert a single FixedSizeBinary row equals the raw bytes of a float vector.
+// Unlike AssertFixedSizeBinaryRows (two fixed rows), this checks one row by
+// index, used to verify individual inner vectors of a normalized VECTOR_ARRAY.
+template <size_t N>
+void
+AssertFixedSizeBinaryRow(const std::shared_ptr<arrow::Array>& array,
+                         int64_t row_index,
+                         const std::array<float, N>& expected) {
+    auto fsb_array =
+        std::static_pointer_cast<arrow::FixedSizeBinaryArray>(array);
+    ASSERT_EQ(fsb_array->byte_width(), sizeof(float) * N);
+    EXPECT_EQ(
+        memcmp(fsb_array->Value(row_index), expected.data(), sizeof(expected)),
+        0);
+}
+
 }  // namespace
 
 TEST(storage, ExternalVarCharStringNormalizesToBinaryAndFillSucceeds) {
@@ -313,6 +351,119 @@ TEST(storage, ExternalFloatVectorListNormalizesToFixedSizeBinary) {
     ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
 }
 
+TEST(storage, ExternalFloatVectorByteListNormalizesToFixedSizeBinary) {
+    constexpr int dim = 2;
+    std::array<float, dim> row0 = {1.0F, 2.0F};
+    std::array<float, dim> row1 = {3.0F, 4.0F};
+
+    auto value_builder = std::make_shared<arrow::UInt8Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    auto& byte_builder =
+        dynamic_cast<arrow::UInt8Builder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    AppendFloatVectorBytes(byte_builder, row0);
+    ASSERT_TRUE(builder.Append().ok());
+    AppendFloatVectorBytes(byte_builder, row1);
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+    AssertFixedSizeBinaryRows(normalized, row0, row1);
+}
+
+TEST(storage, ExternalFloatVectorFixedSizeByteListNormalizesToFixedSizeBinary) {
+    constexpr int dim = 2;
+    std::array<float, dim> row0 = {1.0F, 2.0F};
+    std::array<float, dim> row1 = {3.0F, 4.0F};
+
+    auto value_builder = std::make_shared<arrow::UInt8Builder>();
+    arrow::FixedSizeListBuilder builder(
+        arrow::default_memory_pool(), value_builder, sizeof(float) * dim);
+    auto& byte_builder =
+        dynamic_cast<arrow::UInt8Builder&>(*builder.value_builder());
+
+    ASSERT_TRUE(builder.Append().ok());
+    AppendFloatVectorBytes(byte_builder, row0);
+    ASSERT_TRUE(builder.Append().ok());
+    AppendFloatVectorBytes(byte_builder, row1);
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+    AssertFixedSizeBinaryRows(normalized, row0, row1);
+}
+
+// VECTOR_ARRAY arrives as list<list<uint8>>: the outer list groups multiple
+// vectors per row, each inner vector being a raw uint8 byte list. Normalize
+// must preserve the outer LIST structure and convert only the inner vectors to
+// FixedSizeBinary. Layout under test:
+//   row0 -> [vec0]        (1 inner vector)
+//   row1 -> [vec1, vec2]  (2 inner vectors)
+// so the flattened inner values hold 3 vectors total.
+TEST(storage, ExternalVectorArrayByteListNormalizesInnerVectors) {
+    constexpr int dim = 2;
+    std::array<float, dim> vec0 = {1.0F, 2.0F};
+    std::array<float, dim> vec1 = {3.0F, 4.0F};
+    std::array<float, dim> vec2 = {5.0F, 6.0F};
+
+    // Build the nested list<list<uint8>>: array_builder is the outer list,
+    // inner_vector_builder the per-vector list, inner_byte_builder the raw
+    // uint8 bytes. Append() on a list builder starts a new list slot; the
+    // inner builders are then filled for that slot.
+    auto byte_builder = std::make_shared<arrow::UInt8Builder>();
+    auto vector_builder = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), byte_builder);
+    arrow::ListBuilder array_builder(arrow::default_memory_pool(),
+                                     vector_builder);
+    auto& inner_vector_builder =
+        dynamic_cast<arrow::ListBuilder&>(*array_builder.value_builder());
+    auto& inner_byte_builder = dynamic_cast<arrow::UInt8Builder&>(
+        *inner_vector_builder.value_builder());
+
+    // row0: one inner vector.
+    ASSERT_TRUE(array_builder.Append().ok());
+    ASSERT_TRUE(inner_vector_builder.Append().ok());
+    AppendFloatVectorBytes(inner_byte_builder, vec0);
+
+    // row1: two inner vectors.
+    ASSERT_TRUE(array_builder.Append().ok());
+    ASSERT_TRUE(inner_vector_builder.Append().ok());
+    AppendFloatVectorBytes(inner_byte_builder, vec1);
+    ASSERT_TRUE(inner_vector_builder.Append().ok());
+    AppendFloatVectorBytes(inner_byte_builder, vec2);
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(array_builder.Finish(&list_array).ok());
+
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, dim);
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    // Outer LIST structure is preserved; only inner vectors are rewritten.
+    ASSERT_EQ(normalized->type_id(), arrow::Type::LIST);
+
+    auto normalized_list =
+        std::static_pointer_cast<arrow::ListArray>(normalized);
+    EXPECT_EQ(normalized_list->length(), 2);         // two rows
+    EXPECT_EQ(normalized_list->value_length(0), 1);  // row0 has 1 vector
+    EXPECT_EQ(normalized_list->value_length(1), 2);  // row1 has 2 vectors
+    // Inner vectors normalized from raw uint8 byte lists to FixedSizeBinary.
+    ASSERT_EQ(normalized_list->values()->type_id(),
+              arrow::Type::FIXED_SIZE_BINARY);
+
+    AssertFixedSizeBinaryRow(normalized_list->values(), 0, vec0);
+    AssertFixedSizeBinaryRow(normalized_list->values(), 1, vec1);
+    AssertFixedSizeBinaryRow(normalized_list->values(), 2, vec2);
+}
+
 TEST(storage, ExternalNullableFloatVectorBinaryIsAccepted) {
     std::array<float, 2> row = {1.0F, 2.0F};
     arrow::BinaryBuilder builder;
@@ -329,7 +480,193 @@ TEST(storage, ExternalNullableFloatVectorBinaryIsAccepted) {
     ASSERT_EQ(normalized->type_id(), arrow::Type::BINARY);
 }
 
-TEST(storage, ExternalBinaryVectorListNormalizeFails) {
+TEST(storage, NullableFloatVectorArrowAllValidMaterializesValidData) {
+    std::array<float, 2> row0 = {1.0F, 2.0F};
+    std::array<float, 2> row1 = {3.0F, 4.0F};
+    arrow::BinaryBuilder builder;
+    ASSERT_TRUE(builder
+                    .Append(reinterpret_cast<const uint8_t*>(row0.data()),
+                            sizeof(float) * row0.size())
+                    .ok());
+    ASSERT_TRUE(builder
+                    .Append(reinterpret_cast<const uint8_t*>(row1.data()),
+                            sizeof(float) * row1.size())
+                    .ok());
+    std::shared_ptr<arrow::Array> binary_array;
+    ASSERT_TRUE(builder.Finish(&binary_array).ok());
+    ASSERT_EQ(binary_array->null_count(), 0);
+
+    auto field_data = storage::CreateFieldData(
+        storage::DataType::VECTOR_FLOAT, DataType::NONE, true, 2);
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(binary_array);
+    ASSERT_NO_THROW(field_data->FillFieldData(chunked_array));
+
+    ASSERT_EQ(field_data->get_num_rows(), 2);
+    ASSERT_EQ(field_data->get_valid_rows(), 2);
+    ASSERT_EQ(field_data->get_null_count(), 0);
+    ASSERT_TRUE(field_data->is_valid(0));
+    ASSERT_TRUE(field_data->is_valid(1));
+
+    auto actual0 = static_cast<const float*>(field_data->RawValue(0));
+    auto actual1 = static_cast<const float*>(field_data->RawValue(1));
+    ASSERT_NE(actual0, nullptr);
+    ASSERT_NE(actual1, nullptr);
+    EXPECT_FLOAT_EQ(actual0[0], row0[0]);
+    EXPECT_FLOAT_EQ(actual0[1], row0[1]);
+    EXPECT_FLOAT_EQ(actual1[0], row1[0]);
+    EXPECT_FLOAT_EQ(actual1[1], row1[1]);
+}
+
+TEST(storage, NullableFloatVectorArrowChunksAccumulateNullCount) {
+    std::array<float, 2> row0 = {1.0F, 2.0F};
+    std::array<float, 2> row3 = {7.0F, 8.0F};
+
+    arrow::BinaryBuilder first_builder;
+    ASSERT_TRUE(first_builder
+                    .Append(reinterpret_cast<const uint8_t*>(row0.data()),
+                            sizeof(float) * row0.size())
+                    .ok());
+    ASSERT_TRUE(first_builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> first_array;
+    ASSERT_TRUE(first_builder.Finish(&first_array).ok());
+
+    arrow::BinaryBuilder second_builder;
+    ASSERT_TRUE(second_builder.AppendNull().ok());
+    ASSERT_TRUE(second_builder
+                    .Append(reinterpret_cast<const uint8_t*>(row3.data()),
+                            sizeof(float) * row3.size())
+                    .ok());
+    std::shared_ptr<arrow::Array> second_array;
+    ASSERT_TRUE(second_builder.Finish(&second_array).ok());
+
+    auto field_data = storage::CreateFieldData(
+        storage::DataType::VECTOR_FLOAT, DataType::NONE, true, 2);
+    auto chunked_array = std::make_shared<arrow::ChunkedArray>(
+        arrow::ArrayVector{first_array, second_array});
+    ASSERT_NO_THROW(field_data->FillFieldData(chunked_array));
+
+    ASSERT_EQ(field_data->get_num_rows(), 4);
+    ASSERT_EQ(field_data->get_valid_rows(), 2);
+    ASSERT_EQ(field_data->get_null_count(), 2);
+    EXPECT_TRUE(field_data->is_valid(0));
+    EXPECT_FALSE(field_data->is_valid(1));
+    EXPECT_FALSE(field_data->is_valid(2));
+    EXPECT_TRUE(field_data->is_valid(3));
+
+    auto actual0 = static_cast<const float*>(field_data->RawValue(0));
+    auto actual3 = static_cast<const float*>(field_data->RawValue(3));
+    ASSERT_NE(actual0, nullptr);
+    ASSERT_NE(actual3, nullptr);
+    EXPECT_FLOAT_EQ(actual0[0], row0[0]);
+    EXPECT_FLOAT_EQ(actual0[1], row0[1]);
+    EXPECT_FLOAT_EQ(actual3[0], row3[0]);
+    EXPECT_FLOAT_EQ(actual3[1], row3[1]);
+}
+
+TEST(storage, ExternalNullableVectorArrayPreservesNullRows) {
+    auto value_builder = std::make_shared<arrow::FloatBuilder>();
+    auto vector_builder = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), value_builder);
+    arrow::ListBuilder array_builder(arrow::default_memory_pool(),
+                                     vector_builder);
+    auto& inner_list_builder =
+        dynamic_cast<arrow::ListBuilder&>(*array_builder.value_builder());
+    auto& float_builder =
+        dynamic_cast<arrow::FloatBuilder&>(*inner_list_builder.value_builder());
+
+    ASSERT_TRUE(array_builder.Append().ok());
+    ASSERT_TRUE(inner_list_builder.Append().ok());
+    ASSERT_TRUE(float_builder.Append(1.0F).ok());
+    ASSERT_TRUE(float_builder.Append(2.0F).ok());
+    ASSERT_TRUE(array_builder.AppendNull().ok());
+    ASSERT_TRUE(array_builder.Append().ok());
+    ASSERT_TRUE(inner_list_builder.Append().ok());
+    ASSERT_TRUE(float_builder.Append(3.0F).ok());
+    ASSERT_TRUE(float_builder.Append(4.0F).ok());
+    ASSERT_TRUE(inner_list_builder.Append().ok());
+    ASSERT_TRUE(float_builder.Append(5.0F).ok());
+    ASSERT_TRUE(float_builder.Append(6.0F).ok());
+
+    std::shared_ptr<arrow::Array> list_array;
+    ASSERT_TRUE(array_builder.Finish(&list_array).ok());
+
+    auto nullable_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, 2);
+    auto normalized =
+        storage::NormalizeExternalArrow(list_array, nullable_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::LIST);
+
+    auto normalized_list =
+        std::static_pointer_cast<arrow::ListArray>(normalized);
+    EXPECT_EQ(normalized_list->length(), 3);
+    EXPECT_EQ(normalized_list->null_count(), 1);
+    EXPECT_TRUE(normalized_list->IsNull(1));
+    EXPECT_EQ(normalized_list->value_length(0), 1);
+    EXPECT_EQ(normalized_list->value_length(2), 2);
+    EXPECT_EQ(normalized_list->values()->type_id(),
+              arrow::Type::FIXED_SIZE_BINARY);
+
+    auto non_nullable_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, 2);
+    EXPECT_ANY_THROW(
+        storage::NormalizeExternalArrow(list_array, non_nullable_meta));
+}
+
+TEST(storage, InsertDataVectorArrayNullablePreservesNullRows) {
+    constexpr int dim = 2;
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
+
+    auto make_vector_array = [dim](std::initializer_list<float> values) {
+        return milvus::VectorArray(values.size() > 0 ? values.begin() : nullptr,
+                                   values.size() / dim,
+                                   dim,
+                                   DataType::VECTOR_FLOAT);
+    };
+
+    std::vector<milvus::VectorArray> data;
+    data.emplace_back(make_vector_array({1.0F, 2.0F}));
+    data.emplace_back(make_vector_array({}));
+    data.emplace_back(make_vector_array({3.0F, 4.0F, 5.0F, 6.0F}));
+    uint8_t valid_data[] = {0x0D};  // rows 0,2,3 valid; row 1 null.
+
+    field_data->FillFieldData(data.data(), valid_data, 4, 0);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    auto new_payload = new_insert_data->GetFieldData();
+
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::VECTOR_ARRAY);
+    ASSERT_TRUE(new_payload->IsNullable());
+    ASSERT_EQ(new_payload->get_num_rows(), 4);
+    ASSERT_EQ(new_payload->get_valid_rows(), 3);
+    ASSERT_EQ(new_payload->get_null_count(), 1);
+    EXPECT_TRUE(new_payload->is_valid(0));
+    EXPECT_FALSE(new_payload->is_valid(1));
+    EXPECT_TRUE(new_payload->is_valid(2));
+    EXPECT_TRUE(new_payload->is_valid(3));
+
+    auto vector_array_payload =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            new_payload);
+    ASSERT_NE(vector_array_payload, nullptr);
+    ASSERT_EQ(vector_array_payload->get_element_type(), DataType::VECTOR_FLOAT);
+    EXPECT_EQ(vector_array_payload->value_at(0)->length(), 1);
+    EXPECT_EQ(vector_array_payload->value_at(1)->length(), 0);
+    EXPECT_EQ(vector_array_payload->value_at(2)->length(), 2);
+}
+
+TEST(storage, ExternalBinaryVectorListNormalizesToFixedSizeBinary) {
     auto value_builder = std::make_shared<arrow::UInt8Builder>();
     arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
     auto& byte_builder =
@@ -344,7 +681,14 @@ TEST(storage, ExternalBinaryVectorListNormalizeFails) {
 
     auto field_meta = MakeExternalFieldMetaForTest(
         DataType::VECTOR_BINARY, DataType::NONE, false, 16);
-    EXPECT_ANY_THROW(storage::NormalizeExternalArrow(list_array, field_meta));
+    auto normalized = storage::NormalizeExternalArrow(list_array, field_meta);
+    ASSERT_EQ(normalized->type_id(), arrow::Type::FIXED_SIZE_BINARY);
+
+    auto fsb_array =
+        std::static_pointer_cast<arrow::FixedSizeBinaryArray>(normalized);
+    ASSERT_EQ(fsb_array->byte_width(), 2);
+    const uint8_t expected[] = {0, 1};
+    EXPECT_EQ(memcmp(fsb_array->Value(0), expected, sizeof(expected)), 0);
 }
 
 TEST(storage, ExternalNullableVarCharBinaryPreservesNullCount) {

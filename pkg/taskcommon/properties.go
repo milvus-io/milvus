@@ -21,18 +21,20 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // properties keys
 const (
 	// request
-	ClusterIDKey   = "cluster_id"
-	TaskIDKey      = "task_id"
-	TypeKey        = "task_type"
-	SubTypeKey     = "task_sub_type" // optional, only for Stats
-	SlotKey        = "task_slot"
-	NumRowsKey     = "num_row"      // optional, only for Index, Stats
-	TaskVersionKey = "task_version" // optional, only for Index, Stats and Analyze
+	ClusterIDKey    = "cluster_id"
+	TaskIDKey       = "task_id"
+	TypeKey         = "task_type"
+	SubTypeKey      = "task_sub_type" // optional, only for Stats
+	SlotKey         = "task_slot"
+	NumRowsKey      = "num_row"      // optional, only for Index, Stats
+	TaskVersionKey  = "task_version" // optional, only for Index, Stats and Analyze
+	CollectionIDKey = "collection_id"
 
 	// result
 	StateKey  = "task_state"
@@ -49,7 +51,10 @@ func NewProperties(properties map[string]string) Properties {
 }
 
 func WrapErrTaskPropertyLack(lackProperty string, taskID any) error {
-	return fmt.Errorf("cannot find property '%s' for task '%v'", lackProperty, taskID)
+	// Task properties are populated by the coordinator, never by user input, so a
+	// missing property is an internal protocol violation (e.g. a mixed-version
+	// rolling upgrade), not a user error.
+	return merr.WrapErrServiceInternalMsg("cannot find property '%s' for task '%v'", lackProperty, taskID)
 }
 
 func (p Properties) AppendClusterID(clusterID string) {
@@ -85,6 +90,10 @@ func (p Properties) AppendTaskVersion(version int64) {
 	p[TaskVersionKey] = fmt.Sprintf("%d", version)
 }
 
+func (p Properties) AppendCollectionID(collectionID int64) {
+	p[CollectionIDKey] = fmt.Sprintf("%d", collectionID)
+}
+
 func (p Properties) AppendReason(reason string) {
 	p[ReasonKey] = reason
 }
@@ -101,7 +110,10 @@ func (p Properties) GetTaskType() (Type, error) {
 	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
 		return p[TypeKey], nil
 	default:
-		return p[TypeKey], fmt.Errorf("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
+		// Task types are assigned by the coordinator; an unrecognized one means a
+		// protocol mismatch (e.g. a newer coordinator scheduling onto an older
+		// node), which is system blame, not user input.
+		return p[TypeKey], merr.WrapErrServiceInternalMsg("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
 	}
 }
 
@@ -146,7 +158,7 @@ func (p Properties) GetTaskState() (State, error) {
 	}
 	stateStr := p[StateKey]
 	if _, ok := indexpb.JobState_value[stateStr]; !ok {
-		return None, fmt.Errorf("invalid task state '%v', taskID=%s", stateStr, p[TaskIDKey])
+		return None, merr.WrapErrParameterInvalidMsg("invalid task state '%v', taskID=%s", stateStr, p[TaskIDKey])
 	}
 	return State(indexpb.JobState_value[stateStr]), nil
 }
@@ -182,4 +194,15 @@ func (p Properties) GetTaskVersion() int64 {
 		return 0
 	}
 	return version
+}
+
+func (p Properties) GetCollectionID() (int64, error) {
+	if _, ok := p[CollectionIDKey]; !ok {
+		return 0, WrapErrTaskPropertyLack(CollectionIDKey, p[TaskIDKey])
+	}
+	collectionID, err := strconv.ParseInt(p[CollectionIDKey], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return collectionID, nil
 }

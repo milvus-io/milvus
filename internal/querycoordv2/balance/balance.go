@@ -186,7 +186,7 @@ func (b *RoundRobinBalancer) genChannelPlan(ctx context.Context, replica *meta.R
 	channelsToMove := make([]*meta.DmChannel, 0)
 
 	for _, node := range rwNodes {
-		channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
 		channels = sortIfChannelAtWALLocated(channels)
 
 		if len(channels) <= average {

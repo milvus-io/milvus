@@ -1,18 +1,24 @@
+kind: Schedule
 apiVersion: chaos-mesh.org/v1alpha1
-kind: PodChaos
 metadata:
   name: test-datanode-container-kill
   namespace: chaos-testing
 spec:
-  action: container-kill
-  mode: one
-  containerName: 'datanode'
-  selector:
-    namespaces:
-      - chaos-testing         # target namespace of milvus deployment
-    labelSelectors:
-      app.kubernetes.io/instance: milvus-chaos
-      app.kubernetes.io/name: milvus
-      component: datanode
-  scheduler:
-    cron: '@every 2s'
+  schedule: '*/5 * * * * *'
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid
+  historyLimit: 1
+  type: PodChaos
+  podChaos:
+    selector:
+      namespaces:
+        - chaos-testing
+      labelSelectors:
+        app.kubernetes.io/instance: milvus-chaos
+        app.kubernetes.io/name: milvus
+        component: datanode
+    mode: fixed
+    value: "1"
+    action: container-kill
+    containerNames:
+      - datanode

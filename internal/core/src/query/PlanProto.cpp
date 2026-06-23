@@ -662,21 +662,6 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 
-    // if has score function, run filter and scorer at last
-    if (plan_node_proto.scorers_size() > 0) {
-        std::vector<std::shared_ptr<rescores::Scorer>> scorers;
-        for (const auto& function : plan_node_proto.scorers()) {
-            scorers.push_back(ParseScorer(function));
-        }
-
-        plannode = std::make_shared<milvus::plan::RescoresNode>(
-            milvus::plan::GetNextPlanNodeId(),
-            std::move(scorers),
-            plan_node_proto.score_option(),
-            sources);
-        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-    }
-
     plan_node->plannodes_ = plannode;
 
     PlanOptionsFromProto(plan_node_proto.plan_options(),
@@ -867,7 +852,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     auto plan_node = PlanNodeFromProto(plan_node_proto);
     plan->plan_node_ = std::move(plan_node);
     plan->tag2field_["$0"] = plan->plan_node_->search_info_.field_id_;
-    ExtractedPlanInfo extra_info(schema->size());
+    ExtractedPlanInfo extra_info(schema->get_field_id_bitset_size());
     extra_info.add_involved_field(plan->plan_node_->search_info_.field_id_);
     plan->extra_info_opt_ = std::move(extra_info);
 

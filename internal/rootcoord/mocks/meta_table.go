@@ -362,6 +362,54 @@ func (_c *IMetaTable_AlterDatabase_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// AlterRole provides a mock function with given fields: ctx, tenant, entity
+func (_m *IMetaTable) AlterRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	ret := _m.Called(ctx, tenant, entity)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RoleEntity) error); ok {
+		r0 = rf(ctx, tenant, entity)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_AlterRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterRole'
+type IMetaTable_AlterRole_Call struct {
+	*mock.Call
+}
+
+// AlterRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+//   - entity *milvuspb.RoleEntity
+func (_e *IMetaTable_Expecter) AlterRole(ctx interface{}, tenant interface{}, entity interface{}) *IMetaTable_AlterRole_Call {
+	return &IMetaTable_AlterRole_Call{Call: _e.mock.On("AlterRole", ctx, tenant, entity)}
+}
+
+func (_c *IMetaTable_AlterRole_Call) Run(run func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity)) *IMetaTable_AlterRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RoleEntity))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AlterRole_Call) Return(_a0 error) *IMetaTable_AlterRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_AlterRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RoleEntity) error) *IMetaTable_AlterRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // BackupRBAC provides a mock function with given fields: ctx, tenant
 func (_m *IMetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error) {
 	ret := _m.Called(ctx, tenant)
@@ -657,6 +705,53 @@ func (_c *IMetaTable_CheckIfAliasDroppable_Call) Return(_a0 error) *IMetaTable_C
 }
 
 func (_c *IMetaTable_CheckIfAliasDroppable_Call) RunAndReturn(run func(context.Context, string, string) error) *IMetaTable_CheckIfAliasDroppable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckIfAlterRole provides a mock function with given fields: ctx, req
+func (_m *IMetaTable) CheckIfAlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfAlterRole")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterRoleRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfAlterRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfAlterRole'
+type IMetaTable_CheckIfAlterRole_Call struct {
+	*mock.Call
+}
+
+// CheckIfAlterRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.AlterRoleRequest
+func (_e *IMetaTable_Expecter) CheckIfAlterRole(ctx interface{}, req interface{}) *IMetaTable_CheckIfAlterRole_Call {
+	return &IMetaTable_CheckIfAlterRole_Call{Call: _e.mock.On("CheckIfAlterRole", ctx, req)}
+}
+
+func (_c *IMetaTable_CheckIfAlterRole_Call) Run(run func(ctx context.Context, req *milvuspb.AlterRoleRequest)) *IMetaTable_CheckIfAlterRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterRoleRequest))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfAlterRole_Call) Return(_a0 error) *IMetaTable_CheckIfAlterRole_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfAlterRole_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterRoleRequest) error) *IMetaTable_CheckIfAlterRole_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1966,9 +2061,9 @@ func (_c *IMetaTable_GetCollectionByIDWithMaxTs_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// GetCollectionByName provides a mock function with given fields: ctx, dbName, collectionName, ts
-func (_m *IMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts uint64) (*model.Collection, error) {
-	ret := _m.Called(ctx, dbName, collectionName, ts)
+// GetCollectionByName provides a mock function with given fields: ctx, dbName, collectionName, ts, allowUnavailable
+func (_m *IMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts uint64, allowUnavailable bool) (*model.Collection, error) {
+	ret := _m.Called(ctx, dbName, collectionName, ts, allowUnavailable)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollectionByName")
@@ -1976,19 +2071,19 @@ func (_m *IMetaTable) GetCollectionByName(ctx context.Context, dbName string, co
 
 	var r0 *model.Collection
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) (*model.Collection, error)); ok {
-		return rf(ctx, dbName, collectionName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64, bool) (*model.Collection, error)); ok {
+		return rf(ctx, dbName, collectionName, ts, allowUnavailable)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) *model.Collection); ok {
-		r0 = rf(ctx, dbName, collectionName, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64, bool) *model.Collection); ok {
+		r0 = rf(ctx, dbName, collectionName, ts, allowUnavailable)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*model.Collection)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, string, uint64) error); ok {
-		r1 = rf(ctx, dbName, collectionName, ts)
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, uint64, bool) error); ok {
+		r1 = rf(ctx, dbName, collectionName, ts, allowUnavailable)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2006,13 +2101,14 @@ type IMetaTable_GetCollectionByName_Call struct {
 //   - dbName string
 //   - collectionName string
 //   - ts uint64
-func (_e *IMetaTable_Expecter) GetCollectionByName(ctx interface{}, dbName interface{}, collectionName interface{}, ts interface{}) *IMetaTable_GetCollectionByName_Call {
-	return &IMetaTable_GetCollectionByName_Call{Call: _e.mock.On("GetCollectionByName", ctx, dbName, collectionName, ts)}
+//   - allowUnavailable bool
+func (_e *IMetaTable_Expecter) GetCollectionByName(ctx interface{}, dbName interface{}, collectionName interface{}, ts interface{}, allowUnavailable interface{}) *IMetaTable_GetCollectionByName_Call {
+	return &IMetaTable_GetCollectionByName_Call{Call: _e.mock.On("GetCollectionByName", ctx, dbName, collectionName, ts, allowUnavailable)}
 }
 
-func (_c *IMetaTable_GetCollectionByName_Call) Run(run func(ctx context.Context, dbName string, collectionName string, ts uint64)) *IMetaTable_GetCollectionByName_Call {
+func (_c *IMetaTable_GetCollectionByName_Call) Run(run func(ctx context.Context, dbName string, collectionName string, ts uint64, allowUnavailable bool)) *IMetaTable_GetCollectionByName_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64), args[4].(bool))
 	})
 	return _c
 }
@@ -2022,7 +2118,7 @@ func (_c *IMetaTable_GetCollectionByName_Call) Return(_a0 *model.Collection, _a1
 	return _c
 }
 
-func (_c *IMetaTable_GetCollectionByName_Call) RunAndReturn(run func(context.Context, string, string, uint64) (*model.Collection, error)) *IMetaTable_GetCollectionByName_Call {
+func (_c *IMetaTable_GetCollectionByName_Call) RunAndReturn(run func(context.Context, string, string, uint64, bool) (*model.Collection, error)) *IMetaTable_GetCollectionByName_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2394,6 +2490,63 @@ func (_c *IMetaTable_GetPChannelInfo_Call) Return(_a0 *rootcoordpb.GetPChannelIn
 }
 
 func (_c *IMetaTable_GetPChannelInfo_Call) RunAndReturn(run func(context.Context, string) *rootcoordpb.GetPChannelInfoResponse) *IMetaTable_GetPChannelInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetPartitionIDByName provides a mock function with given fields: collectionID, partitionName
+func (_m *IMetaTable) GetPartitionIDByName(collectionID int64, partitionName string) (int64, bool) {
+	ret := _m.Called(collectionID, partitionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPartitionIDByName")
+	}
+
+	var r0 int64
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(int64, string) (int64, bool)); ok {
+		return rf(collectionID, partitionName)
+	}
+	if rf, ok := ret.Get(0).(func(int64, string) int64); ok {
+		r0 = rf(collectionID, partitionName)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, string) bool); ok {
+		r1 = rf(collectionID, partitionName)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetPartitionIDByName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPartitionIDByName'
+type IMetaTable_GetPartitionIDByName_Call struct {
+	*mock.Call
+}
+
+// GetPartitionIDByName is a helper method to define mock.On call
+//   - collectionID int64
+//   - partitionName string
+func (_e *IMetaTable_Expecter) GetPartitionIDByName(collectionID interface{}, partitionName interface{}) *IMetaTable_GetPartitionIDByName_Call {
+	return &IMetaTable_GetPartitionIDByName_Call{Call: _e.mock.On("GetPartitionIDByName", collectionID, partitionName)}
+}
+
+func (_c *IMetaTable_GetPartitionIDByName_Call) Run(run func(collectionID int64, partitionName string)) *IMetaTable_GetPartitionIDByName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetPartitionIDByName_Call) Return(_a0 int64, _a1 bool) *IMetaTable_GetPartitionIDByName_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetPartitionIDByName_Call) RunAndReturn(run func(int64, string) (int64, bool)) *IMetaTable_GetPartitionIDByName_Call {
 	_c.Call.Return(run)
 	return _c
 }

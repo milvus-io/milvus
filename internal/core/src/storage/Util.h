@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include "common/FastMem.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -102,7 +103,10 @@ std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(DataType data_type, int dim, DataType element_type);
+CreateArrowSchema(DataType data_type,
+                  int dim,
+                  DataType element_type,
+                  bool nullable = false);
 
 int
 GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
@@ -296,6 +300,12 @@ GetFieldDatasFromManifest(
     int64_t dim,
     std::optional<DataType> element_type);
 
+std::vector<FieldDataPtr>
+GetTextFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta);
+
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<const uint8_t*>& data_slices,
@@ -401,7 +411,7 @@ ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
     auto event_data_bytes = event_data.Serialize();
 
     std::shared_ptr<uint8_t[]> file_data(new uint8_t[event_data_bytes.size()]);
-    std::memcpy(
+    milvus::fastmem::FastMemcpy(
         file_data.get(), event_data_bytes.data(), event_data_bytes.size());
 
     storage::BinlogReaderPtr reader = std::make_shared<storage::BinlogReader>(

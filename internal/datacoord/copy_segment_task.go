@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Copy Segment Task Management
@@ -315,7 +317,7 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)
 		return
 	}
-	err = cluster.CreateCopySegment(nodeID, req)
+	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId())
 	if err != nil {
 		log.Warn("failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)
@@ -375,12 +377,13 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 // Process flow:
 //  1. Send QueryCopySegmentRequest to assigned DataNode
 //  2. Check response state:
-//     - Not Completed: Mark task/job as failed (fail-fast)
+//     - In progress or other non-terminal states: keep polling later
+//     - Failed: Mark task/job as failed (fail-fast)
 //     - Completed: Sync binlog and index metadata to segment
 //  3. Update task state accordingly
 //
 // Failure handling:
-// - Any error or non-completed state triggers immediate failure
+// - RPC errors and worker failure responses trigger immediate failure
 // - Task failure immediately marks parent job as failed (fail-fast)
 // - Enables quick feedback to user without waiting for timeout
 //
@@ -413,8 +416,6 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 
 	if resp.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
-		log.Info("copy segment task not completed",
-			WrapCopySegmentTaskLog(t, zap.String("state", resp.GetState().String()))...)
 		return
 	}
 
@@ -538,6 +539,11 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	idMappings := task.GetIdMappings()
 	sources := make([]*datapb.CopySegmentSource, 0, len(idMappings))
 	targets := make([]*datapb.CopySegmentTarget, 0, len(idMappings))
+	var sourceSchema *schemapb.CollectionSchema
+	if snapshotData.Collection != nil {
+		sourceSchema = snapshotData.Collection.GetSchema()
+	}
+	isExternalCollection := typeutil.IsExternalCollection(sourceSchema)
 
 	for _, mapping := range idMappings {
 		sourceSegID := mapping.GetSourceSegmentId()
@@ -553,18 +559,19 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 
 		// Build source with full binlog information
 		source := &datapb.CopySegmentSource{
-			CollectionId:      snapshotData.SnapshotInfo.GetCollectionId(),
-			PartitionId:       sourceSegDesc.GetPartitionId(),
-			SegmentId:         sourceSegDesc.GetSegmentId(),
-			InsertBinlogs:     sourceSegDesc.GetBinlogs(),
-			StatsBinlogs:      sourceSegDesc.GetStatslogs(),
-			DeltaBinlogs:      sourceSegDesc.GetDeltalogs(),
-			IndexFiles:        sourceSegDesc.GetIndexFiles(),        // vector/scalar index file info
-			Bm25Binlogs:       sourceSegDesc.GetBm25Statslogs(),     // BM25 stats logs
-			TextIndexFiles:    sourceSegDesc.GetTextIndexFiles(),    // Text index files
-			JsonKeyIndexFiles: sourceSegDesc.GetJsonKeyIndexFiles(), // JSON key index files
-			ManifestPath:      sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
-			StorageVersion:    sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
+			CollectionId:         snapshotData.SnapshotInfo.GetCollectionId(),
+			PartitionId:          sourceSegDesc.GetPartitionId(),
+			SegmentId:            sourceSegDesc.GetSegmentId(),
+			InsertBinlogs:        sourceSegDesc.GetBinlogs(),
+			StatsBinlogs:         sourceSegDesc.GetStatslogs(),
+			DeltaBinlogs:         sourceSegDesc.GetDeltalogs(),
+			IndexFiles:           sourceSegDesc.GetIndexFiles(),        // vector/scalar index file info
+			Bm25Binlogs:          sourceSegDesc.GetBm25Statslogs(),     // BM25 stats logs
+			TextIndexFiles:       sourceSegDesc.GetTextIndexFiles(),    // Text index files
+			JsonKeyIndexFiles:    sourceSegDesc.GetJsonKeyIndexFiles(), // JSON key index files
+			ManifestPath:         sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
+			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
+			IsExternalCollection: isExternalCollection,
 		}
 		sources = append(sources, source)
 
@@ -576,7 +583,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			if _, exists := newBuildIDs[srcBuildID]; !exists {
 				newID, err := t.alloc.AllocID(ctx)
 				if err != nil {
-					return merr.WrapErrServiceInternal(fmt.Sprintf("failed to allocate new buildID for source buildID %d", srcBuildID), err.Error())
+					return merr.Wrapf(err, "failed to allocate new buildID for source buildID %d", srcBuildID)
 				}
 				newBuildIDs[srcBuildID] = newID
 			}
@@ -609,9 +616,16 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			NewBuildIds:  newBuildIDs,
 		}
 		log.Info("prepare copy segment source and target",
-			zap.Any("source", sourceSegDesc),
-			zap.Any("target", target),
-			zap.Any("newBuildIDs", newBuildIDs))
+			WrapCopySegmentTaskLog(task,
+				zap.Int64("sourceCollectionID", source.GetCollectionId()),
+				zap.Int64("sourcePartitionID", source.GetPartitionId()),
+				zap.Int64("sourceSegmentID", source.GetSegmentId()),
+				zap.Int64("targetCollectionID", target.GetCollectionId()),
+				zap.Int64("targetPartitionID", target.GetPartitionId()),
+				zap.Int64("targetSegmentID", target.GetSegmentId()),
+				zap.Int("newBuildIDCount", len(newBuildIDs)),
+				zap.Bool("hasManifestPath", source.GetManifestPath() != ""),
+				zap.Int64("storageVersion", source.GetStorageVersion()))...)
 		targets = append(targets, target)
 	}
 
@@ -681,7 +695,8 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
-			operators := []UpdateOperator{op1, op2}
+			op3 := UpdateIsImporting(result.GetSegmentId(), false)
+			operators := []UpdateOperator{op1, op2, op3}
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}
@@ -726,7 +741,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 
 			log.Info("update copy segment info done",
 				WrapCopySegmentTaskLog(task, zap.Int64("segmentID", result.GetSegmentId()),
-					zap.Any("segmentResult", result))...)
+					zap.Int64("importedRows", result.GetImportedRows()),
+					zap.Int("binlogFields", len(result.GetBinlogs())),
+					zap.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
 		}
 
 		// Mark task as completed and record copying duration
@@ -844,6 +861,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			CreatedUTCTime:            uint64(now),
 			FinishedUTCTime:           uint64(now),
 			NumRows:                   result.GetImportedRows(),
+			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 		}
 
 		err := meta.indexMeta.AddSegmentIndex(ctx, segIndex)

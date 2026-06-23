@@ -98,15 +98,29 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def create_struct_field_schema(self, client, check_task=None, check_items=None, **kwargs):
-
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.create_struct_field_schema], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
     @trace()
-    def add_field(self, schema, field_name, datatype, check_task=None, check_items=None, **kwargs):
+    def create_field_schema(
+        self,
+        client,
+        name,
+        data_type,
+        desc="",
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_field_schema, name, data_type, desc], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
 
+    @trace()
+    def add_field(self, schema, field_name, datatype, check_task=None, check_items=None, **kwargs):
         # Set default parameters for specific field types
         if datatype == DataType.VARCHAR and "max_length" not in kwargs:
             kwargs["max_length"] = ct.default_length
@@ -519,6 +533,48 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def refresh_external_collection(
+        self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.refresh_external_collection], collection_name=collection_name, **kwargs)
+        check_result = ResponseChecker(
+            res, func_name, check_task, check_items, check, collection_name=collection_name, **kwargs
+        ).run()
+        return res, check_result
+
+    @trace()
+    def get_refresh_external_collection_progress(
+        self, client, job_id, timeout=None, check_task=None, check_items=None, **kwargs
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.get_refresh_external_collection_progress], job_id=job_id, **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, job_id=job_id, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_refresh_external_collection_jobs(
+        self, client, collection_name="", timeout=None, check_task=None, check_items=None, **kwargs
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.list_refresh_external_collection_jobs], collection_name=collection_name, **kwargs
+        )
+        check_result = ResponseChecker(
+            res, func_name, check_task, check_items, check, collection_name=collection_name, **kwargs
+        ).run()
+        return res, check_result
+
+    @trace()
     def refresh_load(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
@@ -732,7 +788,6 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def prepare_index_params(self, client, check_task=None, check_items=None, **kwargs):
-
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.prepare_index_params], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
@@ -905,6 +960,9 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(
             res, func_name, check_task, check_items, check, user_name=user_name, password=password, **kwargs
         ).run()
+        # track for per-instance teardown; avoids cross-worker drops under -n
+        if check is True and check_task is None and user_name not in self.tear_down_user_names:
+            self.tear_down_user_names.append(user_name)
         return res, check_result
 
     @trace()
@@ -980,6 +1038,9 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(
             res, func_name, check_task, check_items, check, role_name=role_name, **kwargs
         ).run()
+        # track for per-instance teardown; avoids cross-worker drops under -n
+        if check is True and check_task is None and role_name not in self.tear_down_role_names:
+            self.tear_down_role_names.append(role_name)
         return res, check_result
 
     @trace()
@@ -1411,6 +1472,29 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def optimize(
+        self,
+        client,
+        collection_name,
+        target_size=None,
+        wait=True,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.optimize, collection_name], target_size=target_size, wait=wait, timeout=timeout, **kwargs
+        )
+        check_result = ResponseChecker(
+            res, func_name, check_task, check_items, check, collection_name=collection_name, **kwargs
+        ).run()
+        return res, check_result
+
+    @trace()
     def get_compaction_state(self, client, job_id, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
@@ -1525,102 +1609,119 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def wait_schema_version_consistent(self, client, collection_name, timeout=30, poll_interval=0.01):
-        """
-        Poll get_collection_stats until the schema version consistency gate would pass.
+    @trace()
+    def add_function_field(
+        self,
+        client,
+        collection_name,
+        field_schema,
+        func,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
 
-        Background: After a previous schema-change DDL (AlterCollectionSchema or
-        AddCollectionField), DataCoord's backfill segment-version propagation runs on
-        a periodic tick. Until the tick fires, a back-to-back schema-change call is
-        rejected by the consistency gate at the Proxy / RootCoord with an error like
-        "schema version consistency check failed: N/M segments have caught up".
-        E2E tests that issue successive schema changes need to wait until the gate
-        would pass; this helper polls the same stats keys the gate reads.
-
-        Pass condition (mirrors checkSchemaVersionConsistency):
-          - both keys absent → schema version is 0, no backfill in progress → pass
-          - schema_version_consistent_segments == schema_version_total_segments → pass
-
-        Note: pymilvus MilvusClient.get_collection_stats returns a dict[str, str]
-        (with row_count converted to int), so we read the keys directly from the dict.
-
-        Args:
-            client: pymilvus MilvusClient
-            collection_name: target collection
-            timeout: max seconds to wait before giving up (default 30s)
-            poll_interval: sleep between polls in seconds (default 10ms)
-
-        Raises:
-            AssertionError on timeout, with the last observed counts for debugging.
-        """
-        consistent_key = "schema_version_consistent_segments"
-        total_key = "schema_version_total_segments"
-        deadline = time.time() + timeout
-        last_consistent, last_total = None, None
-        while time.time() < deadline:
-            stats, _ = self.get_collection_stats(client, collection_name)
-            if not stats:
-                time.sleep(poll_interval)
-                continue
-            consistent = stats.get(consistent_key)
-            total = stats.get(total_key)
-            # Both absent → schema v0 path, gate passes trivially.
-            if consistent is None and total is None:
-                return
-            # Both present and equal → backfill caught up.
-            if consistent is not None and total is not None and int(consistent) == int(total):
-                return
-            last_consistent, last_total = consistent, total
-            time.sleep(poll_interval)
-        raise AssertionError(
-            f"wait_schema_version_consistent timed out after {timeout}s for collection "
-            f"{collection_name}: consistent={last_consistent}, total={last_total}"
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.add_function_field],
+            collection_name=collection_name,
+            field_schema=field_schema,
+            func=func,
+            **kwargs,
         )
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
 
-    def add_collection_field_wait_schema_version_consistency(
+    @trace()
+    def drop_collection_function(
+        self,
+        client,
+        collection_name,
+        function_name,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_collection_function, collection_name, function_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_collection_field(
+        self,
+        client,
+        collection_name,
+        field_name="",
+        field_id=0,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.drop_collection_field],
+            collection_name=collection_name,
+            field_name=field_name,
+            field_id=field_id,
+            **kwargs,
+        )
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def add_collection_struct_field(
         self,
         client,
         collection_name,
         field_name,
-        data_type,
-        desc="",
+        struct_schema,
+        max_capacity,
+        desc=None,
         timeout=None,
         check_task=None,
         check_items=None,
-        wait_timeout=30,
-        poll_interval=0.01,
         **kwargs,
     ):
-        """
-        Wrapper around add_collection_field that first waits for the schema-version
-        consistency gate to pass. Use this in E2E tests that issue successive
-        schema-change DDLs back-to-back, where the previous call's backfill
-        segment-version propagation tick may not have fired yet.
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
 
-        See wait_schema_version_consistent for the polling logic and pass conditions.
-        All add_collection_field arguments are forwarded unchanged.
-        """
-        self.wait_schema_version_consistent(client, collection_name, timeout=wait_timeout, poll_interval=poll_interval)
-        return self.add_collection_field(
-            client,
-            collection_name,
-            field_name,
-            data_type,
-            desc=desc,
-            timeout=timeout,
-            check_task=check_task,
-            check_items=check_items,
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [
+                client.add_collection_struct_field,
+                collection_name,
+                field_name,
+                struct_schema,
+                max_capacity,
+                desc,
+            ],
             **kwargs,
         )
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
 
     # ====================== Snapshot ======================
     @trace()
     def create_snapshot(
         self,
         client,
-        collection_name,
         snapshot_name,
+        collection_name,
+        db_name="",
         description="",
+        compaction_protection_seconds=0,
         timeout=None,
         check_task=None,
         check_items=None,
@@ -1628,16 +1729,19 @@ class TestMilvusClientV2Base(Base):
     ):
         """Create a snapshot for a collection.
 
-        Note: wrapper keeps ``collection_name`` before ``snapshot_name`` for test
-        readability, but the SDK signature is ``create_snapshot(snapshot_name,
-        collection_name, ...)`` so we forward positionals in SDK order.
+        Signature follows ``MilvusClient.create_snapshot``; check arguments are
+        wrapper-only and appended after the SDK arguments.
         """
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request(
-            [client.create_snapshot, snapshot_name, collection_name], description=description, **kwargs
+            [client.create_snapshot, snapshot_name, collection_name],
+            db_name=db_name,
+            description=description,
+            compaction_protection_seconds=compaction_protection_seconds,
+            **kwargs,
         )
         check_result = ResponseChecker(
             res,
@@ -1647,19 +1751,30 @@ class TestMilvusClientV2Base(Base):
             check,
             snapshot_name=snapshot_name,
             collection_name=collection_name,
+            db_name=db_name,
+            description=description,
+            compaction_protection_seconds=compaction_protection_seconds,
             **kwargs,
         ).run()
         return res, check_result
 
     @trace()
     def drop_snapshot(
-        self, client, snapshot_name, collection_name, timeout=None, check_task=None, check_items=None, **kwargs
+        self,
+        client,
+        snapshot_name,
+        collection_name,
+        db_name="",
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
     ):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.drop_snapshot, snapshot_name, collection_name], **kwargs)
+        res, check = api_request([client.drop_snapshot, snapshot_name, collection_name], db_name=db_name, **kwargs)
         check_result = ResponseChecker(
             res,
             func_name,
@@ -1668,31 +1783,42 @@ class TestMilvusClientV2Base(Base):
             check,
             snapshot_name=snapshot_name,
             collection_name=collection_name,
+            db_name=db_name,
             **kwargs,
         ).run()
         return res, check_result
 
     @trace()
-    def list_snapshots(self, client, collection_name="", timeout=None, check_task=None, check_items=None, **kwargs):
-        timeout = TIMEOUT if timeout is None else timeout
-        kwargs.update({"timeout": timeout})
-
-        func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.list_snapshots, collection_name], **kwargs)
-        check_result = ResponseChecker(
-            res, func_name, check_task, check_items, check, collection_name=collection_name, **kwargs
-        ).run()
-        return res, check_result
-
-    @trace()
-    def describe_snapshot(
-        self, client, snapshot_name, collection_name, timeout=None, check_task=None, check_items=None, **kwargs
+    def list_snapshots(
+        self, client, collection_name="", db_name="", timeout=None, check_task=None, check_items=None, **kwargs
     ):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.describe_snapshot, snapshot_name, collection_name], **kwargs)
+        res, check = api_request([client.list_snapshots, collection_name], db_name=db_name, **kwargs)
+        check_result = ResponseChecker(
+            res, func_name, check_task, check_items, check, collection_name=collection_name, db_name=db_name, **kwargs
+        ).run()
+        return res, check_result
+
+    @trace()
+    def describe_snapshot(
+        self,
+        client,
+        snapshot_name,
+        collection_name,
+        db_name="",
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.describe_snapshot, snapshot_name, collection_name], db_name=db_name, **kwargs)
         check_result = ResponseChecker(
             res,
             func_name,
@@ -1701,6 +1827,7 @@ class TestMilvusClientV2Base(Base):
             check,
             snapshot_name=snapshot_name,
             collection_name=collection_name,
+            db_name=db_name,
             **kwargs,
         ).run()
         return res, check_result
@@ -1710,8 +1837,10 @@ class TestMilvusClientV2Base(Base):
         self,
         client,
         snapshot_name,
+        source_collection_name,
         target_collection_name,
-        source_collection_name="",
+        source_db_name="",
+        target_db_name="",
         timeout=None,
         check_task=None,
         check_items=None,
@@ -1719,15 +1848,18 @@ class TestMilvusClientV2Base(Base):
     ):
         """Restore a snapshot into a new collection.
 
-        SDK positional order is ``(snapshot_name, source_collection_name,
-        target_collection_name)`` and ``source_collection_name`` is now required.
+        Signature follows ``MilvusClient.restore_snapshot``; check arguments are
+        wrapper-only and appended after the SDK arguments.
         """
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request(
-            [client.restore_snapshot, snapshot_name, source_collection_name, target_collection_name], **kwargs
+            [client.restore_snapshot, snapshot_name, source_collection_name, target_collection_name],
+            source_db_name=source_db_name,
+            target_db_name=target_db_name,
+            **kwargs,
         )
         check_result = ResponseChecker(
             res,
@@ -1738,6 +1870,8 @@ class TestMilvusClientV2Base(Base):
             snapshot_name=snapshot_name,
             target_collection_name=target_collection_name,
             source_collection_name=source_collection_name,
+            source_db_name=source_db_name,
+            target_db_name=target_db_name,
             **kwargs,
         ).run()
         return res, check_result
@@ -1754,15 +1888,15 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def list_restore_snapshot_jobs(
-        self, client, collection_name="", timeout=None, check_task=None, check_items=None, **kwargs
+        self, client, collection_name="", db_name="", timeout=None, check_task=None, check_items=None, **kwargs
     ):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.list_restore_snapshot_jobs, collection_name], **kwargs)
+        res, check = api_request([client.list_restore_snapshot_jobs, collection_name], db_name=db_name, **kwargs)
         check_result = ResponseChecker(
-            res, func_name, check_task, check_items, check, collection_name=collection_name, **kwargs
+            res, func_name, check_task, check_items, check, collection_name=collection_name, db_name=db_name, **kwargs
         ).run()
         return res, check_result
 
@@ -1772,6 +1906,7 @@ class TestMilvusClientV2Base(Base):
         client,
         snapshot_name,
         collection_name,
+        db_name="",
         ttl_seconds=0,
         timeout=None,
         check_task=None,
@@ -1788,7 +1923,10 @@ class TestMilvusClientV2Base(Base):
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request(
-            [client.pin_snapshot_data, snapshot_name, collection_name], ttl_seconds=ttl_seconds, **kwargs
+            [client.pin_snapshot_data, snapshot_name, collection_name],
+            db_name=db_name,
+            ttl_seconds=ttl_seconds,
+            **kwargs,
         )
         check_result = ResponseChecker(
             res,
@@ -1798,6 +1936,7 @@ class TestMilvusClientV2Base(Base):
             check,
             snapshot_name=snapshot_name,
             collection_name=collection_name,
+            db_name=db_name,
             ttl_seconds=ttl_seconds,
             **kwargs,
         ).run()
@@ -1812,4 +1951,37 @@ class TestMilvusClientV2Base(Base):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.unpin_snapshot_data, pin_id], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, pin_id=pin_id, **kwargs).run()
+        return res, check_result
+
+    # ====================== FileResource ======================
+    @trace()
+    def add_file_resource(self, client, name, path, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.add_file_resource, name, path], **kwargs)
+        check_result = ResponseChecker(
+            res, func_name, check_task, check_items, check, name=name, path=path, **kwargs
+        ).run()
+        return res, check_result
+
+    @trace()
+    def remove_file_resource(self, client, name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.remove_file_resource, name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, name=name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_file_resources(self, client, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.list_file_resources], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result

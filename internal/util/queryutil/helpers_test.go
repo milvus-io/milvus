@@ -48,6 +48,62 @@ func makeNullableSchema(fieldID int64, dataType schemapb.DataType, dim int64) *s
 	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{fs}}
 }
 
+func requireRangeSliceRetrieveResults(t *testing.T, result *internalpb.RetrieveResults, start, end int) *internalpb.RetrieveResults {
+	t.Helper()
+	sliced, err := rangeSliceRetrieveResults(result, start, end)
+	require.NoError(t, err)
+	return sliced
+}
+
+func requireRangeSliceFieldData(t *testing.T, fd *schemapb.FieldData, start, end int) *schemapb.FieldData {
+	t.Helper()
+	sliced, err := rangeSliceFieldData(fd, start, end)
+	require.NoError(t, err)
+	return sliced
+}
+
+func requireRangeSliceVectorField(t *testing.T, vf *schemapb.VectorField, start, end int, validData []bool) *schemapb.VectorField {
+	t.Helper()
+	sliced, err := rangeSliceVectorField(vf, start, end, validData)
+	require.NoError(t, err)
+	return sliced
+}
+
+func requireSliceFieldData(t *testing.T, fd *schemapb.FieldData, indices []int) *schemapb.FieldData {
+	t.Helper()
+	sliced, err := sliceFieldData(fd, indices)
+	require.NoError(t, err)
+	return sliced
+}
+
+func requireSliceVectorField(t *testing.T, vf *schemapb.VectorField, indices []int, validData []bool) *schemapb.VectorField {
+	t.Helper()
+	sliced, err := sliceVectorField(vf, indices, validData)
+	require.NoError(t, err)
+	return sliced
+}
+
+func TestGetRowCountNullableCompactVectorWithoutIDsUsesLogicalRows(t *testing.T) {
+	result := &internalpb.RetrieveResults{
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vec",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+					},
+				}},
+				ValidData: []bool{true, false, true},
+			},
+		},
+	}
+
+	assert.Equal(t, 3, getRowCount(result))
+}
+
 // =========================================================================
 // buildMergedFieldData: ValidData preservation
 // =========================================================================
@@ -326,7 +382,7 @@ func TestRangeSliceScalarField_ArrayElementType(t *testing.T) {
 		}},
 	}
 
-	sliced := rangeSliceFieldData(fd, 1, 3)
+	sliced := requireRangeSliceFieldData(t, fd, 1, 3)
 	arrayField := sliced.GetScalars().GetArrayData()
 	assert.Equal(t, schemapb.DataType_Int32, arrayField.GetElementType())
 	assert.Len(t, arrayField.GetData(), 2)
@@ -342,7 +398,7 @@ func TestRangeSliceScalarField_GeometryWkt(t *testing.T) {
 		}},
 	}
 
-	sliced := rangeSliceFieldData(fd, 1, 3)
+	sliced := requireRangeSliceFieldData(t, fd, 1, 3)
 	assert.Equal(t, []string{"POINT(1 1)", "POINT(2 2)"}, sliced.GetScalars().GetGeometryWktData().GetData())
 }
 
@@ -356,7 +412,7 @@ func TestRangeSliceScalarField_Timestamptz(t *testing.T) {
 		}},
 	}
 
-	sliced := rangeSliceFieldData(fd, 0, 2)
+	sliced := requireRangeSliceFieldData(t, fd, 0, 2)
 	assert.Equal(t, []int64{100, 200}, sliced.GetScalars().GetTimestamptzData().GetData())
 }
 
@@ -379,7 +435,7 @@ func TestSliceScalarField_ArrayElementType(t *testing.T) {
 		}},
 	}
 
-	sliced := sliceFieldData(fd, []int{2, 0})
+	sliced := requireSliceFieldData(t, fd, []int{2, 0})
 	arrayField := sliced.GetScalars().GetArrayData()
 	assert.Equal(t, schemapb.DataType_Int64, arrayField.GetElementType())
 	assert.Len(t, arrayField.GetData(), 2)
@@ -397,7 +453,7 @@ func TestSliceScalarField_GeometryWkt(t *testing.T) {
 		}},
 	}
 
-	sliced := sliceFieldData(fd, []int{2, 0})
+	sliced := requireSliceFieldData(t, fd, []int{2, 0})
 	assert.Equal(t, []string{"POINT(2 2)", "POINT(0 0)"}, sliced.GetScalars().GetGeometryWktData().GetData())
 }
 
@@ -492,8 +548,7 @@ func TestRangeSliceRetrieveResults_ElementIndices(t *testing.T) {
 		},
 	}
 
-	sliced := rangeSliceRetrieveResults(result, 1, 3)
-
+	sliced := requireRangeSliceRetrieveResults(t, result, 1, 3)
 	assert.True(t, sliced.GetElementLevel())
 	require.Len(t, sliced.GetElementIndices(), 2)
 	assert.Equal(t, []int32{2}, sliced.GetElementIndices()[0].GetIndices())
@@ -720,6 +775,137 @@ func TestCalcRowSize_FloatVector(t *testing.T) {
 	assert.Equal(t, int64(dim*4), size)
 }
 
+func TestCalcRowSize_NullableDenseVectorUsesLogicalValidity(t *testing.T) {
+	tests := []struct {
+		name     string
+		field    *schemapb.FieldData
+		wantSize int64
+	}{
+		{
+			name: "float_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_FloatVector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}},
+				}},
+			},
+			wantSize: 8,
+		},
+		{
+			name: "binary_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_BinaryVector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  16,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02}},
+				}},
+			},
+			wantSize: 2,
+		},
+		{
+			name: "float16_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Float16Vector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+				}},
+			},
+			wantSize: 4,
+		},
+		{
+			name: "bfloat16_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_BFloat16Vector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+				}},
+			},
+			wantSize: 4,
+		},
+		{
+			name: "int8_vector",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Int8Vector,
+				ValidData: []bool{false, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  4,
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+				}},
+			},
+			wantSize: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{tt.field}}
+			assert.Equal(t, int64(0), calcRowSize(r, 0))
+			assert.Equal(t, tt.wantSize, calcRowSize(r, 1))
+		})
+	}
+}
+
+func TestCalcRowSize_NullableSparseVectorUsesCompactMapping(t *testing.T) {
+	rowA := makeTestSparseVec(1, 0.5)
+	rowC := makeTestSparseVec(3, 1.5)
+
+	tests := []struct {
+		name      string
+		validData []bool
+		contents  [][]byte
+		wantSizes []int64
+	}{
+		{
+			name:      "null_before_valid",
+			validData: []bool{false, true},
+			contents:  [][]byte{rowA},
+			wantSizes: []int64{0, int64(len(rowA))},
+		},
+		{
+			name:      "valid_null_valid",
+			validData: []bool{true, false, true},
+			contents:  [][]byte{rowA, rowC},
+			wantSizes: []int64{int64(len(rowA)), 0, int64(len(rowC))},
+		},
+		{
+			name:      "all_null",
+			validData: []bool{false, false},
+			contents:  nil,
+			wantSizes: []int64{0, 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &internalpb.RetrieveResults{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_SparseFloatVector,
+						ValidData: tt.validData,
+						Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+							Dim: 4,
+							Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+								Dim:      4,
+								Contents: tt.contents,
+							}},
+						}},
+					},
+				},
+			}
+			for rowIdx, want := range tt.wantSizes {
+				assert.Equal(t, want, calcRowSize(r, int64(rowIdx)))
+			}
+		})
+	}
+}
+
 func TestCalcRowSize_MultipleFieldTypes(t *testing.T) {
 	r := &internalpb.RetrieveResults{
 		FieldsData: []*schemapb.FieldData{
@@ -810,14 +996,17 @@ func TestRangeSliceStructArrayField(t *testing.T) {
 		},
 	}
 
-	sliced := rangeSliceStructArrayField(sa, 1, 3)
+	sliced, err := rangeSliceStructArrayField(sa, 1, 3)
+	require.NoError(t, err)
 	require.Len(t, sliced.GetFields(), 2)
 	assert.Equal(t, []int64{20, 30}, sliced.GetFields()[0].GetScalars().GetLongData().GetData())
 	assert.Equal(t, []string{"b", "c"}, sliced.GetFields()[1].GetScalars().GetStringData().GetData())
 }
 
 func TestRangeSliceStructArrayField_Nil(t *testing.T) {
-	assert.Nil(t, rangeSliceStructArrayField(nil, 0, 1))
+	sliced, err := rangeSliceStructArrayField(nil, 0, 1)
+	require.NoError(t, err)
+	assert.Nil(t, sliced)
 }
 
 // =========================================================================
@@ -843,14 +1032,17 @@ func TestSliceStructArrayField(t *testing.T) {
 	}
 
 	// Select indices 3, 0, 2 (out of order)
-	sliced := sliceStructArrayField(sa, []int{3, 0, 2})
+	sliced, err := sliceStructArrayField(sa, []int{3, 0, 2})
+	require.NoError(t, err)
 	require.Len(t, sliced.GetFields(), 2)
 	assert.Equal(t, []int64{400, 100, 300}, sliced.GetFields()[0].GetScalars().GetLongData().GetData())
 	assert.Equal(t, []string{"w", "x", "z"}, sliced.GetFields()[1].GetScalars().GetStringData().GetData())
 }
 
 func TestSliceStructArrayField_Nil(t *testing.T) {
-	assert.Nil(t, sliceStructArrayField(nil, []int{0}))
+	sliced, err := sliceStructArrayField(nil, []int{0})
+	require.NoError(t, err)
+	assert.Nil(t, sliced)
 }
 
 // =========================================================================
@@ -908,6 +1100,245 @@ func TestBuildMergedVectorField_VectorArray(t *testing.T) {
 	assert.Equal(t, []float32{1.0, 2.0}, va.GetData()[1].GetFloatVector().GetData())
 }
 
+func TestBuildMergedVectorField_NullableStructVectorArray_AllNull(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+				}},
+				ValidData: []bool{false},
+			},
+		},
+	}
+	schema := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "struct_field",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     fieldID,
+						Name:        "struct_field[vec_array]",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						Nullable:    true,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: "dim", Value: "2"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{result}, []rowRef{{resultIdx: 0, rowIdx: 0}}, schema)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false}, merged.FieldsData[0].GetValidData())
+	va := merged.FieldsData[0].GetVectors().GetVectorArray()
+	require.NotNil(t, va)
+	assert.Equal(t, dim, va.GetDim())
+	assert.Equal(t, schemapb.DataType_FloatVector, va.GetElementType())
+	require.Len(t, va.GetData(), 1)
+	assert.Empty(t, va.GetData()[0].GetFloatVector().GetData())
+}
+
+func TestBuildMergedVectorField_NullableStructVectorArray_AllNullWithEmptyVectorArray(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+						Dim:         dim,
+						ElementType: schemapb.DataType_FloatVector,
+					}},
+				}},
+				ValidData: []bool{false, false},
+			},
+		},
+	}
+	schema := makeNullableSchema(fieldID, schemapb.DataType_ArrayOfVector, dim)
+	schema.GetFields()[0].ElementType = schemapb.DataType_FloatVector
+
+	merged, err := buildMergedRetrieveResults(
+		[]*internalpb.RetrieveResults{result},
+		[]rowRef{{resultIdx: 0, rowIdx: 1}},
+		schema,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false}, merged.FieldsData[0].GetValidData())
+	va := merged.FieldsData[0].GetVectors().GetVectorArray()
+	require.NotNil(t, va)
+	assert.Equal(t, dim, va.GetDim())
+	assert.Equal(t, schemapb.DataType_FloatVector, va.GetElementType())
+	require.Len(t, va.GetData(), 1)
+	assert.Empty(t, va.GetData()[0].GetFloatVector().GetData())
+}
+
+func TestBuildMergedVectorField_NullableArrayOfVector_RejectsEmptyValidData(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+						Dim:         dim,
+						Data:        []*schemapb.VectorField{{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}}}}},
+						ElementType: schemapb.DataType_FloatVector,
+					}},
+				}},
+			},
+		},
+	}
+	schema := makeNullableSchema(fieldID, schemapb.DataType_ArrayOfVector, dim)
+	schema.GetFields()[0].ElementType = schemapb.DataType_FloatVector
+
+	_, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{result}, []rowRef{{resultIdx: 0, rowIdx: 0}}, schema)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty ValidData")
+}
+
+func TestBuildMergedVectorField_NullableArrayOfVector_RejectsValidDataRowOutOfRange(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+						Dim:         dim,
+						Data:        []*schemapb.VectorField{{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}}}}, {Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3.0, 4.0}}}}},
+						ElementType: schemapb.DataType_FloatVector,
+					}},
+				}},
+				ValidData: []bool{true},
+			},
+		},
+	}
+	schema := makeNullableSchema(fieldID, schemapb.DataType_ArrayOfVector, dim)
+	schema.GetFields()[0].ElementType = schemapb.DataType_FloatVector
+
+	_, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{result}, []rowRef{{resultIdx: 0, rowIdx: 1}}, schema)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rowIdx=1")
+	assert.Contains(t, err.Error(), "len(ValidData)=1")
+}
+
+func TestBuildMergedVectorField_NullableArrayOfVectorMixedAllNullSourceKeepsRowDense(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}}}}
+
+	allNullResult := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+				}},
+				ValidData: []bool{false},
+			},
+		},
+	}
+	validResult := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{2}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+						Dim:         dim,
+						Data:        []*schemapb.VectorField{v1},
+						ElementType: schemapb.DataType_FloatVector,
+					}},
+				}},
+				ValidData: []bool{true},
+			},
+		},
+	}
+	schema := makeNullableSchema(fieldID, schemapb.DataType_ArrayOfVector, dim)
+	schema.GetFields()[0].ElementType = schemapb.DataType_FloatVector
+
+	merged, err := buildMergedRetrieveResults(
+		[]*internalpb.RetrieveResults{allNullResult, validResult},
+		[]rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 1, rowIdx: 0}},
+		schema,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false, true}, merged.FieldsData[0].GetValidData())
+	va := merged.FieldsData[0].GetVectors().GetVectorArray()
+	require.Len(t, va.GetData(), 2)
+	assert.Empty(t, va.GetData()[0].GetFloatVector().GetData())
+	assert.Equal(t, []float32{1.0, 2.0}, va.GetData()[1].GetFloatVector().GetData())
+}
+
+func TestBuildMergedVectorField_NullableArrayOfVectorUsesLogicalRowIndex(t *testing.T) {
+	const fieldID = int64(700)
+	dim := int64(2)
+	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}}}}
+	empty := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}}
+	v3 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3.0, 4.0}}}}
+
+	result := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}}},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+						Dim:         dim,
+						Data:        []*schemapb.VectorField{v1, empty, v3, empty},
+						ElementType: schemapb.DataType_FloatVector,
+					}},
+				}},
+				ValidData: []bool{true, false, true, false},
+			},
+		},
+	}
+	schema := makeNullableSchema(fieldID, schemapb.DataType_ArrayOfVector, dim)
+	schema.GetFields()[0].ElementType = schemapb.DataType_FloatVector
+
+	merged, err := buildMergedRetrieveResults(
+		[]*internalpb.RetrieveResults{result},
+		[]rowRef{{resultIdx: 0, rowIdx: 2}, {resultIdx: 0, rowIdx: 1}, {resultIdx: 0, rowIdx: 0}},
+		schema,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false, true}, merged.FieldsData[0].GetValidData())
+
+	va := merged.FieldsData[0].GetVectors().GetVectorArray()
+	require.Len(t, va.GetData(), 3)
+	assert.Equal(t, []float32{3.0, 4.0}, va.GetData()[0].GetFloatVector().GetData())
+	assert.Empty(t, va.GetData()[1].GetFloatVector().GetData())
+	assert.Equal(t, []float32{1.0, 2.0}, va.GetData()[2].GetFloatVector().GetData())
+}
+
 // =========================================================================
 // sliceVectorField & rangeSliceVectorField: VectorArray branch
 // =========================================================================
@@ -927,7 +1358,7 @@ func TestSliceVectorField_VectorArray(t *testing.T) {
 		}},
 	}
 
-	sliced := sliceVectorField(vf, []int{2, 0}, nil)
+	sliced := requireSliceVectorField(t, vf, []int{2, 0}, nil)
 	va := sliced.GetVectorArray()
 	require.Len(t, va.GetData(), 2)
 	assert.Equal(t, []float32{5.0, 6.0}, va.GetData()[0].GetFloatVector().GetData())
@@ -950,7 +1381,7 @@ func TestRangeSliceVectorField_VectorArray(t *testing.T) {
 		}},
 	}
 
-	sliced := rangeSliceVectorField(vf, 1, 3, nil)
+	sliced := requireRangeSliceVectorField(t, vf, 1, 3, nil)
 	va := sliced.GetVectorArray()
 	require.Len(t, va.GetData(), 2)
 	assert.Equal(t, []float32{3.0, 4.0}, va.GetData()[0].GetFloatVector().GetData())
@@ -1467,13 +1898,6 @@ func TestBuildMergedVectorField_Int8Vector_TruncatedData(t *testing.T) {
 	assert.Contains(t, err.Error(), "truncated data")
 }
 
-// Note: VectorArray `di < 0` branch (default case with compact mode) is architecturally
-// unreachable. To get compact mode, fieldSchema must be non-nil (nullable=true). But non-nil
-// fieldSchema provides a concrete DataType that matches one of the explicit switch cases
-// (FloatVector, BinaryVector, etc.), so the default/VectorArray branch is only entered via
-// nil-schema fallback where isNullable=false and compact indices are nil.
-// This leaves 1 line (VectorArray di<0) permanently uncovered — accepted as dead code.
-
 func TestBuildMergedVectorField_VectorArray_TruncatedData(t *testing.T) {
 	dim := int64(2)
 	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{
@@ -1528,7 +1952,7 @@ func TestRangeSliceVectorField_FloatVector(t *testing.T) {
 		Dim:  2,
 		Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}},
 	}
-	sliced := rangeSliceVectorField(vf, 1, 3, nil)
+	sliced := requireRangeSliceVectorField(t, vf, 1, 3, nil)
 	assert.Equal(t, []float32{3, 4, 5, 6}, sliced.GetFloatVector().GetData())
 }
 
@@ -1537,7 +1961,7 @@ func TestRangeSliceVectorField_BinaryVector(t *testing.T) {
 		Dim:  16, // 2 bytes per row
 		Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}},
 	}
-	sliced := rangeSliceVectorField(vf, 0, 2, nil)
+	sliced := requireRangeSliceVectorField(t, vf, 0, 2, nil)
 	assert.Equal(t, []byte{0xAA, 0xBB, 0xCC, 0xDD}, sliced.GetBinaryVector())
 }
 
@@ -1546,7 +1970,7 @@ func TestRangeSliceVectorField_Float16Vector(t *testing.T) {
 		Dim:  2, // 4 bytes per row
 		Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}},
 	}
-	sliced := rangeSliceVectorField(vf, 1, 2, nil)
+	sliced := requireRangeSliceVectorField(t, vf, 1, 2, nil)
 	assert.Equal(t, []byte{5, 6, 7, 8}, sliced.GetFloat16Vector())
 }
 
@@ -1558,7 +1982,7 @@ func TestRangeSliceVectorField_SparseFloatVector(t *testing.T) {
 			Dim:      100,
 		}},
 	}
-	sliced := rangeSliceVectorField(vf, 1, 3, nil)
+	sliced := requireRangeSliceVectorField(t, vf, 1, 3, nil)
 	assert.Equal(t, [][]byte{{0x02}, {0x03}}, sliced.GetSparseFloatVector().GetContents())
 }
 
@@ -1571,7 +1995,7 @@ func TestSliceVectorField_FloatVector(t *testing.T) {
 		Dim:  2,
 		Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}},
 	}
-	sliced := sliceVectorField(vf, []int{2, 0}, nil)
+	sliced := requireSliceVectorField(t, vf, []int{2, 0}, nil)
 	assert.Equal(t, []float32{5, 6, 1, 2}, sliced.GetFloatVector().GetData())
 }
 
@@ -1580,7 +2004,7 @@ func TestSliceVectorField_BinaryVector(t *testing.T) {
 		Dim:  16, // 2 bytes per row
 		Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}},
 	}
-	sliced := sliceVectorField(vf, []int{2, 0}, nil)
+	sliced := requireSliceVectorField(t, vf, []int{2, 0}, nil)
 	assert.Equal(t, []byte{0xEE, 0xFF, 0xAA, 0xBB}, sliced.GetBinaryVector())
 }
 
@@ -1589,7 +2013,7 @@ func TestSliceVectorField_Float16Vector(t *testing.T) {
 		Dim:  2, // 4 bytes per row
 		Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}},
 	}
-	sliced := sliceVectorField(vf, []int{1}, nil)
+	sliced := requireSliceVectorField(t, vf, []int{1}, nil)
 	assert.Equal(t, []byte{5, 6, 7, 8}, sliced.GetFloat16Vector())
 }
 
@@ -1598,7 +2022,7 @@ func TestSliceVectorField_BFloat16Vector(t *testing.T) {
 		Dim:  2, // 4 bytes per row
 		Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{10, 20, 30, 40, 50, 60, 70, 80}},
 	}
-	sliced := sliceVectorField(vf, []int{1, 0}, nil)
+	sliced := requireSliceVectorField(t, vf, []int{1, 0}, nil)
 	assert.Equal(t, []byte{50, 60, 70, 80, 10, 20, 30, 40}, sliced.GetBfloat16Vector())
 }
 
@@ -1607,7 +2031,7 @@ func TestSliceVectorField_Int8Vector(t *testing.T) {
 		Dim:  3,
 		Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4, 5, 6}},
 	}
-	sliced := sliceVectorField(vf, []int{1}, nil)
+	sliced := requireSliceVectorField(t, vf, []int{1}, nil)
 	assert.Equal(t, []byte{4, 5, 6}, sliced.GetInt8Vector())
 }
 
@@ -1619,7 +2043,7 @@ func TestSliceVectorField_SparseFloatVector(t *testing.T) {
 			Dim:      100,
 		}},
 	}
-	sliced := sliceVectorField(vf, []int{2, 0}, nil)
+	sliced := requireSliceVectorField(t, vf, []int{2, 0}, nil)
 	assert.Equal(t, [][]byte{{0x03}, {0x01}}, sliced.GetSparseFloatVector().GetContents())
 }
 
@@ -1635,12 +2059,13 @@ func TestRangeSliceFieldData_Vector(t *testing.T) {
 			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}},
 		}},
 	}
-	sliced := rangeSliceFieldData(fd, 1, 3)
+	sliced := requireRangeSliceFieldData(t, fd, 1, 3)
 	assert.Equal(t, []float32{3, 4, 5, 6}, sliced.GetVectors().GetFloatVector().GetData())
 }
 
 func TestRangeSliceFieldData_Nil(t *testing.T) {
-	assert.Nil(t, rangeSliceFieldData(nil, 0, 1))
+	sliced := requireRangeSliceFieldData(t, nil, 0, 1)
+	assert.Nil(t, sliced)
 }
 
 // =========================================================================
@@ -2078,7 +2503,7 @@ func TestRangeSliceVectorField_BFloat16(t *testing.T) {
 		Dim:  2,
 		Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{10, 20, 30, 40, 50, 60, 70, 80}},
 	}
-	sliced := rangeSliceVectorField(vf, 1, 2, nil)
+	sliced := requireRangeSliceVectorField(t, vf, 1, 2, nil)
 	assert.Equal(t, []byte{50, 60, 70, 80}, sliced.GetBfloat16Vector())
 }
 
@@ -2087,7 +2512,7 @@ func TestRangeSliceVectorField_Int8(t *testing.T) {
 		Dim:  3,
 		Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4, 5, 6}},
 	}
-	sliced := rangeSliceVectorField(vf, 0, 1, nil)
+	sliced := requireRangeSliceVectorField(t, vf, 0, 1, nil)
 	assert.Equal(t, []byte{1, 2, 3}, sliced.GetInt8Vector())
 }
 
@@ -2303,13 +2728,15 @@ func TestSliceFieldData_Vector(t *testing.T) {
 			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}},
 		}},
 	}
-	sliced := sliceFieldData(fd, []int{2, 0})
+	sliced := requireSliceFieldData(t, fd, []int{2, 0})
 	assert.Equal(t, []float32{5, 6, 1, 2}, sliced.GetVectors().GetFloatVector().GetData())
 }
 
 func TestSliceFieldData_NilOrEmpty(t *testing.T) {
-	assert.Nil(t, sliceFieldData(nil, []int{0}))
-	assert.Nil(t, sliceFieldData(&schemapb.FieldData{}, nil))
+	sliced := requireSliceFieldData(t, nil, []int{0})
+	assert.Nil(t, sliced)
+	sliced = requireSliceFieldData(t, &schemapb.FieldData{}, nil)
+	assert.Nil(t, sliced)
 }
 
 func TestSliceFieldData_ValidData(t *testing.T) {
@@ -2320,7 +2747,7 @@ func TestSliceFieldData_ValidData(t *testing.T) {
 		}},
 		ValidData: []bool{true, false, true},
 	}
-	sliced := sliceFieldData(fd, []int{2, 0})
+	sliced := requireSliceFieldData(t, fd, []int{2, 0})
 	assert.Equal(t, []bool{true, true}, sliced.GetValidData())
 }
 
@@ -2332,7 +2759,7 @@ func TestRangeSliceFieldData_ValidData(t *testing.T) {
 		}},
 		ValidData: []bool{true, false, true},
 	}
-	sliced := rangeSliceFieldData(fd, 0, 2)
+	sliced := requireRangeSliceFieldData(t, fd, 0, 2)
 	assert.Equal(t, []bool{true, false}, sliced.GetValidData())
 }
 
@@ -2380,7 +2807,7 @@ func TestSliceVectorField_NullableCompact(t *testing.T) {
 	}
 	validData := []bool{true, false, true} // row0=valid(data0), row1=null, row2=valid(data1)
 
-	sliced := sliceVectorField(vf, []int{2, 0}, validData)
+	sliced := requireSliceVectorField(t, vf, []int{2, 0}, validData)
 	assert.Equal(t, []float32{3, 4, 1, 2}, sliced.GetFloatVector().GetData())
 }
 
@@ -2391,7 +2818,7 @@ func TestSliceVectorField_NullableCompact_BinaryVector(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := sliceVectorField(vf, []int{2, 0}, validData)
+	sliced := requireSliceVectorField(t, vf, []int{2, 0}, validData)
 	assert.Equal(t, []byte{0xCC, 0xDD, 0xAA, 0xBB}, sliced.GetBinaryVector())
 }
 
@@ -2402,7 +2829,7 @@ func TestSliceVectorField_NullableCompact_Float16(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := sliceVectorField(vf, []int{0}, validData)
+	sliced := requireSliceVectorField(t, vf, []int{0}, validData)
 	assert.Equal(t, []byte{1, 2, 3, 4}, sliced.GetFloat16Vector())
 }
 
@@ -2413,7 +2840,7 @@ func TestSliceVectorField_NullableCompact_BFloat16(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := sliceVectorField(vf, []int{2}, validData)
+	sliced := requireSliceVectorField(t, vf, []int{2}, validData)
 	assert.Equal(t, []byte{50, 60, 70, 80}, sliced.GetBfloat16Vector())
 }
 
@@ -2424,7 +2851,7 @@ func TestSliceVectorField_NullableCompact_Int8(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := sliceVectorField(vf, []int{2}, validData)
+	sliced := requireSliceVectorField(t, vf, []int{2}, validData)
 	assert.Equal(t, []byte{4, 5, 6}, sliced.GetInt8Vector())
 }
 
@@ -2438,28 +2865,83 @@ func TestSliceVectorField_NullableCompact_Sparse(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := sliceVectorField(vf, []int{2}, validData)
+	sliced := requireSliceVectorField(t, vf, []int{2}, validData)
 	assert.Equal(t, [][]byte{{0x02}}, sliced.GetSparseFloatVector().GetContents())
 }
 
-func TestSliceVectorField_NullableCompact_VectorArray(t *testing.T) {
+func TestSliceVectorField_NullableRowDense_VectorArray_SelectValidRow(t *testing.T) {
 	dim := int64(2)
 	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}
+	empty := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}}
 	v2 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}}
 
 	vf := &schemapb.VectorField{
 		Dim: dim,
 		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 			Dim:         dim,
-			Data:        []*schemapb.VectorField{v1, v2},
+			Data:        []*schemapb.VectorField{v1, empty, v2},
 			ElementType: schemapb.DataType_FloatVector,
 		}},
 	}
 	validData := []bool{true, false, true}
 
-	sliced := sliceVectorField(vf, []int{2}, validData)
+	sliced := requireSliceVectorField(t, vf, []int{2}, validData)
 	assert.Len(t, sliced.GetVectorArray().GetData(), 1)
 	assert.Equal(t, []float32{3, 4}, sliced.GetVectorArray().GetData()[0].GetFloatVector().GetData())
+}
+
+func TestSliceVectorField_NullableRowDense_VectorArray_PreservesNullPlaceholders(t *testing.T) {
+	dim := int64(2)
+	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}
+	empty := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}}
+	v3 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}}
+
+	vf := &schemapb.VectorField{
+		Dim: dim,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         dim,
+			Data:        []*schemapb.VectorField{v1, empty, v3},
+			ElementType: schemapb.DataType_FloatVector,
+		}},
+	}
+	validData := []bool{true, false, true}
+
+	sliced := requireSliceVectorField(t, vf, []int{2, 1, 0}, validData)
+	require.Len(t, sliced.GetVectorArray().GetData(), 3)
+	assert.Equal(t, []float32{3, 4}, sliced.GetVectorArray().GetData()[0].GetFloatVector().GetData())
+	assert.Empty(t, sliced.GetVectorArray().GetData()[1].GetFloatVector().GetData())
+	assert.Equal(t, []float32{1, 2}, sliced.GetVectorArray().GetData()[2].GetFloatVector().GetData())
+}
+
+func TestSliceVectorField_NullableRowDense_VectorArray_AllNullNoData(t *testing.T) {
+	dim := int64(2)
+	vf := &schemapb.VectorField{
+		Dim: dim,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         dim,
+			ElementType: schemapb.DataType_FloatVector,
+		}},
+	}
+	validData := []bool{false}
+
+	sliced := requireSliceVectorField(t, vf, []int{0}, validData)
+	require.Len(t, sliced.GetVectorArray().GetData(), 1)
+	assert.Empty(t, sliced.GetVectorArray().GetData()[0].GetFloatVector().GetData())
+}
+
+func TestSliceVectorField_NullableRowDense_VectorArray_UnsupportedElementTypeReturnsError(t *testing.T) {
+	vf := &schemapb.VectorField{
+		Dim: 2,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         2,
+			ElementType: schemapb.DataType_None,
+		}},
+	}
+
+	sliced, err := sliceVectorField(vf, []int{0}, []bool{false})
+	require.Error(t, err)
+	require.Nil(t, sliced)
+	assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
 }
 
 func TestSliceVectorField_NullableCompact_SkipNull(t *testing.T) {
@@ -2470,7 +2952,7 @@ func TestSliceVectorField_NullableCompact_SkipNull(t *testing.T) {
 	}
 	validData := []bool{true, false}
 
-	sliced := sliceVectorField(vf, []int{1}, validData) // row 1 is null
+	sliced := requireSliceVectorField(t, vf, []int{1}, validData) // row 1 is null
 	assert.Empty(t, sliced.GetFloatVector().GetData())
 }
 
@@ -2483,7 +2965,7 @@ func TestRangeSliceVectorField_NullableCompact(t *testing.T) {
 	validData := []bool{true, false, true}
 
 	// Range [0, 2) = logical row 0 and 1. Row 0 is valid(data0), row 1 is null → only data0
-	sliced := rangeSliceVectorField(vf, 0, 2, validData)
+	sliced := requireRangeSliceVectorField(t, vf, 0, 2, validData)
 	assert.Equal(t, []float32{1, 2}, sliced.GetFloatVector().GetData())
 }
 
@@ -2494,7 +2976,7 @@ func TestRangeSliceVectorField_NullableCompact_BinaryVector(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := rangeSliceVectorField(vf, 0, 2, validData)
+	sliced := requireRangeSliceVectorField(t, vf, 0, 2, validData)
 	assert.Equal(t, []byte{0xAA, 0xBB}, sliced.GetBinaryVector())
 }
 
@@ -2505,7 +2987,7 @@ func TestRangeSliceVectorField_NullableCompact_Float16(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := rangeSliceVectorField(vf, 2, 3, validData)
+	sliced := requireRangeSliceVectorField(t, vf, 2, 3, validData)
 	assert.Equal(t, []byte{5, 6, 7, 8}, sliced.GetFloat16Vector())
 }
 
@@ -2516,7 +2998,7 @@ func TestRangeSliceVectorField_NullableCompact_BFloat16(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := rangeSliceVectorField(vf, 0, 1, validData)
+	sliced := requireRangeSliceVectorField(t, vf, 0, 1, validData)
 	assert.Equal(t, []byte{10, 20, 30, 40}, sliced.GetBfloat16Vector())
 }
 
@@ -2527,7 +3009,7 @@ func TestRangeSliceVectorField_NullableCompact_Int8(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := rangeSliceVectorField(vf, 2, 3, validData)
+	sliced := requireRangeSliceVectorField(t, vf, 2, 3, validData)
 	assert.Equal(t, []byte{4, 5, 6}, sliced.GetInt8Vector())
 }
 
@@ -2541,28 +3023,88 @@ func TestRangeSliceVectorField_NullableCompact_Sparse(t *testing.T) {
 	}
 	validData := []bool{true, false, true}
 
-	sliced := rangeSliceVectorField(vf, 2, 3, validData)
+	sliced := requireRangeSliceVectorField(t, vf, 2, 3, validData)
 	assert.Equal(t, [][]byte{{0x02}}, sliced.GetSparseFloatVector().GetContents())
 }
 
-func TestRangeSliceVectorField_NullableCompact_VectorArray(t *testing.T) {
+func TestRangeSliceVectorField_NullableRowDense_VectorArray_SelectPrefix(t *testing.T) {
 	dim := int64(2)
 	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}
+	empty := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}}
 	v2 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}}
 
 	vf := &schemapb.VectorField{
 		Dim: dim,
 		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 			Dim:         dim,
-			Data:        []*schemapb.VectorField{v1, v2},
+			Data:        []*schemapb.VectorField{v1, empty, v2},
 			ElementType: schemapb.DataType_FloatVector,
 		}},
 	}
 	validData := []bool{true, false, true}
 
-	sliced := rangeSliceVectorField(vf, 0, 1, validData)
+	sliced := requireRangeSliceVectorField(t, vf, 0, 1, validData)
 	assert.Len(t, sliced.GetVectorArray().GetData(), 1)
 	assert.Equal(t, []float32{1, 2}, sliced.GetVectorArray().GetData()[0].GetFloatVector().GetData())
+}
+
+func TestRangeSliceVectorField_NullableRowDense_VectorArray_PreservesNullPlaceholders(t *testing.T) {
+	dim := int64(2)
+	v1 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}
+	empty := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}}
+	v3 := &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}}
+
+	vf := &schemapb.VectorField{
+		Dim: dim,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         dim,
+			Data:        []*schemapb.VectorField{v1, empty, v3},
+			ElementType: schemapb.DataType_FloatVector,
+		}},
+	}
+	validData := []bool{true, false, true}
+
+	sliced := requireRangeSliceVectorField(t, vf, 2, 3, validData)
+	require.Len(t, sliced.GetVectorArray().GetData(), 1)
+	assert.Equal(t, []float32{3, 4}, sliced.GetVectorArray().GetData()[0].GetFloatVector().GetData())
+
+	sliced = requireRangeSliceVectorField(t, vf, 0, 3, validData)
+	require.Len(t, sliced.GetVectorArray().GetData(), 3)
+	assert.Equal(t, []float32{1, 2}, sliced.GetVectorArray().GetData()[0].GetFloatVector().GetData())
+	assert.Empty(t, sliced.GetVectorArray().GetData()[1].GetFloatVector().GetData())
+	assert.Equal(t, []float32{3, 4}, sliced.GetVectorArray().GetData()[2].GetFloatVector().GetData())
+}
+
+func TestRangeSliceVectorField_NullableRowDense_VectorArray_AllNullNoData(t *testing.T) {
+	dim := int64(2)
+	vf := &schemapb.VectorField{
+		Dim: dim,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         dim,
+			ElementType: schemapb.DataType_FloatVector,
+		}},
+	}
+	validData := []bool{false, false}
+
+	sliced := requireRangeSliceVectorField(t, vf, 0, 2, validData)
+	require.Len(t, sliced.GetVectorArray().GetData(), 2)
+	assert.Empty(t, sliced.GetVectorArray().GetData()[0].GetFloatVector().GetData())
+	assert.Empty(t, sliced.GetVectorArray().GetData()[1].GetFloatVector().GetData())
+}
+
+func TestRangeSliceVectorField_NullableRowDense_VectorArray_UnsupportedElementTypeReturnsError(t *testing.T) {
+	vf := &schemapb.VectorField{
+		Dim: 2,
+		Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         2,
+			ElementType: schemapb.DataType_None,
+		}},
+	}
+
+	sliced, err := rangeSliceVectorField(vf, 0, 1, []bool{false})
+	require.Error(t, err)
+	require.Nil(t, sliced)
+	assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
 }
 
 // =========================================================================
@@ -2623,7 +3165,7 @@ func TestRangeSliceRetrieveResults_EmptyRange(t *testing.T) {
 	result := &internalpb.RetrieveResults{
 		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
 	}
-	sliced := rangeSliceRetrieveResults(result, 1, 1) // start == end
+	sliced := requireRangeSliceRetrieveResults(t, result, 1, 1) // start == end
 	assert.Nil(t, sliced.GetIds())
 }
 
@@ -2640,7 +3182,7 @@ func TestRangeSliceRetrieveResults_ElementLevel(t *testing.T) {
 			makeInt64Field(100, "val", []int64{10, 20, 30}),
 		},
 	}
-	sliced := rangeSliceRetrieveResults(result, 1, 3)
+	sliced := requireRangeSliceRetrieveResults(t, result, 1, 3)
 	assert.True(t, sliced.GetElementLevel())
 	assert.Len(t, sliced.GetElementIndices(), 2)
 	assert.Equal(t, []int32{1, 2}, sliced.GetElementIndices()[0].GetIndices())

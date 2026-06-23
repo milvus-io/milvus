@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -33,6 +34,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
+	"github.com/milvus-io/milvus/internal/datanode/external"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -282,6 +285,34 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		s.NoError(err)
 		s.True(merr.Ok(resp))
 		s.T().Logf("status=%v", resp)
+	})
+
+	s.Run("bump schema version compaction", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		jsonParams, err := compaction.GenerateJSONParams(&schemapb.CollectionSchema{})
+		s.Require().NoError(err)
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1001,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+				SegmentID:      102,
+				Level:          datapb.SegmentLevel_L1,
+				StorageVersion: storage.StorageV3,
+				Manifest:       "manifest",
+			}},
+			Type:               datapb.CompactionType_BumpSchemaVersionCompaction,
+			BeginLogID:         100,
+			PreAllocatedLogIDs: &datapb.IDRange{Begin: 200, End: 2000},
+			JsonParams:         jsonParams,
+		}
+
+		resp, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(resp))
 	})
 
 	s.Run("beginLogID is invalid", func() {
@@ -563,7 +594,10 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		// taskcommon.GetTaskType classifies an unrecognized task type as
+		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
+		// an internal protocol violation, not user input.
+		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
 	})
 }
 
@@ -654,7 +688,10 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		// taskcommon.GetTaskType classifies an unrecognized task type as
+		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
+		// an internal protocol violation, not user input.
+		s.Equal(merr.Code(merr.ErrServiceInternal), resp.GetStatus().GetCode())
 	})
 }
 
@@ -740,7 +777,10 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 		}
 		status, err := s.node.DropTask(s.ctx, req)
 		s.NoError(err)
-		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		// taskcommon.GetTaskType classifies an unrecognized task type as
+		// ServiceInternal: task types are coordinator-assigned, so a mismatch is
+		// an internal protocol violation, not user input.
+		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
 	})
 }
 
@@ -1033,6 +1073,60 @@ func (s *DataNodeServicesSuite) TestCreateTaskRefreshExternalCollection() {
 		_ = status
 		_ = err
 	})
+}
+
+func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUpdatedSegmentsPayload() {
+	s.node.UpdateStateCode(commonpb.StateCode_Healthy)
+	if s.node.externalCollectionManager != nil {
+		s.node.externalCollectionManager.Close()
+	}
+	s.node.externalCollectionManager = external.NewExternalCollectionManager(s.ctx, 1)
+	defer s.node.externalCollectionManager.Close()
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           100,
+		PartitionID:            1,
+		TaskID:                 200,
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 1000, End: 1001},
+		Schema: &schemapb.CollectionSchema{
+			Version: 4,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", ExternalField: "id"},
+			},
+		},
+	}
+	task := external.NewRefreshExternalCollectionTask(s.ctx, req)
+	patched := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 1}
+
+	mockNewTask := mockey.Mock(external.NewRefreshExternalCollectionTask).Return(task).Build()
+	defer mockNewTask.UnPatch()
+	mockPre := mockey.Mock((*external.RefreshExternalCollectionTask).PreExecute).Return(nil).Build()
+	defer mockPre.UnPatch()
+	mockExecute := mockey.Mock((*external.RefreshExternalCollectionTask).Execute).Return(nil).Build()
+	defer mockExecute.UnPatch()
+	mockPost := mockey.Mock((*external.RefreshExternalCollectionTask).PostExecute).Return(nil).Build()
+	defer mockPost.UnPatch()
+	mockUpdated := mockey.Mock((*external.RefreshExternalCollectionTask).GetUpdatedSegments).
+		Return([]*datapb.SegmentInfo{patched}).Build()
+	defer mockUpdated.UnPatch()
+
+	status, err := s.node.createRefreshExternalCollectionTask(s.ctx, "cluster", req)
+	s.NoError(err)
+	s.True(merr.Ok(status))
+
+	s.Eventually(func() bool {
+		info := s.node.externalCollectionManager.Get("cluster", 200)
+		return info != nil && info.State == indexpb.JobState_JobStateFinished
+	}, time.Second, 10*time.Millisecond)
+
+	info := s.node.externalCollectionManager.Get("cluster", 200)
+	s.Require().NotNil(info)
+	s.Equal(indexpb.JobState_JobStateFinished, info.State)
+	s.Len(info.UpdatedSegments, 1)
+	s.Equal(int64(10), info.UpdatedSegments[0].GetID())
 }
 
 func (s *DataNodeServicesSuite) TestCreateTaskCopySegment() {

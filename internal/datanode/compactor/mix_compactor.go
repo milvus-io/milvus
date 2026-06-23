@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -110,11 +110,13 @@ func (t *mixCompactionTask) preCompact() error {
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) < 1 {
-		return errors.Newf("compaction plan is illegal, there's no segments in compaction plan, planID = %d", t.GetPlanID())
+		// The plan is produced by datacoord, so a malformed plan is an internal
+		// protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("compaction plan is illegal, there's no segments in compaction plan, planID = %d", t.GetPlanID())
 	}
 
 	if t.plan.GetMaxSize() == 0 {
-		return errors.Newf("compaction plan is illegal, empty maxSize, planID = %d", t.GetPlanID())
+		return merr.WrapErrServiceInternalMsg("compaction plan is illegal, empty maxSize, planID = %d", t.GetPlanID())
 	}
 
 	t.collectionID = t.plan.GetSegmentBinlogs()[0].GetCollectionID()
@@ -260,33 +262,26 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return
 	}
-	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, seg.GetCommitTimestamp())
 
-	var reader storage.RecordReader
-	if seg.GetManifest() != "" {
-		reader, err = storage.NewManifestRecordReader(ctx,
-			seg.GetManifest(),
-			t.plan.GetSchema(),
-			storage.WithCollectionID(t.collectionID),
-			storage.WithDownloader(t.binlogIO.Download),
-			storage.WithVersion(seg.GetStorageVersion()),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		)
-	} else {
-		reader, err = storage.NewBinlogRecordReader(ctx,
-			seg.GetFieldBinlogs(),
-			t.plan.GetSchema(),
-			storage.WithCollectionID(t.collectionID),
-			storage.WithDownloader(t.binlogIO.Download),
-			storage.WithVersion(seg.GetStorageVersion()),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		)
-	}
+	reader, existingFields, err := newCompactionSegmentRecordReader(ctx, seg, t.plan.GetSchema(), t.compactionParams.StorageConfig,
+		storage.WithCollectionID(t.collectionID),
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithVersion(seg.GetStorageVersion()),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+	)
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
 	}
 	defer reader.Close()
+
+	materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
+	if err != nil {
+		log.Warn("compact wrong, failed to init record materializer", zap.Error(err))
+		return
+	}
+	defer materializer.Close()
 
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 	var totalRowsRead int64
@@ -302,6 +297,14 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				log.Warn("compact wrong, failed to iter through data", zap.Error(err))
 				return
 			}
+		}
+
+		baseRecord := r
+		r, err = materializer.Wrap(baseRecord)
+		if err != nil {
+			baseRecord.Release()
+			log.Warn("compact wrong, failed to materialize record", zap.Error(err))
+			return
 		}
 
 		totalRowsRead += int64(r.Len())
@@ -361,18 +364,29 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				err := func() error {
 					rec := rb.Build()
 					defer rec.Release()
-					return mWriter.Write(rec)
+					out := overwriteRecordTimestamps(rec, seg.GetCommitTimestamp())
+					if out != rec {
+						defer out.Release()
+					}
+					return mWriter.Write(out)
 				}()
 				if err != nil {
+					releaseWrappedRecord(r, baseRecord)
 					return 0, 0, err
 				}
 			}
 		} else {
-			err := mWriter.Write(r)
+			out := overwriteRecordTimestamps(r, seg.GetCommitTimestamp())
+			err := mWriter.Write(out)
+			if out != r {
+				out.Release()
+			}
 			if err != nil {
+				releaseWrappedRecord(r, baseRecord)
 				return 0, 0, err
 			}
 		}
+		releaseWrappedRecord(r, baseRecord)
 	}
 
 	deltalogDeleteEntriesCount := len(delta)
@@ -428,7 +442,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	if isEmpty {
 		log.Warn("compact wrong, all segments' binlogs are empty")
-		return nil, errors.New("illegal compaction plan")
+		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan")
 	}
 
 	sortMergeAppicable := t.compactionParams.UseMergeSort

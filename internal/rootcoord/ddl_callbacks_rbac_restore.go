@@ -19,13 +19,12 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -37,7 +36,7 @@ func (c *Core) broadcastRestoreRBACV2(ctx context.Context, req *milvuspb.Restore
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfRBACRestorable(ctx, req); err != nil {
-		return errors.Wrap(err, "failed to check if rbac restorable")
+		return merr.Wrap(err, "failed to check if rbac restorable")
 	}
 
 	msg := message.NewRestoreRBACMessageBuilderV2().
@@ -54,12 +53,12 @@ func (c *Core) broadcastRestoreRBACV2(ctx context.Context, req *milvuspb.Restore
 func (c *DDLCallback) restoreRBACV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreRBACMessageV2) error {
 	meta := result.Message.MustBody().RbacMeta
 	if err := c.meta.RestoreRBAC(ctx, util.DefaultTenant, meta); err != nil {
-		return errors.Wrap(err, "failed to restore rbac meta data")
+		return merr.Wrap(err, "failed to restore rbac meta data")
 	}
 	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 		OpType: int32(typeutil.CacheRefresh),
 	}); err != nil {
-		return errors.Wrap(err, "failed to refresh policy info cache")
+		return merr.Wrap(err, "failed to refresh policy info cache")
 	}
 	return nil
 }

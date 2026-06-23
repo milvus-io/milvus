@@ -829,6 +829,28 @@ func TestDistribution_NewDistribution(t *testing.T) {
 	assert.NotNil(t, dist.current)
 }
 
+func TestDistribution_NotifyAfterClose(t *testing.T) {
+	dist := NewDistribution("test_channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+	dist.Close()
+	refunded := false
+
+	assert.NotPanics(t, func() {
+		dist.notifySnapshotUpdate()
+		dist.AddDistributions(SegmentEntry{
+			NodeID:      1,
+			SegmentID:   1,
+			PartitionID: 1,
+			Version:     1,
+			Candidate: &refundTrackingCandidate{
+				mockCandidate: mockCandidate{id: 1, partition: 1},
+				refunded:      &refunded,
+			},
+		})
+	})
+	assert.True(t, refunded)
+	assert.False(t, dist.SealedSegmentExists(1))
+}
+
 func TestDistribution_UpdateServiceable(t *testing.T) {
 	channelName := "test_channel"
 	growings := []int64{1, 2, 3}
@@ -1723,6 +1745,15 @@ func (m *mockCandidate) GetMinPk() *storage.PrimaryKey            { return nil }
 func (m *mockCandidate) GetMaxPk() *storage.PrimaryKey            { return nil }
 func (m *mockCandidate) Charge()                                  {}
 func (m *mockCandidate) Refund()                                  {}
+
+type refundTrackingCandidate struct {
+	mockCandidate
+	refunded *bool
+}
+
+func (m *refundTrackingCandidate) Refund() {
+	*m.refunded = true
+}
 
 func TestBatchGetFromSegments(t *testing.T) {
 	t.Run("basic_sealed_segments", func(t *testing.T) {

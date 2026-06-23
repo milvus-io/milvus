@@ -68,23 +68,17 @@ struct Proxy {
 
     inline self_type&
     operator=(const bool value) {
-        if (value) {
-            set();
-        } else {
-            reset();
-        }
+        // Branchless blend: a mispredicted branch on a data-dependent
+        // value costs several times more than the extra ALU ops, while
+        // a compile-time-known value folds to the same single or/andn.
+        const data_type filled = data_type(0) - static_cast<data_type>(value);
+        element = (element & ~mask) | (filled & mask);
         return *this;
     }
 
     inline self_type&
     operator=(const self_type& other) {
-        bool value = other.operator bool();
-        if (value) {
-            set();
-        } else {
-            reset();
-        }
-        return *this;
+        return operator=(other.operator bool());
     }
 
     inline self_type&

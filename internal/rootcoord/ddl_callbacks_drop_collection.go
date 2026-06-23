@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -61,7 +60,7 @@ func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.Drop
 	msg := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(dropCollectionTask.header).
 		WithBody(dropCollectionTask.body).
-		WithBroadcast(channels).
+		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -92,7 +91,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			if err := registry.CallMessageAckCallback(ctx, dropLoadConfigMsg, map[string]*message.AppendResult{
 				streaming.WAL().ControlChannel(): result,
 			}); err != nil {
-				return errors.Wrap(err, "failed to release collection")
+				return merr.Wrap(err, "failed to release collection")
 			}
 
 			// 2. drop the collection index.
@@ -108,7 +107,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			if err := registry.CallMessageAckCallback(ctx, dropIndexMsg, map[string]*message.AppendResult{
 				streaming.WAL().ControlChannel(): result,
 			}); err != nil {
-				return errors.Wrap(err, "failed to drop collection index")
+				return merr.Wrap(err, "failed to drop collection index")
 			}
 
 			// 2.5. best-effort drop all snapshots of this collection
@@ -130,7 +129,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 
 			// 3. drop the collection meta itself.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
-				return errors.Wrap(err, "failed to drop collection")
+				return merr.Wrap(err, "failed to drop collection")
 			}
 			continue
 		}
@@ -142,7 +141,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			ChannelName: vchannel,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return errors.Wrap(err, "failed to drop virtual channel")
+			return merr.Wrap(err, "failed to drop virtual channel")
 		}
 	}
 	// add the collection tombstone to the sweeper.

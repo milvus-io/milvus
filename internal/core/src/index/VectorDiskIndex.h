@@ -52,6 +52,13 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
+        const auto& offset_mapping = GetOffsetMapping();
+        if (offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0) {
+            return 0;
+        }
+        if (IsEmptyEmbListIndex()) {
+            return 0;
+        }
         return index_.Count();
     }
 
@@ -95,13 +102,13 @@ class VectorDiskAnnIndex : public VectorIndex {
                   "get sparse vector not supported for disk index");
     }
 
-    knowhere::expected<knowhere::DataSetPtr> CalcDistByIDs(
-        const knowhere::DataSetPtr query_dataset,
-        const BitsetView& bitset,
-        const int64_t* labels,
-        size_t labels_len,
-        bool is_cosine,
-        milvus::OpContext* op_context = nullptr) const override;
+    knowhere::expected<knowhere::DataSetPtr>
+    CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
+                  const BitsetView& bitset,
+                  const int64_t* labels,
+                  size_t labels_len,
+                  bool is_cosine,
+                  milvus::OpContext* op_context = nullptr) const override;
 
     void
     CleanLocalData() override;
@@ -112,6 +119,11 @@ class VectorDiskAnnIndex : public VectorIndex {
                     const BitsetView& bitset) const override;
 
  private:
+    bool
+    IsEmptyEmbListIndex() const {
+        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+    }
+
     knowhere::Json
     update_load_json(const Config& config);
 
@@ -121,6 +133,7 @@ class VectorDiskAnnIndex : public VectorIndex {
     uint32_t search_beamwidth_ = 8;
     // used for embedding list only
     DataType elem_type_;
+    std::vector<size_t> empty_emb_list_offsets_;
 };
 
 template <typename T>

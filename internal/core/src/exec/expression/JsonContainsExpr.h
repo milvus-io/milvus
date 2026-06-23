@@ -60,7 +60,7 @@ class ShreddingArrayBsonContainsArrayExecutor {
             bool matched = false;
             for (const auto& sub_value : array_view.value()) {
                 auto sub_array = milvus::BsonView::GetValueFromBsonView<
-                    bsoncxx::array::view>(sub_value.get_value());
+                    milvus::bson::array_view>(sub_value.get_value());
                 if (!sub_array.has_value())
                     continue;
                 for (const auto& element : elements_) {
@@ -108,7 +108,7 @@ class ShreddingArrayBsonContainsAllArrayExecutor {
             std::set<int> exist_elements_index;
             for (const auto& sub_value : array_view.value()) {
                 auto sub_array = milvus::BsonView::GetValueFromBsonView<
-                    bsoncxx::array::view>(sub_value.get_value());
+                    milvus::bson::array_view>(sub_value.get_value());
                 if (!sub_array.has_value())
                     continue;
 
@@ -317,7 +317,8 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
                         }
                         case proto::plan::GenericValue::kArrayVal: {
                             auto val = milvus::BsonView::GetValueFromBsonView<
-                                bsoncxx::array::view>(sub_value.get_value());
+                                milvus::bson::array_view>(
+                                sub_value.get_value());
                             if (!val.has_value()) {
                                 continue;
                             }
@@ -419,7 +420,8 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
                         }
                         case proto::plan::GenericValue::kArrayVal: {
                             auto val = milvus::BsonView::GetValueFromBsonView<
-                                bsoncxx::array::view>(sub_value.get_value());
+                                milvus::bson::array_view>(
+                                sub_value.get_value());
                             if (val.has_value() &&
                                 CompareTwoJsonArray(val.value(),
                                                     element.array_val())) {

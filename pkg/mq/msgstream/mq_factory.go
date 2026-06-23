@@ -22,10 +22,9 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/cockroachdb/errors"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/rest"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/streamnative/pulsarctl/pkg/cli"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -36,6 +35,7 @@ import (
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar/pulsarlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -82,7 +82,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewMsgStream")
+			return nil, merr.WrapErrServiceUnavailable("context timeout when NewMsgStream")
 		}
 		timeout = time.Until(deadline)
 	}
@@ -111,7 +111,7 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 	timeout := f.RequestTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewTtMsgStream")
+			return nil, merr.WrapErrServiceUnavailable("context timeout when NewTtMsgStream")
 		}
 		timeout = time.Until(deadline)
 	}
@@ -141,7 +141,7 @@ func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
 		log.Error("build authencation from config failed, please check it!",
 			zap.String("authPlugin", f.PulsarAuthPlugin),
 			zap.Error(err))
-		return nil, errors.New("build authencation from config failed")
+		return nil, merr.WrapErrParameterInvalidMsg("build authencation from config failed")
 	}
 	return auth, nil
 }
@@ -163,9 +163,9 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 				log.Warn("failed to get topic name", zap.Error(err))
 				return retry.Unrecoverable(err)
 			}
-			err = admin.Subscriptions().Delete(*topic, subname, true)
+			err = admin.Subscriptions().ForceDelete(*topic, subname)
 			if err != nil {
-				pulsarErr, ok := err.(cli.Error)
+				pulsarErr, ok := err.(rest.Error)
 				if ok {
 					// subscription not found, ignore error
 					if strings.Contains(pulsarErr.Reason, "Subscription not found") {

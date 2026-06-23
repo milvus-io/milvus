@@ -365,6 +365,17 @@ var (
 			nodeIDLabelName,
 		})
 
+	// ProxyShardLeaderPreferredNodeCount records preferred shard leader selection results.
+	ProxyShardLeaderPreferredNodeCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "shard_leader_preferred_node_count",
+			Help:      "counter of preferred shard leader selection results",
+		}, []string{
+			statusLabelName,
+		})
+
 	// ProxyRateLimitReqCount integrates a counter monitoring metric for the rate-limit rpc requests.
 	ProxyRateLimitReqCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -532,6 +543,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyWorkLoadScore)
 	registry.MustRegister(ProxyExecutingTotalNq)
+	registry.MustRegister(ProxyShardLeaderPreferredNodeCount)
 	registry.MustRegister(ProxyRateLimitReqCount)
 
 	registry.MustRegister(ProxySlowQueryCount)

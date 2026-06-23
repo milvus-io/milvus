@@ -26,8 +26,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -92,11 +95,19 @@ func (s *IDFOracleSuite) waitTargetVersion(targetVersion int64) {
 }
 
 func (suite *IDFOracleSuite) genStats(start uint32, end uint32) map[int64]*storage.BM25Stats {
+	return suite.genStatsForField(102, start, end)
+}
+
+func (suite *IDFOracleSuite) genStatsForField(fieldID int64, start uint32, end uint32) map[int64]*storage.BM25Stats {
+	return genBM25StatsForField(fieldID, start, end)
+}
+
+func genBM25StatsForField(fieldID int64, start uint32, end uint32) map[int64]*storage.BM25Stats {
 	result := make(map[int64]*storage.BM25Stats)
-	result[102] = storage.NewBM25Stats()
+	result[fieldID] = storage.NewBM25Stats()
 	for i := start; i < end; i++ {
 		row := map[uint32]float32{i: 1}
-		result[102].Append(row)
+		result[fieldID].Append(row)
 	}
 	return result
 }
@@ -116,15 +127,23 @@ func (suite *IDFOracleSuite) registerSealed(segID int64, start uint32, end uint3
 		&bytesFileReader{bytes.NewReader(data)}, nil,
 	).Maybe()
 
-	bm25Logs := []*datapb.FieldBinlog{{
-		FieldID: 102,
-		Binlogs: []*datapb.Binlog{{LogPath: remotePath}},
-	}}
+	bm25Logs := bm25LogsForField(102, remotePath)
 
 	diskBefore := suite.idfOracle.sealedDiskSize.Load()
 	err = suite.idfOracle.LoadSealed(context.Background(), segID, &querypb.SegmentLoadInfo{Bm25Logs: bm25Logs}, cm)
 	suite.Require().NoError(err)
 	return suite.idfOracle.sealedDiskSize.Load() - diskBefore
+}
+
+func bm25LogsForField(fieldID int64, paths ...string) []*datapb.FieldBinlog {
+	binlogs := make([]*datapb.Binlog, 0, len(paths))
+	for _, logPath := range paths {
+		binlogs = append(binlogs, &datapb.Binlog{LogPath: logPath})
+	}
+	return []*datapb.FieldBinlog{{
+		FieldID: fieldID,
+		Binlogs: binlogs,
+	}}
 }
 
 // update test snapshot
@@ -241,6 +260,30 @@ func (suite *IDFOracleSuite) TestGrow() {
 
 	suite.idfOracle.UpdateGrowing(4, suite.genStats(5, 6))
 	suite.Equal(int64(2), suite.idfOracle.current.NumRow())
+}
+
+func (suite *IDFOracleSuite) TestRegisterGrowingClonesStats() {
+	stats := suite.genStats(1, 2)
+
+	suite.idfOracle.RegisterGrowing(1, stats)
+	stats[102].Append(map[uint32]float32{2: 1})
+
+	registered, ok := suite.idfOracle.growing[1]
+	suite.True(ok)
+	suite.Equal(int64(1), registered.bm25Stats[102].NumRow())
+	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+}
+
+func (suite *IDFOracleSuite) TestUpdateGrowingAfterEmptyRegistration() {
+	suite.idfOracle.RegisterGrowing(1, bm25Stats{})
+
+	registered, ok := suite.idfOracle.growing[1]
+	suite.True(ok)
+	suite.NotNil(registered.bm25Stats)
+
+	suite.idfOracle.UpdateGrowing(1, suite.genStats(1, 2))
+	suite.Equal(int64(1), registered.bm25Stats[102].NumRow())
+	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 }
 
 func (suite *IDFOracleSuite) TestStats() {
@@ -436,10 +479,7 @@ func (suite *IDFOracleSuite) TestLoadSealedFailureCleanup() {
 		nil, errors.New("remote read failed"),
 	)
 
-	bm25Logs := []*datapb.FieldBinlog{{
-		FieldID: 102,
-		Binlogs: []*datapb.Binlog{{LogPath: remotePath}},
-	}}
+	bm25Logs := bm25LogsForField(102, remotePath)
 
 	err := suite.idfOracle.LoadSealed(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25Logs}, cm)
 	suite.Error(err)
@@ -456,4 +496,511 @@ func (suite *IDFOracleSuite) TestLoadSealedFailureCleanup() {
 
 func TestIDFOracle(t *testing.T) {
 	suite.Run(t, new(IDFOracleSuite))
+}
+
+func TestLoadSealedForReopenLoadsOnlyMissingFields(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	oldStats := genBM25StatsForField(102, 1, 3)
+	oldData, err := oldStats[102].Serialize()
+	require.NoError(t, err)
+	oldPath := "bm25stats/seg_1/field_102/0"
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Reader(mock.Anything, oldPath).Return(
+		&bytesFileReader{bytes.NewReader(oldData)}, nil,
+	).Once()
+	err = idfOracle.LoadSealed(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(102, oldPath)}, cm)
+	require.NoError(t, err)
+	diskSize := idfOracle.sealedDiskSize.Load()
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	newData, err := newStats[104].Serialize()
+	require.NoError(t, err)
+	newPath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, newPath).Return(
+		&bytesFileReader{bytes.NewReader(newData)}, nil,
+	).Once()
+
+	reopenInfo := &querypb.SegmentLoadInfo{
+		Bm25Logs: append(
+			bm25LogsForField(102, oldPath),
+			bm25LogsForField(104, newPath)...,
+		),
+	}
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, false)
+	require.NoError(t, err)
+
+	sealedStats, ok := idfOracle.sealed.Get(1)
+	require.True(t, ok)
+	assert.ElementsMatch(t, []int64{102, 104}, sealedStats.FieldList())
+	assert.Greater(t, idfOracle.sealedDiskSize.Load(), diskSize)
+	fetched, err := sealedStats.FetchStats()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), fetched[102].NumRow())
+	assert.Equal(t, int64(3), fetched[104].NumRow())
+}
+
+func TestLoadSealedForReopenIdempotentAfterSuccess(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	sealedStats := &sealedBm25Stats{
+		ts:        time.Now(),
+		activate:  atomic.NewBool(false),
+		segmentID: 1,
+		localDir:  path.Join(idfOracle.dirPath, "1"),
+		fieldList: []int64{102},
+		diskSize:  7,
+	}
+	idfOracle.sealed.Insert(1, sealedStats)
+	idfOracle.sealedDiskSize.Store(7)
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	data, err := newStats[104].Serialize()
+	require.NoError(t, err)
+
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+		&bytesFileReader{bytes.NewReader(data)}, nil,
+	).Once()
+
+	reopenInfo := &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, false)
+	require.NoError(t, err)
+	diskSize := idfOracle.sealedDiskSize.Load()
+
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, false)
+	require.NoError(t, err)
+	assert.Equal(t, diskSize, idfOracle.sealedDiskSize.Load())
+}
+
+func TestLoadSealedForReopenActivatesExistingInactiveSegment(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{103},
+		OutputFieldIds: []int64{104},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	data, err := newStats[104].Serialize()
+	require.NoError(t, err)
+
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+		&bytesFileReader{bytes.NewReader(data)}, nil,
+	).Once()
+	reopenInfo := &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}
+
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, false)
+	require.NoError(t, err)
+	sealedStats, ok := idfOracle.sealed.Get(1)
+	require.True(t, ok)
+	require.False(t, sealedStats.activate.Load())
+	current, err := idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), current.NumRow())
+
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, true)
+	require.NoError(t, err)
+	assert.True(t, sealedStats.activate.Load())
+	current, err = idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), current.NumRow())
+}
+
+func TestLoadSealedForReopenCreatesMissingSegmentEntry(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{104},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	data, err := newStats[104].Serialize()
+	require.NoError(t, err)
+
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+		&bytesFileReader{bytes.NewReader(data)}, nil,
+	).Once()
+
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, false)
+	require.NoError(t, err)
+
+	sealedStats, ok := idfOracle.sealed.Get(1)
+	require.True(t, ok)
+	assert.ElementsMatch(t, []int64{104}, sealedStats.FieldList())
+	fetched, err := sealedStats.FetchStats()
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), fetched[104].NumRow())
+}
+
+func TestLoadSealedForReopenFailureCleanupPreservesExistingFields(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	oldFieldDir := path.Join(idfOracle.dirPath, "1", "102")
+	require.NoError(t, os.MkdirAll(oldFieldDir, os.ModePerm))
+	require.NoError(t, os.WriteFile(path.Join(oldFieldDir, "0.data"), []byte("keep"), 0o600))
+	sealedStats := &sealedBm25Stats{
+		ts:        time.Now(),
+		activate:  atomic.NewBool(false),
+		segmentID: 1,
+		localDir:  path.Join(idfOracle.dirPath, "1"),
+		fieldList: []int64{102},
+		diskSize:  4,
+	}
+	idfOracle.sealed.Insert(1, sealedStats)
+	idfOracle.sealedDiskSize.Store(4)
+
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+		nil, errors.New("remote read failed"),
+	).Once()
+
+	err := idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, false)
+	require.Error(t, err)
+
+	sealedStats, ok := idfOracle.sealed.Get(1)
+	require.True(t, ok)
+	assert.ElementsMatch(t, []int64{102}, sealedStats.FieldList())
+	assert.Equal(t, int64(4), idfOracle.sealedDiskSize.Load())
+	_, err = os.Stat(oldFieldDir)
+	assert.NoError(t, err)
+	_, err = os.Stat(path.Join(idfOracle.dirPath, "1", "104"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestActiveReopenBM25MergesNewFieldStats(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	}, {
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{103},
+		OutputFieldIds: []int64{104},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	sealedStats := &sealedBm25Stats{
+		ts:        time.Now(),
+		activate:  atomic.NewBool(true),
+		segmentID: 1,
+		localDir:  path.Join(idfOracle.dirPath, "1"),
+		fieldList: []int64{102},
+		diskSize:  7,
+	}
+	idfOracle.sealed.Insert(1, sealedStats)
+	idfOracle.sealedDiskSize.Store(7)
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	data, err := newStats[104].Serialize()
+	require.NoError(t, err)
+
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+		&bytesFileReader{bytes.NewReader(data)}, nil,
+	).Once()
+
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, false)
+	require.NoError(t, err)
+
+	current, err := idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), current.NumRow())
+	assert.True(t, sealedStats.activate.Load())
+}
+
+func TestReadableReopenBM25MergesNewFieldStats(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{103},
+		OutputFieldIds: []int64{104},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	data, err := newStats[104].Serialize()
+	require.NoError(t, err)
+
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+		&bytesFileReader{bytes.NewReader(data)}, nil,
+	).Once()
+
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, true)
+	require.NoError(t, err)
+
+	sealedStats, ok := idfOracle.sealed.Get(1)
+	require.True(t, ok)
+	assert.True(t, sealedStats.activate.Load())
+	current, err := idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), current.NumRow())
+}
+
+func TestReadableReopenBM25ActivatesExistingInactiveSegment(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	}, {
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{103},
+		OutputFieldIds: []int64{104},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	// Keep the initial load inactive so this test exercises reopen activation.
+	idfOracle.targetVersion.Store(1)
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	oldStats := genBM25StatsForField(102, 1, 3)
+	oldData, err := oldStats[102].Serialize()
+	require.NoError(t, err)
+	oldPath := "bm25stats/seg_1/field_102/0"
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	newData, err := newStats[104].Serialize()
+	require.NoError(t, err)
+	newPath := "bm25stats/seg_1/field_104/0"
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Reader(mock.Anything, oldPath).Return(
+		&bytesFileReader{bytes.NewReader(oldData)}, nil,
+	).Once()
+	cm.EXPECT().Reader(mock.Anything, newPath).Return(
+		&bytesFileReader{bytes.NewReader(newData)}, nil,
+	).Once()
+
+	err = idfOracle.LoadSealed(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(102, oldPath)}, cm)
+	require.NoError(t, err)
+	sealedStats, ok := idfOracle.sealed.Get(1)
+	require.True(t, ok)
+	require.False(t, sealedStats.activate.Load())
+	current, err := idfOracle.current.GetStats(102)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), current.NumRow())
+
+	reopenInfo := &querypb.SegmentLoadInfo{
+		Bm25Logs: append(
+			bm25LogsForField(102, oldPath),
+			bm25LogsForField(104, newPath)...,
+		),
+	}
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, true)
+	require.NoError(t, err)
+
+	assert.True(t, sealedStats.activate.Load())
+	current, err = idfOracle.current.GetStats(102)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), current.NumRow())
+	current, err = idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), current.NumRow())
+}
+
+func TestReadableReopenBM25RetryDoesNotDoubleMerge(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{103},
+		OutputFieldIds: []int64{104},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	data, err := newStats[104].Serialize()
+	require.NoError(t, err)
+
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+		&bytesFileReader{bytes.NewReader(data)}, nil,
+	).Once()
+	reopenInfo := &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}
+
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, true)
+	require.NoError(t, err)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, true)
+	require.NoError(t, err)
+
+	current, err := idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), current.NumRow())
+}
+
+func TestSyncDistributionReopenBM25InactiveThenActivate(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{103},
+		OutputFieldIds: []int64{104},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	newStats := genBM25StatsForField(104, 10, 13)
+	data, err := newStats[104].Serialize()
+	require.NoError(t, err)
+
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+		&bytesFileReader{bytes.NewReader(data)}, nil,
+	).Once()
+
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, false)
+	require.NoError(t, err)
+	current, err := idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), current.NumRow())
+
+	idfOracle.SetNext(&snapshot{
+		dist: []SnapshotItem{{
+			NodeID:   1,
+			Segments: []SegmentEntry{{NodeID: 1, SegmentID: 1, TargetVersion: 1}},
+		}},
+		targetVersion: 1,
+	})
+	require.Eventually(t, func() bool {
+		return idfOracle.TargetVersion() >= 1
+	}, time.Second, 10*time.Millisecond)
+
+	current, err = idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), current.NumRow())
+}
+
+func TestSealedBM25StatsFieldTracking(t *testing.T) {
+	stats := &sealedBm25Stats{
+		activate:  atomic.NewBool(false),
+		segmentID: 1,
+		fieldList: []int64{102},
+	}
+
+	assert.True(t, stats.HasField(102))
+	assert.False(t, stats.HasField(104))
+	assert.ElementsMatch(t, []int64{102}, stats.FieldList())
+
+	listOnlyStats := &sealedBm25Stats{fieldList: []int64{201}}
+	assert.True(t, listOnlyStats.HasField(201))
+	assert.False(t, listOnlyStats.HasField(202))
+
+	stats.AddFields([]int64{104, 102})
+	assert.True(t, stats.HasField(102))
+	assert.True(t, stats.HasField(104))
+	assert.ElementsMatch(t, []int64{102, 104}, stats.FieldList())
+}
+
+func TestIDFSyncFunctionsAddsNewBM25Field(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	oldStats := storage.NewBM25Stats()
+	oldStats.Append(map[uint32]float32{1: 1})
+	idfOracle.current[102] = oldStats
+
+	err := idfOracle.SyncFunctions([]*schemapb.FunctionSchema{
+		{
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		},
+		{
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{103},
+			OutputFieldIds: []int64{104},
+		},
+	})
+	require.NoError(t, err)
+
+	existing, err := idfOracle.current.GetStats(102)
+	require.NoError(t, err)
+	assert.Same(t, oldStats, existing)
+	added, err := idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	require.NotNil(t, added)
+	assert.Equal(t, int64(0), added.NumRow())
+
+	sparse := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})
+	_, avgdl, err := idfOracle.BuildIDF(104, &schemapb.SparseFloatArray{Contents: [][]byte{sparse}, Dim: 1})
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), avgdl)
+}
+
+func TestBuildIDFNewFieldAfterSyncFunctions(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	sparse := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})
+	_, _, err := idfOracle.BuildIDF(104, &schemapb.SparseFloatArray{Contents: [][]byte{sparse}, Dim: 1})
+	require.Error(t, err)
+
+	err = idfOracle.SyncFunctions([]*schemapb.FunctionSchema{
+		{
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		},
+		{
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{103},
+			OutputFieldIds: []int64{104},
+		},
+	})
+	require.NoError(t, err)
+
+	_, avgdl, err := idfOracle.BuildIDF(104, &schemapb.SparseFloatArray{Contents: [][]byte{sparse}, Dim: 1})
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), avgdl)
 }

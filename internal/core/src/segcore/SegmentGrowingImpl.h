@@ -142,6 +142,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
                            size_t num_rows);
 
     void
+    BuildTextIndexFromTextLobRefs(FieldId field_id,
+                                  const std::vector<FieldDataPtr>& field_data,
+                                  size_t reserved_offset,
+                                  const FieldMeta& field_meta);
+
+    // Test-only: inject TEXT LOB base path.
+    void
+    SetTextLobPathForTesting(FieldId field_id, std::string lob_base_path) {
+        text_lob_paths_[field_id] = std::move(lob_base_path);
+    }
+
+    void
     Reopen(SchemaPtr sch) override;
 
     void
@@ -150,11 +162,23 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
-    LazyCheckSchema(SchemaPtr sch) override;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+           SchemaPtr new_schema) override;
+
+    void
+    LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx = nullptr) override;
+
+    // Backfill fields that exist in the schema but had no data to load,
+    // e.g. fields added by AddField after the loaded binlogs were written.
+    // Nullable vector fields get their validity bitmap filled so queries
+    // observe all-null values instead of an uninitialized column.
+    void
+    FillAbsentFields();
 
  private:
     // Build geometry cache for inserted data
@@ -331,6 +355,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const VectorBase& vec_raw,
         const int64_t* seg_offsets,
         int64_t count,
+        const bool* valid_data,
         google::protobuf::RepeatedPtrField<T>* dst) const;
 
     template <typename T>
@@ -482,6 +507,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasIndex(FieldId field_id) const override {
+        if (!is_field_exist(field_id)) {
+            return false;
+        }
         auto& field_meta = schema_->operator[](field_id);
         if ((IsVectorDataType(field_meta.get_data_type()) ||
              IsGeometryType(field_meta.get_data_type())) &&
@@ -526,7 +554,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     HasFieldData(FieldId field_id) const override {
-        return true;
+        if (SystemProperty::Instance().IsSystem(field_id)) {
+            return insert_record_.row_count() > 0;
+        }
+        if (!insert_record_.is_data_exist(field_id)) {
+            return false;
+        }
+        return !insert_record_.get_data_base(field_id)->empty();
     }
 
     bool
@@ -641,6 +675,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
     ResourceUsage
     EstimateSegmentResourceUsage() const;
 
+    void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const override;
+
+    void
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapView valid_result) const override;
+
  protected:
     int64_t
     num_chunk(FieldId field_id) const override;
@@ -697,6 +746,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     fill_empty_field(const FieldMeta& field_meta);
+
+    void
+    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
+                                     int64_t row_count);
 
     /**
      * @brief Update resource tracking by refunding old estimate and charging new

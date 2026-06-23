@@ -386,7 +386,7 @@ func (s *CommonSuite) createBaseManifest(basePath string, storageConfig *indexpb
 		{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
 	}
 
-	pw, err := packed.NewFFIPackedWriter(basePath, 0, arrowSchema, columnGroups, storageConfig, nil)
+	pw, err := packed.NewFFIPackedWriter(basePath, arrowSchema, columnGroups, storageConfig, nil)
 	require.NoError(t, err)
 
 	// Write minimal data to create a valid manifest
@@ -401,7 +401,12 @@ func (s *CommonSuite) createBaseManifest(basePath string, storageConfig *indexpb
 	err = pw.WriteRecordBatch(rec)
 	require.NoError(t, err)
 
-	manifestPath, err := pw.Close()
+	out, err := pw.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+
+	manifestPath, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, storageConfig,
+		&packed.ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	return manifestPath

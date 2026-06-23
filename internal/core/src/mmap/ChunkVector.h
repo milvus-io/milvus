@@ -15,12 +15,16 @@
 // limitations under the License.
 #pragma once
 
-#include "common/Utils.h"
+#include <algorithm>
+#include <type_traits>
+
+#include "common/FastMem.h"
 #include "common/Span.h"
-#include "mmap/ChunkData.h"
-#include "storage/MmapManager.h"
-#include "segcore/SegcoreConfig.h"
 #include "common/TypeTraits.h"
+#include "common/Utils.h"
+#include "mmap/ChunkData.h"
+#include "segcore/SegcoreConfig.h"
+#include "storage/MmapManager.h"
 
 namespace milvus {
 template <typename Type>
@@ -111,7 +115,12 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                     offset,
                     length,
                     vec_[chunk_id].size()));
-            std::copy_n(data, length, ptr + offset);
+            if constexpr (std::is_trivially_copyable_v<Type>) {
+                milvus::fastmem::FastMemcpy(
+                    ptr + offset, data, length * sizeof(Type));
+            } else {
+                std::copy_n(data, length, ptr + offset);
+            }
         } else {
             vec_[chunk_id].set(data, offset, length, check_data_valid);
         }

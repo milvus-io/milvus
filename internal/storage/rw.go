@@ -19,7 +19,6 @@ package storage
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"io"
 	"sort"
 
@@ -74,6 +73,7 @@ type rwOptions struct {
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
 	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	externalReader      packed.ExternalReaderContext
 }
 
 func (o *rwOptions) validate() error {
@@ -90,7 +90,7 @@ func (o *rwOptions) validate() error {
 			return merr.WrapErrServiceInternal("storage config is nil")
 		}
 	default:
-		return merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", o.version))
+		return merr.WrapErrServiceInternalMsg("unsupported storage version %d", o.version)
 	}
 	return nil
 }
@@ -173,6 +173,12 @@ func GetStorageConfig(option ...RwOption) *indexpb.StorageConfig {
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
+	}
+}
+
+func WithExternalReaderContext(externalReader packed.ExternalReaderContext) RwOption {
+	return func(options *rwOptions) {
+		options.externalReader = externalReader
 	}
 }
 
@@ -328,7 +334,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		// FIXME: add needed fields support
 		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
 	if err != nil {
 		return nil, err
@@ -364,7 +370,8 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 			}
 		}
 	}
-	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize,
+		rwOptions.storageConfig, pluginContext, option...)
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,
@@ -379,6 +386,11 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
+	}
+	if rwOptions.version == StorageV1 {
+		if err := ValidateStorageV1InsertWritableSchema(schema); err != nil {
+			return nil, err
+		}
 	}
 
 	blobsWriter := func(blobs []*Blob) error {
@@ -440,7 +452,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 		)
 	}
-	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 }
 
 func NewDeltalogWriter(
@@ -480,7 +492,7 @@ func NewDeltalogWriter(
 			[]storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{0, common.TimeStampField}}},
 			rwOptions.storageConfig, nil)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
 }
 
@@ -529,6 +541,6 @@ func NewDeltalogReader(
 			},
 		}, nil
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
 }

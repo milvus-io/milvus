@@ -21,6 +21,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
@@ -33,7 +36,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -53,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
@@ -557,6 +563,12 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("AlterRole", func(t *testing.T) {
+		mockProxy.EXPECT().AlterRole(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.AlterRole(ctx, nil)
+		assert.NoError(t, err)
+	})
+
 	t.Run("DropRole", func(t *testing.T) {
 		mockProxy.EXPECT().DropRole(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.DropRole(ctx, nil)
@@ -723,6 +735,23 @@ func Test_NewServer(t *testing.T) {
 	})
 }
 
+func TestServer_GetReplicateConfiguration(t *testing.T) {
+	ctx := context.Background()
+	req := &milvuspb.GetReplicateConfigurationRequest{}
+	expectedResp := &milvuspb.GetReplicateConfigurationResponse{
+		Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Configuration: &commonpb.ReplicateConfiguration{},
+	}
+	mockProxy := mocks.NewMockProxy(t)
+	mockProxy.EXPECT().GetReplicateConfiguration(mock.Anything, req).Return(expectedResp, nil)
+
+	server := &Server{proxy: mockProxy}
+	resp, err := server.GetReplicateConfiguration(ctx, req)
+
+	assert.NoError(t, err)
+	assert.Same(t, expectedResp, resp)
+}
+
 func TestServer_Check(t *testing.T) {
 	ctx := context.Background()
 	server := getServer(t)
@@ -861,6 +890,59 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 	server.registerHTTPServer()
 }
 
+func Test_NewServer_HTTPServer_TimeoutDefaults(t *testing.T) {
+	server := getServer(t)
+	startProxyHTTPServerForTest(t, server)
+
+	assert.Equal(t, 5*time.Second, server.httpServer.ReadHeaderTimeout)
+	assert.Equal(t, time.Duration(0), server.httpServer.ReadTimeout)
+	assert.Equal(t, time.Duration(0), server.httpServer.WriteTimeout)
+	assert.Equal(t, 300*time.Second, server.httpServer.IdleTimeout)
+	assert.Equal(t, 16<<20, server.httpServer.MaxHeaderBytes)
+}
+
+func Test_NewServer_HTTPServer_TimeoutConfigOverrides(t *testing.T) {
+	params := paramtable.Get()
+	params.Save("proxy.http.readHeaderTimeout", "7s")
+	params.Save("proxy.http.readTimeout", "8s")
+	params.Save("proxy.http.writeTimeout", "9s")
+	params.Save("proxy.http.idleTimeout", "10s")
+	params.Save("proxy.http.maxHeaderBytes", "2048")
+	t.Cleanup(func() {
+		params.Reset("proxy.http.readHeaderTimeout")
+		params.Reset("proxy.http.readTimeout")
+		params.Reset("proxy.http.writeTimeout")
+		params.Reset("proxy.http.idleTimeout")
+		params.Reset("proxy.http.maxHeaderBytes")
+	})
+
+	server := getServer(t)
+	startProxyHTTPServerForTest(t, server)
+
+	assert.Equal(t, 7*time.Second, server.httpServer.ReadHeaderTimeout)
+	assert.Equal(t, 8*time.Second, server.httpServer.ReadTimeout)
+	assert.Equal(t, 9*time.Second, server.httpServer.WriteTimeout)
+	assert.Equal(t, 10*time.Second, server.httpServer.IdleTimeout)
+	assert.Equal(t, 2048, server.httpServer.MaxHeaderBytes)
+}
+
+func startProxyHTTPServerForTest(t *testing.T, server *Server) {
+	t.Helper()
+
+	listener, err := netutil.NewListener()
+	assert.NoError(t, err)
+	server.listenerManager = &listenerManager{httpListener: listener}
+
+	errChan := make(chan error, 2)
+	server.wg.Add(1)
+	go server.startHTTPServer(errChan)
+	assert.NoError(t, <-errChan)
+	t.Cleanup(func() {
+		assert.NoError(t, server.httpServer.Close())
+		server.wg.Wait()
+	})
+}
+
 func getServer(t *testing.T) *Server {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
@@ -893,6 +975,129 @@ func getServer(t *testing.T) *Server {
 	}, nil).Maybe()
 	server.mixCoordClient = mockMC
 	return server
+}
+
+func expectProxyLifecycle(t *testing.T, server *Server) {
+	t.Helper()
+	mockProxy := server.proxy.(*mocks.MockProxy)
+	mockProxy.EXPECT().Stop().Return(nil)
+	mockProxy.EXPECT().Init().Return(nil)
+	mockProxy.EXPECT().Start().Return(nil)
+	mockProxy.EXPECT().Register().Return(nil)
+	mockProxy.EXPECT().GetRateLimiter().Return(nil, nil)
+	mockProxy.EXPECT().SetMixCoordClient(mock.Anything).Return()
+	mockProxy.EXPECT().UpdateStateCode(mock.Anything).Return()
+	mockProxy.EXPECT().SetAddress(mock.Anything).Return()
+}
+
+func getAvailablePortExcept(excluded ...int) int {
+	for {
+		port := funcutil.GetAvailablePort()
+		duplicated := false
+		for _, excludedPort := range excluded {
+			if port == excludedPort {
+				duplicated = true
+				break
+			}
+		}
+		if !duplicated {
+			return port
+		}
+	}
+}
+
+func configureHTTP2ProxyParams(t *testing.T, tlsMode int, portShare bool) (int, int) {
+	t.Helper()
+	Params := &paramtable.Get().ProxyGrpcServerCfg
+	resetKeys := []string{
+		Params.TLSMode.Key,
+		Params.Port.Key,
+		Params.InternalPort.Key,
+		Params.ServerPemPath.Key,
+		Params.ServerKeyPath.Key,
+		Params.CaPemPath.Key,
+		proxy.Params.HTTPCfg.Enabled.Key,
+		proxy.Params.HTTPCfg.Port.Key,
+	}
+	for _, key := range resetKeys {
+		key := key
+		t.Cleanup(func() { paramtable.Get().Reset(key) })
+	}
+
+	grpcPort := getAvailablePortExcept()
+	internalPort := getAvailablePortExcept(grpcPort)
+	httpPort := grpcPort
+	httpPortValue := ""
+	if !portShare {
+		httpPort = getAvailablePortExcept(grpcPort, internalPort)
+		httpPortValue = strconv.Itoa(httpPort)
+	}
+
+	paramtable.Get().Save(Params.TLSMode.Key, strconv.Itoa(tlsMode))
+	paramtable.Get().Save(Params.Port.Key, strconv.Itoa(grpcPort))
+	paramtable.Get().Save(Params.InternalPort.Key, strconv.Itoa(internalPort))
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
+	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
+	paramtable.Get().Save(Params.CaPemPath.Key, "../../../configs/cert/ca.pem")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, httpPortValue)
+	return grpcPort, httpPort
+}
+
+func startHTTP2ProxyServer(t *testing.T, tlsMode int, portShare bool) (*Server, int, int) {
+	t.Helper()
+	server := getServer(t)
+	expectProxyLifecycle(t, server)
+	grpcPort, httpPort := configureHTTP2ProxyParams(t, tlsMode, portShare)
+	t.Cleanup(func() { require.NoError(t, server.Stop()) })
+	require.NoError(t, runAndWaitForServerReady(server))
+	return server, grpcPort, httpPort
+}
+
+func newH2CClient(t *testing.T) *http.Client {
+	t.Helper()
+	transport := &http2.Transport{
+		AllowHTTP: true,
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+	client := &http.Client{Transport: transport}
+	t.Cleanup(client.CloseIdleConnections)
+	return client
+}
+
+func newTLSHTTP2Client(t *testing.T, tlsMode int) *http.Client {
+	t.Helper()
+	certPool := x509.NewCertPool()
+	ca, err := os.ReadFile("../../../configs/cert/ca.pem")
+	require.NoError(t, err)
+	require.True(t, certPool.AppendCertsFromPEM(ca))
+	tlsConf := &tls.Config{
+		RootCAs:    certPool,
+		ServerName: "localhost",
+		NextProtos: []string{http2.NextProtoTLS},
+		MinVersion: tls.VersionTLS12,
+	}
+	if tlsMode == 2 {
+		cert, err := tls.LoadX509KeyPair(clientPemPath, clientKeyPath)
+		require.NoError(t, err)
+		tlsConf.Certificates = []tls.Certificate{cert}
+	}
+	client := &http.Client{Transport: &http2.Transport{TLSClientConfig: tlsConf}}
+	t.Cleanup(client.CloseIdleConnections)
+	return client
+}
+
+func assertHTTP2Response(t *testing.T, client *http.Client, url string) {
+	t.Helper()
+	resp, err := client.Get(url)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	_, err = io.Copy(io.Discard, resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "HTTP/2.0", resp.Proto)
 }
 
 func Test_NewServer_TLS_TwoWay(t *testing.T) {
@@ -984,6 +1189,18 @@ func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 	server.Stop()
 }
 
+// freeTCPPort grabs a random unused TCP port. The TLS HTTP-server tests
+// below hardcoded port 8080 originally, which collides with anything else
+// already bound to that port on the dev machine (e.g. the TEI text-embedding
+// container in our compose stack).
+func freeTCPPort(t *testing.T) string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	assert.NoError(t, ln.Close())
+	return strconv.Itoa(port)
+}
+
 func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	server := getServer(t)
 
@@ -1004,7 +1221,7 @@ func Test_NewHTTPServer_TLS_TwoWay(t *testing.T) {
 	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
 	paramtable.Get().Save(Params.CaPemPath.Key, "../../../configs/cert/ca.pem")
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
-	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, freeTCPPort(t))
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
@@ -1038,7 +1255,7 @@ func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
 	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
 	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
-	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, freeTCPPort(t))
 
 	err := runAndWaitForServerReady(server)
 	fmt.Printf("err: %v\n", err)
@@ -1054,6 +1271,37 @@ func Test_NewHTTPServer_TLS_OneWay(t *testing.T) {
 	server.Stop()
 }
 
+func Test_NewHTTPServer_H2C(t *testing.T) {
+	_, _, httpPort := startHTTP2ProxyServer(t, 0, false)
+	assertHTTP2Response(t, newH2CClient(t), fmt.Sprintf("http://localhost:%d/not-found", httpPort))
+}
+
+func Test_NewHTTPServer_TLS_HTTP2(t *testing.T) {
+	for _, tlsMode := range []int{1, 2} {
+		tlsMode := tlsMode
+		t.Run(fmt.Sprintf("tls_mode_%d", tlsMode), func(t *testing.T) {
+			_, _, httpPort := startHTTP2ProxyServer(t, tlsMode, false)
+			assertHTTP2Response(t, newTLSHTTP2Client(t, tlsMode), fmt.Sprintf("https://localhost:%d/not-found", httpPort))
+		})
+	}
+}
+
+func Test_NewHTTPServer_PortShare_H2C(t *testing.T) {
+	enableCustomInterceptor = false
+	t.Cleanup(func() { enableCustomInterceptor = true })
+	_, grpcPort, _ := startHTTP2ProxyServer(t, 0, true)
+	assertHTTP2Response(t, newH2CClient(t), fmt.Sprintf("http://localhost:%d/not-found", grpcPort))
+
+	ctx, cancel := context.WithTimeout(context.Background(), waitDuration)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, fmt.Sprintf("localhost:%d", grpcPort), grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	resp, err := grpc_health_v1.NewHealthClient(conn).Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.GetStatus())
+}
+
 func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
 	server := getServer(t)
 
@@ -1066,7 +1314,7 @@ func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {
 	paramtable.Get().Save(Params.ServerPemPath.Key, "../not/existed/server.pem")
 	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
-	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, "8080")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Port.Key, freeTCPPort(t))
 	err := runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()

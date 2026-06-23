@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -120,7 +121,7 @@ func (sw *sessionDiscoverer) watch(ctx context.Context, cb func(VersionedState) 
 		case event, ok := <-eventCh:
 			// Break the loop if the watch is failed.
 			if !ok {
-				return errors.New("etcd watch channel closed unexpectedly")
+				return status.NewInner("etcd watch channel closed unexpectedly")
 			}
 			if err := sw.handleETCDEvent(event); err != nil {
 				return err

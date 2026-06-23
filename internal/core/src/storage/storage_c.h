@@ -45,6 +45,9 @@ ResizeTheadPool(int64_t priority, float ratio);
 CStatus
 InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config);
 
+CStatus
+InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config);
+
 // Plugin related APIs
 CStatus
 InitPluginLoader(const char* plugin_path);

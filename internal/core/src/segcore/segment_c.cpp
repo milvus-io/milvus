@@ -16,15 +16,20 @@
 #include <folly/ExceptionWrapper.h>
 #include <folly/Try.h>
 #include <folly/futures/Promise.h>
+#include <cstring>
 #include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "common/Common.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
@@ -182,30 +187,72 @@ NewSegmentWithLoadInfo(CCollection collection,
     }
 }
 
+milvus::SchemaPtr
+ParseReopenSchema(const void* schema_blob,
+                  const int64_t schema_length,
+                  const uint64_t schema_version) {
+    AssertInfo(schema_blob != nullptr, "schema is null");
+    AssertInfo(schema_length > 0, "schema length must be positive");
+
+    milvus::proto::schema::CollectionSchema collection_schema;
+    auto suc = collection_schema.ParseFromArray(schema_blob, schema_length);
+    AssertInfo(suc, "parse schema proto failed");
+    auto schema = milvus::Schema::ParseFrom(collection_schema);
+    schema->set_schema_version(schema_version);
+    return schema;
+}
+
 CFuture*
 AsyncReopenSegment(CTraceContext c_trace,
                    CSegmentInterface c_segment,
                    const uint8_t* load_info_blob,
-                   const int64_t load_info_length) {
-    AssertInfo(load_info_blob, "load info is null");
-    milvus::proto::segcore::SegmentLoadInfo load_info;
-    auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
-    AssertInfo(suc, "unmarshal load info failed");
+                   const int64_t load_info_length,
+                   const void* schema_blob,
+                   const int64_t schema_length,
+                   const uint64_t schema_version) {
+    try {
+        AssertInfo(load_info_blob, "load info is null");
+        milvus::proto::segcore::SegmentLoadInfo load_info;
+        auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
+        AssertInfo(suc, "unmarshal load info failed");
+        auto schema =
+            ParseReopenSchema(schema_blob, schema_length, schema_version);
 
-    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
-    auto future = milvus::futures::Future<bool>::async(
-        milvus::futures::getLoadCPUExecutor(),
-        milvus::futures::ExecutePriority::NORMAL,
-        [c_trace, segment, load_info = std::move(load_info)](
-            folly::CancellationToken cancel_token) -> bool* {
-            milvus::OpContext op_ctx(cancel_token);
-            segment->Reopen(&op_ctx, load_info);
-            return nullptr;
-        },
-        milvus::futures::PoolType::kLoad);
-    return static_cast<CFuture*>(static_cast<void*>(
-        static_cast<milvus::futures::IFuture*>(future.release())));
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getLoadCPUExecutor(),
+            milvus::futures::ExecutePriority::NORMAL,
+            [c_trace,
+             segment,
+             load_info = std::move(load_info),
+             schema = std::move(schema)](
+                folly::CancellationToken cancel_token) -> bool* {
+                milvus::OpContext op_ctx(cancel_token);
+                segment->Reopen(&op_ctx, load_info, schema);
+                return nullptr;
+            },
+            milvus::futures::PoolType::kLoad);
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (std::exception& e) {
+        std::string error_msg = e.what();
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getLoadCPUExecutor(),
+            milvus::futures::ExecutePriority::NORMAL,
+            [error_msg = std::move(error_msg)](
+                folly::CancellationToken cancel_token) -> bool* {
+                (void)cancel_token;
+                ThrowInfo(milvus::UnexpectedError,
+                          "AsyncReopenSegment preflight failed: {}",
+                          error_msg);
+                return nullptr;
+            },
+            milvus::futures::PoolType::kLoad);
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    }
 }
 
 CLoadCancellationSource
@@ -346,18 +393,35 @@ AsyncSearch(CTraceContext c_trace,
 
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
+            AssertInfo(phg_ptr != nullptr && !phg_ptr->empty(),
+                       "search requires non-empty placeholder group");
+            const int64_t num_queries = milvus::query::GetNumOfQueries(phg_ptr);
+            auto target_vector_field_id =
+                plan->plan_node_->search_info_.field_id_;
 
-            segment->LazyCheckSchema(plan->schema_);
-
-            auto search_result = segment->Search(plan,
-                                                 phg_ptr,
-                                                 timestamp,
-                                                 cancel_token,
-                                                 consistency_level,
-                                                 collection_ttl,
-                                                 entity_ttl_physical_time_us,
-                                                 filter_only,
-                                                 enable_expr_cache);
+            milvus::OpContext op_ctx(cancel_token);
+            segment->LazyCheckSchema(plan->schema_, &op_ctx);
+            auto internal_segment =
+                static_cast<milvus::segcore::SegmentInternalInterface*>(
+                    segment);
+            std::unique_ptr<milvus::SearchResult> search_result;
+            if (!filter_only &&
+                !internal_segment->FieldAccessible(target_vector_field_id)) {
+                search_result = std::make_unique<milvus::SearchResult>();
+                search_result->total_nq_ = num_queries;
+                search_result->unity_topK_ = 0;
+                search_result->total_data_cnt_ = 0;
+            } else {
+                search_result = segment->Search(plan,
+                                                phg_ptr,
+                                                timestamp,
+                                                cancel_token,
+                                                consistency_level,
+                                                collection_ttl,
+                                                entity_ttl_physical_time_us,
+                                                filter_only,
+                                                enable_expr_cache);
+            }
             if (!filter_only &&
                 !milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
@@ -430,7 +494,8 @@ AsyncRetrieve(CTraceContext c_trace,
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
-            segment->LazyCheckSchema(plan->schema_);
+            milvus::OpContext op_ctx(cancel_token);
+            segment->LazyCheckSchema(plan->schema_, &op_ctx);
 
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx,
@@ -468,6 +533,9 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span(
                 "SegCoreRetrieveByOffsets", &trace_ctx, true);
+
+            milvus::OpContext op_ctx(cancel_token);
+            segment->LazyCheckSchema(plan->schema_, &op_ctx);
 
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
@@ -696,6 +764,16 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         auto info_proto =
             std::make_unique<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>();
         info_proto->ParseFromArray(serialized_load_json_key_index_info, len);
+        if (!milvus::JSON_KEY_STATS_ENABLED.load()) {
+            LOG_WARN(
+                "skip load json stats because json key stats is disabled, "
+                "segment:{}, field:{}, build:{}, version:{}",
+                segment->get_segment_id(),
+                info_proto->fieldid(),
+                info_proto->buildid(),
+                info_proto->version());
+            return milvus::SuccessCStatus();
+        }
 
         milvus::storage::FieldDataMeta field_meta{info_proto->collectionid(),
                                                   info_proto->partitionid(),
@@ -862,6 +940,7 @@ struct FieldInfo {
     milvus::FieldId field_id;
     std::string field_name;
     milvus::DataType data_type;
+    milvus::DataType element_type;
     bool nullable;
     int64_t dim;  // for vector types
     const milvus::segcore::VectorBase* vec_base;
@@ -869,6 +948,153 @@ struct FieldInfo {
     // For TEXT fields with spillover: reader for temp LOB file
     milvus::segcore::TextLobSpillover* text_lob_spillover = nullptr;
 };
+
+struct BM25StatsAccumulator {
+    std::unordered_map<uint32_t, int32_t> rows_with_token;
+    int64_t num_row = 0;
+    int64_t num_token = 0;
+
+    void
+    Merge(const BM25StatsAccumulator& other) {
+        for (const auto& [token, count] : other.rows_with_token) {
+            rows_with_token[token] += count;
+        }
+        num_row += other.num_row;
+        num_token += other.num_token;
+    }
+};
+
+void
+AppendSparseRowToBM25Stats(
+    const knowhere::sparse::SparseRow<milvus::SparseValueType>* row,
+    BM25StatsAccumulator& stats) {
+    stats.num_row++;
+    if (row == nullptr) {
+        return;
+    }
+    auto byte_size = row->data_byte_size();
+    if (byte_size == 0) {
+        return;
+    }
+    auto data = static_cast<const uint8_t*>(row->data());
+    auto element_count =
+        byte_size /
+        knowhere::sparse::SparseRow<milvus::SparseValueType>::element_size();
+    for (size_t i = 0; i < element_count; i++) {
+        uint32_t token = 0;
+        float value = 0;
+        std::memcpy(&token, data + i * 8, sizeof(token));
+        std::memcpy(&value, data + i * 8 + 4, sizeof(value));
+        stats.rows_with_token[token] += 1;
+        stats.num_token += static_cast<int64_t>(value);
+    }
+}
+
+std::vector<uint8_t>
+SerializeBM25Stats(const BM25StatsAccumulator& stats) {
+    constexpr int32_t version = 0;
+    std::vector<uint8_t> out;
+    out.reserve(
+        sizeof(version) + sizeof(stats.num_row) + sizeof(stats.num_token) +
+        stats.rows_with_token.size() * (sizeof(uint32_t) + sizeof(int32_t)));
+    auto append = [&out](const void* ptr, size_t size) {
+        auto bytes = static_cast<const uint8_t*>(ptr);
+        out.insert(out.end(), bytes, bytes + size);
+    };
+    append(&version, sizeof(version));
+    append(&stats.num_row, sizeof(stats.num_row));
+    append(&stats.num_token, sizeof(stats.num_token));
+    for (const auto& [token, row_count] : stats.rows_with_token) {
+        append(&token, sizeof(token));
+        append(&row_count, sizeof(row_count));
+    }
+    return out;
+}
+
+arrow::Result<BM25StatsAccumulator>
+DeserializeBM25Stats(const uint8_t* data, int64_t size) {
+    if (size < 20 || (size - 20) % 8 != 0) {
+        return arrow::Status::Invalid("invalid BM25 stats blob size");
+    }
+    BM25StatsAccumulator stats;
+    int32_t version = 0;
+    std::memcpy(&version, data, sizeof(version));
+    if (version != 0) {
+        return arrow::Status::Invalid("unsupported BM25 stats version");
+    }
+    std::memcpy(&stats.num_row, data + 4, sizeof(stats.num_row));
+    std::memcpy(&stats.num_token, data + 12, sizeof(stats.num_token));
+    auto entries = (size - 20) / 8;
+    for (int64_t i = 0; i < entries; i++) {
+        uint32_t token = 0;
+        int32_t count = 0;
+        std::memcpy(&token, data + 20 + i * 8, sizeof(token));
+        std::memcpy(&count, data + 20 + i * 8 + 4, sizeof(count));
+        stats.rows_with_token[token] += count;
+    }
+    return stats;
+}
+
+arrow::Status
+WriteRawFile(const milvus_storage::ArrowFileSystemPtr& fs,
+             const std::string& path,
+             const std::vector<uint8_t>& data) {
+    auto slash = path.find_last_of('/');
+    if (slash != std::string::npos && slash > 0) {
+        ARROW_RETURN_NOT_OK(fs->CreateDir(path.substr(0, slash), true));
+    }
+    ARROW_ASSIGN_OR_RAISE(auto output, fs->OpenOutputStream(path));
+    ARROW_RETURN_NOT_OK(output->Write(data.data(), data.size()));
+    return output->Close();
+}
+
+arrow::Result<BM25StatsAccumulator>
+ReadBM25StatsFile(const milvus_storage::ArrowFileSystemPtr& fs,
+                  const std::string& path) {
+    ARROW_ASSIGN_OR_RAISE(auto input, fs->OpenInputFile(path));
+    ARROW_ASSIGN_OR_RAISE(auto size, input->GetSize());
+    ARROW_ASSIGN_OR_RAISE(auto buffer, input->Read(size));
+    return DeserializeBM25Stats(buffer->data(), buffer->size());
+}
+
+bool
+IsCompoundStatsPath(const std::string& path) {
+    auto slash = path.find_last_of('/');
+    auto basename = slash == std::string::npos ? path : path.substr(slash + 1);
+    return basename == "1";
+}
+
+arrow::Status
+CollectBM25StatsForChunk(const FieldInfo& field_info,
+                         int64_t start_offset,
+                         int64_t num_rows,
+                         BM25StatsAccumulator& stats) {
+    for (int64_t i = 0; i < num_rows; i++) {
+        auto logical_offset = start_offset + i;
+        if (field_info.valid_data &&
+            !field_info.valid_data->is_valid(logical_offset)) {
+            stats.num_row++;
+            continue;
+        }
+
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(logical_offset);
+        if (physical_offset < 0) {
+            return arrow::Status::Invalid(
+                "valid nullable sparse vector row missing physical data");
+        }
+
+        auto size_per_chunk = field_info.vec_base->get_size_per_chunk();
+        auto chunk_id = physical_offset / size_per_chunk;
+        auto offset_in_chunk = physical_offset % size_per_chunk;
+        auto chunk_data = field_info.vec_base->get_chunk_data(chunk_id);
+        auto rows = static_cast<
+            const knowhere::sparse::SparseRow<milvus::SparseValueType>*>(
+            chunk_data);
+        AppendSparseRowToBM25Stats(rows + offset_in_chunk, stats);
+    }
+    return arrow::Status::OK();
+}
 
 // get element byte width for a data type
 int64_t
@@ -883,6 +1109,7 @@ GetElementByteWidth(milvus::DataType data_type, int64_t dim) {
         case milvus::DataType::FLOAT:
             return 4;
         case milvus::DataType::INT64:
+        case milvus::DataType::TIMESTAMPTZ:
         case milvus::DataType::DOUBLE:
             return 8;
         case milvus::DataType::VECTOR_FLOAT:
@@ -893,9 +1120,166 @@ GetElementByteWidth(milvus::DataType data_type, int64_t dim) {
             return dim * sizeof(milvus::float16);
         case milvus::DataType::VECTOR_BFLOAT16:
             return dim * sizeof(milvus::bfloat16);
+        case milvus::DataType::VECTOR_INT8:
+            return dim * sizeof(milvus::int8);
         default:
             return 0;  // variable length
     }
+}
+
+bool
+IsSupportedNullableVectorDataType(milvus::DataType data_type) {
+    switch (data_type) {
+        case milvus::DataType::VECTOR_FLOAT:
+        case milvus::DataType::VECTOR_BINARY:
+        case milvus::DataType::VECTOR_FLOAT16:
+        case milvus::DataType::VECTOR_BFLOAT16:
+        case milvus::DataType::VECTOR_INT8:
+        case milvus::DataType::VECTOR_SPARSE_U32_F32:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool
+IsFixedWidthVectorDataType(milvus::DataType data_type) {
+    return data_type == milvus::DataType::VECTOR_FLOAT ||
+           data_type == milvus::DataType::VECTOR_BINARY ||
+           data_type == milvus::DataType::VECTOR_FLOAT16 ||
+           data_type == milvus::DataType::VECTOR_BFLOAT16 ||
+           data_type == milvus::DataType::VECTOR_INT8;
+}
+
+const uint8_t*
+GetPhysicalVectorValue(const milvus::segcore::VectorBase* vec_base,
+                       int64_t physical_offset,
+                       int64_t byte_width) {
+    if (physical_offset < 0) {
+        return nullptr;
+    }
+
+    auto size_per_chunk = vec_base->get_size_per_chunk();
+    auto chunk_id = physical_offset / size_per_chunk;
+    auto offset_in_chunk = physical_offset % size_per_chunk;
+    auto chunk_data = vec_base->get_chunk_data(chunk_id);
+    return static_cast<const uint8_t*>(chunk_data) +
+           offset_in_chunk * byte_width;
+}
+
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildNullableFixedWidthVectorArray(const FieldInfo& field_info,
+                                   int64_t start_offset,
+                                   int64_t num_rows,
+                                   int64_t byte_width) {
+    if (!field_info.valid_data) {
+        return arrow::Status::Invalid(
+            "nullable vector field missing ValidData");
+    }
+
+    bool all_valid = true;
+    for (int64_t i = 0; i < num_rows; i++) {
+        if (!field_info.valid_data->is_valid(start_offset + i)) {
+            all_valid = false;
+            break;
+        }
+    }
+    if (all_valid && num_rows > 0) {
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(start_offset);
+        auto size_per_chunk = field_info.vec_base->get_size_per_chunk();
+        if (physical_offset >= 0 &&
+            physical_offset / size_per_chunk ==
+                (physical_offset + num_rows - 1) / size_per_chunk &&
+            num_rows * byte_width <= std::numeric_limits<int32_t>::max()) {
+            auto value = GetPhysicalVectorValue(
+                field_info.vec_base, physical_offset, byte_width);
+            if (value == nullptr) {
+                return arrow::Status::Invalid(
+                    "valid nullable vector row missing physical data");
+            }
+
+            ARROW_ASSIGN_OR_RAISE(
+                auto offsets_buffer,
+                arrow::AllocateBuffer((num_rows + 1) * sizeof(int32_t)));
+            auto offsets =
+                reinterpret_cast<int32_t*>(offsets_buffer->mutable_data());
+            for (int64_t i = 0; i <= num_rows; i++) {
+                offsets[i] = static_cast<int32_t>(i * byte_width);
+            }
+            std::shared_ptr<arrow::Buffer> offsets_buffer_shared(
+                std::move(offsets_buffer));
+            auto data_buffer =
+                arrow::Buffer::Wrap(value, num_rows * byte_width);
+            return std::make_shared<arrow::BinaryArray>(
+                num_rows, offsets_buffer_shared, data_buffer, nullptr, 0);
+        }
+    }
+
+    arrow::BinaryBuilder builder;
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    for (int64_t i = 0; i < num_rows; i++) {
+        auto logical_offset = start_offset + i;
+        if (!field_info.valid_data->is_valid(logical_offset)) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+            continue;
+        }
+
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(logical_offset);
+        auto value = GetPhysicalVectorValue(
+            field_info.vec_base, physical_offset, byte_width);
+        if (value == nullptr) {
+            return arrow::Status::Invalid(
+                "valid nullable vector row missing physical data");
+        }
+        ARROW_RETURN_NOT_OK(builder.Append(value, byte_width));
+    }
+
+    return builder.Finish();
+}
+
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildSparseFloatVectorArrayForChunk(const FieldInfo& field_info,
+                                    int64_t start_offset,
+                                    int64_t num_rows) {
+    arrow::BinaryBuilder builder;
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    for (int64_t i = 0; i < num_rows; i++) {
+        auto logical_offset = start_offset + i;
+        if (field_info.valid_data &&
+            !field_info.valid_data->is_valid(logical_offset)) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+            continue;
+        }
+
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(logical_offset);
+        if (physical_offset < 0) {
+            return arrow::Status::Invalid(
+                "valid nullable sparse vector row missing physical data");
+        }
+
+        auto size_per_chunk = field_info.vec_base->get_size_per_chunk();
+        auto chunk_id = physical_offset / size_per_chunk;
+        auto offset_in_chunk = physical_offset % size_per_chunk;
+        auto chunk_data = field_info.vec_base->get_chunk_data(chunk_id);
+        auto rows = static_cast<
+            const knowhere::sparse::SparseRow<milvus::SparseValueType>*>(
+            chunk_data);
+        auto row = rows + offset_in_chunk;
+        auto byte_size = row->data_byte_size();
+        if (byte_size == 0) {
+            ARROW_RETURN_NOT_OK(builder.Append(""));
+        } else {
+            ARROW_RETURN_NOT_OK(builder.Append(
+                static_cast<const uint8_t*>(row->data()), byte_size));
+        }
+    }
+
+    return builder.Finish();
 }
 
 // build Arrow Array for a single chunk of fixed-size data (zero-copy when possible)
@@ -1043,6 +1427,56 @@ BuildTextArrayForChunkWithSpillover(
     return builder.Finish();
 }
 
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildVectorArrayForChunk(const FieldInfo& field_info,
+                         int64_t start_offset,
+                         int64_t num_rows) {
+    auto vector_array_vec = dynamic_cast<
+        const milvus::segcore::ConcurrentVector<milvus::VectorArray>*>(
+        field_info.vec_base);
+    if (!vector_array_vec) {
+        return arrow::Status::Invalid("Expected ConcurrentVector<VectorArray>");
+    }
+
+    auto byte_width = milvus::vector_bytes_per_element(field_info.element_type,
+                                                       field_info.dim);
+    auto value_builder = std::make_shared<arrow::FixedSizeBinaryBuilder>(
+        arrow::fixed_size_binary(byte_width));
+    arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    for (int64_t i = 0; i < num_rows; i++) {
+        auto logical_offset = start_offset + i;
+        if (field_info.valid_data &&
+            !field_info.valid_data->is_valid(logical_offset)) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+            continue;
+        }
+
+        auto physical_offset =
+            field_info.vec_base->get_physical_offset(logical_offset);
+        if (physical_offset < 0) {
+            return arrow::Status::Invalid(
+                "valid nullable vector array row missing physical data");
+        }
+
+        const auto& vector_array = (*vector_array_vec)[physical_offset];
+        if (vector_array.get_element_type() != field_info.element_type) {
+            return arrow::Status::Invalid("VECTOR_ARRAY element type mismatch");
+        }
+        if (vector_array.dim() != field_info.dim) {
+            return arrow::Status::Invalid("VECTOR_ARRAY dim mismatch");
+        }
+
+        ARROW_RETURN_NOT_OK(builder.Append());
+        ARROW_RETURN_NOT_OK(value_builder->AppendValues(
+            reinterpret_cast<const uint8_t*>(vector_array.data()),
+            vector_array.length()));
+    }
+
+    return builder.Finish();
+}
+
 // build boolean array for a chunk - booleans need special handling
 arrow::Result<std::shared_ptr<arrow::Array>>
 BuildBoolArrayForChunk(
@@ -1072,42 +1506,68 @@ BuildArrayForChunk(const FieldInfo& field_info,
                    int64_t offset_in_chunk,
                    int64_t num_rows,
                    int64_t global_offset) {
-    const void* chunk_data = field_info.vec_base->get_chunk_data(chunk_id);
     int64_t element_size =
         GetElementByteWidth(field_info.data_type, field_info.dim);
 
-    // adjust data pointer for offset within chunk
-    const uint8_t* data_ptr = static_cast<const uint8_t*>(chunk_data) +
-                              offset_in_chunk * element_size;
+    auto get_data_ptr = [&]() {
+        const void* chunk_data = field_info.vec_base->get_chunk_data(chunk_id);
+        return static_cast<const uint8_t*>(chunk_data) +
+               offset_in_chunk * element_size;
+    };
 
     switch (field_info.data_type) {
         case milvus::DataType::BOOL:
             return BuildBoolArrayForChunk(
-                data_ptr, num_rows, field_info.valid_data, global_offset);
+                get_data_ptr(), num_rows, field_info.valid_data, global_offset);
 
         case milvus::DataType::INT8:
             return WrapChunkAsArrowArray<arrow::Int8Array>(
-                data_ptr, num_rows, 1, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                1,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::INT16:
             return WrapChunkAsArrowArray<arrow::Int16Array>(
-                data_ptr, num_rows, 2, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                2,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::INT32:
             return WrapChunkAsArrowArray<arrow::Int32Array>(
-                data_ptr, num_rows, 4, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                4,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::INT64:
+        case milvus::DataType::TIMESTAMPTZ:
             return WrapChunkAsArrowArray<arrow::Int64Array>(
-                data_ptr, num_rows, 8, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                8,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::FLOAT:
             return WrapChunkAsArrowArray<arrow::FloatArray>(
-                data_ptr, num_rows, 4, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                4,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::DOUBLE:
             return WrapChunkAsArrowArray<arrow::DoubleArray>(
-                data_ptr, num_rows, 8, field_info.valid_data, global_offset);
+                get_data_ptr(),
+                num_rows,
+                8,
+                field_info.valid_data,
+                global_offset);
 
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING: {
@@ -1193,19 +1653,55 @@ BuildArrayForChunk(const FieldInfo& field_info,
             return builder.Finish();
         }
 
+        case milvus::DataType::GEOMETRY: {
+            auto geometry_vec = dynamic_cast<
+                const milvus::segcore::ConcurrentVector<std::string>*>(
+                field_info.vec_base);
+            if (!geometry_vec) {
+                return arrow::Status::Invalid(
+                    "Expected ConcurrentVector<std::string> for GEOMETRY");
+            }
+            arrow::BinaryBuilder builder;
+            ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+            for (int64_t i = 0; i < num_rows; i++) {
+                int64_t offset = global_offset + i;
+                if (field_info.valid_data &&
+                    !field_info.valid_data->is_valid(offset)) {
+                    ARROW_RETURN_NOT_OK(builder.AppendNull());
+                } else {
+                    auto wkb = geometry_vec->view_element(offset);
+                    ARROW_RETURN_NOT_OK(builder.Append(wkb.data(), wkb.size()));
+                }
+            }
+            return builder.Finish();
+        }
+
         case milvus::DataType::VECTOR_FLOAT:
         case milvus::DataType::VECTOR_BINARY:
         case milvus::DataType::VECTOR_FLOAT16:
-        case milvus::DataType::VECTOR_BFLOAT16: {
+        case milvus::DataType::VECTOR_BFLOAT16:
+        case milvus::DataType::VECTOR_INT8: {
+            if (field_info.nullable) {
+                return BuildNullableFixedWidthVectorArray(
+                    field_info, global_offset, num_rows, element_size);
+            }
             auto arrow_type =
                 milvus::GetArrowDataType(field_info.data_type, field_info.dim);
-            return WrapChunkAsFixedSizeBinaryArray(data_ptr,
+            return WrapChunkAsFixedSizeBinaryArray(get_data_ptr(),
                                                    num_rows,
                                                    element_size,
                                                    arrow_type,
                                                    field_info.valid_data,
                                                    global_offset);
         }
+
+        case milvus::DataType::VECTOR_SPARSE_U32_F32:
+            return BuildSparseFloatVectorArrayForChunk(
+                field_info, global_offset, num_rows);
+
+        case milvus::DataType::VECTOR_ARRAY:
+            return BuildVectorArrayForChunk(
+                field_info, global_offset, num_rows);
 
         default:
             return arrow::Status::NotImplemented("Unsupported data type");
@@ -1229,18 +1725,33 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                                           "invalid arguments: segment, config, "
                                           "and result must not be null");
         }
+        result->manifest_path = nullptr;
+        result->committed_version = 0;
+        result->num_rows = 0;
+        result->bm25_field_ids = nullptr;
+        result->bm25_stats = nullptr;
+        result->bm25_stats_sizes = nullptr;
+        result->num_bm25_stats = 0;
 
         if (start_offset < 0 || end_offset < start_offset) {
             return milvus::FailureCStatus(
                 milvus::UnexpectedError,
                 "invalid offsets: start_offset must be >= 0 and <= end_offset");
         }
+        if (config->num_bm25_fields > 0 && config->bm25_field_ids == nullptr) {
+            return milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                "invalid BM25 config: bm25_field_ids is null");
+        }
+        if (config->num_bm25_fields > 0 &&
+            config->bm25_stats_log_ids == nullptr) {
+            return milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                "invalid BM25 config: bm25_stats_log_ids is null");
+        }
 
         // no data to flush
         if (start_offset == end_offset) {
-            result->manifest_path = nullptr;
-            result->committed_version = 0;
-            result->num_rows = 0;
             return milvus::SuccessCStatus();
         }
 
@@ -1259,6 +1770,14 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto& insert_record = growing_segment->get_insert_record();
 
         int64_t total_rows = end_offset - start_offset;
+        std::unordered_set<int64_t> bm25_field_ids;
+        std::unordered_map<int64_t, int64_t> bm25_stats_log_ids;
+        for (size_t i = 0; i < config->num_bm25_fields; i++) {
+            bm25_field_ids.insert(config->bm25_field_ids[i]);
+            bm25_stats_log_ids[config->bm25_field_ids[i]] =
+                config->bm25_stats_log_ids[i];
+        }
+        std::unordered_map<int64_t, BM25StatsAccumulator> bm25_stats;
 
         // Use get_field_ids() (ordered vector) instead of get_fields() (unordered_map)
         // to ensure deterministic column order matching the reader's expected order.
@@ -1271,6 +1790,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             info.field_id = RowFieldID;
             info.field_name = field_meta.get_name().get();
             info.data_type = field_meta.get_data_type();
+            info.element_type = milvus::DataType::NONE;
             info.nullable = field_meta.is_nullable();
             info.dim = 0;
             info.vec_base = &insert_record.row_ids_;
@@ -1315,16 +1835,27 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 }
             }
 
-            auto arrow_type = milvus::GetArrowDataType(
-                field_meta.get_data_type(),
-                field_meta.is_vector() ? field_meta.get_dim() : 0);
+            auto data_type = field_meta.get_data_type();
+            auto dim = field_meta.is_vector() &&
+                               !milvus::IsSparseFloatVectorDataType(data_type)
+                           ? field_meta.get_dim()
+                           : 0;
+            auto arrow_type = data_type == milvus::DataType::VECTOR_ARRAY
+                                  ? milvus::GetArrowDataTypeForVectorArray(
+                                        field_meta.get_element_type(), dim)
+                                  : milvus::GetArrowDataType(data_type, dim);
+            if (field_meta.is_nullable() &&
+                IsSupportedNullableVectorDataType(data_type)) {
+                arrow_type = arrow::binary();
+            }
 
             FieldInfo info;
             info.field_id = field_id;
             info.field_name = field_meta.get_name().get();
-            info.data_type = field_meta.get_data_type();
+            info.data_type = data_type;
+            info.element_type = field_meta.get_element_type();
             info.nullable = field_meta.is_nullable();
-            info.dim = field_meta.is_vector() ? field_meta.get_dim() : 0;
+            info.dim = dim;
             info.vec_base = vec_base;
             info.valid_data = nullptr;
             if (field_meta.is_nullable() &&
@@ -1338,13 +1869,38 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 info.text_lob_spillover =
                     growing_segment->GetTextLobSpillover(field_id);
             }
+            if (bm25_field_ids.find(field_id.get()) != bm25_field_ids.end()) {
+                if (field_meta.get_data_type() !=
+                    milvus::DataType::VECTOR_SPARSE_U32_F32) {
+                    return milvus::FailureCStatus(
+                        milvus::UnexpectedError,
+                        fmt::format("BM25 stats field {} is not sparse vector",
+                                    field_id.get()));
+                }
+                bm25_stats.emplace(field_id.get(), BM25StatsAccumulator{});
+            }
 
             field_infos.push_back(std::move(info));
 
             // create Arrow field with metadata
-            auto metadata = arrow::KeyValueMetadata::Make(
-                {milvus_storage::ARROW_FIELD_ID_KEY},
-                {std::to_string(field_id.get())});
+            std::vector<std::string> metadata_keys = {
+                milvus_storage::ARROW_FIELD_ID_KEY};
+            std::vector<std::string> metadata_values = {
+                std::to_string(field_id.get())};
+            if (field_meta.is_nullable() &&
+                IsFixedWidthVectorDataType(data_type)) {
+                metadata_keys.push_back(DIM_KEY);
+                metadata_values.push_back(std::to_string(dim));
+            }
+            if (data_type == milvus::DataType::VECTOR_ARRAY) {
+                metadata_keys.push_back(ELEMENT_TYPE_KEY_FOR_ARROW);
+                metadata_values.push_back(std::to_string(
+                    static_cast<int>(field_meta.get_element_type())));
+                metadata_keys.push_back(DIM_KEY);
+                metadata_values.push_back(std::to_string(dim));
+            }
+            auto metadata =
+                arrow::KeyValueMetadata::Make(metadata_keys, metadata_values);
             arrow_fields.push_back(arrow::field(std::to_string(field_id.get()),
                                                 arrow_type,
                                                 field_meta.is_nullable(),
@@ -1377,8 +1933,11 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // use single column group policy (all columns in one group)
         writer_config.properties[PROPERTY_WRITER_POLICY] =
             std::string(LOON_COLUMN_GROUP_POLICY_SINGLE);
-        writer_config.properties[PROPERTY_FORMAT] =
-            std::string(LOON_FORMAT_PARQUET);
+        auto writer_format =
+            config->writer_format && config->writer_format[0] != '\0'
+                ? std::string(config->writer_format)
+                : std::string(LOON_FORMAT_PARQUET);
+        writer_config.properties[PROPERTY_WRITER_FORMAT] = writer_format;
 
         // add TEXT column configs
         for (size_t i = 0; i < config->num_text_columns; i++) {
@@ -1387,6 +1946,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             if (config->text_lob_paths && config->text_lob_paths[i]) {
                 text_config.lob_base_path = config->text_lob_paths[i];
             }
+            text_config.properties = writer_config.properties;
             writer_config.lob_columns[text_config.field_id] = text_config;
         }
 
@@ -1443,6 +2003,18 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                         arr_result.status().ToString());
                 }
                 arrays.push_back(arr_result.ValueOrDie());
+
+                auto stats_iter = bm25_stats.find(field_info.field_id.get());
+                if (stats_iter != bm25_stats.end()) {
+                    auto status = CollectBM25StatsForChunk(field_info,
+                                                           current_offset,
+                                                           batch_rows,
+                                                           stats_iter->second);
+                    if (!status.ok()) {
+                        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                                      status.ToString());
+                    }
+                }
             }
 
             // create RecordBatch and write
@@ -1472,7 +2044,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 fs,
                 writer_config.segment_path,
                 read_version,
-                milvus_storage::api::transaction::FailResolver,
+                milvus_storage::api::transaction::OverwriteResolver,
                 retry_limit);
         if (!transaction_result.ok()) {
             return milvus::FailureCStatus(
@@ -1481,12 +2053,94 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         }
         auto transaction = std::move(transaction_result).ValueOrDie();
 
+        auto manifest_result = transaction->GetManifest();
+        if (!manifest_result.ok()) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          manifest_result.status().ToString());
+        }
+        auto manifest = manifest_result.ValueOrDie();
+
         // append column groups
         transaction->AppendFiles(*output.column_groups);
 
         // add LOB files
         for (const auto& lob_file : output.lob_files) {
             transaction->AddLobFile(lob_file);
+        }
+
+        // add BM25 stats files and register their manifest entries in the same
+        // transaction as the flushed data files.
+        for (const auto& [field_id, stats] : bm25_stats) {
+            auto stat_key = fmt::format("bm25.{}", field_id);
+            milvus_storage::api::Statistics stat_entry;
+            auto existing_it = manifest->stats().find(stat_key);
+            if (existing_it != manifest->stats().end()) {
+                stat_entry = existing_it->second;
+            }
+
+            auto serialized = SerializeBM25Stats(stats);
+            auto stats_log_id = bm25_stats_log_ids[field_id];
+            auto rel_path =
+                fmt::format("_stats/bm25.{}/{}", field_id, stats_log_id);
+            auto full_path =
+                fmt::format("{}/{}", writer_config.segment_path, rel_path);
+            auto write_status = WriteRawFile(fs, full_path, serialized);
+            if (!write_status.ok()) {
+                return milvus::FailureCStatus(milvus::UnexpectedError,
+                                              write_status.ToString());
+            }
+            stat_entry.paths.push_back(full_path);
+
+            int64_t memory_size = serialized.size();
+            auto mem_it = stat_entry.metadata.find("memory_size");
+            if (mem_it != stat_entry.metadata.end()) {
+                try {
+                    memory_size += std::stoll(mem_it->second);
+                } catch (...) {
+                    // Ignore malformed historical metadata and rewrite it below.
+                }
+            }
+
+            if (config->write_merged_bm25_stats) {
+                BM25StatsAccumulator merged_stats;
+                std::vector<std::string> paths_to_merge;
+                for (const auto& existing_path : stat_entry.paths) {
+                    if (IsCompoundStatsPath(existing_path)) {
+                        paths_to_merge = {existing_path};
+                        break;
+                    }
+                    if (existing_path != full_path) {
+                        paths_to_merge.push_back(existing_path);
+                    }
+                }
+                for (const auto& existing_path : paths_to_merge) {
+                    auto existing_result = ReadBM25StatsFile(fs, existing_path);
+                    if (!existing_result.ok()) {
+                        return milvus::FailureCStatus(
+                            milvus::UnexpectedError,
+                            existing_result.status().ToString());
+                    }
+                    merged_stats.Merge(existing_result.ValueOrDie());
+                }
+                merged_stats.Merge(stats);
+
+                auto merged_serialized = SerializeBM25Stats(merged_stats);
+                auto merged_rel_path =
+                    fmt::format("_stats/bm25.{}/{}", field_id, int64_t(1));
+                auto merged_full_path = fmt::format(
+                    "{}/{}", writer_config.segment_path, merged_rel_path);
+                write_status =
+                    WriteRawFile(fs, merged_full_path, merged_serialized);
+                if (!write_status.ok()) {
+                    return milvus::FailureCStatus(milvus::UnexpectedError,
+                                                  write_status.ToString());
+                }
+                stat_entry.paths.push_back(merged_full_path);
+                memory_size += merged_serialized.size();
+            }
+
+            stat_entry.metadata["memory_size"] = std::to_string(memory_size);
+            transaction->UpdateStat(stat_key, stat_entry);
         }
 
         // commit
@@ -1503,6 +2157,27 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         result->manifest_path = strdup(manifest_path.c_str());
         result->committed_version = committed_version;
         result->num_rows = output.rows_written;
+        if (!bm25_stats.empty()) {
+            result->num_bm25_stats = bm25_stats.size();
+            result->bm25_field_ids = static_cast<int64_t*>(
+                malloc(sizeof(int64_t) * result->num_bm25_stats));
+            result->bm25_stats = static_cast<uint8_t**>(
+                malloc(sizeof(uint8_t*) * result->num_bm25_stats));
+            result->bm25_stats_sizes = static_cast<size_t*>(
+                malloc(sizeof(size_t) * result->num_bm25_stats));
+            size_t idx = 0;
+            for (const auto& [field_id, stats] : bm25_stats) {
+                auto serialized = SerializeBM25Stats(stats);
+                result->bm25_field_ids[idx] = field_id;
+                result->bm25_stats_sizes[idx] = serialized.size();
+                result->bm25_stats[idx] =
+                    static_cast<uint8_t*>(malloc(serialized.size()));
+                std::memcpy(result->bm25_stats[idx],
+                            serialized.data(),
+                            serialized.size());
+                idx++;
+            }
+        }
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -1516,4 +2191,31 @@ FreeFlushResult(CFlushResult* result) {
         free(result->manifest_path);
         result->manifest_path = nullptr;
     }
+    if (result && result->bm25_stats) {
+        for (size_t i = 0; i < result->num_bm25_stats; i++) {
+            free(result->bm25_stats[i]);
+        }
+        free(result->bm25_stats);
+        result->bm25_stats = nullptr;
+    }
+    if (result && result->bm25_field_ids) {
+        free(result->bm25_field_ids);
+        result->bm25_field_ids = nullptr;
+    }
+    if (result && result->bm25_stats_sizes) {
+        free(result->bm25_stats_sizes);
+        result->bm25_stats_sizes = nullptr;
+    }
+    if (result) {
+        result->num_bm25_stats = 0;
+    }
+}
+
+CStatus
+SegmentSetCommitTimestamp(CSegmentInterface c_segment, uint64_t commit_ts) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    segment->SetCommitTimestamp(commit_ts);
+    return milvus::SuccessCStatus();
 }

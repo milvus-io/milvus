@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -55,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -121,6 +121,7 @@ type Server struct {
 	importMeta       ImportMeta
 	importInspector  ImportInspector
 	importChecker    ImportChecker
+	importJobLock    *lock.KeyLock[int64]
 
 	copySegmentMeta      CopySegmentMeta
 	copySegmentInspector CopySegmentInspector
@@ -211,6 +212,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		flushCh:             make(chan UniqueID, 1024),
 		notifyIndexChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
+		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
 	}
@@ -343,7 +345,7 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.broadcastCommitImportMessage)
 
 	// init file resource observer
 	if s.fileResourceObserver != nil {
@@ -459,7 +461,7 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
 	s.icSession = session
 	if s.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }
@@ -489,6 +491,9 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 func (s *Server) initServiceDiscovery() error {
 	log := log.Ctx(s.ctx)
 	r := semver.MustParseRange(">=2.2.3")
+	if s.indexEngineVersionManager == nil {
+		s.indexEngineVersionManager = newIndexEngineVersionManager()
+	}
 	sessions, rev, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
@@ -517,7 +522,6 @@ func (s *Server) initServiceDiscovery() error {
 		s.dnSessionWatcher = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, s.rewatchDataNodes)
 	}
 
-	s.indexEngineVersionManager = newIndexEngineVersionManager()
 	qnSessions, qnRevision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		log.Warn("DataCoord get QueryNode sessions failed", zap.Error(err))
@@ -539,6 +543,9 @@ func (s *Server) rewatchQueryNodes(sessions map[string]*sessionutil.Session) err
 // rewatchDataNodes is used to rewatch data nodes when datacoord is started or reconnected to etcd
 // Note: may apply same node multiple times, so rewatchDataNodes must be idempotent
 func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) error {
+	if s.indexEngineVersionManager == nil {
+		s.indexEngineVersionManager = newIndexEngineVersionManager()
+	}
 	legacyVersion, err := semver.Parse(paramtable.Get().DataCoordCfg.LegacyVersionWithoutRPCWatch.GetValue())
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
@@ -610,7 +617,7 @@ func (s *Server) initKV() error {
 		s.kv = etcdkv.NewEtcdKV(s.etcdCli, s.metaRootPath,
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	default:
-		return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", metaType))
+		return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("unsupported meta store: %s", metaType))
 	}
 	log.Info("data coordinator successfully connected to metadata store", zap.String("metaType", metaType))
 	return nil
@@ -866,7 +873,6 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			if s.fileResourceObserver != nil {
 				s.fileResourceObserver.Notify()
 			}
-			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
@@ -880,6 +886,10 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return nil
 			}
 			s.nodeManager.RemoveNode(event.Session.ServerID)
+		case sessionutil.SessionUpdateEvent:
+			log.Info("received datanode SessionUpdateEvent",
+				zap.String("address", info.Address),
+				zap.Int64("serverID", info.Version))
 		default:
 			log.Warn("receive unknown service event type",
 				zap.Any("type", event.EventType))
@@ -1016,7 +1026,7 @@ func (s *Server) flushFlushingSegment(ctx context.Context, segmentID UniqueID) e
 				return ctx.Err()
 			}
 			// underlying etcd may return context canceled, so we need to return a error to retry.
-			return errors.New("flush segment complete failed")
+			return merr.WrapErrServiceInternalMsg("flush segment complete failed")
 		}
 		return nil
 	}, retry.AttemptAlways())
@@ -1106,7 +1116,7 @@ func (s *Server) CleanMeta() error {
 	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "")
 	if err2 != nil {
 		if err != nil {
-			err = fmt.Errorf("failed to CleanMeta[metadata cleanup error: %w][watchdata cleanup error: %v]", err, err2)
+			err = merr.Wrapf(err, "failed to clean meta (watchdata cleanup error: %v)", err2)
 		} else {
 			err = err2
 		}

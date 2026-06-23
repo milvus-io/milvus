@@ -732,7 +732,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	// get segment info
 	segments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-		return segmentHasData && info.GetStartPosition().GetTimestamp() < snapshotTs && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
+		return segmentHasData && segmentEffectiveTs(info.SegmentInfo) < snapshotTs && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
 	}))
 
 	if len(segments) == 0 {
@@ -837,8 +837,11 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 			fieldID := h.s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 			indexName := h.s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 
-			indexFilePaths := metautil.BuildSegmentIndexFilePaths(h.s.meta.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
-				segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+			builder := metautil.NewIndexPathBuilder(h.s.meta.chunkManager.RootPath(),
+				segIdx.IndexStorePathVersion, segIdx.CollectionID,
+				segIdx.PartitionID, segIdx.SegmentID,
+				segIdx.BuildID, segIdx.IndexVersion)
+			indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
 			indexParams := h.s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 
@@ -856,6 +859,7 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 				NumRows:                   segIdx.NumRows,
 				CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 				CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+				IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 			})
 		}
 	}

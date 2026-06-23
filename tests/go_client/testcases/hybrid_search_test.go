@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -93,6 +94,114 @@ func TestHybridSearchTemplateParam(t *testing.T) {
 		for _, id := range hits.IDs.(*column.ColumnInt64).Data() {
 			require.Greater(t, id, int64(int64Value))
 		}
+	}
+}
+
+func TestHybridSearchPartitionKeyIsolationUnsupportedFilter(t *testing.T) {
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const dim = 5
+	collName := common.GenRandomString("pk_iso_hybrid", 6)
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("vector_a").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+		WithField(entity.NewField().WithName("vector_b").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+		WithField(entity.NewField().WithName("tenant").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64).WithIsPartitionKey(true)).
+		WithField(entity.NewField().WithName("color").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64))
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).
+		WithNumPartitions(16).
+		WithProperty("partitionkey.isolation", true).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	vectorA := [][]float32{
+		{0.10, 0.20, 0.30, 0.40, 0.50},
+		{0.11, 0.21, 0.31, 0.41, 0.51},
+		{0.90, 0.80, 0.70, 0.60, 0.50},
+		{0.91, 0.81, 0.71, 0.61, 0.51},
+		{0.10, 0.20, 0.30, 0.40, 0.50},
+	}
+	vectorB := [][]float32{
+		{0.50, 0.40, 0.30, 0.20, 0.10},
+		{0.51, 0.41, 0.31, 0.21, 0.11},
+		{0.50, 0.60, 0.70, 0.80, 0.90},
+		{0.51, 0.61, 0.71, 0.81, 0.91},
+		{0.50, 0.40, 0.30, 0.20, 0.10},
+	}
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(
+			column.NewColumnInt64("id", []int64{1, 2, 3, 4, 5}),
+			column.NewColumnFloatVector("vector_a", dim, vectorA),
+			column.NewColumnFloatVector("vector_b", dim, vectorB),
+			column.NewColumnVarChar("tenant", []string{"tenant_a", "tenant_a", "tenant_b", "tenant_b", "tenant_c"}),
+			column.NewColumnVarChar("color", []string{"tenant_a_1", "tenant_a_2", "tenant_b_1", "tenant_b_2", "tenant_c_control"}),
+		))
+	common.CheckErr(t, err, true)
+
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, flushTask.Await(ctx), true)
+
+	for _, fieldName := range []string{"vector_a", "vector_b"} {
+		idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, fieldName, index.NewAutoIndex(entity.COSINE)))
+		common.CheckErr(t, err, true)
+		common.CheckErr(t, idxTask.Await(ctx), true)
+	}
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	queryA := []entity.Vector{entity.FloatVector([]float32{0.10, 0.20, 0.30, 0.40, 0.50})}
+	queryB := []entity.Vector{entity.FloatVector([]float32{0.50, 0.40, 0.30, 0.20, 0.10})}
+
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 5, queryA).
+		WithANNSField("vector_a").
+		WithSearchParam("metric_type", "COSINE").
+		WithFilter(`tenant == "tenant_a"`).
+		WithOutputFields("id", "tenant", "color").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Len(t, searchRes, 1)
+	tenants := searchRes[0].GetColumn("tenant").(*column.ColumnVarChar).Data()
+	require.NotEmpty(t, tenants)
+	require.Subset(t, []string{"tenant_a"}, tenants)
+
+	invalidFilters := map[string]string{
+		`tenant in ["tenant_a", "tenant_b"]`: "partition key isolation does not support IN",
+		"":                                   "partition key not found in expr",
+	}
+	for expr, errMsg := range invalidFilters {
+		_, err := mc.Search(ctx, client.NewSearchOption(collName, 5, queryA).
+			WithANNSField("vector_a").
+			WithSearchParam("metric_type", "COSINE").
+			WithFilter(expr).
+			WithOutputFields("id", "tenant", "color").
+			WithConsistencyLevel(entity.ClStrong))
+		require.ErrorContains(t, err, errMsg)
+	}
+
+	for expr, errMsg := range invalidFilters {
+		annReq1 := client.NewAnnRequest("vector_a", 5, queryA...).
+			WithSearchParam("metric_type", "COSINE").
+			WithFilter(expr)
+		annReq2 := client.NewAnnRequest("vector_b", 5, queryB...).
+			WithSearchParam("metric_type", "COSINE").
+			WithFilter(expr)
+		_, err := mc.HybridSearch(ctx, client.NewHybridSearchOption(collName, 5, annReq1, annReq2).
+			WithReranker(client.NewRRFReranker()).
+			WithOutputFields("id", "tenant", "color").
+			WithConsistencyLevel(entity.ClStrong))
+		if err == nil {
+			t.Skipf("xfail: https://github.com/milvus-io/milvus/issues/50398, hybrid_search accepted unsupported filter %q", expr)
+		}
+		require.ErrorContains(t, err, errMsg)
 	}
 }
 
@@ -285,7 +394,12 @@ func TestHybridSearchMultiVectorsPagination(t *testing.T) {
 
 	// offset 0, -1 -> 0
 	for _, offset := range []int{0, -1} {
-		searchRes, err := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReqDef).WithOffset(offset).WithConsistencyLevel(entity.ClStrong))
+		var searchRes []client.ResultSet
+		err := common.RetryOnTSafeStalled(ctx, func() error {
+			var err error
+			searchRes, err = mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReqDef).WithOffset(offset).WithConsistencyLevel(entity.ClStrong))
+			return err
+		})
 		common.CheckErr(t, err, true)
 		common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	}

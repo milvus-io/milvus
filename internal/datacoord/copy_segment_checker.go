@@ -196,8 +196,7 @@ func (c *copySegmentChecker) Close() {
 
 // LogJobStats reports job statistics grouped by state.
 //
-// This logs the count of jobs in each state and reports metrics for monitoring.
-// Called on every checker tick to provide visibility into job progress.
+// This reports metrics on every checker tick and logs non-empty job stats.
 //
 // Metrics reported:
 //   - CopySegmentJobs gauge with state label
@@ -218,13 +217,14 @@ func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
 		stateNum[state] = num
 		metrics.CopySegmentJobs.WithLabelValues(state).Set(float64(num))
 	}
-	log.Info("copy segment job stats", zap.Any("stateNum", stateNum))
+	if len(jobs) > 0 {
+		log.Info("copy segment job stats", zap.Any("stateNum", stateNum))
+	}
 }
 
 // LogTaskStats reports task statistics grouped by state.
 //
-// This logs the count of tasks in each state and reports metrics for monitoring.
-// Called on every checker tick to provide visibility into task execution.
+// This reports metrics on every checker tick and logs non-empty task stats.
 //
 // Metrics reported:
 //   - CopySegmentTasks gauge with state label
@@ -244,15 +244,17 @@ func (c *copySegmentChecker) LogTaskStats() {
 	completed := len(byState[datapb.CopySegmentTaskState_CopySegmentTaskCompleted])
 	failed := len(byState[datapb.CopySegmentTaskState_CopySegmentTaskFailed])
 
-	log.Info("copy segment task stats",
-		zap.Int("pending", pending), zap.Int("inProgress", inProgress),
-		zap.Int("completed", completed), zap.Int("failed", failed))
-
 	// Report metrics
 	metrics.CopySegmentTasks.WithLabelValues(datapb.CopySegmentTaskState_CopySegmentTaskPending.String()).Set(float64(pending))
 	metrics.CopySegmentTasks.WithLabelValues(datapb.CopySegmentTaskState_CopySegmentTaskInProgress.String()).Set(float64(inProgress))
 	metrics.CopySegmentTasks.WithLabelValues(datapb.CopySegmentTaskState_CopySegmentTaskCompleted.String()).Set(float64(completed))
 	metrics.CopySegmentTasks.WithLabelValues(datapb.CopySegmentTaskState_CopySegmentTaskFailed.String()).Set(float64(failed))
+
+	if len(tasks) > 0 {
+		log.Info("copy segment task stats",
+			zap.Int("pending", pending), zap.Int("inProgress", inProgress),
+			zap.Int("completed", completed), zap.Int("failed", failed))
+	}
 }
 
 // ============================================================================

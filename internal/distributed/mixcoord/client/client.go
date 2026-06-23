@@ -69,7 +69,7 @@ type Client struct {
 func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
-		err := errors.New("new session error, maybe can not connect to etcd")
+		err := merr.WrapErrServiceUnavailable("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("New MixCoord Client failed", zap.Error(err))
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (c *Client) getMixCoordAddr() (string, error) {
 			return c.getCompatibleMixCoordAddr()
 		} else {
 			log.Warn("MixCoordClient mess key not exist", zap.Any("key", key))
-			return "", errors.New("find no available mixcoord, check mixcoord state")
+			return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 		}
 	}
 	log.Debug("MixCoordClient GetSessions success",
@@ -137,12 +137,12 @@ func (c *Client) getCompatibleMixCoordAddr() (string, error) {
 	msess, _, err := c.sess.GetSessions(c.ctx, typeutil.RootCoordRole)
 	if err != nil {
 		log.Debug("mixCoordClient getSessions failed", zap.Any("key", typeutil.RootCoordRole), zap.Error(err))
-		return "", errors.New("find no available mixcoord, check mixcoord state")
+		return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 	}
 	ms, ok := msess[typeutil.RootCoordRole]
 	if !ok {
 		log.Warn("MixCoordClient mess key not exist", zap.Any("key", typeutil.RootCoordRole))
-		return "", errors.New("find no available mixcoord, check mixcoord state")
+		return "", merr.WrapErrNodeNotFound(0, "find no available mixcoord, check mixcoord state")
 	}
 	log.Debug("MixCoordClient GetSessions use rootCoord", zap.Any("key", typeutil.RootCoordRole))
 	c.grpcClient.SetNodeID(ms.ServerID)
@@ -256,6 +256,17 @@ func (c *Client) AddCollectionField(ctx context.Context, in *milvuspb.AddCollect
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
 		return client.AddCollectionField(ctx, in)
+	})
+}
+
+func (c *Client) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AddCollectionStructField(ctx, in)
 	})
 }
 
@@ -391,6 +402,18 @@ func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartiti
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
 		return client.CreatePartition(ctx, in)
+	})
+}
+
+// CreatePartitionV2 create partition and return partition ID
+func (c *Client) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.CreatePartitionResponse, error) {
+		return client.CreatePartitionV2(ctx, in)
 	})
 }
 
@@ -636,6 +659,17 @@ func (c *Client) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
 		return client.CreateRole(ctx, req)
+	})
+}
+
+func (c *Client) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AlterRole(ctx, req)
 	})
 }
 
@@ -1524,6 +1558,24 @@ func (c *Client) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 	})
 }
 
+func (c *Client) CommitImport(ctx context.Context, req *datapb.CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CommitImport(ctx, req)
+	})
+}
+
+func (c *Client) AbortImport(ctx context.Context, req *datapb.AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AbortImport(ctx, req)
+	})
+}
+
+func (c *Client) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.HandleCommitVchannel(ctx, req)
+	})
+}
+
 func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest, opts ...grpc.CallOption) (*indexpb.ListIndexesResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.ListIndexesResponse, error) {
 		return client.ListIndexes(ctx, in)
@@ -1803,6 +1855,17 @@ func (c *Client) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.ListQueryNodeResponse, error) {
 		return client.ListQueryNode(ctx, req)
+	})
+}
+
+func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.ClearReadTaskQueueResponse, error) {
+		return client.RootCoordClient.ClearReadTaskQueue(ctx, req)
 	})
 }
 

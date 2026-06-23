@@ -743,6 +743,121 @@ func TestParquetReaderWithStructArray(t *testing.T) {
 	}
 }
 
+func TestParquetReaderMissingNullableStructArray(t *testing.T) {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Name: "test_missing_nullable_struct_array",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:  200,
+				Name:     "struct_array",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     201,
+						Name:        "struct_array[int_array]",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						Nullable:    true,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.MaxCapacityKey, Value: "20"},
+						},
+					},
+					{
+						FieldID:     202,
+						Name:        "struct_array[vector_array]",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						Nullable:    true,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "4"},
+							{Key: common.MaxCapacityKey, Value: "20"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pqSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	mem := memory.NewGoAllocator()
+	idBuilder := array.NewInt64Builder(mem)
+	idBuilder.AppendValues([]int64{1, 2, 3}, nil)
+	idArray := idBuilder.NewArray()
+	idBuilder.Release()
+	defer idArray.Release()
+
+	filePath := fmt.Sprintf("%s/test_missing_nullable_struct_array_%d.parquet", t.TempDir(), rand.Int())
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	assert.NoError(t, err)
+
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(3)), pqarrow.DefaultWriterProps())
+	assert.NoError(t, err)
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{idArray}, 3)
+	err = fw.Write(recordBatch)
+	assert.NoError(t, err)
+	recordBatch.Release()
+	assert.NoError(t, fw.Close())
+
+	factory := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := factory.NewPersistentStorageChunkManager(ctx)
+	assert.NoError(t, err)
+
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	assert.NoError(t, err)
+	defer reader.Close()
+
+	readData, err := reader.Read()
+	assert.NoError(t, err)
+	assert.Equal(t, 3, readData.Data[100].RowNum())
+	assert.Equal(t, 0, readData.Data[201].RowNum())
+	assert.Equal(t, 0, readData.Data[202].RowNum())
+
+	flatSubFieldBuilder := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+	flatSubFieldValueBuilder := flatSubFieldBuilder.ValueBuilder().(*array.Int32Builder)
+	for i := 0; i < 3; i++ {
+		flatSubFieldBuilder.Append(true)
+		flatSubFieldValueBuilder.AppendValues([]int32{int32(i)}, nil)
+	}
+	flatSubFieldArray := flatSubFieldBuilder.NewArray()
+	flatSubFieldBuilder.Release()
+	defer flatSubFieldArray.Release()
+
+	flatSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "struct_array[int_array]", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+	}, nil)
+	flatFilePath := fmt.Sprintf("%s/test_flat_struct_sub_field_%d.parquet", t.TempDir(), rand.Int())
+	flatWf, err := os.OpenFile(flatFilePath, os.O_RDWR|os.O_CREATE, 0o666)
+	assert.NoError(t, err)
+	flatFw, err := pqarrow.NewFileWriter(flatSchema, flatWf, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(3)), pqarrow.DefaultWriterProps())
+	assert.NoError(t, err)
+	flatRecordBatch := array.NewRecord(flatSchema, []arrow.Array{idArray, flatSubFieldArray}, 3)
+	err = flatFw.Write(flatRecordBatch)
+	assert.NoError(t, err)
+	flatRecordBatch.Release()
+	assert.NoError(t, flatFw.Close())
+
+	_, err = NewReader(ctx, cm, schema, flatFilePath, 64*1024*1024)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "flat sub-field column")
+
+	schema.StructArrayFields[0].Nullable = false
+	_, err = NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	assert.Error(t, err)
+}
+
 func TestParquetReaderError(t *testing.T) {
 	ctx := context.Background()
 	cm := mocks.NewChunkManager(t)

@@ -125,7 +125,9 @@ type distribution struct {
 
 	// async snapshot generation
 	snapshotNotifier chan struct{} // capacity 1, notify background goroutine to regenerate snapshot
+	snapshotClose    chan struct{} // closed to stop background goroutine
 	snapshotDone     chan struct{} // closed when background goroutine exits
+	closed           *atomic.Bool
 	closeOnce        sync.Once
 
 	// distribution info
@@ -159,7 +161,9 @@ func NewDistribution(channelName string, queryView *channelQueryView) *distribut
 		current:          atomic.NewPointer[snapshot](nil),
 		queryView:        queryView,
 		snapshotNotifier: make(chan struct{}, 1),
+		snapshotClose:    make(chan struct{}),
 		snapshotDone:     make(chan struct{}),
+		closed:           atomic.NewBool(false),
 	}
 	// generate initial snapshot synchronously
 	dist.genSnapshot()
@@ -171,6 +175,9 @@ func NewDistribution(channelName string, queryView *channelQueryView) *distribut
 
 // notifySnapshotUpdate sends a non-blocking notification to regenerate snapshot.
 func (d *distribution) notifySnapshotUpdate() {
+	if d.closed.Load() {
+		return
+	}
 	select {
 	case d.snapshotNotifier <- struct{}{}:
 	default:
@@ -180,11 +187,16 @@ func (d *distribution) notifySnapshotUpdate() {
 // snapshotLoop runs in a background goroutine, regenerating snapshot on notification.
 func (d *distribution) snapshotLoop() {
 	defer close(d.snapshotDone)
-	for range d.snapshotNotifier {
-		d.mut.Lock()
-		d.genSnapshot()
-		d.updateServiceable("snapshotLoop")
-		d.mut.Unlock()
+	for {
+		select {
+		case <-d.snapshotClose:
+			return
+		case <-d.snapshotNotifier:
+			d.mut.Lock()
+			d.genSnapshot()
+			d.updateServiceable("snapshotLoop")
+			d.mut.Unlock()
+		}
 	}
 }
 
@@ -302,6 +314,19 @@ func (d *distribution) PeekSegments(readable bool, partitions ...int64) (sealed 
 	return
 }
 
+// IsReadableSealedSegment reuses PeekSegments(readable=true) semantics for Reopen activation.
+func (d *distribution) IsReadableSealedSegment(segmentID int64) bool {
+	sealed, _ := d.PeekSegments(true)
+	for _, item := range sealed {
+		for _, entry := range item.Segments {
+			if entry.SegmentID == segmentID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Unpin notifies snapshot one reference is released.
 func (d *distribution) Unpin(version int64) {
 	snapshot, ok := d.snapshots.Get(version)
@@ -366,6 +391,16 @@ func (d *distribution) updateServiceable(triggerAction string) {
 // AddDistributions add multiple segment entries.
 func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	var toRefund []pkoracle.Candidate
+
+	if d.closed.Load() {
+		for _, entry := range entries {
+			if entry.Candidate != nil {
+				toRefund = append(toRefund, entry.Candidate)
+			}
+		}
+		refundCandidates(toRefund)
+		return
+	}
 
 	d.mut.Lock()
 	for _, entry := range entries {
@@ -776,7 +811,8 @@ func (d *distribution) Flush() {
 // Close stops the background snapshot loop and waits for it to exit.
 func (d *distribution) Close() {
 	d.closeOnce.Do(func() {
-		close(d.snapshotNotifier)
+		d.closed.Store(true)
+		close(d.snapshotClose)
 	})
 	<-d.snapshotDone
 }

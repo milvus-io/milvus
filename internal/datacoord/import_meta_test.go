@@ -336,3 +336,103 @@ func TestTaskStatsJSON(t *testing.T) {
 	assert.NotNil(t, taskMeta.get(2))
 	assert.Equal(t, 2, len(taskMeta.listTaskStats()))
 }
+
+func TestHandleCommitVchannel(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+
+	jobID := int64(100)
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:     jobID,
+			State:     internalpb.ImportJobState_Committing,
+			Vchannels: []string{"ch1", "ch2"},
+		},
+	}
+	err = im.AddJob(context.TODO(), job)
+	assert.NoError(t, err)
+
+	callCount := 0
+	cb := func() error { callCount++; return nil }
+
+	// First commit of ch1 — should succeed and persist
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", cb)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, callCount)
+	assert.Contains(t, im.GetJob(context.TODO(), jobID).GetCommittedVchannels(), "ch1")
+
+	// Idempotent second commit of ch1 — callback should NOT fire again
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", cb)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, callCount) // still 1, not 2
+
+	// Unknown job returns error
+	err = im.HandleCommitVchannel(context.TODO(), int64(9999), "ch1", cb)
+	assert.Error(t, err)
+	assert.Equal(t, 1, callCount) // callback not called for missing job
+}
+
+func TestHandleCommitVchannelTransitionsUncommittedToCommittingBeforeCallback(t *testing.T) {
+	jobID := int64(101)
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+
+	type savedJob struct {
+		state          internalpb.ImportJobState
+		committed      []string
+		callbackCalled bool
+	}
+	var (
+		recordSaves    bool
+		callbackCalled bool
+		saves          []savedJob
+	)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Run(func(ctx context.Context, job *datapb.ImportJob) {
+		if recordSaves && job.GetJobID() == jobID {
+			saves = append(saves, savedJob{
+				state:          job.GetState(),
+				committed:      append([]string(nil), job.GetCommittedVchannels()...),
+				callbackCalled: callbackCalled,
+			})
+		}
+	}).Return(nil).Maybe()
+
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:     jobID,
+			State:     internalpb.ImportJobState_Uncommitted,
+			Vchannels: []string{"ch1"},
+		},
+	}
+	err = im.AddJob(context.TODO(), job)
+	assert.NoError(t, err)
+
+	recordSaves = true
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", func() error {
+		callbackCalled = true
+		return nil
+	})
+	assert.NoError(t, err)
+	if assert.Len(t, saves, 2) {
+		assert.Equal(t, internalpb.ImportJobState_Committing, saves[0].state)
+		assert.Empty(t, saves[0].committed)
+		assert.False(t, saves[0].callbackCalled)
+		assert.Equal(t, internalpb.ImportJobState_Committing, saves[1].state)
+		assert.Contains(t, saves[1].committed, "ch1")
+		assert.True(t, saves[1].callbackCalled)
+	}
+	updated := im.GetJob(context.TODO(), jobID)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updated.GetState())
+	assert.Contains(t, updated.GetCommittedVchannels(), "ch1")
+}

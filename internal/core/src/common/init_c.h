@@ -32,6 +32,9 @@ void
 SetIndexSliceSize(const int64_t);
 
 void
+SetStreamBudgetRatio(const double);
+
+void
 SetHighPriorityThreadCoreCoefficient(const float);
 
 void
@@ -51,6 +54,9 @@ SetDefaultDeleteDumpBatchSize(int64_t val);
 
 void
 SetDefaultOptimizeExprEnable(bool val);
+
+void
+SetDefaultJSONKeyStatsEnable(bool val);
 
 void
 SetDefaultGrowingJSONKeyStatsEnable(bool val);
@@ -83,7 +89,15 @@ void
 SetExprResCacheEnable(bool val);
 
 void
-SetExprResCacheCapacityBytes(int64_t bytes);
+SetExprResCacheConfig(const char* mode,            // "memory" or "disk"
+                      const char* disk_base_path,  // disk mode: file path
+                      int64_t mem_max_bytes,
+                      bool compression_enabled,
+                      int32_t admission_threshold,
+                      int64_t mem_min_eval_duration_us,
+                      int64_t disk_max_bytes,
+                      int64_t disk_max_file_size,
+                      int64_t disk_min_eval_duration_us);
 
 // Set the capacity of arrow's internal IO thread pool. This pool runs
 // async range reads (ReadRangeCache) that issue actual S3 GetObject
@@ -97,6 +111,9 @@ SetExprResCacheCapacityBytes(int64_t bytes);
 // passes it here. Values <= 0 are ignored (keep the current capacity).
 void
 SetArrowIOThreadPoolCapacity(int threads);
+
+void
+UpdateArrowIOThreadPoolMetrics();
 
 // Target average byte size of one storage v2 cache cell. Row groups are
 // packed into cells so that rgs_per_cell * avg_row_group_size ≈ this value.

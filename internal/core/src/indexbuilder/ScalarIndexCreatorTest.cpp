@@ -13,7 +13,12 @@
 #include <knowhere/comp/index_param.h>
 
 #include "common/CDataType.h"
+#include "common/Consts.h"
+#include "index/Utils.h"
+#include "storage/Util.h"
+#include "indexbuilder/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 #define private public
 #include "indexbuilder/ScalarIndexCreator.h"
@@ -46,7 +51,7 @@ build_index(const ScalarIndexCreatorPtr& creator,
 
     creator->Build(ds);
 
-    delete[](char*)(ds->GetTensor());
+    delete[] (char*)(ds->GetTensor());
 }
 
 template <>
@@ -59,7 +64,7 @@ build_index(const ScalarIndexCreatorPtr& creator,
 
     creator->Build(ds);
 
-    delete[](char*)(ds->GetTensor());
+    delete[] (char*)(ds->GetTensor());
 }
 
 }  // namespace
@@ -150,3 +155,36 @@ REGISTER_TYPED_TEST_SUITE_P(TypedScalarIndexCreatorTest,
 INSTANTIATE_TYPED_TEST_SUITE_P(ArithmeticCheck,
                                TypedScalarIndexCreatorTest,
                                ScalarT);
+
+TEST(ScalarIndexCreatorTest, CreateTextMatchIndexForTextField) {
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(
+        milvus::proto::schema::DataType::Text);
+    field_meta.field_schema.set_fieldid(101);
+    field_meta.field_schema.set_name("text");
+    field_meta.field_schema.add_type_params()->set_key("enable_analyzer");
+    field_meta.field_schema.mutable_type_params(0)->set_value("true");
+    field_meta.field_schema.add_type_params()->set_key("analyzer_params");
+    field_meta.field_schema.mutable_type_params(1)->set_value(
+        R"({"tokenizer":"standard"})");
+
+    milvus::storage::IndexMeta index_meta{3, 101, 1000, 0};
+    milvus::storage::FileManagerContext ctx(
+        field_meta, index_meta, chunk_manager, fs);
+
+    milvus::Config config;
+    config[milvus::index::INDEX_TYPE] = milvus::index::INVERTED_INDEX_TYPE;
+    config["is_text_match"] = "true";
+    config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+    config[milvus::index::TANTIVY_INDEX_VERSION] =
+        milvus::index::TANTIVY_INDEX_LATEST_VERSION;
+
+    auto creator =
+        milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
+            milvus::DataType::TEXT, config, ctx);
+    ASSERT_NE(creator, nullptr);
+}

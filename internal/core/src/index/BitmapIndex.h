@@ -214,49 +214,6 @@ class BitmapIndex : public ScalarIndex<T> {
         return std::is_same_v<T, std::string>;
     }
 
-    bool
-    SupportPatternQuery() const override {
-        return std::is_same_v<T, std::string>;
-    }
-
-    const TargetBitmap
-    PatternQuery(const std::string& pattern) override {
-        if constexpr (!std::is_same_v<T, std::string>) {
-            ThrowInfo(ErrorCode::OpTypeInvalid,
-                      "pattern query only supported for string type");
-            return TargetBitmap{};
-        } else {
-            AssertInfo(is_built_, "index has not been built");
-
-            LikePatternMatcher matcher(pattern);
-            TargetBitmap res(total_num_rows_, false);
-            if (is_mmap_) {
-                for (const auto& [key, bitmap] : bitmap_info_map_) {
-                    if (matcher(key)) {
-                        for (const auto& v : bitmap) {
-                            res.set(v);
-                        }
-                    }
-                }
-            } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-                for (const auto& [key, bitmap] : data_) {
-                    if (matcher(key)) {
-                        for (const auto& v : bitmap) {
-                            res.set(v);
-                        }
-                    }
-                }
-            } else {
-                for (const auto& [key, bitset] : bitsets_) {
-                    if (matcher(key)) {
-                        res |= bitset;
-                    }
-                }
-            }
-            return res;
-        }
-    }
-
     const TargetBitmap
     PatternMatch(const std::string& pattern, proto::plan::OpType op) override {
         switch (op) {
@@ -271,11 +228,85 @@ class BitmapIndex : public ScalarIndex<T> {
             case proto::plan::OpType::Match: {
                 return PatternQuery(pattern);
             }
+            case proto::plan::OpType::RegexMatch: {
+                if constexpr (!std::is_same_v<T, std::string>) {
+                    ThrowInfo(ErrorCode::OpTypeInvalid,
+                              "RegexMatch only supported for string type");
+                    return TargetBitmap{};
+                } else {
+                    AssertInfo(is_built_, "index has not been built");
+                    PartialRegexMatcher matcher(pattern);
+                    TargetBitmap res(total_num_rows_, false);
+                    if (is_mmap_) {
+                        for (const auto& [key, bitmap] : bitmap_info_map_) {
+                            if (matcher(key)) {
+                                for (const auto& v : bitmap) {
+                                    res.set(v);
+                                }
+                            }
+                        }
+                    } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+                        for (const auto& [key, bitmap] : data_) {
+                            if (matcher(key)) {
+                                for (const auto& v : bitmap) {
+                                    res.set(v);
+                                }
+                            }
+                        }
+                    } else {
+                        for (const auto& [key, bitset] : bitsets_) {
+                            if (matcher(key)) {
+                                res |= bitset;
+                            }
+                        }
+                    }
+                    return res;
+                }
+            }
             default:
                 ThrowInfo(ErrorCode::OpTypeInvalid,
                           "not supported op type: {} for index PatternMatch",
                           op);
         }
+    }
+
+ protected:
+    const TargetBitmap
+    PatternQuery(const std::string& pattern) override {
+        if constexpr (!std::is_same_v<T, std::string>) {
+            ThrowInfo(ErrorCode::OpTypeInvalid,
+                      "pattern query only supported for string type");
+            return TargetBitmap{};
+        }
+
+        AssertInfo(is_built_, "index has not been built");
+
+        LikePatternMatcher matcher(pattern);
+        TargetBitmap res(total_num_rows_, false);
+        if (is_mmap_) {
+            for (const auto& [key, bitmap] : bitmap_info_map_) {
+                if (matcher(key)) {
+                    for (const auto& v : bitmap) {
+                        res.set(v);
+                    }
+                }
+            }
+        } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+            for (const auto& [key, bitmap] : data_) {
+                if (matcher(key)) {
+                    for (const auto& v : bitmap) {
+                        res.set(v);
+                    }
+                }
+            }
+        } else {
+            for (const auto& [key, bitset] : bitsets_) {
+                if (matcher(key)) {
+                    res |= bitset;
+                }
+            }
+        }
+        return res;
     }
 
  public:

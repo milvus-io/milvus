@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cachinglayer/Manager.h"
@@ -192,9 +193,16 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
  public:
     TestIndexTranslator(std::string key,
                         std::unique_ptr<milvus::index::IndexBase>&& index)
+        : TestIndexTranslator(std::move(key), std::move(index), nullptr) {
+    }
+
+    TestIndexTranslator(std::string key,
+                        std::unique_ptr<milvus::index::IndexBase>&& index,
+                        milvus::OpContext** observed_ctx)
         : Translator<milvus::index::IndexBase>(),
           key_(key),
           index_(std::move(index)),
+          observed_ctx_(observed_ctx),
           meta_(milvus::cachinglayer::Meta(
               StorageType::MEMORY,
               CellIdMappingMode::IDENTICAL,
@@ -236,6 +244,9 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
     get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
+        if (observed_ctx_ != nullptr) {
+            *observed_ctx_ = ctx;
+        }
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
             res;
         res.reserve(cids.size());
@@ -249,6 +260,7 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
  private:
     std::string key_;
     std::unique_ptr<milvus::index::IndexBase> index_;
+    milvus::OpContext** observed_ctx_{nullptr};
     milvus::cachinglayer::Meta meta_;
 };
 
@@ -258,6 +270,17 @@ CreateTestCacheIndex(std::string key,
     std::unique_ptr<milvus::cachinglayer::Translator<milvus::index::IndexBase>>
         translator = std::make_unique<TestIndexTranslator>(std::move(key),
                                                            std::move(index));
+    return milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+        std::move(translator));
+}
+
+inline index::CacheIndexBasePtr
+CreateTestCacheIndex(std::string key,
+                     std::unique_ptr<milvus::index::IndexBase>&& index,
+                     milvus::OpContext** observed_ctx) {
+    std::unique_ptr<milvus::cachinglayer::Translator<milvus::index::IndexBase>>
+        translator = std::make_unique<TestIndexTranslator>(
+            std::move(key), std::move(index), observed_ctx);
     return milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator));
 }

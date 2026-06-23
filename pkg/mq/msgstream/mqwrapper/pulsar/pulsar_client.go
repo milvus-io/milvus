@@ -23,15 +23,15 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/cockroachdb/errors"
-	pulsarctl "github.com/streamnative/pulsarctl/pkg/pulsar"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/common"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin/config"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	mqcommon "github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -93,7 +93,7 @@ func (pc *pulsarClient) CreateProducer(ctx context.Context, options mqcommon.Pro
 	}
 	if pp == nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
-		return nil, errors.New("pulsar is not ready, producer is nil")
+		return nil, merr.WrapErrServiceUnavailable("pulsar is not ready, producer is nil")
 	}
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
@@ -144,24 +144,24 @@ func GetFullTopicName(tenant string, namespace string, topic string) (string, er
 			zap.String("tenant", tenant),
 			zap.String("namesapce", namespace),
 			zap.String("topic", topic))
-		return "", errors.New("build full topic name failed")
+		return "", merr.WrapErrMqInternalMsg("build full topic name failed")
 	}
 
 	return fmt.Sprintf("%s/%s/%s", tenant, namespace, topic), nil
 }
 
-func NewAdminClient(address, authPlugin, authParams string) (pulsarctl.Client, error) {
-	config := common.Config{
+func NewAdminClient(address, authPlugin, authParams string) (admin.Client, error) {
+	cfg := config.Config{
 		WebServiceURL: address,
 		AuthPlugin:    authPlugin,
 		AuthParams:    authParams,
 	}
-	admin, err := pulsarctl.New(&config)
+	adminClient, err := admin.New(&cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build pulsar admin client due to %s", err.Error())
+		return nil, merr.WrapErrMqInternal(err, "failed to build pulsar admin client")
 	}
 
-	return admin, nil
+	return adminClient, nil
 }
 
 // EarliestMessageID returns the earliest message id

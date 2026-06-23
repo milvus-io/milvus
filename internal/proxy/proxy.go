@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/atomic"
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
@@ -116,11 +116,6 @@ type Proxy struct {
 	enableComplexDeleteLimit bool
 
 	slowQueries *expirable.LRU[Timestamp, *metricsinfo.SlowQuery]
-
-	// alterSchemaInFlight tracks collections that have an AlterCollectionSchema
-	// request in progress, keyed by "dbName/collectionName". Prevents concurrent
-	// requests from racing past the schema version consistency gate.
-	alterSchemaInFlight sync.Map
 }
 
 // NewProxy returns a Proxy struct.
@@ -170,7 +165,7 @@ func (node *Proxy) Register() error {
 func (node *Proxy) initSession() error {
 	node.session = sessionutil.NewSession(node.ctx)
 	if node.session == nil {
-		return errors.New("new session failed, maybe etcd cannot be connected")
+		return merr.WrapErrServiceNotReadyMsg("new session failed, maybe etcd cannot be connected")
 	}
 	node.session.Init(typeutil.ProxyRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.ProxyRole, node.session.ServerID)
@@ -339,6 +334,10 @@ func (node *Proxy) Stop() error {
 		node.resourceManager.Close()
 	}
 
+	if globalMetaCache != nil {
+		globalMetaCache.Close()
+	}
+
 	node.cancel()
 	node.wg.Wait()
 
@@ -379,7 +378,7 @@ func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, 
 // GetRateLimiter returns the rateLimiter in Proxy.
 func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
 	if node.simpleLimiter == nil {
-		return nil, errors.New("nil rate limiter in Proxy")
+		return nil, merr.WrapErrParameterInvalidMsg("nil rate limiter in Proxy")
 	}
 	return node.simpleLimiter, nil
 }

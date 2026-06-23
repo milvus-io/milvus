@@ -18,11 +18,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -242,8 +245,10 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	}()
 
 	// TODO: should be removed at 3.0, after merge the flusher logic into recovery storage.
-	// only for truncate api now.
-	if bh := msg.BroadcastHeader(); bh != nil && bh.AckSyncUp {
+	// Only truncate collection needs to observe before the flusher handles the message.
+	// Other messages should keep the deferred order so lifecycle cleanup such as
+	// DropCollection can finish the flowgraph before recovery storage observes it.
+	if msg.MessageType() == message.MessageTypeTruncateCollection {
 		if err := impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
 			return err
@@ -278,6 +283,50 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		defer func() {
 			impl.flusherComponents.WhenDropCollection(msg.VChannel())
 		}()
+	case message.MessageTypeCommitImport:
+		commitMsg, err := message.AsImmutableCommitImportMessageV2(msg)
+		if err != nil {
+			impl.logger.DPanic("failed to parse CommitImportMessage", zap.Error(err))
+			return nil
+		}
+		vchannel := msg.VChannel()
+		jobID := commitMsg.Header().GetJobId()
+
+		// Flush DML data before this commit fence. Panic on failure so WAL replays the message.
+		if err := resource.Resource().WriteBufferManager().
+			FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
+			if errors.Is(err, merr.ErrChannelNotFound) {
+				impl.logger.Info("CommitImport targets stale vchannel, skip local flush and continue commit ack",
+					zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
+			} else {
+				impl.logger.Panic("FlushChannel on CommitImport failed, panicking to retry from WAL",
+					zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
+			}
+		}
+
+		// Notify DataCoord that this vchannel has committed.
+		mixCoord, err := resource.Resource().MixCoordClient().GetWithContext(impl.notifier.Context())
+		if err != nil {
+			return errors.Wrap(err, "failed to get MixCoordClient for HandleCommitVchannel")
+		}
+		resp, err := mixCoord.HandleCommitVchannel(impl.notifier.Context(), &datapb.HandleCommitVchannelRequest{
+			Base:            commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+			JobId:           jobID,
+			Vchannel:        vchannel,
+			CommitTimestamp: msg.TimeTick(),
+		})
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			impl.logger.Panic("HandleCommitVchannel RPC failed, panicking to retry from WAL",
+				zap.Int64("jobID", jobID), zap.String("vchannel", vchannel), zap.Error(err))
+		}
+		impl.logger.Info("CommitImportMessage handled: vchannel committed",
+			zap.String("vchannel", vchannel), zap.Int64("jobID", jobID))
+		return nil // don't forward to flusherComponents
+	case message.MessageTypeRollbackImport:
+		// No-op: DataCoord DDL ack callback handles all state changes.
+		impl.logger.Info("RollbackImportMessage consumed (no-op in flusher)",
+			zap.String("vchannel", msg.VChannel()))
+		return nil // don't forward to flusherComponents
 	}
 	return impl.flusherComponents.HandleMessage(impl.notifier.Context(), msg)
 }

@@ -528,6 +528,10 @@ func Test_compactionTrigger_force(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	preAllocateIDExpansionFactor := paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
+	preAllocatedSegmentIDBegin := int64(100)
+	preAllocatedSegmentIDEnd := preAllocatedSegmentIDBegin + preAllocateIDExpansionFactor
+	preAllocatedLogIDEnd := preAllocatedSegmentIDBegin + 4*preAllocateIDExpansionFactor
 
 	tests := []struct {
 		name         string
@@ -576,7 +580,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			},
 			[]*datapb.CompactionPlan{
 				{
-					PlanID: 100,
+					PlanID: preAllocatedSegmentIDEnd,
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 						{
 							SegmentID: 1,
@@ -629,8 +633,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Channel:                "ch1",
 					TotalRows:              200,
 					Schema:                 schema,
-					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 101, End: 200},
-					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
+					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedSegmentIDEnd},
+					PreAllocatedLogIDs:     &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedLogIDEnd},
 					MaxSize:                1073741824,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 					JsonParams:             params,
@@ -1922,6 +1926,103 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	// expire time < Timestamp To, and index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex but indexFileKeys is nil
 	couldDo = trigger.ShouldDoSingleCompaction(info6, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
+
+	// Test import segment: old row timestamps should not trigger TTL compaction when commit_timestamp is recent
+	t.Run("import segment not TTL-triggered by old row timestamps", func(t *testing.T) {
+		// Row timestamps are very old (ts=1000), but commit_timestamp is in the future (now + 1 day).
+		// expireTime is 5000 which is > row timestamps but < commit_timestamp.
+		// Without the fix, rows appear expired. With the fix, commit_timestamp is used as effective ts.
+		now := time.Now()
+		commitTs := tsoutil.ComposeTSByTime(now.Add(24*time.Hour), 0) // future: definitely not expired
+		expireTime := uint64(5000)                                    // > old row ts (1000) but < commitTs
+
+		var importBinlogs []*datapb.FieldBinlog
+		for i := 0; i < 100; i++ {
+			importBinlogs = append(importBinlogs, &datapb.FieldBinlog{
+				Binlogs: []*datapb.Binlog{
+					// TimestampTo=1000: very old, looks expired compared to expireTime=5000
+					{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 500, TimestampTo: 1000, MemorySize: 100000},
+				},
+			})
+		}
+
+		importSegment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:              1,
+				CollectionID:    2,
+				PartitionID:     1,
+				LastExpireTime:  2000,
+				NumOfRows:       500,
+				MaxRowNum:       1000,
+				InsertChannel:   "ch1",
+				State:           commonpb.SegmentState_Flushed,
+				Binlogs:         importBinlogs,
+				CommitTimestamp: commitTs,
+			},
+		}
+
+		// Without commit_timestamp fix, all rows look expired (TimestampTo=1000 < expireTime=5000),
+		// and 100% expired ratio would trigger compaction. With the fix, commit_timestamp is used
+		// as the effective ts, which is far in the future, so no TTL compaction is triggered.
+		couldDo := trigger.ShouldDoSingleCompaction(importSegment, &compactTime{expireTime: expireTime})
+		assert.False(t, couldDo, "import segment with recent commit_timestamp should not be TTL-compacted due to old row timestamps")
+	})
+}
+
+func Test_compactionTrigger_shouldDoSingleCompaction_CommitTimestamp(t *testing.T) {
+	indexMeta := newSegmentIndexMeta(nil)
+	mock0Allocator := newMockAllocator(t)
+	trigger := newCompactionTrigger(&meta{
+		indexMeta:  indexMeta,
+		channelCPs: newChannelCps(),
+	}, &compactionInspector{}, mock0Allocator, newMockHandler(), newIndexEngineVersionManager())
+
+	// Import segment: binlog TimestampFrom=100, TimestampTo=500 (very old)
+	// commit_timestamp=2000 (current time)
+	// expireTime=1000 — between old binlog ts and commit_ts
+	// Without fix: would trigger (500 < 1000). With fix: must NOT trigger (max(500,2000)=2000 > 1000).
+	importSeg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:              99,
+			CollectionID:    1,
+			NumOfRows:       1000,
+			State:           commonpb.SegmentState_Flushed,
+			CommitTimestamp: 2000,
+			Binlogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{
+					{EntriesNum: 900, TimestampFrom: 100, TimestampTo: 500, MemorySize: 1024 * 1024},
+				}},
+			},
+		},
+	}
+	// expireTime=1000: old binlog ts (500) < 1000, but commit_ts (2000) > 1000 → NOT expired
+	shouldCompact := trigger.ShouldDoSingleCompaction(importSeg, &compactTime{expireTime: 1000})
+	assert.False(t, shouldCompact,
+		"import segment with commit_ts=2000 must NOT be TTL-compacted at expireTime=1000")
+
+	// At expireTime=3000 > commit_ts=2000 → should compact
+	shouldCompact = trigger.ShouldDoSingleCompaction(importSeg, &compactTime{expireTime: 3000})
+	assert.True(t, shouldCompact,
+		"import segment with commit_ts=2000 MUST be TTL-compacted at expireTime=3000")
+
+	// Normal segment (commit_ts=0): old behavior preserved
+	normalSeg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:        100,
+			NumOfRows: 1000,
+			State:     commonpb.SegmentState_Flushed,
+			// CommitTimestamp = 0
+			Binlogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{
+					{EntriesNum: 900, TimestampFrom: 100, TimestampTo: 500, MemorySize: 1024 * 1024},
+				}},
+			},
+		},
+	}
+	// Normal: 500 < 1000 → should compact (old behavior unchanged)
+	shouldCompact = trigger.ShouldDoSingleCompaction(normalSeg, &compactTime{expireTime: 1000})
+	assert.True(t, shouldCompact,
+		"normal segment with binlog ts=500 MUST be TTL-compacted at expireTime=1000 (unchanged behavior)")
 }
 
 func Test_compactionTrigger_ShouldStrictCompactExpiry(t *testing.T) {
@@ -2003,39 +2104,65 @@ func Test_compactionTrigger_new(t *testing.T) {
 	}
 }
 
-func TestFilterSegmentsWithMatchingSchemaVersion(t *testing.T) {
-	coll := &collectionInfo{
-		ID:     1,
-		Schema: &schemapb.CollectionSchema{Version: 5},
+func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
+	paramtable.Init()
+
+	collectionID := int64(1)
+	partitionID := int64(10)
+	channel := "ch-1"
+	schema := newTestSchema()
+	schema.Version = 5
+	mt := &meta{
+		segments:    NewSegmentsInfo(),
+		indexMeta:   newSegmentIndexMeta(nil),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	mt.collections.Insert(collectionID, &collectionInfo{ID: collectionID, Schema: schema})
+
+	for _, item := range []struct {
+		id            int64
+		schemaVersion int32
+	}{
+		{id: 101, schemaVersion: 3},
+		{id: 102, schemaVersion: 5},
+		{id: 103, schemaVersion: 4},
+	} {
+		mt.segments.SetSegment(item.id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            item.id,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			IsSorted:      true,
+			NumOfRows:     10,
+			MaxRowNum:     100,
+			SchemaVersion: item.schemaVersion,
+			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{EntriesNum: 10, MemorySize: 1}}}},
+		}})
 	}
 
-	// empty input → empty output
-	result := filterSegmentsWithMatchingSchemaVersion(nil, coll)
-	assert.Empty(t, result)
+	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: mt}
+	trigger := newCompactionTrigger(mt, inspector, newMock0Allocator(t), newMockHandlerWithMeta(mt), newMockVersionManager())
+	err := trigger.handleSignal(&compactionSignal{
+		id:           1,
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		channel:      channel,
+		isForce:      true,
+	})
+	assert.NoError(t, err)
 
-	// all segments match → all returned
-	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
-		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
-		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
-	}, coll)
-	assert.Equal(t, 2, len(result))
-
-	// mixed versions → only matching segments returned
-	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
-		{SegmentInfo: &datapb.SegmentInfo{ID: 1, SchemaVersion: 5}},
-		{SegmentInfo: &datapb.SegmentInfo{ID: 2, SchemaVersion: 4}},
-		{SegmentInfo: &datapb.SegmentInfo{ID: 3, SchemaVersion: 5}},
-	}, coll)
-	assert.Equal(t, 2, len(result))
-	assert.Equal(t, int64(1), result[0].GetID())
-	assert.Equal(t, int64(3), result[1].GetID())
-
-	// all segments outdated → empty output
-	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
-		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 0}},
-		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 4}},
-	}, coll)
-	assert.Empty(t, result)
+	select {
+	case plan := <-inspector.spyChan:
+		var got []int64
+		for _, segment := range plan.GetSegmentBinlogs() {
+			got = append(got, segment.GetSegmentID())
+		}
+		assert.ElementsMatch(t, []int64{101, 102, 103}, got)
+	case <-time.After(time.Second):
+		assert.Fail(t, "expected compaction plan for mixed schema version segments")
+	}
 }
 
 func Test_compactionTrigger_getCompactTime(t *testing.T) {
@@ -2451,6 +2578,55 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			channel:      s.channel,
 			isForce:      true,
 		})
+	})
+
+	s.Run("force compaction preallocates segment IDs from input size", func() {
+		defer s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
+		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
+
+		const mb = 1024 * 1024
+		s.meta.segments.segments[1].Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+
+		tr := s.tr
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collectionID).
+			Return(&collectionInfo{
+				ID: s.collectionID,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+					},
+				},
+			}, nil).Once()
+		tr.handler = handler
+
+		const (
+			startID = int64(20000)
+			planID  = int64(20003)
+			endID   = int64(20004)
+		)
+		s.allocator.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
+		s.inspector.EXPECT().enqueueCompaction(mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+			s.EqualValues(planID, task.GetPlanID())
+			s.ElementsMatch([]int64{1}, task.GetInputSegments())
+			s.EqualValues(startID, task.GetPreAllocatedSegmentIDs().GetBegin())
+			s.EqualValues(planID, task.GetPreAllocatedSegmentIDs().GetEnd())
+			return true
+		})).Return(nil).Once()
+
+		err := tr.handleSignal(NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel).
+			WithSegmentIDs(1).
+			WithIsForce(true))
+		s.NoError(err)
 	})
 }
 
@@ -3195,6 +3371,35 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField(t *testing.T) {
 	ct = &compactTime{startTime: startTime, collectionTTL: 0}
 	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment2)
 	assert.False(t, shouldCompact)
+}
+
+func Test_compactionTrigger_ShouldCompactExpiryWithTTLField_CommitTimestamp(t *testing.T) {
+	trigger := &compactionTrigger{}
+	ts := time.Now()
+
+	// expirQuantiles contain very old timestamps (simulating imported data with stale row timestamps)
+	oldTs := ts.Add(-24 * time.Hour)
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:              1,
+			CollectionID:    2,
+			CommitTimestamp: tsoutil.ComposeTSByTime(ts, 0), // import segment
+			ExpirQuantiles: []int64{
+				oldTs.UnixMicro(),
+				oldTs.Add(time.Minute).UnixMicro(),
+				oldTs.Add(2 * time.Minute).UnixMicro(),
+				oldTs.Add(3 * time.Minute).UnixMicro(),
+				oldTs.Add(4 * time.Minute).UnixMicro(),
+			},
+		},
+	}
+
+	// expirQuantiles are based on original row timestamps; ShouldCompactExpiryWithTTLField
+	// does not adjust for commit_timestamp, so stale quantiles still trigger compaction.
+	startTime := tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	ct := &compactTime{startTime: startTime, collectionTTL: 0}
+	shouldCompact := trigger.ShouldCompactExpiryWithTTLField(ct, segment)
+	assert.True(t, shouldCompact, "stale expirQuantiles should still trigger TTL compaction")
 }
 
 func newTestIndexMeta(collID, segID, indexID int64, indexType string, segIdx *model.SegmentIndex) *indexMeta {

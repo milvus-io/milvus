@@ -1233,6 +1233,183 @@ func TestColumnBasedInsertMsgToInsertData(t *testing.T) {
 	}
 }
 
+func TestColumnBasedInsertMsgToInsertDataKeepsBM25Output(t *testing.T) {
+	sparseRow := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 2})
+	schema := &schemapb.CollectionSchema{
+		Name: "bm25_schema",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "bm25",
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		}},
+	}
+	msg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			NumRows:    1,
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:     []int64{1},
+			Timestamps: []uint64{100},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 100,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
+					}},
+				},
+				{
+					Type:    schemapb.DataType_VarChar,
+					FieldId: 101,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello"}}},
+					}},
+				},
+				{
+					Type:    schemapb.DataType_SparseFloatVector,
+					FieldId: 102,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_SparseFloatVector{
+							SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{sparseRow}, Dim: 2},
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	idata, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	require.NoError(t, err)
+	fieldData, ok := idata.Data[102].(*SparseFloatVectorFieldData)
+	require.True(t, ok)
+	assert.Equal(t, [][]byte{sparseRow}, fieldData.GetContents())
+}
+
+func TestColumnBasedInsertMsgToInsertDataKeepsMinHashOutput(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "minhash_schema",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID:          102,
+				Name:             "signature",
+				DataType:         schemapb.DataType_BinaryVector,
+				IsFunctionOutput: true,
+				TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "minhash",
+			Type:           schemapb.FunctionType_MinHash,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		}},
+	}
+	msg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			NumRows:    1,
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:     []int64{1},
+			Timestamps: []uint64{100},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 100,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
+					}},
+				},
+				{
+					Type:    schemapb.DataType_VarChar,
+					FieldId: 101,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello"}}},
+					}},
+				},
+				{
+					Type:    schemapb.DataType_BinaryVector,
+					FieldId: 102,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim: 32,
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: []byte{1, 2, 3, 4},
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	idata, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	require.NoError(t, err)
+	fieldData, ok := idata.Data[102].(*BinaryVectorFieldData)
+	require.True(t, ok)
+	assert.Equal(t, []byte{1, 2, 3, 4}, fieldData.Data)
+}
+
+func TestColumnBasedInsertMsgToInsertDataRequiresNonEmbeddingFunctionOutput(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "text_embedding_schema",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID:          102,
+				Name:             "embedding",
+				DataType:         schemapb.DataType_FloatVector,
+				IsFunctionOutput: true,
+				TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:           "text_embedding",
+			Type:           schemapb.FunctionType_TextEmbedding,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{102},
+		}},
+	}
+	msg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			NumRows:    1,
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:     []int64{1},
+			Timestamps: []uint64{100},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 100,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
+					}},
+				},
+				{
+					Type:    schemapb.DataType_VarChar,
+					FieldId: 101,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello"}}},
+					}},
+				},
+			},
+		},
+	}
+
+	_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "embedding")
+}
+
 func TestColumnBasedInsertMsgToInsertDataNullable(t *testing.T) {
 	numRows, dim := 2, 8
 	schema, _, fieldIDs := genAllFieldsSchemaNullable(dim, true)
@@ -1255,6 +1432,235 @@ func TestColumnBasedInsertMsgToInsertDataNullable(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *testing.T) {
+	validData := []bool{true, false, true}
+	makeSchema := func(dataType schemapb.DataType, dim string) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name: "nullable_vector_compact",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: dataType,
+					Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: dim},
+					},
+				},
+			},
+		}
+	}
+	makeMsg := func(dataType schemapb.DataType, vectors *schemapb.VectorField) *msgstream.InsertMsg {
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "pk",
+						FieldId:   100,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+								},
+							},
+						},
+					},
+					{
+						Type:      dataType,
+						FieldName: "vec",
+						FieldId:   101,
+						ValidData: validData,
+						Field:     &schemapb.FieldData_Vectors{Vectors: vectors},
+					},
+				},
+				NumRows: 3,
+				Version: msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		dataType schemapb.DataType
+		dim      string
+		vectors  *schemapb.VectorField
+	}{
+		{
+			name:     "float vector",
+			dataType: schemapb.DataType_FloatVector,
+			dim:      "2",
+			vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}},
+			}},
+		},
+		{
+			name:     "binary vector",
+			dataType: schemapb.DataType_BinaryVector,
+			dim:      "8",
+			vectors:  &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3}}},
+		},
+		{
+			name:     "float16 vector",
+			dataType: schemapb.DataType_Float16Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}},
+		},
+		{
+			name:     "bfloat16 vector",
+			dataType: schemapb.DataType_BFloat16Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}},
+		},
+		{
+			name:     "sparse vector",
+			dataType: schemapb.DataType_SparseFloatVector,
+			dim:      "2",
+			vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{
+				SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{
+					typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
+					typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2}),
+					typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3}),
+				}},
+			}},
+		},
+		{
+			name:     "int8 vector",
+			dataType: schemapb.DataType_Int8Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4, 5, 6}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := makeMsg(tt.dataType, tt.vectors)
+			schema := makeSchema(tt.dataType, tt.dim)
+
+			_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact")
+
+			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact")
+		})
+	}
+}
+
+func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorPartialRowData(t *testing.T) {
+	makeSchema := func(dataType schemapb.DataType, dim string) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name: "nullable_vector_partial_row",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: dataType,
+					Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: dim},
+					},
+				},
+			},
+		}
+	}
+	makeMsg := func(dataType schemapb.DataType, vectors *schemapb.VectorField) *msgstream.InsertMsg {
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "pk",
+						FieldId:   100,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+								},
+							},
+						},
+					},
+					{
+						Type:      dataType,
+						FieldName: "vec",
+						FieldId:   101,
+						ValidData: []bool{true, false},
+						Field:     &schemapb.FieldData_Vectors{Vectors: vectors},
+					},
+				},
+				NumRows: 2,
+				Version: msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		dataType schemapb.DataType
+		dim      string
+		vectors  *schemapb.VectorField
+	}{
+		{
+			name:     "float vector",
+			dataType: schemapb.DataType_FloatVector,
+			dim:      "2",
+			vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3}},
+			}},
+		},
+		{
+			name:     "binary vector",
+			dataType: schemapb.DataType_BinaryVector,
+			dim:      "16",
+			vectors:  &schemapb.VectorField{Dim: 16, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3}}},
+		},
+		{
+			name:     "float16 vector",
+			dataType: schemapb.DataType_Float16Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5}}},
+		},
+		{
+			name:     "bfloat16 vector",
+			dataType: schemapb.DataType_BFloat16Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5}}},
+		},
+		{
+			name:     "int8 vector",
+			dataType: schemapb.DataType_Int8Vector,
+			dim:      "2",
+			vectors:  &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := makeMsg(tt.dataType, tt.vectors)
+			schema := makeSchema(tt.dataType, tt.dim)
+
+			_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+			require.Error(t, err)
+
+			_, err = TransferInsertMsgToInsertRecord(schema, msg)
+			require.Error(t, err)
+		})
 	}
 }
 
@@ -2427,7 +2833,7 @@ func TestFillMissingFields(t *testing.T) {
 		assert.False(t, existsTimestamp)
 	})
 
-	t.Run("skip function output fields", func(t *testing.T) {
+	t.Run("skip embedding function output fields", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name: "test_schema",
 			Fields: []*schemapb.FieldSchema{
@@ -2451,9 +2857,30 @@ func TestFillMissingFields(t *testing.T) {
 				},
 				{
 					FieldID:          101,
-					Name:             "function_output",
-					DataType:         schemapb.DataType_FloatVector,
-					IsFunctionOutput: true, // Should be skipped
+					Name:             "bm25_output",
+					DataType:         schemapb.DataType_SparseFloatVector,
+					IsFunctionOutput: true,
+				},
+				{
+					FieldID:          102,
+					Name:             "minhash_output",
+					DataType:         schemapb.DataType_BinaryVector,
+					IsFunctionOutput: true,
+					TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:           "bm25",
+					Type:           schemapb.FunctionType_BM25,
+					InputFieldIds:  []int64{100},
+					OutputFieldIds: []int64{101},
+				},
+				{
+					Name:           "minhash",
+					Type:           schemapb.FunctionType_MinHash,
+					InputFieldIds:  []int64{100},
+					OutputFieldIds: []int64{102},
 				},
 			},
 		}
@@ -2469,9 +2896,63 @@ func TestFillMissingFields(t *testing.T) {
 		err := fillMissingFields(schema, insertData)
 		assert.NoError(t, err)
 
-		// Function output field should not be added
 		_, exists := insertData.Data[101]
 		assert.False(t, exists)
+		_, exists = insertData.Data[102]
+		assert.False(t, exists)
+	})
+
+	t.Run("missing non-embedding function output field is required", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_schema",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      common.RowIDField,
+					Name:         common.RowIDFieldName,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: false,
+				},
+				{
+					FieldID:      common.TimeStampField,
+					Name:         common.TimeStampFieldName,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: false,
+				},
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:          101,
+					Name:             "text_embedding_output",
+					DataType:         schemapb.DataType_FloatVector,
+					IsFunctionOutput: true,
+					TypeParams:       []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:           "text_embedding",
+					Type:           schemapb.FunctionType_TextEmbedding,
+					InputFieldIds:  []int64{100},
+					OutputFieldIds: []int64{101},
+				},
+			},
+		}
+
+		insertData := &InsertData{
+			Data: map[FieldID]FieldData{
+				common.RowIDField:     &Int64FieldData{Data: []int64{1, 2, 3}},
+				common.TimeStampField: &Int64FieldData{Data: []int64{100, 200, 300}},
+				100:                   &Int64FieldData{Data: []int64{10, 20, 30}},
+			},
+		}
+
+		err := fillMissingFields(schema, insertData)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "text_embedding_output")
 	})
 
 	t.Run("all fields present - no filling needed", func(t *testing.T) {
@@ -2834,4 +3315,108 @@ func TestInsertDataWithStructAndMissingField(t *testing.T) {
 	for _, valid := range int64Field.ValidData {
 		assert.False(t, valid, "nullable field should have all null values")
 	}
+}
+
+func TestMergeVectorArrayField(t *testing.T) {
+	t.Run("nullable merge", func(t *testing.T) {
+		data := &InsertData{Data: make(map[FieldID]FieldData)}
+
+		// Plan B: dense layout — Data length equals ValidData length; null rows hold empty placeholders.
+		nullPlaceholder := &schemapb.VectorField{
+			Dim:  4,
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+		}
+		field1 := &VectorArrayFieldData{
+			Dim:         4,
+			ElementType: schemapb.DataType_FloatVector,
+			Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4), nullPlaceholder},
+			ValidData:   []bool{true, false},
+			Nullable:    true,
+		}
+
+		field2 := &VectorArrayFieldData{
+			Dim:         4,
+			ElementType: schemapb.DataType_FloatVector,
+			Data:        []*schemapb.VectorField{nullPlaceholder, makeFloatVec(4, 5, 6, 7, 8)},
+			ValidData:   []bool{false, true},
+			Nullable:    true,
+		}
+
+		MergeFieldData(data, 100, field1)
+		MergeFieldData(data, 100, field2)
+
+		merged := data.Data[100].(*VectorArrayFieldData)
+		assert.Equal(t, 4, len(merged.Data))
+		assert.Equal(t, []bool{true, false, false, true}, merged.ValidData)
+		assert.True(t, merged.Nullable)
+	})
+
+	t.Run("non-nullable merge", func(t *testing.T) {
+		data := &InsertData{Data: make(map[FieldID]FieldData)}
+
+		field := &VectorArrayFieldData{
+			Dim:         4,
+			ElementType: schemapb.DataType_FloatVector,
+			Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)},
+			Nullable:    false,
+		}
+
+		MergeFieldData(data, 100, field)
+
+		merged := data.Data[100].(*VectorArrayFieldData)
+		assert.Equal(t, 1, len(merged.Data))
+		assert.Nil(t, merged.ValidData)
+	})
+}
+
+func TestMergeInsertDataNullableSparseAllNullPreservesValidData(t *testing.T) {
+	buffer := &InsertData{Data: make(map[FieldID]FieldData)}
+	allNull := &InsertData{Data: map[FieldID]FieldData{
+		100: &SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{Dim: 8},
+			ValidData:        []bool{false, false},
+			Nullable:         true,
+		},
+	}}
+
+	MergeInsertData(buffer, allNull)
+
+	merged := buffer.Data[100].(*SparseFloatVectorFieldData)
+	require.True(t, merged.Nullable)
+	require.Equal(t, []bool{false, false}, merged.ValidData)
+	require.Empty(t, merged.Contents)
+	require.Equal(t, 2, merged.RowNum())
+}
+
+func TestTransferInsertDataToInsertRecord_NullableArrayOfVector(t *testing.T) {
+	vec0 := makeFloatVec(4, 1, 2, 3, 4)
+	nullPlaceholder := &schemapb.VectorField{
+		Dim:  4,
+		Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+	}
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				Dim:         4,
+				ElementType: schemapb.DataType_FloatVector,
+				Data:        []*schemapb.VectorField{vec0, nullPlaceholder},
+				ValidData:   []bool{true, false},
+				Nullable:    true,
+			},
+		},
+	}
+
+	record, err := TransferInsertDataToInsertRecord(insertData)
+	require.NoError(t, err)
+
+	found := false
+	for _, fd := range record.FieldsData {
+		if fd.FieldId == 100 {
+			found = true
+			assert.Equal(t, []bool{true, false}, fd.GetValidData())
+			assert.NotNil(t, fd.GetVectors().GetVectorArray())
+			assert.Equal(t, 2, len(fd.GetVectors().GetVectorArray().GetData()))
+		}
+	}
+	assert.True(t, found)
 }

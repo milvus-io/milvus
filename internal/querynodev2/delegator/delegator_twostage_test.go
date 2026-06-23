@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -179,7 +180,7 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearch() {
 		s.False(result, "should return false when both segments and topk are below threshold")
 	})
 
-	s.Run("segments_above_threshold", func() {
+	s.Run("topk_below_threshold", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
@@ -195,12 +196,12 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearch() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// sealedNum=10 is above min segments (5), so it should pass even if topk is below threshold
+		// topk=1000 is below min topk (2000), so it should not pass even if sealedNum is above threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 10)
-		s.True(result, "should return true when segments are above threshold")
+		s.False(result, "should return false when topk is below threshold")
 	})
 
-	s.Run("topk_above_threshold", func() {
+	s.Run("segments_below_threshold", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
@@ -216,9 +217,9 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearch() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// topk=3000 is above min topk (2000), so it should pass even if segments are below threshold
+		// sealedNum=3 is below min segments (5), so it should not pass even if topk is above threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 3)
-		s.True(result, "should return true when topk is above threshold")
+		s.False(result, "should return false when segments are below threshold")
 	})
 
 	s.Run("wrong_search_type_no_filter", func() {
@@ -480,11 +481,11 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
-				if callCount == 1 {
+				n := callCount.Add(1)
+				if n == 1 {
 					// First call should be filter stage with FilterOnly=true
 					s.True(req.GetFilterOnly(), "First call should have FilterOnly=true")
 					s.True(req.GetEnableExprCache(), "First call should have EnableExprCache=true")
@@ -531,7 +532,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		s.False(fallback)
 		s.NotNil(results)
 		// Should have called SearchSegments twice: once for filter stage, once for vector search
-		s.Equal(2, callCount, "Should have called SearchSegments twice")
+		s.Equal(int32(2), callCount.Load(), "Should have called SearchSegments twice")
 	})
 
 	s.Run("incomplete_filter_counts_fallback_restores_enable_expr_cache", func() {
@@ -619,10 +620,17 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
+				n := callCount.Add(1)
+				if n == 2 {
+					optimizedPlan := &planpb.PlanNode{}
+					err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), optimizedPlan)
+					s.Require().NoError(err)
+					s.NotNil(optimizedPlan.GetVectorAnns().GetPredicates(),
+						"second-stage search must keep predicates in the serialized plan")
+				}
 			}).Return(&internalpb.SearchResults{
 			FilterValidCounts: []int64{5000},
 		}, nil)
@@ -677,7 +685,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
-		s.Equal(2, callCount, "Should have called SearchSegments twice")
+		s.Equal(int32(2), callCount.Load(), "Should have called SearchSegments twice")
 		s.True(hookCalled, "QueryHook.Run should have been called by the optimizer")
 		mockHook.AssertExpectations(s.T())
 	})
@@ -886,7 +894,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithMultipleSegments() {
 }
 
 func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearchEdgeCases() {
-	s.Run("exact_threshold_segments", func() {
+	s.Run("topk_below_threshold_at_exact_segments", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
@@ -902,12 +910,12 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearchEdgeCases() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// sealedNum=5 is exactly at threshold
+		// sealedNum=5 is exactly at threshold, but topk is below threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 5)
-		s.True(result, "should return true when segments equal threshold")
+		s.False(result, "should return false when topk is below threshold")
 	})
 
-	s.Run("exact_threshold_topk", func() {
+	s.Run("segments_below_threshold_at_exact_topk", func() {
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
 		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
@@ -923,9 +931,9 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearchEdgeCases() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// sealedNum=4 is below threshold
+		// topk=2000 is exactly at threshold, but sealedNum=4 is below threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 4)
-		s.True(result, "should return true when topk equals threshold")
+		s.False(result, "should return false when segments are below threshold")
 	})
 
 	s.Run("zero_segments", func() {
@@ -964,9 +972,9 @@ func (s *TwoStageSearchSuite) TestShouldUseTwoStageSearchEdgeCases() {
 				SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
 			},
 		}
-		// sealedNum=10 is above threshold, so it should pass
+		// topk=0 is below threshold, so it should not pass even if sealedNum is above threshold
 		result := optimizers.ShouldUseTwoStageSearch(req, 10)
-		s.True(result, "should return true when segments above threshold even with zero topk")
+		s.False(result, "should return false when topk is below threshold")
 	})
 }
 
@@ -983,10 +991,10 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		worker1 := &cluster.MockWorker{}
 		workers[1] = worker1
 
-		callCount := 0
+		var callCount atomic.Int32
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				callCount++
+				callCount.Add(1)
 				// All calls in two-stage search should have EnableExprCache=true
 				s.True(req.GetEnableExprCache(), "EnableExprCache should be true for all two-stage search calls")
 			}).Return(&internalpb.SearchResults{
@@ -1031,7 +1039,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		// Should have called SearchSegments 3 times:
 		// filter stage: 1 call for sealed only (growing not included in filter stage)
 		// search stage: 1 call for sealed + 1 call for growing = 2
-		s.Equal(3, callCount)
+		s.Equal(int32(3), callCount.Load())
 	})
 }
 

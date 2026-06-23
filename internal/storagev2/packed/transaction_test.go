@@ -62,7 +62,7 @@ func createBaseManifest(t *testing.T, basePath string, storageConfig *indexpb.St
 		{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
 	}
 
-	pw, err := NewFFIPackedWriter(basePath, 0, schema, columnGroups, storageConfig, nil)
+	pw, err := NewFFIPackedWriter(basePath, schema, columnGroups, storageConfig, nil)
 	require.NoError(t, err)
 
 	b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
@@ -75,7 +75,12 @@ func createBaseManifest(t *testing.T, basePath string, storageConfig *indexpb.St
 	err = pw.WriteRecordBatch(rec)
 	require.NoError(t, err)
 
-	manifestPath, err := pw.Close()
+	out, err := pw.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+
+	manifestPath, err := CommitManifestUpdates(basePath, ManifestEarliest, storageConfig,
+		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	return manifestPath
 }

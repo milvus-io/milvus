@@ -225,23 +225,9 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	defer cancel()
 	coll, err := t.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("collection ID %d not found, err: %w", collectionID, err)
+		return nil, merr.Wrapf(err, "collection ID %d not found", collectionID)
 	}
 	return coll, nil
-}
-
-// filterSegmentsWithMatchingSchemaVersion removes segments whose schema version does not match the
-// collection's current schema version. This allows mix compaction to proceed on the matching subset
-// rather than blocking the entire group (collection + partition + channel) during backfill.
-func filterSegmentsWithMatchingSchemaVersion(segments []*SegmentInfo, coll *collectionInfo) []*SegmentInfo {
-	collectionSchemaVersion := coll.Schema.GetVersion()
-	result := make([]*SegmentInfo, 0, len(segments))
-	for _, segment := range segments {
-		if segment.GetSchemaVersion() == collectionSchemaVersion {
-			result = append(result, segment)
-		}
-	}
-	return result
 }
 
 func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
@@ -388,15 +374,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			continue
 		}
 
-		group.segments = filterSegmentsWithMatchingSchemaVersion(group.segments, coll)
-		if len(group.segments) == 0 {
-			log.Debug("no segments with matching schema version in group, skip mix compaction",
-				zap.Int64("collectionID", group.collectionID),
-				zap.Int64("partitionID", group.partitionID),
-				zap.String("channel", group.channelName))
-			continue
-		}
-
 		if !signal.isForce && !isCollectionAutoCompactionEnabled(coll) {
 			log.RatedInfo(20, "collection auto compaction disabled")
 			return nil
@@ -417,8 +394,14 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			}
 			totalRows, inputSegmentIDs := plan.A, plan.B
 
-			n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
-			startID, endID, err := t.allocator.AllocN(n)
+			inputs := typeutil.NewSet[int64](inputSegmentIDs...)
+			totalSize := lo.SumBy(group.segments, func(s *SegmentInfo) int64 {
+				if inputs.Contain(s.GetID()) {
+					return s.getSegmentSize()
+				}
+				return 0
+			})
+			planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(t.allocator, float64(totalSize), float64(expectedSize))
 			if err != nil {
 				log.Warn("fail to allocate id", zap.Error(err))
 				return err
@@ -426,24 +409,21 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			start := time.Now()
 			pts, _ := tsoutil.ParseTS(ct.startTime)
 			task := &datapb.CompactionTask{
-				PlanID:         startID,
-				TriggerID:      signal.id,
-				State:          datapb.CompactionTaskState_pipelining,
-				StartTime:      pts.Unix(),
-				Type:           datapb.CompactionType_MixCompaction,
-				CollectionTtl:  ct.collectionTTL.Nanoseconds(),
-				CollectionID:   group.collectionID,
-				PartitionID:    group.partitionID,
-				Channel:        group.channelName,
-				InputSegments:  inputSegmentIDs,
-				ResultSegments: []int64{},
-				TotalRows:      totalRows,
-				Schema:         coll.Schema,
-				MaxSize:        expectedSize,
-				PreAllocatedSegmentIDs: &datapb.IDRange{
-					Begin: startID + 1,
-					End:   endID,
-				},
+				PlanID:                 planID,
+				TriggerID:              signal.id,
+				State:                  datapb.CompactionTaskState_pipelining,
+				StartTime:              pts.Unix(),
+				Type:                   datapb.CompactionType_MixCompaction,
+				CollectionTtl:          ct.collectionTTL.Nanoseconds(),
+				CollectionID:           group.collectionID,
+				PartitionID:            group.partitionID,
+				Channel:                group.channelName,
+				InputSegments:          inputSegmentIDs,
+				ResultSegments:         []int64{},
+				TotalRows:              totalRows,
+				Schema:                 coll.Schema,
+				MaxSize:                expectedSize,
+				PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 			}
 			err = t.inspector.enqueueCompaction(task)
 			if err != nil {
@@ -583,15 +563,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	// default filter, select segments which could be compacted
 	filters := []SegmentFilter{
 		SegmentFilterFunc(func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment) &&
-				isFlushed(segment) &&
-				!segment.isCompacting && // not compacting now
-				!segment.GetIsImporting() && // not importing now
-				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
-				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
-				!segment.GetIsInvisible() &&
-				(segment.GetIsSorted() || segment.GetIsSortedByNamespace()) &&
-				!t.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
+			return isNormalManualCompactionCandidate(t.meta, segment)
 		}),
 	}
 
@@ -619,7 +591,10 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	segments := t.meta.SelectSegments(context.TODO(), filters...)
 	// some criterion not met or conflicted
 	if len(signal.segmentIDs) > 0 && len(segments) != len(signal.segmentIDs) {
-		return nil, merr.WrapErrServiceInternal("not all segment ids provided could be compacted")
+		// SelectSegments also filters segments that are transiently mid-flush /
+		// compacting / just dropped, so a count mismatch is usually server-side
+		// state, not a bad id from the caller.
+		return nil, merr.WrapErrServiceInternalMsg("not all segment ids provided could be compacted")
 	}
 
 	type category struct {
@@ -778,7 +753,9 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	for _, binlogs := range segment.GetBinlogs() {
 		for _, l := range binlogs.GetBinlogs() {
 			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
-			if l.TimestampTo < compactTime.expireTime {
+			// For import segments, row timestamps predate the commit; use commit_timestamp
+			// as the effective "data age" to prevent premature TTL-triggered compaction.
+			if tsoutil.EffectiveTimestamp(l.TimestampTo, segment.GetCommitTimestamp()) < compactTime.expireTime {
 				log.RatedDebug(10, "mark binlog as expired",
 					zap.Int64("segmentID", segment.ID),
 					zap.Int64("binlogID", l.GetLogID()),
@@ -787,7 +764,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 				totalExpiredRows += int(l.GetEntriesNum())
 				totalExpiredSize += l.GetMemorySize()
 			}
-			earliestFromTs = min(earliestFromTs, l.TimestampFrom)
+			earliestFromTs = min(earliestFromTs, tsoutil.EffectiveTimestamp(l.TimestampFrom, segment.GetCommitTimestamp()))
 		}
 	}
 	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {

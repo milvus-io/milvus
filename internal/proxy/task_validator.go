@@ -1,21 +1,20 @@
 package proxy
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// validator is a generic interface for validating tasks
-type validator[T any] interface {
+// taskValidator is a generic interface for validating tasks.
+type taskValidator[T any] interface {
 	validate(request T) error
 }
 
 // searchTaskValidator validates search tasks
 type searchTaskValidator struct{}
 
-var searchTaskValidatorInstance validator[*searchTask] = &searchTaskValidator{}
+var searchTaskValidatorInstance taskValidator[*searchTask] = &searchTaskValidator{}
 
 func (v *searchTaskValidator) validateSubSearch(subReq *internalpb.SubSearchRequest) error {
 	maxResultEntries := paramtable.Get().ProxyCfg.MaxResultEntries.GetAsInt64()
@@ -29,7 +28,7 @@ func (v *searchTaskValidator) validateSubSearch(subReq *internalpb.SubSearchRequ
 		nEntries *= subReq.GroupSize
 	}
 	if nEntries > maxResultEntries {
-		return fmt.Errorf("number of result entries is too large")
+		return merr.WrapErrParameterInvalidMsg("number of result entries is too large")
 	}
 	return nil
 }
@@ -46,7 +45,7 @@ func (v *searchTaskValidator) validateSearch(search *searchTask) error {
 		nEntries *= search.GroupSize
 	}
 	if nEntries > maxResultEntries {
-		return fmt.Errorf("number of result entries is too large")
+		return merr.WrapErrParameterInvalidMsg("number of result entries is too large")
 	}
 	return nil
 }

@@ -72,6 +72,10 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
             return TantivyDataType::Keyword;
         }
 
+        case proto::schema::DataType::Text: {
+            return TantivyDataType::Text;
+        }
+
         case proto::schema::DataType::JSON: {
             return TantivyDataType::JSON;
         }
@@ -254,6 +258,22 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
             case proto::plan::OpType::Match: {
                 return PatternQuery(pattern);
             }
+            case proto::plan::OpType::RegexMatch: {
+                TargetBitmap bitset(Count());
+                PartialRegexMatcher matcher(pattern);
+                wrapper_->regex_match_query(
+                    &matcher,
+                    [](void* ctx,
+                       const uint8_t* term,
+                       uintptr_t term_len) -> bool {
+                        auto* matcher = static_cast<PartialRegexMatcher*>(ctx);
+                        std::string_view term_view(
+                            reinterpret_cast<const char*>(term), term_len);
+                        return (*matcher)(term_view);
+                    },
+                    &bitset);
+                return bitset;
+            }
             default:
                 ThrowInfo(
                     ErrorCode::OpTypeInvalid,
@@ -268,18 +288,22 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     bool
-    SupportPatternQuery() const override {
-        return std::is_same_v<T, std::string>;
+    ShouldUseOp(proto::plan::OpType op) const override {
+        // Suffix/contains LIKE and regex can be executed correctly over indexed
+        // terms, but for short varchar values they are often slower than raw
+        // scan. Keep only prefix/LIKE Match on the inverted-index path.
+        switch (op) {
+            case proto::plan::OpType::Match:
+            case proto::plan::OpType::PrefixMatch:
+                return SupportPatternMatch() || HasRawData();
+            case proto::plan::OpType::RegexMatch:
+            case proto::plan::OpType::PostfixMatch:
+            case proto::plan::OpType::InnerMatch:
+                return false;
+            default:
+                return true;
+        }
     }
-
-    bool
-    TryUsePatternQuery() const override {
-        // for inverted index, not use pattern query to implement match
-        return false;
-    }
-
-    const TargetBitmap
-    PatternQuery(const std::string& pattern) override;
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
@@ -297,6 +321,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 const Config& config) override;
 
  protected:
+    const TargetBitmap
+    PatternQuery(const std::string& pattern) override;
+
     void
     finish();
 

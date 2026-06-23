@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string.h>
+#include "common/FastMem.h"
 #include <algorithm>
 #include <cstddef>
 #include <exception>
@@ -192,7 +193,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp32_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float>>(
             DataType::NONE,
@@ -209,7 +210,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp16_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<float16>>(
             DataType::NONE,
@@ -226,7 +227,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_bf16_vec](size_t id) {
-            return (const void*)field_raw_data_ptr->get_element(id);
+            return (const void*)field_raw_data_ptr->get_physical_element(id);
         };
         index_ = std::make_unique<index::VectorMemIndex<bfloat16>>(
             DataType::NONE,
@@ -258,7 +259,8 @@ VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
             reinterpret_cast<milvus::proto::schema::SparseFloatArray*>(output));
     } else {
         auto vector = index_->GetVector(ids_ds);
-        std::memcpy(output, vector.data(), count * element_size);
+        milvus::fastmem::FastMemcpy(
+            output, vector.data(), count * element_size);
     }
 }
 
@@ -450,9 +452,10 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                 auto src =
                     chunk_data +
                     (copy_start - chunk_id * size_per_chunk) * vec_length;
-                std::memcpy(data_buf.get() + actual_copy_count * vec_length,
-                            src,
-                            copy_count * vec_length);
+                milvus::fastmem::FastMemcpy(
+                    data_buf.get() + actual_copy_count * vec_length,
+                    src,
+                    copy_count * vec_length);
                 actual_copy_count += copy_count;
             }
             data_ptr = data_buf.get();

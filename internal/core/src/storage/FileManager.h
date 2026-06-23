@@ -40,6 +40,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
+#include "pb/index_coord.pb.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
@@ -178,20 +179,36 @@ class FileManagerImpl : public milvus::FileManager {
     virtual bool
     AddFileMeta(const FileMeta& file_meta) override = 0;
 
+    /**
+     * @brief Open an input stream for loading an index file from remote storage.
+     *
+     * @param local_full_file_path Local full file path. The local file may not
+     * exist yet; FileManager uses its basename and index metadata to resolve the
+     * remote object path.
+     */
     std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename) override final {
-        return OpenInputStream(filename, /*is_index_file=*/true);
+    OpenInputStream(const std::string& local_full_file_path) override final {
+        return OpenInputStream(local_full_file_path, /*is_index_file=*/true);
     }
 
+    /**
+     * @brief Open an output stream for uploading a built local index file to
+     * remote storage.
+     *
+     * @param local_full_file_path Local full path of the already-built index
+     * file. FileManager uses its basename and index metadata to resolve the
+     * remote object path.
+     */
     std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename) override final {
-        return OpenOutputStream(filename, /*is_index_file=*/true);
+    OpenOutputStream(const std::string& local_full_file_path) override final {
+        return OpenOutputStream(local_full_file_path, /*is_index_file=*/true);
     }
 
     std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename, bool is_index_file) {
+    OpenInputStream(const std::string& local_full_file_path,
+                    bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
-        auto local_file_name = GetFileName(filename);
+        auto local_file_name = GetFileName(local_full_file_path);
         auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
                                               : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
@@ -205,9 +222,10 @@ class FileManagerImpl : public milvus::FileManager {
     }
 
     std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename, bool is_index_file) {
+    OpenOutputStream(const std::string& local_full_file_path,
+                     bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open output stream");
-        auto local_file_name = GetFileName(filename);
+        auto local_file_name = GetFileName(local_full_file_path);
         auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
                                               : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
@@ -280,13 +298,23 @@ class FileManagerImpl : public milvus::FileManager {
         boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
                                              ? rcm_->GetRootPath()
                                              : index::kOverrideRootPathForUT;
-        boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
-        boost::filesystem::path path1 =
-            std::to_string(index_meta_.build_id) + "/" +
-            std::to_string(index_meta_.index_version) + "/" +
-            std::to_string(field_meta_.partition_id) + "/" +
-            std::to_string(field_meta_.segment_id);
-        return NormalizePath(prefix / path / path1);
+        if (index_meta_.index_store_path_version >=
+            ::milvus::proto::index::IndexStorePathVersion::
+                INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
+            // {root}/index_v1/{coll}/{part}/{seg}/{build}/{ver}
+            return NormalizePath(prefix / std::string(INDEX_ROOT_PATH_V1) /
+                                 std::to_string(field_meta_.collection_id) /
+                                 std::to_string(field_meta_.partition_id) /
+                                 std::to_string(field_meta_.segment_id) /
+                                 std::to_string(index_meta_.build_id) /
+                                 std::to_string(index_meta_.index_version));
+        }
+        // {root}/index_files/{build}/{ver}/{part}/{seg}
+        return NormalizePath(prefix / std::string(INDEX_ROOT_PATH) /
+                             std::to_string(index_meta_.build_id) /
+                             std::to_string(index_meta_.index_version) /
+                             std::to_string(field_meta_.partition_id) /
+                             std::to_string(field_meta_.segment_id));
     }
 
     virtual std::string

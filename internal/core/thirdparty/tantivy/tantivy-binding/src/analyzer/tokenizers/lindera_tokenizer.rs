@@ -14,11 +14,16 @@ use lindera::token_filter::korean_keep_tags::KoreanKeepTagsTokenFilter;
 use lindera::token_filter::korean_stop_tags::KoreanStopTagsTokenFilter;
 use lindera::token_filter::BoxTokenFilter as LTokenFilter;
 
-use lindera::dictionary::{Dictionary, UserDictionary};
+use lindera::dictionary::{
+    load_user_dictionary_from_bin, load_user_dictionary_from_csv, Dictionary, UserDictionary,
+};
 use lindera_dictionary::viterbi::Lattice;
 
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
-use crate::analyzer::options::{get_lindera_download_url, get_options, DEFAULT_DICT_PATH_KEY};
+use crate::analyzer::options::{
+    get_lindera_download_url, get_options, get_resource_path, FileResourcePathHelper,
+    DEFAULT_DICT_PATH_KEY,
+};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 /// Segmenter
@@ -121,6 +126,7 @@ pub struct LinderaTokenStream<'a> {
 const DICT_KIND_KEY: &str = "dict_kind";
 const FILTER_KEY: &str = "filter";
 const MODE_KEY: &str = "mode";
+const USER_DICT_KEY: &str = "user_dict";
 
 impl<'a> TokenStream for LinderaTokenStream<'a> {
     fn advance(&mut self) -> bool {
@@ -170,7 +176,10 @@ impl Clone for LinderaTokenizer {
 impl LinderaTokenizer {
     /// Create a new `LinderaTokenizer`.
     /// This function will create a new `LinderaTokenizer` with json parameters.
-    pub fn from_json(params: &json::Map<String, json::Value>) -> Result<LinderaTokenizer> {
+    pub fn from_json(
+        params: &json::Map<String, json::Value>,
+        helper: &mut FileResourcePathHelper,
+    ) -> Result<LinderaTokenizer> {
         let kind: DictionaryKind = fetch_lindera_kind(params)?;
 
         // for download dict online
@@ -180,7 +189,8 @@ impl LinderaTokenizer {
         let dictionary = load_dictionary_from_kind(&kind, build_dir, download_urls)?;
 
         let mode = get_lindera_mode(params)?;
-        let segmenter = LinderaSegmenter::new(mode, dictionary, None);
+        let user_dictionary = fetch_lindera_user_dict(&kind, params, helper)?;
+        let segmenter = LinderaSegmenter::new(mode, dictionary, user_dictionary);
         let mut tokenizer = LinderaTokenizer::from_segmenter(segmenter);
 
         // append lindera filter
@@ -297,6 +307,43 @@ fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<Diction
             "lindera tokenizer dict kind should be string"
         )))?
         .into_dict_kind()
+}
+
+fn fetch_lindera_user_dict(
+    kind: &DictionaryKind,
+    params: &json::Map<String, json::Value>,
+    helper: &mut FileResourcePathHelper,
+) -> Result<Option<UserDictionary>> {
+    let v = match params.get(USER_DICT_KEY) {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    let path = get_resource_path(helper, v, "lindera user dict file")?;
+    let ext = path.extension().and_then(|e| e.to_str());
+    let user_dict = match ext {
+        Some("csv") => {
+            load_user_dictionary_from_csv(kind.clone(), path.as_path()).map_err(|e| {
+                TantivyBindingError::InvalidArgument(format!(
+                    "lindera load user dict csv failed: {:?}",
+                    e
+                ))
+            })?
+        }
+        Some("bin") => load_user_dictionary_from_bin(path.as_path()).map_err(|e| {
+            TantivyBindingError::InvalidArgument(format!(
+                "lindera load user dict bin failed: {:?}",
+                e
+            ))
+        })?,
+        _ => {
+            return Err(TantivyBindingError::InvalidArgument(format!(
+                "lindera user dict file extension must be csv or bin, got {:?}",
+                ext
+            )))
+        }
+    };
+    Ok(Some(user_dict))
 }
 
 fn fetch_dict_build_dir() -> Result<String> {
@@ -469,8 +516,15 @@ fn fetch_lindera_token_filter(
 #[cfg(test)]
 mod tests {
     use super::LinderaTokenizer;
+    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
     use serde_json as json;
+    use std::io::Write;
+    use std::sync::Arc;
     use tantivy::tokenizer::Tokenizer;
+
+    fn default_helper() -> FileResourcePathHelper {
+        FileResourcePathHelper::new(Arc::new(ResourceInfo::new()))
+    }
 
     #[test]
     fn test_lindera_tokenizer() {
@@ -485,7 +539,8 @@ mod tests {
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
 
-        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap(), &mut helper);
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
 
         let mut binding = tokenizer.unwrap();
@@ -509,7 +564,8 @@ mod tests {
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
 
-        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap(), &mut helper);
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
 
         let mut binding = tokenizer.unwrap();
@@ -533,7 +589,8 @@ mod tests {
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
 
-        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap(), &mut helper);
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
 
         let mut binding = tokenizer.unwrap();
@@ -557,7 +614,8 @@ mod tests {
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
 
-        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap(), &mut helper);
         assert!(tokenizer.is_err());
     }
 
@@ -570,7 +628,101 @@ mod tests {
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
 
-        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap(), &mut helper);
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+    }
+
+    #[test]
+    fn test_lindera_tokenizer_with_local_user_dict_csv() {
+        let dir = std::env::temp_dir().join("milvus_lindera_userdict_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ipadic_simple_userdic.csv");
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(
+                "東京スカイツリー,カスタム名詞,トウキョウスカイツリー\n\
+                 東武スカイツリーライン,カスタム名詞,トウブスカイツリーライン\n\
+                 とうきょうスカイツリー駅,カスタム名詞,トウキョウスカイツリーエキ\n"
+                    .as_bytes(),
+            )
+            .unwrap();
+        }
+
+        let params = format!(
+            r#"{{
+                "type": "lindera",
+                "dict_kind": "ipadic",
+                "user_dict": {{
+                    "type": "local",
+                    "path": "{}"
+                }}
+            }}"#,
+            path.to_str().unwrap()
+        );
+        let json_param = json::from_str::<json::Map<String, json::Value>>(&params).unwrap();
+
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&json_param, &mut helper);
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+
+        let mut binding = tokenizer.unwrap();
+        let stream =
+            binding.token_stream("東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です");
+        let results: Vec<String> = stream.tokens.iter().map(|t| t.text.to_string()).collect();
+
+        // user dict should merge adjacent morphemes into the custom noun.
+        assert!(
+            results.iter().any(|t| t == "東京スカイツリー"),
+            "user dict entry not applied, tokens: {:?}",
+            results
+        );
+        assert!(
+            results.iter().any(|t| t == "とうきょうスカイツリー駅"),
+            "user dict entry not applied, tokens: {:?}",
+            results
+        );
+    }
+
+    #[test]
+    fn test_lindera_tokenizer_user_dict_bad_extension() {
+        let dir = std::env::temp_dir().join("milvus_lindera_userdict_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("user_dict.txt");
+        std::fs::write(&path, "ignored").unwrap();
+
+        let params = format!(
+            r#"{{
+                "type": "lindera",
+                "dict_kind": "ipadic",
+                "user_dict": {{
+                    "type": "local",
+                    "path": "{}"
+                }}
+            }}"#,
+            path.to_str().unwrap()
+        );
+        let json_param = json::from_str::<json::Map<String, json::Value>>(&params).unwrap();
+
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&json_param, &mut helper);
+        assert!(tokenizer.is_err());
+    }
+
+    #[test]
+    fn test_lindera_tokenizer_user_dict_missing_file() {
+        let params = r#"{
+            "type": "lindera",
+            "dict_kind": "ipadic",
+            "user_dict": {
+                "type": "local",
+                "path": "/tmp/milvus_lindera_nonexistent_user_dict.csv"
+            }
+        }"#;
+        let json_param = json::from_str::<json::Map<String, json::Value>>(&params).unwrap();
+
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&json_param, &mut helper);
+        assert!(tokenizer.is_err());
     }
 }

@@ -18,6 +18,7 @@ from chaos.checker import (
     FullTextSearchChecker,
     GeoQueryChecker,
     HybridSearchChecker,
+    Import2PCChecker,
     IndexCreateChecker,
     InsertChecker,
     JsonQueryChecker,
@@ -34,40 +35,13 @@ from common import common_func as cf
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
 from delayed_assert import assert_expectations
-from pymilvus import DataType, FunctionType, connections, utility
+from pymilvus import connections, utility
 from utils.util_k8s import get_milvus_instance_name, wait_pods_ready
 from utils.util_log import test_log as log
 
-_VECTOR_DTYPES = {
-    DataType.FLOAT_VECTOR,
-    DataType.FLOAT16_VECTOR,
-    DataType.BFLOAT16_VECTOR,
-    DataType.BINARY_VECTOR,
-    DataType.SPARSE_FLOAT_VECTOR,
-    DataType.INT8_VECTOR,
-}
 
-
-def _build_checker_schema(dim=8):
-    """Build the shared all-datatype schema, stripped for the 2.6-latest image.
-
-    The chaos-test image used by milvus_cdc_chaos_test/verify_test rejects
-    two things the shared gen_all_datatype_collection_schema includes by
-    default:
-      - FunctionType.MINHASH (error: "check function params with unknown
-        function type")
-      - nullable=True on FLOAT_VECTOR (error: "vector type not support null")
-
-    Drop the MinHash function and its output field, and force nullable=False
-    on every vector field so the server accepts the schema.
-    """
-    schema = cf.gen_all_datatype_collection_schema(dim=dim)
-    schema.functions[:] = [f for f in schema.functions if f.type != FunctionType.MINHASH]
-    schema.fields[:] = [f for f in schema.fields if f.name != "minhash_emb"]
-    for f in schema.fields:
-        if f.dtype in _VECTOR_DTYPES:
-            f.nullable = False
-    return schema
+def _build_checker_schema(dim=8, enable_struct_array_field=True):
+    return cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=enable_struct_array_field)
 
 
 class TestBase:
@@ -85,7 +59,20 @@ class TestBase:
 
 class TestOperations(TestBase):
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self, upstream_uri, upstream_token, milvus_ns):
+    def connection(
+        self,
+        upstream_uri,
+        upstream_token,
+        downstream_uri,
+        downstream_token,
+        milvus_ns,
+        import_2pc_workload,
+        import_2pc_minio_endpoint,
+        import_2pc_minio_bucket,
+        import_2pc_downstream_minio_endpoint,
+        import_2pc_downstream_minio_bucket,
+        import_2pc_rows,
+    ):
         connections.connect("default", uri=upstream_uri, token=upstream_token)
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -97,15 +84,29 @@ class TestOperations(TestBase):
         self.milvus_sys = MilvusSys(alias="default")
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
+        cf.param_info.param_uri = upstream_uri
+        cf.param_info.param_token = upstream_token
+        cf.param_info.param_bucket_name = import_2pc_minio_bucket
+        self.upstream_uri = upstream_uri
+        self.upstream_token = upstream_token
+        self.downstream_uri = downstream_uri
+        self.downstream_token = downstream_token
+        self.import_2pc_workload = import_2pc_workload
+        self.import_2pc_minio_endpoint = import_2pc_minio_endpoint
+        self.import_2pc_minio_bucket = import_2pc_minio_bucket
+        self.import_2pc_downstream_minio_endpoint = import_2pc_downstream_minio_endpoint
+        self.import_2pc_downstream_minio_bucket = import_2pc_downstream_minio_bucket
+        self.import_2pc_rows = import_2pc_rows
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         schema = _build_checker_schema()
+        partial_update_schema = _build_checker_schema(enable_struct_array_field=False)
         checkers = {
             Op.create: CollectionCreateChecker(collection_name=c_name, schema=schema),
             Op.insert: InsertChecker(collection_name=c_name, schema=schema),
             Op.upsert: UpsertChecker(collection_name=c_name, schema=schema),
-            Op.partial_update: PartialUpdateChecker(collection_name=c_name, schema=schema),
+            Op.partial_update: PartialUpdateChecker(schema=partial_update_schema),
             Op.flush: FlushChecker(collection_name=c_name, schema=schema),
             Op.index: IndexCreateChecker(collection_name=c_name, schema=schema),
             Op.search: SearchChecker(collection_name=c_name, schema=schema),
@@ -122,6 +123,19 @@ class TestOperations(TestBase):
             Op.add_field: AddFieldChecker(collection_name=c_name, schema=schema),
             Op.rename_collection: CollectionRenameChecker(collection_name=c_name, schema=schema),
         }
+        if self.import_2pc_workload:
+            checkers[Op.import_2pc] = Import2PCChecker(
+                collection_name=cf.gen_unique_str("Import2PCChecker_"),
+                rows_per_import=self.import_2pc_rows,
+                minio_endpoint=self.import_2pc_minio_endpoint,
+                bucket_name=self.import_2pc_minio_bucket,
+                uri=self.upstream_uri,
+                token=self.upstream_token,
+                downstream_uri=self.downstream_uri,
+                downstream_token=self.downstream_token,
+                downstream_minio_endpoint=self.import_2pc_downstream_minio_endpoint,
+                downstream_bucket_name=self.import_2pc_downstream_minio_bucket,
+            )
         self.health_checkers = checkers
 
     @pytest.mark.tags(CaseLabel.CDC)

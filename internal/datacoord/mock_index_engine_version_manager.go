@@ -3,8 +3,10 @@
 package datacoord
 
 import (
-	semver "github.com/blang/semver/v4"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	mock "github.com/stretchr/testify/mock"
+
+	semver "github.com/blang/semver/v4"
 
 	sessionutil "github.com/milvus-io/milvus/internal/util/sessionutil"
 )
@@ -52,6 +54,51 @@ func (_c *MockVersionManager_AddNode_Call) Return() *MockVersionManager_AddNode_
 
 func (_c *MockVersionManager_AddNode_Call) RunAndReturn(run func(*sessionutil.Session)) *MockVersionManager_AddNode_Call {
 	_c.Run(run)
+	return _c
+}
+
+// GetClusterMinIndexStorePathVersion provides a mock function with no fields
+func (_m *MockVersionManager) GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterMinIndexStorePathVersion")
+	}
+
+	var r0 indexpb.IndexStorePathVersion
+	if rf, ok := ret.Get(0).(func() indexpb.IndexStorePathVersion); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(indexpb.IndexStorePathVersion)
+	}
+
+	return r0
+}
+
+// MockVersionManager_GetClusterMinIndexStorePathVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusterMinIndexStorePathVersion'
+type MockVersionManager_GetClusterMinIndexStorePathVersion_Call struct {
+	*mock.Call
+}
+
+// GetClusterMinIndexStorePathVersion is a helper method to define mock.On call
+func (_e *MockVersionManager_Expecter) GetClusterMinIndexStorePathVersion() *MockVersionManager_GetClusterMinIndexStorePathVersion_Call {
+	return &MockVersionManager_GetClusterMinIndexStorePathVersion_Call{Call: _e.mock.On("GetClusterMinIndexStorePathVersion")}
+}
+
+func (_c *MockVersionManager_GetClusterMinIndexStorePathVersion_Call) Run(run func()) *MockVersionManager_GetClusterMinIndexStorePathVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockVersionManager_GetClusterMinIndexStorePathVersion_Call) Return(_a0 indexpb.IndexStorePathVersion) *MockVersionManager_GetClusterMinIndexStorePathVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockVersionManager_GetClusterMinIndexStorePathVersion_Call) RunAndReturn(run func() indexpb.IndexStorePathVersion) *MockVersionManager_GetClusterMinIndexStorePathVersion_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

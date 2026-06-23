@@ -154,10 +154,9 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
         // them. Caller of this method must handle this case themselves and must
         // not pass variable length types to this method.
         default: {
-            ThrowInfo(
-                DataTypeInvalid,
-                fmt::format("failed to get data type size, invalid type {}",
-                            data_type));
+            ThrowInfo(DataTypeInvalid,
+                      "failed to get data type size, invalid type {}",
+                      data_type);
         }
     }
 }
@@ -217,11 +216,9 @@ ToProtoDataType(DataType data_type) {
         // Internal-only or unsupported mappings
         case DataType::ROW:
         default:
-            ThrowInfo(
-                DataTypeInvalid,
-                fmt::format(
-                    "failed to convert to proto data type, invalid type {}",
-                    data_type));
+            ThrowInfo(DataTypeInvalid,
+                      "failed to convert to proto data type, invalid type {}",
+                      data_type);
     }
 }
 
@@ -267,8 +264,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
             return arrow::fixed_size_binary(dim);
         default: {
             ThrowInfo(DataTypeInvalid,
-                      fmt::format("failed to get data type, invalid type {}",
-                                  data_type));
+                      "failed to get data type, invalid type {}",
+                      data_type);
         }
     }
 }
@@ -292,10 +289,10 @@ GetArrowDataTypeForVectorArray(DataType elem_type, int dim) {
         case DataType::VECTOR_INT8:
             return arrow::list(arrow::fixed_size_binary(dim));
         default: {
-            ThrowInfo(DataTypeInvalid,
-                      fmt::format("failed to get arrow type for vector array, "
-                                  "invalid type {}",
-                                  elem_type));
+            ThrowInfo(
+                DataTypeInvalid,
+                "failed to get arrow type for vector array, invalid type {}",
+                elem_type);
         }
     }
 }
@@ -814,7 +811,7 @@ struct TypeTraits<DataType::DOUBLE> {
 
 template <>
 struct TypeTraits<DataType::TIMESTAMPTZ> {
-    using NativeType = double;
+    using NativeType = int64_t;
     static constexpr DataType TypeKind = DataType::TIMESTAMPTZ;
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;
@@ -977,8 +974,7 @@ vector_bytes_per_element(const DataType data_type, int64_t dim) {
         case DataType::VECTOR_INT8:
             return dim * sizeof(int8);
         default:
-            ThrowInfo(UnexpectedError,
-                      fmt::format("invalid data type: {}", data_type));
+            ThrowInfo(UnexpectedError, "invalid data type: {}", data_type);
     }
 }
 
@@ -1125,6 +1121,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
                 break;
             case milvus::OpType::InnerMatch:
                 name = "InnerMatch";
+                break;
+            case milvus::OpType::RegexMatch:
+                name = "RegexMatch";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

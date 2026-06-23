@@ -20,37 +20,27 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
-	"sync"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/analyzer"
-	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -118,7 +108,9 @@ func (t *sortCompactionTask) preCompact() error {
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) != 1 {
-		return errors.Newf("sort compaction should handle exactly one segment, but got %d segments, planID = %d",
+		// The plan is produced by datacoord, so a malformed plan is an internal
+		// protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("sort compaction should handle exactly one segment, but got %d segments, planID = %d",
 			len(t.plan.GetSegmentBinlogs()), t.GetPlanID())
 	}
 
@@ -216,7 +208,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	loadDeltaCost := time.Since(phaseStart)
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
-	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
 	case schemapb.DataType_Int64:
@@ -250,31 +242,29 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 
 	phaseStart = time.Now()
-	var rr storage.RecordReader
-	// use manifest reader if manifest presents
-	if t.manifest != "" {
-		rr, err = storage.NewManifestRecordReader(ctx, t.manifest, t.plan.Schema,
-			storage.WithVersion(t.segmentStorageVersion),
-			storage.WithDownloader(t.binlogIO.Download),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithCollectionID(t.collectionID),
-		)
-	} else {
-		rr, err = storage.NewBinlogRecordReader(ctx, t.insertLogs, t.plan.Schema,
-			storage.WithVersion(t.segmentStorageVersion),
-			storage.WithDownloader(t.binlogIO.Download),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithCollectionID(t.collectionID),
-		)
-	}
+	rr, existingFields, err := newCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig,
+		storage.WithVersion(t.segmentStorageVersion),
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithCollectionID(t.collectionID),
+	)
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		srw.Close()
 		return nil, err
 	}
+	materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
+	if err != nil {
+		log.Warn("error creating record materializer", zap.Error(err))
+		rr.Close()
+		srw.Close()
+		return nil, err
+	}
+	rr = newMaterializedRecordReader(rr, materializer)
 	defer rr.Close()
 	initReaderCost := time.Since(phaseStart)
 
+	rr = wrapReaderWithTimestampOverwrite(rr, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
 	rrs := []storage.RecordReader{rr}
 	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
@@ -479,24 +469,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			}, nil
 		}
 		// For V3 segments, register text index stats in manifest.
-		// C++ Upload() returns relative file names; convert to absolute
-		// by prepending statsBasePath before registering with manifest.
+		// TextStatsLogs already carries full object keys for mixed-version compatibility;
+		// AddStatsToManifest stores the manifest-relative representation at commit time.
 		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
-			basePath, _, bErr := packed.UnmarshalManifestPath(resultSegment.GetManifest())
-			if bErr != nil {
-				log.Warn("failed to unmarshal manifest path for text index stats",
-					zap.Int64("targetSegmentID", targetSegemntID), zap.Error(bErr))
-				return &datapb.CompactionPlanResult{
-					PlanID: t.GetPlanID(),
-					State:  datapb.CompactionTaskState_failed,
-				}, nil
-			}
-			for _, stats := range textStatsLogs {
-				prefix := fmt.Sprintf("%s/_stats/text_index.%d", basePath, stats.GetFieldID())
-				for i, f := range stats.GetFiles() {
-					stats.Files[i] = prefix + "/" + f
-				}
-			}
 			statEntries := packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion())
 			newManifest, mErr := packed.AddStatsToManifest(
 				resultSegment.GetManifest(), t.compactionParams.StorageConfig, statEntries)
@@ -570,159 +545,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	taskID int64,
 	segment *datapb.CompactionSegment,
 ) (map[int64]*datapb.TextIndexStats, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("partitionID", partitionID),
-		zap.Int64("segmentID", segmentID),
-	)
-
-	fieldBinlogs := lo.GroupBy(segment.GetInsertLogs(), func(binlog *datapb.FieldBinlog) int64 {
-		return binlog.GetFieldID()
-	})
-
-	getInsertFiles := func(fieldID int64) ([]string, error) {
-		if t.storageVersion == storage.StorageV2 || t.storageVersion == storage.StorageV3 {
-			return []string{}, nil
-		}
-		binlogs, ok := fieldBinlogs[fieldID]
-		if !ok {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
-		}
-		result := make([]string, 0, len(binlogs))
-		for _, binlog := range binlogs {
-			for _, file := range binlog.GetBinlogs() {
-				result = append(result, metautil.BuildInsertLogPath(t.compactionParams.StorageConfig.GetRootPath(),
-					collectionID, partitionID, segmentID, fieldID, file.GetLogID()))
-			}
-		}
-		return result, nil
-	}
-
-	newStorageConfig, err := util.ParseStorageConfig(t.compactionParams.StorageConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	// Concurrent create text index for all match-enabled fields
-	var (
-		mu            sync.Mutex
-		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
-	)
-
-	eg, egCtx := errgroup.WithContext(ctx)
-
-	var analyzerExtraInfo string
-	if len(t.plan.GetFileResources()) > 0 {
-		err := fileresource.GlobalFileManager.Download(ctx, t.cm, t.plan.GetFileResources()...)
-		if err != nil {
-			return nil, err
-		}
-		defer fileresource.GlobalFileManager.Release(t.plan.GetFileResources()...)
-		analyzerExtraInfo, err = analyzer.BuildExtraResourceInfo(t.compactionParams.StorageConfig.GetRootPath(), t.plan.GetFileResources())
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	for _, field := range t.plan.GetSchema().GetFields() {
-		field := field
-		h := typeutil.CreateFieldSchemaHelper(field)
-		if !h.EnableMatch() {
-			continue
-		}
-		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
-
-		eg.Go(func() error {
-			files, err := getInsertFiles(field.GetFieldID())
-			if err != nil {
-				return err
-			}
-
-			// Compute statsBasePath so C++ uploads text index to manifest-compatible location.
-			var statsBasePath string
-			if segment.GetManifest() != "" {
-				basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
-				if err != nil {
-					return fmt.Errorf("failed to unmarshal manifest path for text_index basePath: %w", err)
-				}
-				statsBasePath = fmt.Sprintf("%s/_stats/text_index.%d", basePath, field.GetFieldID())
-			}
-
-			buildIndexParams := &indexcgopb.BuildIndexInfo{
-				BuildID:                   t.GetPlanID(),
-				CollectionID:              collectionID,
-				PartitionID:               partitionID,
-				SegmentID:                 segmentID,
-				IndexVersion:              0, // always zero
-				InsertFiles:               files,
-				FieldSchema:               field,
-				StorageConfig:             newStorageConfig,
-				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
-				StorageVersion:            t.storageVersion,
-				Manifest:                  segment.GetManifest(),
-				StatsBasePath:             statsBasePath,
-				IndexParams: []*commonpb.KeyValuePair{
-					{Key: "index_type", Value: "INVERTED"},
-					{Key: "is_text_match", Value: "true"},
-				},
-			}
-
-			if len(analyzerExtraInfo) > 0 {
-				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
-			}
-
-			if t.storageVersion == storage.StorageV2 || t.storageVersion == storage.StorageV3 {
-				buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
-					segment.GetInsertLogs(),
-					t.compactionParams.StorageConfig,
-					collectionID,
-					partitionID,
-					segmentID)
-			}
-
-			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams)
-			if err != nil {
-				return err
-			}
-			defer index.Delete()
-
-			indexStats, err := index.UpLoad()
-			if err != nil {
-				return err
-			}
-
-			uploaded := make(map[string]int64)
-			for _, info := range indexStats.GetSerializedIndexInfos() {
-				uploaded[info.FileName] = info.FileSize
-			}
-
-			mu.Lock()
-			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
-			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-				FieldID:                   field.GetFieldID(),
-				Version:                   0,
-				BuildID:                   taskID,
-				Files:                     lo.Keys(uploaded),
-				LogSize:                   totalSize,
-				MemorySize:                totalSize,
-				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
-			}
-			mu.Unlock()
-
-			log.Info("field enable match, create text index done",
-				zap.Int64("segmentID", segmentID),
-				zap.Int64("field id", field.GetFieldID()),
-				zap.Strings("files", lo.Keys(uploaded)),
-			)
-			return nil
-		})
-	}
-
-	if err := eg.Wait(); err != nil {
-		return nil, err
-	}
-
-	return textIndexLogs, nil
+	return createTextIndex(ctx, t.cm, t.plan, t.compactionParams, t.storageVersion, collectionID, partitionID, segmentID, taskID, segment)
 }
 
 // initLOBCompactionContext initializes the LOB compaction context for TEXT columns.

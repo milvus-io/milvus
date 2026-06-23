@@ -319,6 +319,7 @@ proxy:
     timeTick:
       bufSize: 512 # The maximum number of messages can be buffered in the timeTick message stream of the proxy when producing messages.
   maxNameLength: 255 # The maximum length of the name or alias that can be created in Milvus, including the collection name, collection alias, partition name, and field name.
+  maxCollectionDescriptionLength: 1024 # The maximum byte length of a collection description accepted by CreateCollection and AlterCollection. Existing collection metadata is not revalidated, but restore or replication flows that recreate a collection through CreateCollection must satisfy this limit or raise it first.
   maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
@@ -327,6 +328,7 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
+  maxRoleDescriptionLength: 1024 # Maximum role description length in bytes.
   nameValidation:
     allowedChars: $ # Additional characters allowed in names beyond underscores, letters and numbers. To allow hyphens in names, add '-' here.
   roleNameValidation:
@@ -336,6 +338,7 @@ proxy:
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
+  maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
   maxIndexParamsSize: 102400 # maximum total size of index params in bytes for create index requests
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
@@ -358,15 +361,15 @@ proxy:
     remoteMaxTime: 0 # The time interval allowed for uploading access log files. If the upload time of a log file exceeds this interval, the file will be deleted. Setting the value to 0 disables this feature.
     formatters:
       base:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [error_type: $error_type]"
       query:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [params: $query_params]"
-        methods: "Query, Delete"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [params: $query_params] [error_type: $error_type]"
+        methods: "Query, Delete, /query, /v2/vectordb/entities/query, /v2/vectordb/entities/get, /v2/vectordb/entities/delete"
       search:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [nq: $nq] [params: $search_params]"
-        methods: "HybridSearch, Search"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [nq: $nq] [params: $search_params] [error_type: $error_type]"
+        methods: "HybridSearch, Search, /search, /v2/vectordb/entities/search, /v2/vectordb/entities/advanced_search, /v2/vectordb/entities/hybrid_search"
       upsert:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [partial_update: $partial_update]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [partial_update: $partial_update] [error_type: $error_type]"
         methods: Upsert
     cacheSize: 0 # Size of log of write cache, in byte. (Close write cache if size was 0)
     cacheFlushInterval: 3 # time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)
@@ -377,6 +380,7 @@ proxy:
   slowQuerySpanInSeconds: 1 # threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
+  metaCacheGCTimeInterval: 300 # the time interval for meta cache GC, in seconds
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
@@ -384,6 +388,11 @@ proxy:
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
+    readHeaderTimeout: 5s # HTTP server timeout for reading request headers
+    readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
+    writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
+    idleTimeout: 300s # HTTP server keep-alive idle timeout
+    maxHeaderBytes: 16777216 # Maximum number of bytes the HTTP server reads from request headers. Defaults to 16MiB to match grpc-go's max header list size, since in shared-port mode this server also serves external gRPC over HTTP/2
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
     hstsIncludeSubDomains: false # Include subdomains in Strict-Transport-Security
     enableHSTS: false # Whether to enable setting the Strict-Transport-Security header
@@ -433,6 +442,7 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
+  dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
@@ -501,6 +511,9 @@ queryNode:
         # - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
         # Defaults to "sync", except for vector field which defaults to "disable".
         scalarField: sync
+        # options: sync, async, disable.
+        # Cache warmup for scalar indexes and the system PK index.
+        # Defaults to "sync".
         scalarIndex: sync
         vectorField: disable # cache warmup for vector field raw data is by default disabled.
         vectorIndex: sync
@@ -549,8 +562,7 @@ queryNode:
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
-    receiveChanSize: 10240
-    unsolvedQueueSize: 10240
+    unsolvedQueueSize: 1024
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
@@ -566,22 +578,34 @@ queryNode:
       # 	Scheduling is fair on task granularity.
       # 	The policy is based on the username for authentication.
       # 	And an empty username is considered the same user.
-      # 	When there are no multi-users, the policy decay into FIFO"
+      # 	When there are no multi-users, the policy decay into FIFO.
       name: fifo
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
+      taskDeadlineAdvance: 50ms # Advance duration for cleaning queued query node read tasks before their context deadline. It supports duration strings such as 50ms and 1s. A bare number is interpreted as milliseconds for compatibility.
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   grouping:
-    maxNQ: 1000
+    maxNQ: 16
+    nqMergeRatio: 3 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
+    maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
+  delegatorPostLoadConcurrencyFactor: 1 # delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor
   exprCache:
     enabled: false # enable expression result cache
-    capacityBytes: 268435456 # max capacity in bytes for expression result cache
+    mode: disk # cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)
+    minEvalDurationUs: 1000 # global latency filter: skip expressions that eval faster than this (0=disabled)
+    admissionThreshold: 2 # frequency admission for memory and disk mode: cache after N+ occurrences (1=no gating)
+    memory:
+      maxBytes: 268435456 # max memory for expression cache in memory mode (default 256MB)
+      compressionEnabled: true # enable Roaring/Raw adaptive compression in memory mode
+    disk:
+      maxBytes: 10737418240 # max total disk usage for expression cache in disk mode (default 10GB)
+      maxFileSizeBytes: 268435456 # max file size per sealed segment in disk mode (default 256MB)
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
@@ -666,7 +690,7 @@ dataCoord:
   # if param forceRebuildSegmentIndex is enabled, the vector index will be rebuilt to aligned with targetVecIndexVersion.
   # if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
   # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
-  targetVecIndexVersion: -1
+  targetVecIndexVersion: 10
   forceRebuildScalarSegmentIndex: false # force rebuild scalar segment index to specified scalar index engine's version
   # if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.
   # if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
@@ -703,8 +727,9 @@ dataCoord:
         deltalogMaxNum: 1000 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 1000
     expiry:
       tolerance: -1 # tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero
-    backfill:
-      triggerInterval: 20 # The time interval in seconds for trigger backfill compaction
+    bumpSchemaVersion:
+      enabled: false # Enable schema version bump compaction
+      triggerInterval: 20 # The time interval in seconds for trigger schema bump compaction
     single:
       ratio:
         threshold: 0.2 # The ratio threshold of a segment to trigger a single compaction, default as 0.2
@@ -759,7 +784,8 @@ dataCoord:
     maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
-    fileNumPerSlot: 1 # The files number per slot for pre-import/import task.
+    enableInReplicatingCluster: false # Whether to allow import in a replicating cluster. When enabled, only auto_commit=false imports are accepted.
+    fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
@@ -767,7 +793,7 @@ dataCoord:
     clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
-    backfillCompactionUsage: 1 # slot usage of backfill compaction task.
+    bumpSchemaVersionCompactionUsage: 1 # slot usage of schema bump compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
@@ -845,6 +871,7 @@ dataNode:
     workPoolSize: 8 # worker pool size for one clustering compaction job.
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
+    format: parquet # storage format for insert data, options: [parquet, vortex]
     deltalog: json # deltalog format, options: [json, parquet]
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
@@ -952,6 +979,8 @@ common:
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
+  entryStream:
+    streamBudgetRatio: 3 # Multiplier for entry stream transient memory budget, relative to CPU core count
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
@@ -971,7 +1000,7 @@ common:
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
     enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
-  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
+  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
     stv2:
@@ -981,7 +1010,8 @@ common:
       splitByAvgSize:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: true
+    useLoonFFI: false
+    enableGrowingSourceFlush: true # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1019,7 +1049,8 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
-    exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
+    exprEnabled: false # Whether to enable the /expr endpoint for debugging.
+    exprAuthMode: rootOnly # Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. rootOnly accepts only the root credentials via HTTP Basic Auth. rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.
     internaltlsEnabled: false
     tlsMode: 0
   session:
@@ -1440,6 +1471,8 @@ credential:
 
 # Any configuration related to functions
 function:
+  model:
+    requestTimeout: 30s # Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.
   textEmbedding:
     providers:
       azure_openai:
@@ -1509,3 +1542,4 @@ function:
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
+    runner_concurrency: 8 # The concurrency for each function runner to tokenize text

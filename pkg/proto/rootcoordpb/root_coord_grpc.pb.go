@@ -30,6 +30,7 @@ const (
 	RootCoord_DropCollection_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/DropCollection"
 	RootCoord_TruncateCollection_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/TruncateCollection"
 	RootCoord_AddCollectionField_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/AddCollectionField"
+	RootCoord_AddCollectionStructField_FullMethodName      = "/milvus.proto.rootcoord.RootCoord/AddCollectionStructField"
 	RootCoord_AlterCollectionSchema_FullMethodName         = "/milvus.proto.rootcoord.RootCoord/AlterCollectionSchema"
 	RootCoord_HasCollection_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/HasCollection"
 	RootCoord_DescribeCollection_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/DescribeCollection"
@@ -47,6 +48,7 @@ const (
 	RootCoord_AlterCollectionFunction_FullMethodName       = "/milvus.proto.rootcoord.RootCoord/AlterCollectionFunction"
 	RootCoord_DropCollectionFunction_FullMethodName        = "/milvus.proto.rootcoord.RootCoord/DropCollectionFunction"
 	RootCoord_CreatePartition_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/CreatePartition"
+	RootCoord_CreatePartitionV2_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/CreatePartitionV2"
 	RootCoord_DropPartition_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/DropPartition"
 	RootCoord_HasPartition_FullMethodName                  = "/milvus.proto.rootcoord.RootCoord/HasPartition"
 	RootCoord_ShowPartitions_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/ShowPartitions"
@@ -65,6 +67,7 @@ const (
 	RootCoord_ListCredUsers_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/ListCredUsers"
 	RootCoord_GetCredential_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/GetCredential"
 	RootCoord_CreateRole_FullMethodName                    = "/milvus.proto.rootcoord.RootCoord/CreateRole"
+	RootCoord_AlterRole_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/AlterRole"
 	RootCoord_DropRole_FullMethodName                      = "/milvus.proto.rootcoord.RootCoord/DropRole"
 	RootCoord_OperateUserRole_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/OperateUserRole"
 	RootCoord_SelectRole_FullMethodName                    = "/milvus.proto.rootcoord.RootCoord/SelectRole"
@@ -86,6 +89,7 @@ const (
 	RootCoord_DescribeDatabase_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/DescribeDatabase"
 	RootCoord_AlterDatabase_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/AlterDatabase"
 	RootCoord_GetQuotaMetrics_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetQuotaMetrics"
+	RootCoord_ClearReadTaskQueue_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ClearReadTaskQueue"
 	RootCoord_BackupEzk_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/BackupEzk"
 	RootCoord_AddFileResource_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AddFileResource"
 	RootCoord_RemoveFileResource_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/RemoveFileResource"
@@ -132,6 +136,13 @@ type RootCoordClient interface {
 	// @return Status
 	AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// *
+	// @brief This method is used to add collection struct field.
+	//
+	// @param AddCollectionStructFieldRequest, struct field schema is going to be added.
+	//
+	// @return Status
+	AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// *
 	// @brief This method is used to add/drop collection field/function.
 	//
 	// @param AlterCollectionSchemaRequest, field schema is going to be added.
@@ -174,6 +185,7 @@ type RootCoordClient interface {
 	//
 	// @return Status
 	CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*CreatePartitionResponse, error)
 	// *
 	// @brief This method is used to drop partition
 	//
@@ -210,6 +222,7 @@ type RootCoordClient interface {
 	GetCredential(ctx context.Context, in *GetCredentialRequest, opts ...grpc.CallOption) (*GetCredentialResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
 	CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropRole(ctx context.Context, in *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest, opts ...grpc.CallOption) (*milvuspb.SelectRoleResponse, error)
@@ -231,6 +244,7 @@ type RootCoordClient interface {
 	DescribeDatabase(ctx context.Context, in *DescribeDatabaseRequest, opts ...grpc.CallOption) (*DescribeDatabaseResponse, error)
 	AlterDatabase(ctx context.Context, in *AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
+	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
 	BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error)
 	// File Resource Management
 	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -308,6 +322,15 @@ func (c *rootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.T
 func (c *rootCoordClient) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_AddCollectionField_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_AddCollectionStructField_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -461,6 +484,15 @@ func (c *rootCoordClient) DropCollectionFunction(ctx context.Context, in *milvus
 func (c *rootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_CreatePartition_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*CreatePartitionResponse, error) {
+	out := new(CreatePartitionResponse)
+	err := c.cc.Invoke(ctx, RootCoord_CreatePartitionV2_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -623,6 +655,15 @@ func (c *rootCoordClient) GetCredential(ctx context.Context, in *GetCredentialRe
 func (c *rootCoordClient) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_CreateRole_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_AlterRole_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -818,6 +859,15 @@ func (c *rootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalpb.Ge
 	return out, nil
 }
 
+func (c *rootCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	out := new(internalpb.ClearReadTaskQueueResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ClearReadTaskQueue_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
 	out := new(internalpb.BackupEzkResponse)
 	err := c.cc.Invoke(ctx, RootCoord_BackupEzk_FullMethodName, in, out, opts...)
@@ -926,6 +976,13 @@ type RootCoordServer interface {
 	// @return Status
 	AddCollectionField(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error)
 	// *
+	// @brief This method is used to add collection struct field.
+	//
+	// @param AddCollectionStructFieldRequest, struct field schema is going to be added.
+	//
+	// @return Status
+	AddCollectionStructField(context.Context, *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error)
+	// *
 	// @brief This method is used to add/drop collection field/function.
 	//
 	// @param AlterCollectionSchemaRequest, field schema is going to be added.
@@ -968,6 +1025,7 @@ type RootCoordServer interface {
 	//
 	// @return Status
 	CreatePartition(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+	CreatePartitionV2(context.Context, *milvuspb.CreatePartitionRequest) (*CreatePartitionResponse, error)
 	// *
 	// @brief This method is used to drop partition
 	//
@@ -1004,6 +1062,7 @@ type RootCoordServer interface {
 	GetCredential(context.Context, *GetCredentialRequest) (*GetCredentialResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
 	CreateRole(context.Context, *milvuspb.CreateRoleRequest) (*commonpb.Status, error)
+	AlterRole(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error)
 	DropRole(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error)
 	OperateUserRole(context.Context, *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error)
 	SelectRole(context.Context, *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error)
@@ -1025,6 +1084,7 @@ type RootCoordServer interface {
 	DescribeDatabase(context.Context, *DescribeDatabaseRequest) (*DescribeDatabaseResponse, error)
 	AlterDatabase(context.Context, *AlterDatabaseRequest) (*commonpb.Status, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
+	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)
 	// File Resource Management
 	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
@@ -1061,6 +1121,9 @@ func (UnimplementedRootCoordServer) TruncateCollection(context.Context, *milvusp
 }
 func (UnimplementedRootCoordServer) AddCollectionField(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddCollectionField not implemented")
+}
+func (UnimplementedRootCoordServer) AddCollectionStructField(context.Context, *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddCollectionStructField not implemented")
 }
 func (UnimplementedRootCoordServer) AlterCollectionSchema(context.Context, *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AlterCollectionSchema not implemented")
@@ -1112,6 +1175,9 @@ func (UnimplementedRootCoordServer) DropCollectionFunction(context.Context, *mil
 }
 func (UnimplementedRootCoordServer) CreatePartition(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreatePartition not implemented")
+}
+func (UnimplementedRootCoordServer) CreatePartitionV2(context.Context, *milvuspb.CreatePartitionRequest) (*CreatePartitionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreatePartitionV2 not implemented")
 }
 func (UnimplementedRootCoordServer) DropPartition(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropPartition not implemented")
@@ -1166,6 +1232,9 @@ func (UnimplementedRootCoordServer) GetCredential(context.Context, *GetCredentia
 }
 func (UnimplementedRootCoordServer) CreateRole(context.Context, *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateRole not implemented")
+}
+func (UnimplementedRootCoordServer) AlterRole(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AlterRole not implemented")
 }
 func (UnimplementedRootCoordServer) DropRole(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropRole not implemented")
@@ -1229,6 +1298,9 @@ func (UnimplementedRootCoordServer) AlterDatabase(context.Context, *AlterDatabas
 }
 func (UnimplementedRootCoordServer) GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetQuotaMetrics not implemented")
+}
+func (UnimplementedRootCoordServer) ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClearReadTaskQueue not implemented")
 }
 func (UnimplementedRootCoordServer) BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackupEzk not implemented")
@@ -1388,6 +1460,24 @@ func _RootCoord_AddCollectionField_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).AddCollectionField(ctx, req.(*milvuspb.AddCollectionFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_AddCollectionStructField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AddCollectionStructFieldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).AddCollectionStructField(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_AddCollectionStructField_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).AddCollectionStructField(ctx, req.(*milvuspb.AddCollectionStructFieldRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1694,6 +1784,24 @@ func _RootCoord_CreatePartition_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).CreatePartition(ctx, req.(*milvuspb.CreatePartitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CreatePartitionV2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CreatePartitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CreatePartitionV2(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CreatePartitionV2_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CreatePartitionV2(ctx, req.(*milvuspb.CreatePartitionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2018,6 +2126,24 @@ func _RootCoord_CreateRole_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).CreateRole(ctx, req.(*milvuspb.CreateRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_AlterRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AlterRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).AlterRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_AlterRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).AlterRole(ctx, req.(*milvuspb.AlterRoleRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2400,6 +2526,24 @@ func _RootCoord_GetQuotaMetrics_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_ClearReadTaskQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.ClearReadTaskQueueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ClearReadTaskQueue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ClearReadTaskQueue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ClearReadTaskQueue(ctx, req.(*internalpb.ClearReadTaskQueueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_BackupEzk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.BackupEzkRequest)
 	if err := dec(in); err != nil {
@@ -2580,6 +2724,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _RootCoord_AddCollectionField_Handler,
 		},
 		{
+			MethodName: "AddCollectionStructField",
+			Handler:    _RootCoord_AddCollectionStructField_Handler,
+		},
+		{
 			MethodName: "AlterCollectionSchema",
 			Handler:    _RootCoord_AlterCollectionSchema_Handler,
 		},
@@ -2646,6 +2794,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreatePartition",
 			Handler:    _RootCoord_CreatePartition_Handler,
+		},
+		{
+			MethodName: "CreatePartitionV2",
+			Handler:    _RootCoord_CreatePartitionV2_Handler,
 		},
 		{
 			MethodName: "DropPartition",
@@ -2718,6 +2870,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateRole",
 			Handler:    _RootCoord_CreateRole_Handler,
+		},
+		{
+			MethodName: "AlterRole",
+			Handler:    _RootCoord_AlterRole_Handler,
 		},
 		{
 			MethodName: "DropRole",
@@ -2802,6 +2958,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetQuotaMetrics",
 			Handler:    _RootCoord_GetQuotaMetrics_Handler,
+		},
+		{
+			MethodName: "ClearReadTaskQueue",
+			Handler:    _RootCoord_ClearReadTaskQueue_Handler,
 		},
 		{
 			MethodName: "BackupEzk",

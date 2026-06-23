@@ -62,3 +62,27 @@ func (c *Client) CreateReplicateStream(ctx context.Context, opts ...grpc.CallOpt
 	})
 	return streamClient, err
 }
+
+// DumpMessages streams messages from a WAL range for data salvage.
+// It is typically used after a force failover: callers obtain the salvage
+// checkpoint from GetReplicateInfo and pass its message id as the request's
+// StartMessageId to recover messages that were not yet synchronized.
+//
+// The returned stream yields DumpMessagesResponse frames; each frame carries
+// either an error status or a non-system message. Iterate with stream.Recv()
+// until io.EOF.
+func (c *Client) DumpMessages(ctx context.Context, req *milvuspb.DumpMessagesRequest, opts ...grpc.CallOption) (milvuspb.MilvusService_DumpMessagesClient, error) {
+	var streamClient milvuspb.MilvusService_DumpMessagesClient
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		var err error
+		streamClient, err = milvusService.DumpMessages(ctx, req, opts...)
+		if err != nil {
+			return err
+		}
+		if streamClient == nil {
+			return errors.New("stream client is nil")
+		}
+		return nil
+	})
+	return streamClient, err
+}

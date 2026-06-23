@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -53,6 +54,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 		State:          datapb.CompactionTaskState_executing,
 		InputSegments:  []int64{200, 201},
 		ResultSegments: []int64{100, 200},
+		Schema:         &schemapb.CollectionSchema{Version: 1},
 	}, nil, s.mockMeta, newMockVersionManager())
 	alloc := allocator.NewMockAllocator(s.T())
 	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
@@ -84,11 +86,125 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 			NodeID:         1,
 			InputSegments:  []int64{200, 201},
 			ResultSegments: []int64{100, 200},
+			Schema:         &schemapb.CollectionSchema{Version: 1},
 		}, nil, s.mockMeta, newMockVersionManager())
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrSegmentNotFound)
 	})
+}
+
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() {
+	s.Run("nil_schema", func() {
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			Type:          datapb.CompactionType_MixCompaction,
+			InputSegments: []int64{200},
+		}, nil, NewMockCompactionMeta(s.T()), newMockVersionManager())
+
+		_, err := task.BuildCompactionRequest()
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+	})
+
+	s.Run("mix_task_schema_older_than_input", func() {
+		meta := NewMockCompactionMeta(s.T())
+		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            200,
+			State:         commonpb.SegmentState_Flushed,
+			SchemaVersion: 3,
+		}}).Once()
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			Type:          datapb.CompactionType_MixCompaction,
+			InputSegments: []int64{200},
+			Schema:        &schemapb.CollectionSchema{Version: 2},
+		}, nil, meta, newMockVersionManager())
+
+		_, err := task.BuildCompactionRequest()
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+	})
+
+	s.Run("sort_task_schema_older_than_input", func() {
+		meta := NewMockCompactionMeta(s.T())
+		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            200,
+			State:         commonpb.SegmentState_Flushed,
+			SchemaVersion: 3,
+		}}).Once()
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			Type:          datapb.CompactionType_SortCompaction,
+			InputSegments: []int64{200},
+			Schema:        &schemapb.CollectionSchema{Version: 2},
+		}, nil, meta, newMockVersionManager())
+		task.slotUsage.Store(1)
+
+		_, err := task.BuildCompactionRequest()
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrIllegalCompactionPlan)
+	})
+
+	for _, test := range []struct {
+		name           string
+		compactionType datapb.CompactionType
+		taskSchema     int32
+		inputSchema    int32
+		storeSlotUsage bool
+		expectedSchema int32
+	}{
+		{
+			name:           "mix_task_schema_newer_than_mixed_inputs_allowed",
+			compactionType: datapb.CompactionType_MixCompaction,
+			taskSchema:     4,
+			inputSchema:    3,
+			expectedSchema: 4,
+		},
+		{
+			name:           "sort_task_schema_equal_input_allowed",
+			compactionType: datapb.CompactionType_SortCompaction,
+			taskSchema:     3,
+			inputSchema:    3,
+			storeSlotUsage: true,
+			expectedSchema: 3,
+		},
+		{
+			name:           "sort_task_schema_newer_than_input_allowed",
+			compactionType: datapb.CompactionType_SortCompaction,
+			taskSchema:     4,
+			inputSchema:    3,
+			storeSlotUsage: true,
+			expectedSchema: 4,
+		},
+	} {
+		s.Run(test.name, func() {
+			meta := NewMockCompactionMeta(s.T())
+			meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            200,
+				State:         commonpb.SegmentState_Flushed,
+				SchemaVersion: test.inputSchema,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
+			}}).Once()
+			task := newMixCompactionTask(&datapb.CompactionTask{
+				PlanID:        1,
+				Type:          test.compactionType,
+				InputSegments: []int64{200},
+				Schema:        &schemapb.CollectionSchema{Version: test.taskSchema},
+			}, nil, meta, newMockVersionManager())
+			if test.storeSlotUsage {
+				task.slotUsage.Store(1)
+			}
+			alloc := allocator.NewMockAllocator(s.T())
+			alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+			task.allocator = alloc
+
+			plan, err := task.BuildCompactionRequest()
+			s.NoError(err)
+			s.EqualValues(test.expectedSchema, plan.GetSchema().GetVersion())
+			s.Len(plan.GetSegmentBinlogs(), 1)
+		})
+	}
 }
 
 func (s *MixCompactionTaskSuite) TestProcess() {

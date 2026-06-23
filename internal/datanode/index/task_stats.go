@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	_ "github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -227,7 +228,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	entityFilter := compaction.NewEntityFilter(deletePKs, st.req.GetCollectionTtl(), st.currentTime)
+	entityFilter := compaction.NewEntityFilter(deletePKs, st.req.GetCollectionTtl(), st.currentTime, 0)
 
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
@@ -292,7 +293,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			newManifest, err := packed.AddStatsToManifest(
 				st.manifestPath, st.req.GetStorageConfig(), statEntries)
 			if err != nil {
-				return nil, fmt.Errorf("failed to add stats to manifest: %w", err)
+				return nil, merr.Wrap(err, "failed to add stats to manifest")
 			}
 			st.manifestPath = newManifest
 		}
@@ -496,7 +497,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok && !enableNull {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrServiceInternalMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
@@ -580,6 +581,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			for _, info := range indexStats.GetSerializedIndexInfos() {
 				uploaded[info.FileName] = info.FileSize
 			}
+			// TextMatch upload returns relative filenames. Store full paths in
+			// metadata/task results for mixed-version compatibility.
+			statsFiles := metautil.BuildStatsFilePaths(statsBasePath, lo.Keys(uploaded))
 
 			mu.Lock()
 			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
@@ -587,7 +591,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 				FieldID:                   field.GetFieldID(),
 				Version:                   version,
 				BuildID:                   taskID,
-				Files:                     lo.Keys(uploaded),
+				Files:                     statsFiles,
 				LogSize:                   totalSize,
 				MemorySize:                totalSize,
 				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(st.req.GetCurrentScalarIndexVersion()),
@@ -597,7 +601,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			log.Info("field enable match, create text index done",
 				zap.Int64("targetSegmentID", st.req.GetTargetSegmentID()),
 				zap.Int64("field id", field.GetFieldID()),
-				zap.Strings("files", lo.Keys(uploaded)),
+				zap.Strings("files", statsFiles),
 			)
 			return nil
 		})
@@ -608,28 +612,14 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	}
 
 	// When manifest_path is set, register text index stats in manifest.
-	// C++ Upload() returns relative paths; convert to absolute by prepending basePath
-	// before registering with manifest (loon library expects absolute paths).
-	// Use a separate copy for manifest so the original stats retain relative paths
-	// for dual-write to etcd (etcd stores relative paths, reconstructed on read).
+	// TextStatsLogs already carries full object keys for mixed-version compatibility;
+	// AddStatsToManifest stores the manifest-relative representation at commit time.
 	if st.manifestPath != "" && len(textIndexLogs) > 0 {
-		manifestStats := make(map[int64]*datapb.TextIndexStats, len(textIndexLogs))
-		for fieldID, stats := range textIndexLogs {
-			cloned := proto.Clone(stats).(*datapb.TextIndexStats)
-			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "text_index", stats.GetFieldID())
-			if err != nil {
-				return err
-			}
-			for i, f := range cloned.GetFiles() {
-				cloned.Files[i] = basePath + "/" + f
-			}
-			manifestStats[fieldID] = cloned
-		}
-		statEntries := packed.TextIndexStatEntries(manifestStats, st.req.GetCurrentScalarIndexVersion())
+		statEntries := packed.TextIndexStatEntries(textIndexLogs, st.req.GetCurrentScalarIndexVersion())
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
-			return fmt.Errorf("failed to add text index stats to manifest: %w", err)
+			return merr.Wrap(err, "failed to add text index stats to manifest")
 		}
 		st.manifestPath = newManifest
 		// Dual-write: keep textIndexLogs populated so it is stored in segment metadata as a
@@ -696,7 +686,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok && !enableNull {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrServiceInternalMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
@@ -807,7 +797,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
-			return fmt.Errorf("failed to add JSON key stats to manifest: %w", err)
+			return merr.Wrap(err, "failed to add JSON key stats to manifest")
 		}
 		st.manifestPath = newManifest
 		// Dual-write: keep jsonKeyIndexStats populated so it is stored in segment metadata as a
@@ -840,7 +830,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 	if req.GetStorageVersion() == storage.StorageV3 {
 		basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 		if err != nil {
-			return "", fmt.Errorf("failed to unmarshal manifest path for %s basePath: %w", statsType, err)
+			return "", merr.Wrapf(err, "failed to unmarshal manifest path for %s basePath", statsType)
 		}
 		return fmt.Sprintf("%s/_stats/%s.%d", basePath, statsType, fieldID), nil
 	}
@@ -856,7 +846,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
 	}
-	return "", fmt.Errorf("unknown stats type: %s", statsType)
+	return "", merr.WrapErrParameterInvalidMsg("unknown stats type: %s", statsType)
 }
 
 func buildIndexParams(
@@ -877,6 +867,7 @@ func buildIndexParams(
 		PartitionID:                      req.GetPartitionID(),
 		SegmentID:                        req.GetTargetSegmentID(),
 		IndexVersion:                     req.GetTaskVersion(),
+		NumRows:                          req.GetNumRows(),
 		InsertFiles:                      files,
 		FieldSchema:                      field,
 		StorageConfig:                    storageConfig,
@@ -897,6 +888,10 @@ func buildIndexParams(
 			req.GetPartitionID(),
 			req.GetTargetSegmentID(),
 		)
+		if schema := req.GetSchema(); schema != nil {
+			params.ExternalSource = schema.GetExternalSource()
+			params.ExternalSpec = schema.GetExternalSpec()
+		}
 		log.Info("build index params", zap.Any("segment insert files", params.SegmentInsertFiles))
 	}
 

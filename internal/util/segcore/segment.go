@@ -8,7 +8,6 @@ package segcore
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/plan_c.h"
-#include "segcore/reduce_c.h"
 */
 import "C"
 
@@ -19,7 +18,6 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -87,7 +85,16 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
-	return &cSegmentImpl{id: req.SegmentID, ptr: ptr}, nil
+	seg := &cSegmentImpl{id: req.SegmentID, ptr: ptr}
+	if req.LoadInfo != nil {
+		if commitTs := req.LoadInfo.GetCommitTimestamp(); commitTs != 0 {
+			if err := seg.SetCommitTimestamp(commitTs); err != nil {
+				C.DeleteSegment(ptr)
+				return nil, merr.Wrap(err, "failed to set commit timestamp on segment")
+			}
+		}
+	}
+	return seg, nil
 }
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
@@ -249,7 +256,7 @@ func (s *cSegmentImpl) Insert(ctx context.Context, request *InsertRequest) (*Ins
 
 	insertRecordBlob, err := proto.Marshal(request.Record)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal insert record: %s", err)
+		return nil, merr.Wrap(err, "failed to marshal insert record")
 	}
 
 	numOfRow := len(request.RowIDs)
@@ -291,7 +298,7 @@ func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*Del
 
 	dataBlob, err := proto.Marshal(ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ids: %s", err)
+		return nil, merr.Wrap(err, "failed to marshal ids")
 	}
 	status := C.Delete(s.ptr,
 		cSize,
@@ -312,7 +319,7 @@ func (s *cSegmentImpl) LoadFieldData(ctx context.Context, request *LoadFieldData
 
 	status := C.LoadFieldData(s.ptr, creq.cLoadFieldDataInfo)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "failed to load field data")
+		return nil, merr.Wrap(err, "failed to load field data")
 	}
 	return &LoadFieldDataResult{}, nil
 }
@@ -336,6 +343,16 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 }
 
 func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
+	if req == nil {
+		return merr.WrapErrParameterInvalidMsg("reopen request is nil")
+	}
+	if req.LoadInfo == nil {
+		return merr.WrapErrParameterInvalidMsg("reopen load info is nil")
+	}
+	if req.Schema == nil {
+		return merr.WrapErrParameterInvalidMsg("reopen schema is nil")
+	}
+
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
@@ -345,6 +362,18 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if err != nil {
 		return err
 	}
+	if len(loadInfoBlob) == 0 {
+		return merr.WrapErrServiceInternalMsg("reopen load info blob is empty")
+	}
+
+	schemaBlob, err := proto.Marshal(req.Schema)
+	if err != nil {
+		return err
+	}
+	if len(schemaBlob) == 0 {
+		return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
+	}
+	defer runtime.KeepAlive(schemaBlob)
 
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
@@ -353,6 +382,9 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 				s.ptr,
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
 				C.int64_t(len(loadInfoBlob)),
+				unsafe.Pointer(&schemaBlob[0]),
+				C.int64_t(len(schemaBlob)),
+				C.uint64_t(req.SchemaVersion),
 			))
 		},
 		cgo.WithName("segment-reopen"),
@@ -365,7 +397,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
 	status := C.DropSealedSegmentIndex(s.ptr, C.int64_t(fieldID))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to drop index")
+		return merr.Wrap(err, "failed to drop index")
 	}
 	return nil
 }
@@ -373,7 +405,7 @@ func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
 func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error {
 	status := C.DropSealedSegmentJSONIndex(s.ptr, C.int64_t(fieldID), C.CString(nestedPath))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to drop json index")
+		return merr.Wrap(err, "failed to drop json index")
 	}
 	return nil
 }
@@ -381,6 +413,14 @@ func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedP
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)
+}
+
+// SetCommitTimestamp sets the commit timestamp for the segment.
+// Import segments use this to ensure rows with old historical timestamps are
+// not visible to queries dispatched before T_commit.
+func (s *cSegmentImpl) SetCommitTimestamp(ts uint64) error {
+	status := C.SegmentSetCommitTimestamp(s.ptr, C.uint64_t(ts))
+	return ConsumeCStatusIntoError(&status)
 }
 
 // ConvertToSegcoreSegmentLoadInfo converts querypb.SegmentLoadInfo to segcorepb.SegmentLoadInfo.
@@ -418,8 +458,9 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		JsonKeyStatsLogs:     convertJSONKeyStats(jsonStats, jsonBasePaths),
 		Priority:             src.GetPriority(),
 		ManifestPath:         src.GetManifestPath(),
-		UseTakeForOutput:     paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.GetAsBool(),
+		UseTakeForOutput:     src.GetUseTakeForOutput(),
 		EstimatedBytesPerRow: src.GetEstimatedBytesPerRow(),
+		CommitTimestamp:      src.GetCommitTimestamp(),
 	}
 }
 
@@ -539,6 +580,7 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 			NumRows:                   fii.GetNumRows(),
 			CurrentIndexVersion:       fii.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: fii.GetCurrentScalarIndexVersion(),
+			IndexStorePathVersion:     fii.GetIndexStorePathVersion(),
 		})
 	}
 	return result
@@ -580,13 +622,14 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[i
 		)
 
 		result[k] = &segcorepb.TextIndexStats{
-			FieldID:    v.GetFieldID(),
-			Version:    v.GetVersion(),
-			Files:      files,
-			LogSize:    v.GetLogSize(),
-			MemorySize: v.GetMemorySize(),
-			BuildID:    v.GetBuildID(),
-			BasePath:   basePath,
+			FieldID:                   v.GetFieldID(),
+			Version:                   v.GetVersion(),
+			Files:                     files,
+			LogSize:                   v.GetLogSize(),
+			MemorySize:                v.GetMemorySize(),
+			BuildID:                   v.GetBuildID(),
+			CurrentScalarIndexVersion: v.GetCurrentScalarIndexVersion(),
+			BasePath:                  basePath,
 		}
 	}
 	return result

@@ -84,7 +84,7 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	suite.scheduler = task.NewMockScheduler(suite.T())
-	suite.scheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.scheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	// Initialize global assign policy factory before creating checker
@@ -1042,7 +1042,7 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 
 	// Helper to get ch2DelegatorList
 	getCh2DelegatorList := func() map[string][]*meta.DmChannel {
-		delegatorList := checker.dist.ChannelDistManager.GetByCollectionAndFilter(collectionID, meta.WithReplica2Channel(replica))
+		delegatorList := checker.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
 		return lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
 			return d.View.Channel
 		})
@@ -1150,7 +1150,7 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 
 	// Helper to get ch2DelegatorList
 	getCh2DelegatorList := func() map[string][]*meta.DmChannel {
-		delegatorList := checker.dist.ChannelDistManager.GetByCollectionAndFilter(collectionID, meta.WithReplica2Channel(replica))
+		delegatorList := checker.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
 		return lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
 			return d.View.Channel
 		})

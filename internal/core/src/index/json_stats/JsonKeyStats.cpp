@@ -30,9 +30,6 @@
 #include "NamedType/underlying_functionalities.hpp"
 #include "arrow/api.h"
 #include "boost/filesystem/operations.hpp"
-#include "bsoncxx/builder/basic/document.hpp"
-#include "bsoncxx/document/value.hpp"
-#include "bsoncxx/document/view.hpp"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Consts.h"
@@ -67,6 +64,7 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MmapManager.h"
+#include "storage/Util.h"
 #include "folly/ScopeGuard.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -515,10 +513,8 @@ JsonKeyStats::BuildKeyStatsForNullRow() {
     }
 
     // add null bson to shared column
-    bsoncxx::builder::basic::document null_doc;
-    auto null_bson = null_doc.extract();
-    parquet_writer_->AppendSharedRow(null_bson.view().data(),
-                                     null_bson.view().length());
+    BsonDocument null_doc;
+    parquet_writer_->AppendSharedRow(null_doc.data(), null_doc.length());
 
     parquet_writer_->AddCurrentRow();
 }
@@ -594,12 +590,13 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
         }
     }
 
-    bsoncxx::builder::basic::document final_doc;
-    BsonBuilder::ConvertDomToBson(root, final_doc);
+    BsonDocument final_doc;
+    BsonBuilder::ConvertDomToBson(root, final_doc.get());
     // build inverted index for shared key
     // cache pairs of (key, row_id/offset) into memory
     // when all rows processed, build it into disk
-    auto key_offsets = BsonBuilder::ExtractBsonKeyOffsets(final_doc.view());
+    auto key_offsets = BsonBuilder::ExtractBsonKeyOffsets(final_doc.data(),
+                                                          final_doc.length());
     for (const auto& [key, offset] : key_offsets) {
         LOG_TRACE(
             "add record to bson inverted index: {} with row_id: {} and offset: "
@@ -611,8 +608,7 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
             field_id_);
         bson_inverted_index_->AddRecord(key, row_id, offset);
     }
-    auto bson = final_doc.extract();
-    parquet_writer_->AppendSharedRow(bson.view().data(), bson.view().length());
+    parquet_writer_->AppendSharedRow(final_doc.data(), final_doc.length());
 
     parquet_writer_->AddCurrentRow();
 }
@@ -729,27 +725,8 @@ JsonKeyStats::Build(const Config& config) {
     if (is_built_)
         return;
     auto start_time = std::chrono::steady_clock::now();
-    auto field_datas = mem_file_manager_->CacheRawDataToMemory(config);
-
-    auto lack_binlog_rows =
-        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
-    if (lack_binlog_rows.has_value()) {
-        auto field_schema = mem_file_manager_->GetFieldDataMeta().field_schema;
-        auto default_value = [&]() -> std::optional<DefaultValueType> {
-            if (!field_schema.has_default_value()) {
-                return std::nullopt;
-            }
-            return field_schema.default_value();
-        }();
-        auto field_data = storage::CreateFieldData(
-            static_cast<DataType>(field_schema.data_type()),
-            DataType::NONE,
-            true,
-            1,
-            lack_binlog_rows.value());
-        field_data->FillFieldData(default_value, lack_binlog_rows.value());
-        field_datas.insert(field_datas.begin(), field_data);
-    }
+    auto field_datas =
+        storage::CacheRawDataAndFillMissing(mem_file_manager_, config);
 
     BuildWithFieldData(field_datas, schema_.nullable());
     auto end_time = std::chrono::steady_clock::now();

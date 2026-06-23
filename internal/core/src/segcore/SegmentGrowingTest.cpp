@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 #include <stddef.h>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -58,6 +59,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/Utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -134,6 +136,78 @@ TEST(Growing, RealCount) {
     status = segment->Delete(c, del_ids3.get(), del_tss3.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(0, segment->get_real_count());
+}
+
+TEST(Growing, InsertSkipsMissingFunctionOutputField) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(2);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto sparse = FieldId(pk.get() + 1);
+    schema->AddField(FieldName("sparse_out"),
+                     sparse,
+                     DataType::VECTOR_SPARSE_U32_F32,
+                     0,
+                     std::nullopt,
+                     false);
+    schema->add_function_output_field_id(sparse);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    auto insert_schema = std::make_shared<Schema>();
+    insert_schema->set_schema_version(1);
+    insert_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    insert_schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 5;
+    auto dataset = DataGen(insert_schema, row_count);
+    segment->PreInsert(row_count);
+    ASSERT_NO_THROW(segment->Insert(0,
+                                    row_count,
+                                    dataset.row_ids_.data(),
+                                    dataset.timestamps_.data(),
+                                    dataset.raw_));
+    EXPECT_FALSE(segment->FieldAccessible(sparse));
+}
+
+TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    auto segment = CreateGrowingSegment(old_schema, empty_index_meta);
+
+    constexpr int64_t row_count = 5;
+    auto dataset = DataGen(old_schema, row_count);
+    segment->Insert(0,
+                    row_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    auto label = FieldId(pk.get() + 1);
+    new_schema->AddField(FieldName("chunks[label]"),
+                         label,
+                         DataType::ARRAY,
+                         DataType::VARCHAR,
+                         true);
+    segment->Reopen(new_schema);
+
+    auto offsets = segment->GetArrayOffsets(label);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), row_count);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+    for (int64_t i = 0; i <= row_count; ++i) {
+        auto [start, end] = offsets->ElementIDRangeOfRow(i);
+        EXPECT_EQ(start, 0);
+        EXPECT_EQ(end, 0);
+    }
 }
 
 class GrowingTest
@@ -876,6 +950,173 @@ TEST_P(GrowingTest, FillVectorArrayData) {
         EXPECT_EQ(int64_result->valid_data_size(), 0);
         EXPECT_EQ(array_float_vector_result->valid_data_size(), 0);
     }
+}
+
+TEST(GrowingTest, EmptyVectorArrayRowsInitializeElementOneof) {
+    auto schema = std::make_shared<Schema>();
+    auto array_float_vector =
+        schema->AddDebugVectorArrayField("array_float_vector",
+                                         DataType::VECTOR_FLOAT,
+                                         8,
+                                         knowhere::metric::L2,
+                                         true);
+
+    auto data =
+        CreateEmptyVectorDataArray(2, schema->operator[](array_float_vector));
+
+    ASSERT_EQ(data->vectors().vector_array().data_size(), 2);
+    for (const auto& row : data->vectors().vector_array().data()) {
+        EXPECT_EQ(row.dim(), 8);
+        EXPECT_EQ(row.data_case(),
+                  proto::schema::VectorField::DataCase::kFloatVector);
+        EXPECT_TRUE(row.float_vector().data().empty());
+        EXPECT_NO_THROW(milvus::VectorArray(row));
+    }
+}
+
+TEST(GrowingTest, QueryNullableVectorArrayUsesPhysicalOffsets) {
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_float_vector =
+        schema->AddDebugVectorArrayField("array_float_vector",
+                                         DataType::VECTOR_FLOAT,
+                                         4,
+                                         knowhere::metric::L2,
+                                         true);
+    schema->set_primary_field_id(int64_field);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(false);
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment, nullptr);
+
+    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    insert_record_proto->set_num_rows(2);
+
+    auto pk_data = insert_record_proto->add_fields_data();
+    pk_data->set_field_id(int64_field.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(10);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(11);
+
+    auto array_data = insert_record_proto->add_fields_data();
+    array_data->set_field_id(array_float_vector.get());
+    array_data->set_type(proto::schema::DataType::ArrayOfVector);
+    array_data->add_valid_data(false);
+    array_data->add_valid_data(true);
+    array_data->mutable_vectors()->set_dim(4);
+    auto vector_array = array_data->mutable_vectors()->mutable_vector_array();
+    vector_array->set_dim(4);
+    vector_array->set_element_type(proto::schema::DataType::FloatVector);
+    auto valid_row = vector_array->add_data();
+    valid_row->set_dim(4);
+    for (auto value : {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F}) {
+        valid_row->mutable_float_vector()->add_data(value);
+    }
+
+    std::vector<int64_t> row_ids = {0, 1};
+    std::vector<Timestamp> timestamps = {100, 101};
+    auto offset = segment->PreInsert(2);
+    segment->Insert(offset,
+                    2,
+                    row_ids.data(),
+                    timestamps.data(),
+                    insert_record_proto.get());
+
+    std::array<int64_t, 2> offsets = {0, 1};
+    std::unique_ptr<DataArray> result;
+    EXPECT_NO_THROW(
+        result = segment->bulk_subscript(
+            nullptr, array_float_vector, offsets.data(), offsets.size()));
+    ASSERT_NE(result, nullptr);
+
+    ASSERT_EQ(result->valid_data_size(), 2);
+    EXPECT_FALSE(result->valid_data(0));
+    EXPECT_TRUE(result->valid_data(1));
+    ASSERT_EQ(result->vectors().vector_array().data_size(), 2);
+    EXPECT_TRUE(
+        result->vectors().vector_array().data(0).float_vector().data().empty());
+    const auto& row = result->vectors().vector_array().data(1);
+    ASSERT_EQ(row.float_vector().data_size(), 8);
+    EXPECT_FLOAT_EQ(row.float_vector().data(0), 1.0F);
+    EXPECT_FLOAT_EQ(row.float_vector().data(7), 8.0F);
+}
+
+TEST(GrowingTest, QueryNullableVectorArrayStoresRowDenseInputByValidData) {
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_float_vector =
+        schema->AddDebugVectorArrayField("array_float_vector",
+                                         DataType::VECTOR_FLOAT,
+                                         4,
+                                         knowhere::metric::L2,
+                                         true);
+    schema->set_primary_field_id(int64_field);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(false);
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment, nullptr);
+
+    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    insert_record_proto->set_num_rows(2);
+
+    auto pk_data = insert_record_proto->add_fields_data();
+    pk_data->set_field_id(int64_field.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(10);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(11);
+
+    auto array_data = insert_record_proto->add_fields_data();
+    array_data->set_field_id(array_float_vector.get());
+    array_data->set_type(proto::schema::DataType::ArrayOfVector);
+    array_data->add_valid_data(false);
+    array_data->add_valid_data(true);
+    array_data->mutable_vectors()->set_dim(4);
+    auto vector_array = array_data->mutable_vectors()->mutable_vector_array();
+    vector_array->set_dim(4);
+    vector_array->set_element_type(proto::schema::DataType::FloatVector);
+    auto null_row = vector_array->add_data();
+    null_row->set_dim(4);
+    null_row->mutable_float_vector();
+    auto valid_row = vector_array->add_data();
+    valid_row->set_dim(4);
+    for (auto value : {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F}) {
+        valid_row->mutable_float_vector()->add_data(value);
+    }
+
+    std::vector<int64_t> row_ids = {0, 1};
+    std::vector<Timestamp> timestamps = {100, 101};
+    auto offset = segment->PreInsert(2);
+    segment->Insert(offset,
+                    2,
+                    row_ids.data(),
+                    timestamps.data(),
+                    insert_record_proto.get());
+
+    std::array<int64_t, 2> offsets = {0, 1};
+    std::unique_ptr<DataArray> result;
+    EXPECT_NO_THROW(
+        result = segment->bulk_subscript(
+            nullptr, array_float_vector, offsets.data(), offsets.size()));
+    ASSERT_NE(result, nullptr);
+
+    ASSERT_EQ(result->valid_data_size(), 2);
+    EXPECT_FALSE(result->valid_data(0));
+    EXPECT_TRUE(result->valid_data(1));
+    ASSERT_EQ(result->vectors().vector_array().data_size(), 2);
+    EXPECT_TRUE(
+        result->vectors().vector_array().data(0).float_vector().data().empty());
+    const auto& row = result->vectors().vector_array().data(1);
+    ASSERT_EQ(row.float_vector().data_size(), 8);
+    EXPECT_FLOAT_EQ(row.float_vector().data(0), 1.0F);
+    EXPECT_FLOAT_EQ(row.float_vector().data(7), 8.0F);
 }
 
 TEST(GrowingTest, LoadVectorArrayData) {

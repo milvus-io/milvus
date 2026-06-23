@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -68,7 +67,6 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		zap.Int32("current_index_version", req.GetCurrentIndexVersion()),
 		zap.Any("storepath", req.GetStorePath()),
 		zap.Any("storeversion", req.GetStoreVersion()),
-		zap.Any("indexstorepath", req.GetIndexStorePath()),
 		zap.Any("dim", req.GetDim()),
 	)
 	ctx, sp := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "DataNode-CreateIndex", trace.WithAttributes(
@@ -83,7 +81,9 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		Cancel: taskCancel,
 		State:  commonpb.IndexState_InProgress,
 	}); oldInfo != nil {
-		err := merr.WrapErrIndexDuplicate(req.GetIndexName(), "building index task existed")
+		// Node-internal dedup of a coordinator-dispatched build task: a duplicate
+		// is a scheduling race, not the user re-creating an index.
+		err := merr.WrapErrServiceInternalMsg("building index task existed, index=%s, buildID=%d", req.GetIndexName(), req.GetBuildID())
 		log.Warn("duplicated index build task", zap.Error(err))
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
@@ -255,7 +255,7 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 		return node.createStatsTask(ctx, statsRequest)
 	default:
 		log.Warn("DataNode receive unknown type job")
-		return merr.Status(fmt.Errorf("DataNode receive unknown type job with TaskID: %d", req.GetTaskID())), nil
+		return merr.Status(merr.WrapErrServiceInternalMsg("DataNode receive unknown type job with TaskID: %d", req.GetTaskID())), nil
 	}
 }
 
@@ -275,7 +275,6 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		zap.Int32("current_index_version", req.GetCurrentIndexVersion()),
 		zap.String("storePath", req.GetStorePath()),
 		zap.Int64("storeVersion", req.GetStoreVersion()),
-		zap.String("indexStorePath", req.GetIndexStorePath()),
 		zap.Int64("dim", req.GetDim()),
 		zap.Int64("fieldID", req.GetFieldID()),
 		zap.String("fieldType", req.GetFieldType().String()),
@@ -289,8 +288,9 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 	}
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &index.IndexTaskInfo{
-		Cancel: taskCancel,
-		State:  commonpb.IndexState_InProgress,
+		Cancel:                taskCancel,
+		State:                 commonpb.IndexState_InProgress,
+		IndexStorePathVersion: req.GetIndexStorePathVersion(),
 	}); oldInfo != nil {
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeIndexJob.String(),
 			fmt.Sprintf("building index task existed with %s-%d", req.GetClusterID(), req.GetBuildID()))
@@ -455,7 +455,7 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 	default:
 		log.Warn("DataNode receive querying unknown type jobs")
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(errors.New("DataNode receive querying unknown type jobs")),
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("DataNode receive querying unknown type jobs")),
 		}, nil
 	}
 }
@@ -480,7 +480,7 @@ func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJob
 	log.Debug("query index jobs result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("tasks '%v' not found", req.GetTaskIDs())),
 		}, nil
 	}
 	return &workerpb.QueryJobsV2Response{
@@ -509,7 +509,7 @@ func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJob
 	log.Debug("query stats job result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("tasks '%v' not found", req.GetTaskIDs())),
 		}, nil
 	}
 	return &workerpb.QueryJobsV2Response{
@@ -543,7 +543,7 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 	log.Debug("query analyze jobs result success", zap.Any("results", results))
 	if len(results) == 0 {
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("tasks '%v' not found", req.GetTaskIDs())),
 		}, nil
 	}
 	return &workerpb.QueryJobsV2Response{
@@ -614,6 +614,6 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 		return merr.Success(), nil
 	default:
 		log.Warn("DataNode receive dropping unknown type jobs")
-		return merr.Status(errors.New("DataNode receive dropping unknown type jobs")), nil
+		return merr.Status(merr.WrapErrServiceInternalMsg("DataNode receive dropping unknown type jobs")), nil
 	}
 }

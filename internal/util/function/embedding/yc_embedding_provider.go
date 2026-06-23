@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -51,9 +52,9 @@ type YCEmbeddingProvider struct {
 	apiKey    string
 	modelName string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewYCEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*YCEmbeddingProvider, error) {
@@ -75,7 +76,7 @@ func NewYCEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *s
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("yc embedding model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("yc embedding model name is required")
 	}
 
 	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.YandexCloudAKEnvStr, extraInfo)
@@ -83,20 +84,22 @@ func NewYCEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *s
 		return nil, err
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.YandexCloudAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.YandexCloudAKEnvStr)
 	}
 	if url == "" {
 		url = defaultYCTextEmbeddingURL
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := YCEmbeddingProvider{
-		fieldDim:   fieldDim,
-		url:        url,
-		apiKey:     apiKey,
-		modelName:  modelName,
-		maxBatch:   128,
-		timeoutSec: 30,
-		extraInfo:  extraInfo,
+		fieldDim:  fieldDim,
+		url:       url,
+		apiKey:    apiKey,
+		modelName: modelName,
+		maxBatch:  128,
+		timeoutMs: timeoutMs,
+		extraInfo: extraInfo,
 	}
 	return &provider, nil
 }
@@ -135,18 +138,18 @@ func (provider *YCEmbeddingProvider) CallEmbedding(ctx context.Context, texts []
 			req.Texts = nil
 		}
 
-		resp, err := models.PostRequest[YCEmbeddingResponse](req, provider.url, provider.headers(), provider.timeoutSec)
+		resp, err := models.PostRequest[YCEmbeddingResponse](req, provider.url, provider.headers(), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 
 		embeddings := extractYCEmbeddings(resp)
 		if end-i != len(embeddings) {
-			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(embeddings))
+			return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(embeddings))
 		}
 		for _, emb := range embeddings {
 			if len(emb) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(emb))
 			}
 			data = append(data, emb)

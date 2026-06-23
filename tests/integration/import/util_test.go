@@ -26,7 +26,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
@@ -36,6 +38,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	pq "github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
@@ -105,6 +108,98 @@ func searilizeParquetFile(schema *schemapb.CollectionSchema, insertData *storage
 		return nil, err
 	}
 	return buf, nil
+}
+
+func generateFixedSizeListParquetFile(
+	c *cluster.MiniClusterV3,
+	arrayFieldName string,
+	vectorFieldName string,
+	rowCount int,
+	arraySize int,
+	vectorDim int,
+) (string, error) {
+	mem := memory.NewGoAllocator()
+	int32List := buildFixedSizeInt32List(mem, int32(arraySize), rowCount)
+	defer int32List.Release()
+	float32List := buildFixedSizeFloat32List(mem, int32(vectorDim), rowCount)
+	defer float32List.Release()
+
+	pqSchema := arrow.NewSchema([]arrow.Field{
+		{Name: arrayFieldName, Type: int32List.DataType(), Nullable: false},
+		{Name: vectorFieldName, Type: float32List.DataType(), Nullable: false},
+	}, nil)
+
+	buf := bytes.NewBuffer(make([]byte, 0, 10240))
+	fw, err := pqarrow.NewFileWriter(
+		pqSchema,
+		buf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(int64(rowCount))),
+		pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema()),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{int32List, float32List}, int64(rowCount))
+	defer recordBatch.Release()
+	if err := fw.Write(recordBatch); err != nil {
+		return "", err
+	}
+	if err := fw.Close(); err != nil {
+		return "", err
+	}
+
+	filePath := path.Join(c.RootPath(), "parquet", uuid.New().String()+".parquet")
+	if err := c.ChunkManager.Write(context.Background(), filePath, buf.Bytes()); err != nil {
+		return "", err
+	}
+	return filePath, nil
+}
+
+func buildFixedSizeInt32List(mem memory.Allocator, listSize int32, rowCount int) arrow.Array {
+	builder := array.NewFixedSizeListBuilderWithField(mem, listSize, arrow.Field{
+		Name:     "item",
+		Type:     arrow.PrimitiveTypes.Int32,
+		Nullable: false,
+	})
+	defer builder.Release()
+
+	validRows := make([]bool, rowCount)
+	for i := range validRows {
+		validRows[i] = true
+	}
+	builder.AppendValues(validRows)
+
+	valueBuilder := builder.ValueBuilder().(*array.Int32Builder)
+	for row := 0; row < rowCount; row++ {
+		for col := 0; col < int(listSize); col++ {
+			valueBuilder.Append(int32(row + col))
+		}
+	}
+	return builder.NewArray()
+}
+
+func buildFixedSizeFloat32List(mem memory.Allocator, listSize int32, rowCount int) arrow.Array {
+	builder := array.NewFixedSizeListBuilderWithField(mem, listSize, arrow.Field{
+		Name:     "item",
+		Type:     arrow.PrimitiveTypes.Float32,
+		Nullable: false,
+	})
+	defer builder.Release()
+
+	validRows := make([]bool, rowCount)
+	for i := range validRows {
+		validRows[i] = true
+	}
+	builder.AppendValues(validRows)
+
+	valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
+	for row := 0; row < rowCount; row++ {
+		for col := 0; col < int(listSize); col++ {
+			valueBuilder.Append(float32(row*int(listSize) + col))
+		}
+	}
+	return builder.NewArray()
 }
 
 func GenerateNumpyFiles(c *cluster.MiniClusterV3, schema *schemapb.CollectionSchema, rowCount int) (*internalpb.ImportFile, error) {
@@ -248,6 +343,21 @@ func GenerateCSVFile(t *testing.T, c *cluster.MiniClusterV3, schema *schemapb.Co
 		panic(err)
 	}
 	return filePath, sep
+}
+
+// AssertImportSegmentsHaveCommitTimestamp verifies that all flushed segments
+// for the given collection have CommitTimestamp > 0 after import.
+func AssertImportSegmentsHaveCommitTimestamp(t *testing.T, c *cluster.MiniClusterV3, collectionName string) {
+	segments, err := c.ShowSegments(collectionName)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, segments, "expected at least one segment after import")
+	for _, seg := range segments {
+		if seg.GetState() == commonpb.SegmentState_Flushed {
+			assert.Greater(t, seg.GetCommitTimestamp(), uint64(0),
+				"segment %d should have CommitTimestamp > 0, got %d",
+				seg.GetID(), seg.GetCommitTimestamp())
+		}
+	}
 }
 
 func WaitForImportDone(ctx context.Context, c *cluster.MiniClusterV3, jobID string) error {

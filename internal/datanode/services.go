@@ -194,11 +194,11 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	}
 
 	if req.GetBeginLogID() == 0 {
-		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid beginLogID")), nil
+		return merr.Status(merr.WrapErrServiceInternalMsg("invalid beginLogID")), nil
 	}
 
 	if req.GetPreAllocatedLogIDs().GetBegin() == 0 || req.GetPreAllocatedLogIDs().GetEnd() == 0 {
-		return merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid beginID %d or invalid endID %d", req.GetPreAllocatedLogIDs().GetBegin(), req.GetPreAllocatedLogIDs().GetEnd()))), nil
+		return merr.Status(merr.WrapErrServiceInternalMsg(fmt.Sprintf("invalid beginID %d or invalid endID %d", req.GetPreAllocatedLogIDs().GetBegin(), req.GetPreAllocatedLogIDs().GetEnd()))), nil
 	}
 
 	/*
@@ -233,7 +233,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		)
 	case datapb.CompactionType_MixCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil
 		}
 		pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
 		if err != nil {
@@ -256,7 +256,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		)
 	case datapb.CompactionType_ClusteringCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil
 		}
 		if namespaceEnabled {
 			var sortFields []int64
@@ -281,7 +281,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		}
 	case datapb.CompactionType_SortCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil
 		}
 		pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
 		if err != nil {
@@ -302,11 +302,11 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			compactionParams,
 			sortFields,
 		)
-	case datapb.CompactionType_BackfillCompaction:
-		task = compactor.NewBackfillCompactionTask(taskCtx, cm, req, compactionParams)
+	case datapb.CompactionType_BumpSchemaVersionCompaction:
+		task = compactor.NewBumpSchemaVersionCompactionTask(taskCtx, cm, req, compactionParams)
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))
-		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
+		return merr.Status(merr.WrapErrServiceInternalMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
 	succeed, err := node.compactionExecutor.Enqueue(task)
@@ -790,7 +790,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		}
 		return node.CopySegment(ctx, req)
 	default:
-		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("CreateTask failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -807,7 +807,7 @@ func wrapQueryTaskResult[Resp proto.Message](resp Resp, properties taskcommon.Pr
 	}
 	statusResp, ok := any(resp).(ResponseWithStatus)
 	if !ok {
-		return &workerpb.QueryTaskResponse{Status: merr.Status(fmt.Errorf("response does not implement GetStatus"))}, nil
+		return &workerpb.QueryTaskResponse{Status: merr.Status(merr.WrapErrServiceInternalMsg("response does not implement GetStatus"))}, nil
 	}
 	return &workerpb.QueryTaskResponse{
 		Status:     statusResp.GetStatus(),
@@ -937,7 +937,7 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
 	default:
-		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("QueryTask failed", zap.Error(err))
 		return &workerpb.QueryTaskResponse{
 			Status: merr.Status(err),
@@ -997,7 +997,7 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			zap.String("clusterID", clusterID))
 		return merr.Success(), nil
 	default:
-		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("DropTask failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -1065,7 +1065,7 @@ func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, c
 			Status:          merr.Success(),
 			State:           indexpb.JobState_JobStateFinished,
 			KeptSegments:    task.GetKeptSegmentIDs(),
-			UpdatedSegments: task.GetNewSegments(),
+			UpdatedSegments: task.GetUpdatedSegments(),
 		}
 
 		return resp, nil

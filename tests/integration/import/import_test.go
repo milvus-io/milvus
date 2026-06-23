@@ -18,6 +18,7 @@ package importv2
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -331,6 +332,140 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.Empty(segments)
+}
+
+func (s *BulkInsertSuite) TestImportFixedSizeListParquet() {
+	const (
+		rowCount  = 100
+		arraySize = 3
+		vectorDim = 4
+	)
+
+	c := s.Cluster
+	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
+	defer cancel()
+
+	collectionName := "TestBulkInsert_FixedSizeList_" + funcutil.RandomString(8)
+	arrayFieldName := "fsl_array"
+
+	schema := integration.ConstructSchema(collectionName, vectorDim, true,
+		&schemapb.FieldSchema{
+			FieldID:      100,
+			Name:         integration.Int64Field,
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+			AutoID:       true,
+		},
+		&schemapb.FieldSchema{
+			FieldID:     101,
+			Name:        arrayFieldName,
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int32,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: fmt.Sprintf("%d", arraySize)},
+			},
+		},
+		&schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     integration.FloatVecField,
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: fmt.Sprintf("%d", vectorDim)},
+			},
+		},
+	)
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      common.DefaultShardsNum,
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createCollectionStatus.GetErrorCode())
+
+	filePath, err := generateFixedSizeListParquetFile(c, arrayFieldName, integration.FloatVecField, rowCount, arraySize, vectorDim)
+	s.NoError(err)
+
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: collectionName,
+		Files: []*internalpb.ImportFile{
+			{
+				Paths: []string{filePath},
+			},
+		},
+	})
+	s.NoError(err)
+	s.Equal(int32(0), importResp.GetStatus().GetCode())
+	s.NoError(WaitForImportDone(ctx, c, importResp.GetJobID()))
+
+	segments, err := c.ShowSegments(collectionName)
+	s.NoError(err)
+	s.NotEmpty(segments)
+	for _, segment := range segments {
+		s.NotEmpty(segment.GetBinlogs())
+		s.NoError(CheckLogID(segment.GetBinlogs()))
+		s.NotEmpty(segment.GetStatslogs())
+		s.NoError(CheckLogID(segment.GetStatslogs()))
+	}
+
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.FloatVecField,
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(vectorDim, s.indexType, s.metricType),
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode(), createIndexStatus.GetReason())
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode(), loadStatus.GetReason())
+	s.WaitForLoad(ctx, collectionName)
+
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName:   collectionName,
+		Expr:             fmt.Sprintf("%s >= 0", integration.Int64Field),
+		OutputFields:     []string{arrayFieldName, integration.FloatVecField},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode(), queryResult.GetStatus().GetReason())
+
+	var arrayData []*schemapb.ScalarField
+	var vectorData []float32
+	for _, fieldData := range queryResult.GetFieldsData() {
+		switch fieldData.GetFieldName() {
+		case arrayFieldName:
+			arrayData = fieldData.GetScalars().GetArrayData().GetData()
+		case integration.FloatVecField:
+			vectorData = fieldData.GetVectors().GetFloatVector().GetData()
+		}
+	}
+	s.Len(arrayData, rowCount)
+	s.Len(vectorData, rowCount*vectorDim)
+
+	seenRows := make(map[int32]struct{}, rowCount)
+	for i, row := range arrayData {
+		values := row.GetIntData().GetData()
+		s.Len(values, arraySize)
+		expectedRow := values[0]
+		s.EqualValues([]int32{expectedRow, expectedRow + 1, expectedRow + 2}, values)
+		s.Equal(float32(int(expectedRow)*vectorDim), vectorData[i*vectorDim])
+		for col := 1; col < vectorDim; col++ {
+			s.Equal(vectorData[i*vectorDim]+float32(col), vectorData[i*vectorDim+col])
+		}
+		seenRows[expectedRow] = struct{}{}
+	}
+	s.Len(seenRows, rowCount)
+	for row := 0; row < rowCount; row++ {
+		_, ok := seenRows[int32(row)]
+		s.True(ok)
+	}
 }
 
 func (s *BulkInsertSuite) TestDiskQuotaExceeded() {

@@ -40,9 +40,12 @@
 
 #include "common/Common.h"
 #include "common/Consts.h"
+#include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
 #include "common/TypeTraits.h"
 #include "common/Types.h"
 #include "common/VectorTrait.h"
@@ -52,11 +55,11 @@
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "knowhere/binaryset.h"
-#include "knowhere/object.h"
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
+#include "pb/index_coord.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -74,6 +77,8 @@
 #include "index/BitmapIndex.h"
 #include "index/StringIndexMarisa.h"
 #include "index/StringIndexSort.h"
+#include "index/VectorDiskIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectDOUBLE_Test;
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectFLOAT_Test;
@@ -272,6 +277,140 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Remove(small_index_file_path);
 }
 
+TEST_F(DiskAnnFileManagerTest, OpenInputStreamUsesBasenameForIndexPath) {
+    auto conf = milvus_storage::ArrowFileSystemConfig();
+    conf.storage_type = "local";
+    conf.root_path = TestLocalPath + "diskann_stream_contract";
+
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    ASSERT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
+
+    FieldDataMeta field_meta;
+    field_meta.collection_id = 100;
+    field_meta.partition_id = 20;
+    field_meta.segment_id = 30;
+    field_meta.field_id = 5;
+
+    IndexMeta index_meta;
+    index_meta.segment_id = 30;
+    index_meta.field_id = 5;
+    index_meta.build_id = 1000;
+    index_meta.index_version = 1;
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
+
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_meta, index_meta, cm_, fs));
+
+    const std::string local_path =
+        TestLocalPath + "cache/local_chunk/index_files/1000_1_30_5/index_data";
+    auto output = fm->OpenOutputStream(local_path);
+    const uint64_t expected = 0x1020304050607080ULL;
+    output->Write(expected);
+    output->Close();
+
+    auto input = fm->OpenInputStream("index_v1/100/20/30/1000/1/index_data");
+    uint64_t actual = 0;
+    input->Read(actual);
+    EXPECT_EQ(actual, expected);
+
+    boost::filesystem::remove_all(conf.root_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, OpenInputStreamDoesNotUseRemoteParentPath) {
+    auto conf = milvus_storage::ArrowFileSystemConfig();
+    conf.storage_type = "local";
+    conf.root_path = TestLocalPath + "diskann_stream_no_direct";
+
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    ASSERT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
+
+    FieldDataMeta field_meta;
+    field_meta.collection_id = 100;
+    field_meta.partition_id = 20;
+    field_meta.segment_id = 30;
+    field_meta.field_id = 5;
+
+    IndexMeta index_meta;
+    index_meta.segment_id = 30;
+    index_meta.field_id = 5;
+    index_meta.build_id = 1000;
+    index_meta.index_version = 1;
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
+
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_meta, index_meta, cm_, fs));
+
+    const std::string local_path =
+        TestLocalPath + "cache/local_chunk/index_files/1000_1_30_5/index_data";
+    auto output = fm->OpenOutputStream(local_path);
+    const uint64_t expected = 42;
+    output->Write(expected);
+    output->Close();
+
+    auto input = fm->OpenInputStream("wrong_parent/path/index_data");
+    uint64_t actual = 0;
+    input->Read(actual);
+    EXPECT_EQ(actual, expected);
+
+    boost::filesystem::remove_all(conf.root_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V0BuildRooted) {
+    storage::FieldDataMeta field_meta;
+    field_meta.collection_id = 100;
+    field_meta.partition_id = 20;
+    field_meta.segment_id = 30;
+    field_meta.field_id = 5;
+
+    storage::IndexMeta index_meta;
+    index_meta.segment_id = 30;
+    index_meta.field_id = 5;
+    index_meta.build_id = 1000;
+    index_meta.index_version = 1;
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_BUILD_ROOTED;
+
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    auto prefix = fm->GetRemoteIndexObjectPrefix();
+    EXPECT_TRUE(prefix.find("/index_files/1000/1/20/30") != std::string::npos)
+        << "prefix=" << prefix;
+    EXPECT_TRUE(prefix.find("/index_v1/") == std::string::npos)
+        << "prefix=" << prefix;
+}
+
+TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V1CollectionRooted) {
+    storage::FieldDataMeta field_meta;
+    field_meta.collection_id = 100;
+    field_meta.partition_id = 20;
+    field_meta.segment_id = 30;
+    field_meta.field_id = 5;
+
+    storage::IndexMeta index_meta;
+    index_meta.segment_id = 30;
+    index_meta.field_id = 5;
+    index_meta.build_id = 1000;
+    index_meta.index_version = 1;
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED;
+
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    auto prefix = fm->GetRemoteIndexObjectPrefix();
+    EXPECT_TRUE(prefix.find("/index_v1/100/20/30/1000/1") != std::string::npos)
+        << "prefix=" << prefix;
+    const std::string key = "vector_index_data";
+    auto composed = prefix + "/" + key;
+    EXPECT_TRUE(composed.find("/index_v1/100/20/30/1000/1/") !=
+                std::string::npos);
+}
+
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
@@ -379,6 +518,21 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPoolException) {
 }
 
 namespace {
+class FileSliceSizeGuard {
+ public:
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(milvus::FILE_SLICE_SIZE.load()) {
+        milvus::FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        milvus::FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+ private:
+    int64_t old_slice_size_;
+};
+
 const int64_t kOptFieldId = 123456;
 const std::string kOptFieldName = "opt_field_name";
 const int64_t kOptFieldDataRange = 1000;
@@ -521,6 +675,220 @@ CheckOptFieldCorrectness(
     }
 }
 }  // namespace
+
+TEST_F(DiskAnnFileManagerTest, FilterValidDataDiskFileSlices) {
+    std::vector<std::string> files = {"/remote/index/valid_data_0",
+                                      "valid_data_12",
+                                      "/remote/index/valid_data",
+                                      "/remote/index/valid_data_x",
+                                      "/remote/index/not_valid_data_0",
+                                      "/remote/index/_mem.index.bin",
+                                      "/remote/index/valid_data_0_extra",
+                                      "/remote/index/valid_data_"};
+
+    auto filtered = milvus::index::FilterValidDataDiskFileSlices(files);
+
+    ASSERT_EQ(filtered.size(), 2);
+    EXPECT_EQ(filtered[0], "/remote/index/valid_data_0");
+    EXPECT_EQ(filtered[1], "valid_data_12");
+}
+
+TEST_F(DiskAnnFileManagerTest, CacheValidDataDiskFileSlices) {
+    auto file_manager = CreateFileManager(cm_, fs_);
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
+    if (local_chunk_manager->Exist(local_index_prefix)) {
+        local_chunk_manager->RemoveDir(local_index_prefix);
+    }
+    local_chunk_manager->CreateDir(local_index_prefix);
+
+    auto valid_data_path =
+        local_index_prefix + "/" + milvus::index::VALID_DATA_KEY;
+    std::vector<uint8_t> payload = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    local_chunk_manager->CreateFile(valid_data_path);
+    local_chunk_manager->Write(valid_data_path, payload.data(), payload.size());
+
+    ASSERT_TRUE(file_manager->AddFile(valid_data_path));
+    auto remote_paths_to_size = file_manager->GetRemotePathsToFileSize();
+    std::vector<std::string> remote_files;
+    remote_files.reserve(remote_paths_to_size.size());
+    for (const auto& entry : remote_paths_to_size) {
+        remote_files.emplace_back(entry.first);
+    }
+
+    auto valid_data_files =
+        milvus::index::FilterValidDataDiskFileSlices(remote_files);
+    ASSERT_EQ(valid_data_files.size(), remote_files.size());
+
+    local_chunk_manager->Remove(valid_data_path);
+    ASSERT_FALSE(local_chunk_manager->Exist(valid_data_path));
+
+    file_manager->CacheIndexToDisk(valid_data_files,
+                                   milvus::proto::common::LoadPriority::HIGH);
+
+    ASSERT_TRUE(local_chunk_manager->Exist(valid_data_path));
+    ASSERT_EQ(local_chunk_manager->Size(valid_data_path), payload.size());
+    std::vector<uint8_t> read_payload(payload.size());
+    local_chunk_manager->Read(
+        valid_data_path, read_payload.data(), read_payload.size());
+    EXPECT_EQ(read_payload, payload);
+
+    local_chunk_manager->Remove(valid_data_path);
+    for (const auto& remote_file : remote_files) {
+        cm_->Remove(remote_file);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, CacheValidDataMultipleDiskFileSlices) {
+    FileSliceSizeGuard slice_size_guard(4);
+
+    auto file_manager = CreateFileManager(cm_, fs_);
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
+    if (local_chunk_manager->Exist(local_index_prefix)) {
+        local_chunk_manager->RemoveDir(local_index_prefix);
+    }
+    local_chunk_manager->CreateDir(local_index_prefix);
+
+    auto valid_data_path =
+        local_index_prefix + "/" + milvus::index::VALID_DATA_KEY;
+    std::vector<uint8_t> payload(45);
+    for (size_t i = 0; i < payload.size(); ++i) {
+        payload[i] = static_cast<uint8_t>(i);
+    }
+    local_chunk_manager->CreateFile(valid_data_path);
+    local_chunk_manager->Write(valid_data_path, payload.data(), payload.size());
+
+    ASSERT_TRUE(file_manager->AddFile(valid_data_path));
+    auto remote_paths_to_size = file_manager->GetRemotePathsToFileSize();
+    ASSERT_EQ(remote_paths_to_size.size(), 12);
+
+    std::vector<std::string> remote_files;
+    remote_files.reserve(remote_paths_to_size.size());
+    for (const auto& entry : remote_paths_to_size) {
+        remote_files.emplace_back(entry.first);
+    }
+
+    auto valid_data_files =
+        milvus::index::FilterValidDataDiskFileSlices(remote_files);
+    ASSERT_EQ(valid_data_files.size(), remote_files.size());
+    std::reverse(valid_data_files.begin(), valid_data_files.end());
+
+    local_chunk_manager->Remove(valid_data_path);
+    ASSERT_FALSE(local_chunk_manager->Exist(valid_data_path));
+
+    file_manager->CacheIndexToDisk(valid_data_files,
+                                   milvus::proto::common::LoadPriority::HIGH);
+
+    ASSERT_TRUE(local_chunk_manager->Exist(valid_data_path));
+    ASSERT_EQ(local_chunk_manager->Size(valid_data_path), payload.size());
+    std::vector<uint8_t> read_payload(payload.size());
+    local_chunk_manager->Read(
+        valid_data_path, read_payload.data(), read_payload.size());
+    EXPECT_EQ(read_payload, payload);
+
+    local_chunk_manager->Remove(valid_data_path);
+    for (const auto& remote_file : remote_files) {
+        cm_->Remove(remote_file);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
+    FileSliceSizeGuard slice_size_guard(64);
+
+    constexpr int64_t total_count = 3000;
+    constexpr int64_t valid_count = 2400;
+
+    FieldDataMeta field_data_meta = {1, 2, 3003, 100};
+    field_data_meta.field_schema.set_nullable(true);
+    IndexMeta index_meta = {
+        3003, 100, 1000, 1, "test", "vec_field", DataType::VECTOR_FLOAT, 128};
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, cm_, fs_);
+    auto file_manager =
+        std::make_shared<DiskFileManagerImpl>(file_manager_context);
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_index_prefix = file_manager->GetLocalIndexObjectPrefix();
+
+    if (local_chunk_manager->Exist(local_index_prefix)) {
+        local_chunk_manager->RemoveDir(local_index_prefix);
+    }
+    local_chunk_manager->CreateDir(local_index_prefix);
+
+    auto valid_data_path =
+        local_index_prefix + "/" + milvus::index::VALID_DATA_KEY;
+    auto wire_count = milvus::index::ToValidDataCount(total_count);
+    auto bitmap_size = milvus::index::GetValidDataBitmapSize(total_count);
+    std::vector<uint8_t> valid_data(sizeof(uint64_t) + bitmap_size, 0);
+    std::memcpy(valid_data.data(), &wire_count, sizeof(uint64_t));
+    for (int64_t i = 0; i < total_count; ++i) {
+        if (i % 5 != 0) {
+            valid_data[sizeof(uint64_t) + i / 8] |= (1 << (i % 8));
+        }
+    }
+    local_chunk_manager->CreateFile(valid_data_path);
+    local_chunk_manager->Write(
+        valid_data_path, valid_data.data(), valid_data.size());
+
+    ASSERT_TRUE(file_manager->AddFile(valid_data_path));
+    auto remote_paths_to_size = file_manager->GetRemotePathsToFileSize();
+    ASSERT_EQ(remote_paths_to_size.size(), (valid_data.size() + 63) / 64);
+    ASSERT_GT(remote_paths_to_size.size(), 1);
+    std::vector<std::string> index_files = {"remote/index/_mem.index.bin"};
+    for (const auto& remote_path_to_size : remote_paths_to_size) {
+        index_files.emplace_back(remote_path_to_size.first);
+    }
+    ASSERT_EQ(milvus::index::FilterValidDataDiskFileSlices(index_files).size(),
+              remote_paths_to_size.size());
+    auto cache_files =
+        milvus::index::GetCacheFilesForDiskIndexLoad(index_files, true);
+    ASSERT_EQ(cache_files.size(), remote_paths_to_size.size());
+
+    local_chunk_manager->Remove(valid_data_path);
+    ASSERT_FALSE(local_chunk_manager->Exist(valid_data_path));
+
+    milvus::index::VectorDiskAnnIndex<float> loaded_index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    file_manager->CacheIndexToDisk(cache_files,
+                                   milvus::proto::common::LoadPriority::HIGH);
+
+    EXPECT_FALSE(
+        local_chunk_manager->Exist(local_index_prefix + "/_mem.index.bin"));
+    ASSERT_TRUE(local_chunk_manager->Exist(valid_data_path));
+    ASSERT_EQ(local_chunk_manager->Size(valid_data_path), valid_data.size());
+    std::vector<uint8_t> cached_valid_data(valid_data.size());
+    local_chunk_manager->Read(
+        valid_data_path, cached_valid_data.data(), cached_valid_data.size());
+    EXPECT_EQ(cached_valid_data, valid_data);
+
+    uint64_t cached_wire_count = 0;
+    std::memcpy(&cached_wire_count, cached_valid_data.data(), sizeof(uint64_t));
+    ASSERT_EQ(milvus::index::FromValidDataCount(cached_wire_count),
+              total_count);
+    milvus::index::BuildValidDataFromBitmap(
+        &loaded_index,
+        total_count,
+        cached_valid_data.data() + sizeof(uint64_t));
+    loaded_index.SetDim(128);
+
+    ASSERT_TRUE(loaded_index.GetOffsetMapping().IsEnabled());
+    EXPECT_EQ(loaded_index.GetOffsetMapping().GetTotalCount(), total_count);
+    EXPECT_EQ(loaded_index.GetOffsetMapping().GetValidCount(), valid_count);
+    EXPECT_EQ(loaded_index.GetDim(), 128);
+
+    local_chunk_manager->Remove(valid_data_path);
+    for (const auto& remote_path_to_size : remote_paths_to_size) {
+        cm_->Remove(remote_path_to_size.first);
+    }
+}
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOptFieldMoreThanOne) {
     auto file_manager = CreateFileManager(cm_, fs_);
@@ -918,6 +1286,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
     storage::InsertData insert_data(payload_reader);
     FieldDataMeta field_data_meta = {
         collection_id, partition_id, segment_id, field_id};
+    field_data_meta.field_schema.set_nullable(true);
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
 
@@ -956,16 +1325,16 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
     ASSERT_TRUE(local_chunk_manager->Exist(valid_data_path))
         << "valid_data file should be created for nullable field";
 
-    size_t read_total_num_rows = 0;
+    uint64_t read_total_num_rows = 0;
     local_chunk_manager->Read(
-        valid_data_path, 0, &read_total_num_rows, sizeof(size_t));
+        valid_data_path, 0, &read_total_num_rows, sizeof(uint64_t));
     EXPECT_EQ(read_total_num_rows, num_rows)
         << "total_num_rows should match original num_rows";
 
     size_t bitmap_size = (num_rows + 7) / 8;
     std::vector<uint8_t> read_bitmap(bitmap_size);
     local_chunk_manager->Read(
-        valid_data_path, sizeof(size_t), read_bitmap.data(), bitmap_size);
+        valid_data_path, sizeof(uint64_t), read_bitmap.data(), bitmap_size);
 
     // Verify bitmap content
     for (int64_t i = 0; i < num_rows; ++i) {
@@ -977,6 +1346,352 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
 
     local_chunk_manager->Remove(local_data_path);
     local_chunk_manager->Remove(valid_data_path);
+    cm_->Remove(insert_file_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3001;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 100;
+
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+    field_data_meta.field_schema.set_nullable(true);
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vec_field",
+                            DataType::VECTOR_FLOAT,
+                            dim};
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, cm_, fs_);
+    milvus::index::VectorDiskAnnIndex<float> index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
+    std::fill_n(valid_data.get(), num_rows, false);
+    index.UpdateValidData(valid_data.get(), num_rows);
+    ASSERT_TRUE(index.GetOffsetMapping().IsEnabled());
+    ASSERT_EQ(index.GetOffsetMapping().GetTotalCount(), num_rows);
+    ASSERT_EQ(index.GetOffsetMapping().GetValidCount(), 0);
+
+    std::vector<float> vec_data(dim, 0.0f);
+    auto dataset = knowhere::GenDataSet(0, dim, vec_data.data());
+
+    milvus::Config config;
+    config[DIM_KEY] = dim;
+    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+
+    index.BuildWithDataset(dataset, config);
+
+    ASSERT_TRUE(index.GetOffsetMapping().IsEnabled());
+    EXPECT_EQ(index.GetOffsetMapping().GetTotalCount(), num_rows);
+    EXPECT_EQ(index.GetOffsetMapping().GetValidCount(), 0);
+    EXPECT_EQ(index.GetDim(), dim);
+
+    auto stats = index.Upload(config);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_NE(files[0].find(milvus::index::VALID_DATA_KEY), std::string::npos);
+
+    for (const auto& file : files) {
+        cm_->Remove(file);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3002;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 100;
+
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+    field_data_meta.field_schema.set_nullable(true);
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vec_field",
+                            DataType::VECTOR_FLOAT,
+                            dim};
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, cm_, fs_);
+
+    std::vector<std::string> files;
+    {
+        milvus::index::VectorDiskAnnIndex<float> index(
+            DataType::NONE,
+            knowhere::IndexEnum::INDEX_DISKANN,
+            knowhere::metric::L2,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            file_manager_context);
+
+        std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
+        std::fill_n(valid_data.get(), num_rows, false);
+        index.UpdateValidData(valid_data.get(), num_rows);
+
+        std::vector<float> vec_data(dim, 0.0f);
+        auto dataset = knowhere::GenDataSet(0, dim, vec_data.data());
+
+        milvus::Config config;
+        config[DIM_KEY] = dim;
+        config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+
+        index.BuildWithDataset(dataset, config);
+        auto stats = index.Upload(config);
+        files = stats->GetIndexFiles();
+    }
+
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_NE(files[0].find(milvus::index::VALID_DATA_KEY), std::string::npos);
+
+    milvus::index::VectorDiskAnnIndex<float> loaded_index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    milvus::Config load_config;
+    load_config[DIM_KEY] = dim;
+    load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
+    load_config["index_files"] = files;
+
+    loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
+    ASSERT_TRUE(loaded_index.GetOffsetMapping().IsEnabled());
+    EXPECT_EQ(loaded_index.GetOffsetMapping().GetTotalCount(), num_rows);
+    EXPECT_EQ(loaded_index.GetOffsetMapping().GetValidCount(), 0);
+    EXPECT_EQ(loaded_index.GetDim(), dim);
+
+    for (const auto& file : files) {
+        cm_->Remove(file);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromDataset) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3003;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_queries = 3;
+
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vector_array_field",
+                            DataType::VECTOR_ARRAY,
+                            dim};
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, cm_, fs_);
+    milvus::index::VectorDiskAnnIndex<float> index(
+        DataType::VECTOR_FLOAT,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    std::vector<float> vec_data(dim, 0.0f);
+    auto dataset = knowhere::GenDataSet(0, dim, vec_data.data());
+    std::vector<size_t> offsets(num_queries + 1, 0);
+    dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                 const_cast<const size_t*>(offsets.data()));
+    dataset->Set(knowhere::meta::NQ, num_queries);
+    ASSERT_EQ(dataset->GetRows(), 0);
+    ASSERT_EQ(dataset->Get<int64_t>(knowhere::meta::NQ), num_queries);
+    ASSERT_EQ(dataset->Get<const size_t*>(
+                  knowhere::meta::EMB_LIST_OFFSET)[num_queries],
+              0);
+
+    milvus::Config config;
+    config[DIM_KEY] = dim;
+    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+
+    index.BuildWithDataset(dataset, config);
+
+    EXPECT_EQ(index.Count(), 0);
+    EXPECT_TRUE(index.HasRawData());
+    EXPECT_EQ(index.GetDim(), dim);
+
+    SearchInfo search_info;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.topk_ = 2;
+
+    SearchResult search_result;
+    index.Query(
+        dataset, search_info, milvus::BitsetView{}, nullptr, search_result);
+    EXPECT_EQ(search_result.total_nq_, num_queries);
+    EXPECT_EQ(search_result.unity_topK_, search_info.topk_);
+    ASSERT_EQ(search_result.seg_offsets_.size(),
+              num_queries * search_info.topk_);
+    ASSERT_EQ(search_result.distances_.size(), num_queries * search_info.topk_);
+    for (auto offset : search_result.seg_offsets_) {
+        EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+    }
+
+    auto stats = index.Upload(config);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_NE(files[0].find("empty_emb_list_offsets"), std::string::npos);
+
+    milvus::index::VectorDiskAnnIndex<float> loaded_index(
+        DataType::VECTOR_FLOAT,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    milvus::Config load_config;
+    load_config[DIM_KEY] = dim;
+    load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
+    load_config["index_files"] = files;
+
+    loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
+    EXPECT_EQ(loaded_index.Count(), 0);
+    EXPECT_TRUE(loaded_index.HasRawData());
+    EXPECT_EQ(loaded_index.GetDim(), dim);
+
+    SearchResult loaded_search_result;
+    loaded_index.Query(dataset,
+                       search_info,
+                       milvus::BitsetView{},
+                       nullptr,
+                       loaded_search_result);
+    EXPECT_EQ(loaded_search_result.total_nq_, num_queries);
+    ASSERT_EQ(loaded_search_result.seg_offsets_.size(),
+              num_queries * search_info.topk_);
+    for (auto offset : loaded_search_result.seg_offsets_) {
+        EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+    }
+
+    for (const auto& file : files) {
+        cm_->Remove(file);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3004;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 3;
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, dim);
+    auto vector_array_data =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            field_data);
+    ASSERT_NE(vector_array_data, nullptr);
+
+    std::vector<milvus::VectorArray> empty_lists;
+    empty_lists.reserve(num_rows);
+    for (int64_t i = 0; i < num_rows; ++i) {
+        empty_lists.emplace_back(nullptr, 0, dim, DataType::VECTOR_FLOAT);
+    }
+    vector_array_data->FillFieldData(empty_lists.data(), num_rows);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    auto field_data_meta =
+        milvus::segcore::gen_field_meta(collection_id,
+                                        partition_id,
+                                        segment_id,
+                                        field_id,
+                                        DataType::VECTOR_ARRAY,
+                                        DataType::VECTOR_FLOAT,
+                                        false);
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
+
+    std::string insert_file_path =
+        TestLocalPath + "diskann/empty_emb_list_binlog";
+    boost::filesystem::remove_all(insert_file_path);
+    cm_->Write(
+        insert_file_path, serialized_data.data(), serialized_data.size());
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vector_array_field",
+                            DataType::VECTOR_ARRAY,
+                            dim};
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, cm_, fs_);
+    milvus::index::VectorDiskAnnIndex<float> index(
+        DataType::VECTOR_FLOAT,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    milvus::Config config;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
+    config[DIM_KEY] = dim;
+    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+
+    index.Build(config);
+
+    EXPECT_EQ(index.Count(), 0);
+    EXPECT_TRUE(index.HasRawData());
+    EXPECT_EQ(index.GetDim(), dim);
+
+    std::vector<float> vec_data(dim, 0.0f);
+    auto query_dataset = knowhere::GenDataSet(0, dim, vec_data.data());
+    std::vector<size_t> query_offsets(num_rows + 1, 0);
+    query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                       const_cast<const size_t*>(query_offsets.data()));
+    query_dataset->Set(knowhere::meta::NQ, num_rows);
+
+    SearchInfo search_info;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.topk_ = 2;
+
+    SearchResult search_result;
+    index.Query(query_dataset,
+                search_info,
+                milvus::BitsetView{},
+                nullptr,
+                search_result);
+    EXPECT_EQ(search_result.total_nq_, num_rows);
+    ASSERT_EQ(search_result.seg_offsets_.size(), num_rows * search_info.topk_);
+    for (auto offset : search_result.seg_offsets_) {
+        EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+    }
+
+    auto stats = index.Upload(config);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_NE(files[0].find("empty_emb_list_offsets"), std::string::npos);
+
+    for (const auto& file : files) {
+        cm_->Remove(file);
+    }
     cm_->Remove(insert_file_path);
 }
 

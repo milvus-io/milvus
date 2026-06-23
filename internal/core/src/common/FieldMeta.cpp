@@ -179,6 +179,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          element_type,
                          dim,
                          std::nullopt,
+                         nullable,
                          external_field_mapping};
     }
 

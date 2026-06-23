@@ -265,8 +265,7 @@ func (_c *MockFunctionRunner_GetSchema_Call) RunAndReturn(run func() *schemapb.F
 func NewMockFunctionRunner(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockFunctionRunner {
+}) *MockFunctionRunner {
 	mock := &MockFunctionRunner{}
 	mock.Mock.Test(t)
 

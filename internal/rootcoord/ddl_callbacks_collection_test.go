@@ -87,7 +87,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		Schema:         schemaBytes,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, coll.Name, collectionName)
 	// create a collection with same schema should be idempotent.
@@ -105,7 +105,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		PartitionName:  partitionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Len(t, coll.Partitions, 2)
 	require.Contains(t, lo.Map(coll.Partitions, func(p *model.Partition, _ int) string { return p.PartitionName }), partitionName)
@@ -116,7 +116,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		PartitionName:  partitionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Len(t, coll.Partitions, 2)
 
@@ -148,7 +148,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(resp.GetStatus(), err))
 	// verify collection still exists after truncate
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, coll.Name, collectionName)
 	require.Equal(t, 1, len(coll.ShardInfos))
@@ -163,7 +163,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	_, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	_, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.Error(t, err)
 	// drop a dropped collection should be idempotent.
 	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
@@ -171,4 +171,69 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
+}
+
+func TestCreatePartitionMaxCountIgnoresDroppedPartitions(t *testing.T) {
+	Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "2")
+	defer Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
+
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	testSchema := &schemapb.CollectionSchema{
+		Name:   collectionName,
+		AutoID: false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "field1",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+
+	status, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	status, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	status, err = core.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionName:  "partition_1",
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	status, err = core.DropPartition(ctx, &milvuspb.DropPartitionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionName:  "partition_1",
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, true)
+	require.NoError(t, err)
+	require.Len(t, coll.Partitions, 2)
+	require.Equal(t, 1, coll.GetPartitionNum(true))
+
+	status, err = core.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionName:  "partition_2",
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	status, err = core.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionName:  "partition_3",
+	})
+	require.ErrorContains(t, merr.CheckRPCCall(status, err), "partition number (2) exceeds max configuration (2)")
 }

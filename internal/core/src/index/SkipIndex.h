@@ -187,14 +187,34 @@ class SkipIndex {
  public:
     template <typename T>
     std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
+    CanSkipUnaryRange(milvus::OpContext* op_ctx,
+                      FieldId field_id,
+                      int64_t chunk_id,
+                      OpType op_type,
+                      const T& val) const {
+        auto pw = GetFieldChunkMetrics(op_ctx, field_id, chunk_id);
+        auto field_chunk_metrics = pw.get();
+        return field_chunk_metrics->CanSkipUnaryRange(op_type,
+                                                      index::Metrics{val});
+    }
+
+    template <typename T>
+    std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
     CanSkipUnaryRange(FieldId field_id,
                       int64_t chunk_id,
                       OpType op_type,
                       const T& val) const {
-        auto pw = GetFieldChunkMetrics(field_id, chunk_id);
-        auto field_chunk_metrics = pw.get();
-        return field_chunk_metrics->CanSkipUnaryRange(op_type,
-                                                      index::Metrics{val});
+        return CanSkipUnaryRange<T>(nullptr, field_id, chunk_id, op_type, val);
+    }
+
+    template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::value, bool>
+    CanSkipUnaryRange(milvus::OpContext* op_ctx,
+                      FieldId field_id,
+                      int64_t chunk_id,
+                      OpType op_type,
+                      const T& val) const {
+        return false;
     }
 
     template <typename T>
@@ -203,7 +223,25 @@ class SkipIndex {
                       int64_t chunk_id,
                       OpType op_type,
                       const T& val) const {
-        return false;
+        return CanSkipUnaryRange<T>(nullptr, field_id, chunk_id, op_type, val);
+    }
+
+    template <typename T>
+    std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
+    CanSkipBinaryRange(milvus::OpContext* op_ctx,
+                       FieldId field_id,
+                       int64_t chunk_id,
+                       const T& lower_val,
+                       const T& upper_val,
+                       bool lower_inclusive,
+                       bool upper_inclusive) const {
+        auto pw = GetFieldChunkMetrics(op_ctx, field_id, chunk_id);
+        auto field_chunk_metrics = pw.get();
+        return field_chunk_metrics->CanSkipBinaryRange(
+            index::Metrics{lower_val},
+            index::Metrics{upper_val},
+            lower_inclusive,
+            upper_inclusive);
     }
 
     template <typename T>
@@ -214,13 +252,25 @@ class SkipIndex {
                        const T& upper_val,
                        bool lower_inclusive,
                        bool upper_inclusive) const {
-        auto pw = GetFieldChunkMetrics(field_id, chunk_id);
-        auto field_chunk_metrics = pw.get();
-        return field_chunk_metrics->CanSkipBinaryRange(
-            index::Metrics{lower_val},
-            index::Metrics{upper_val},
-            lower_inclusive,
-            upper_inclusive);
+        return CanSkipBinaryRange<T>(nullptr,
+                                     field_id,
+                                     chunk_id,
+                                     lower_val,
+                                     upper_val,
+                                     lower_inclusive,
+                                     upper_inclusive);
+    }
+
+    template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::value, bool>
+    CanSkipBinaryRange(milvus::OpContext* op_ctx,
+                       FieldId field_id,
+                       int64_t chunk_id,
+                       const T& lower_val,
+                       const T& upper_val,
+                       bool lower_inclusive,
+                       bool upper_inclusive) const {
+        return false;
     }
 
     template <typename T>
@@ -231,12 +281,19 @@ class SkipIndex {
                        const T& upper_val,
                        bool lower_inclusive,
                        bool upper_inclusive) const {
-        return false;
+        return CanSkipBinaryRange<T>(nullptr,
+                                     field_id,
+                                     chunk_id,
+                                     lower_val,
+                                     upper_val,
+                                     lower_inclusive,
+                                     upper_inclusive);
     }
 
     template <typename T>
     std::enable_if_t<SkipIndex::IsAllowedType<T>::arith_value, bool>
-    CanSkipBinaryArithRange(FieldId field_id,
+    CanSkipBinaryArithRange(milvus::OpContext* op_ctx,
+                            FieldId field_id,
                             int64_t chunk_id,
                             OpType op_type,
                             ArithOpType arith_type,
@@ -252,8 +309,11 @@ class SkipIndex {
                     return false;
                 }
             }
-            return CanSkipUnaryRange<T>(
-                field_id, chunk_id, new_op_type, static_cast<T>(new_value_hp));
+            return CanSkipUnaryRange<T>(op_ctx,
+                                        field_id,
+                                        chunk_id,
+                                        new_op_type,
+                                        static_cast<T>(new_value_hp));
         };
         switch (arith_type) {
             case ArithOpType::Add: {
@@ -296,8 +356,26 @@ class SkipIndex {
     }
 
     template <typename T>
-    std::enable_if_t<!SkipIndex::IsAllowedType<T>::arith_value, bool>
+    std::enable_if_t<SkipIndex::IsAllowedType<T>::arith_value, bool>
     CanSkipBinaryArithRange(FieldId field_id,
+                            int64_t chunk_id,
+                            OpType op_type,
+                            ArithOpType arith_type,
+                            const HighPrecisionType<T> value,
+                            const HighPrecisionType<T> right_operand) const {
+        return CanSkipBinaryArithRange<T>(nullptr,
+                                          field_id,
+                                          chunk_id,
+                                          op_type,
+                                          arith_type,
+                                          value,
+                                          right_operand);
+    }
+
+    template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::arith_value, bool>
+    CanSkipBinaryArithRange(milvus::OpContext* op_ctx,
+                            FieldId field_id,
                             int64_t chunk_id,
                             OpType op_type,
                             ArithOpType arith_type,
@@ -307,11 +385,29 @@ class SkipIndex {
     }
 
     template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::arith_value, bool>
+    CanSkipBinaryArithRange(FieldId field_id,
+                            int64_t chunk_id,
+                            OpType op_type,
+                            ArithOpType arith_type,
+                            const HighPrecisionType<T> value,
+                            const HighPrecisionType<T> right_operand) const {
+        return CanSkipBinaryArithRange<T>(nullptr,
+                                          field_id,
+                                          chunk_id,
+                                          op_type,
+                                          arith_type,
+                                          value,
+                                          right_operand);
+    }
+
+    template <typename T>
     std::enable_if_t<SkipIndex::IsAllowedType<T>::in_value, bool>
-    CanSkipInQuery(FieldId field_id,
+    CanSkipInQuery(milvus::OpContext* op_ctx,
+                   FieldId field_id,
                    int64_t chunk_id,
                    const std::vector<T>& values) const {
-        auto pw = GetFieldChunkMetrics(field_id, chunk_id);
+        auto pw = GetFieldChunkMetrics(op_ctx, field_id, chunk_id);
         auto field_chunk_metrics = pw.get();
         auto vals = std::vector<index::Metrics>{};
         vals.reserve(values.size());
@@ -322,11 +418,28 @@ class SkipIndex {
     }
 
     template <typename T>
+    std::enable_if_t<SkipIndex::IsAllowedType<T>::in_value, bool>
+    CanSkipInQuery(FieldId field_id,
+                   int64_t chunk_id,
+                   const std::vector<T>& values) const {
+        return CanSkipInQuery<T>(nullptr, field_id, chunk_id, values);
+    }
+
+    template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::in_value, bool>
+    CanSkipInQuery(milvus::OpContext* op_ctx,
+                   FieldId field_id,
+                   int64_t chunk_id,
+                   const std::vector<T>& values) const {
+        return false;
+    }
+
+    template <typename T>
     std::enable_if_t<!SkipIndex::IsAllowedType<T>::in_value, bool>
     CanSkipInQuery(FieldId field_id,
                    int64_t chunk_id,
                    const std::vector<T>& values) const {
-        return false;
+        return CanSkipInQuery<T>(nullptr, field_id, chunk_id, values);
     }
 
     void
@@ -380,7 +493,14 @@ class SkipIndex {
     }
 
     const cachinglayer::PinWrapper<const index::FieldChunkMetrics*>
-    GetFieldChunkMetrics(FieldId field_id, int chunk_id) const;
+    GetFieldChunkMetrics(milvus::OpContext* op_ctx,
+                         FieldId field_id,
+                         int chunk_id) const;
+
+    const cachinglayer::PinWrapper<const index::FieldChunkMetrics*>
+    GetFieldChunkMetrics(FieldId field_id, int chunk_id) const {
+        return GetFieldChunkMetrics(nullptr, field_id, chunk_id);
+    }
 
     std::unordered_map<
         FieldId,

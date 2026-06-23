@@ -181,6 +181,80 @@ func (_c *MockRootCoordClient_AddCollectionFunction_Call) RunAndReturn(run func(
 	return _c
 }
 
+// AddCollectionStructField provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddCollectionStructField")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_AddCollectionStructField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCollectionStructField'
+type MockRootCoordClient_AddCollectionStructField_Call struct {
+	*mock.Call
+}
+
+// AddCollectionStructField is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.AddCollectionStructFieldRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) AddCollectionStructField(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AddCollectionStructField_Call {
+	return &MockRootCoordClient_AddCollectionStructField_Call{Call: _e.mock.On("AddCollectionStructField",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_AddCollectionStructField_Call) Run(run func(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption)) *MockRootCoordClient_AddCollectionStructField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.AddCollectionStructFieldRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_AddCollectionStructField_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AddCollectionStructField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_AddCollectionStructField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionStructFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AddCollectionStructField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AddFileResource provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -847,6 +921,80 @@ func (_c *MockRootCoordClient_AlterDatabase_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// AlterRole provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterRole")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterRoleRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterRoleRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterRoleRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_AlterRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterRole'
+type MockRootCoordClient_AlterRole_Call struct {
+	*mock.Call
+}
+
+// AlterRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.AlterRoleRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) AlterRole(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AlterRole_Call {
+	return &MockRootCoordClient_AlterRole_Call{Call: _e.mock.On("AlterRole",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_AlterRole_Call) Run(run func(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption)) *MockRootCoordClient_AlterRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterRoleRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_AlterRole_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AlterRole_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_AlterRole_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterRoleRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AlterRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // BackupEzk provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -1065,6 +1213,80 @@ func (_c *MockRootCoordClient_CheckHealth_Call) Return(_a0 *milvuspb.CheckHealth
 }
 
 func (_c *MockRootCoordClient_CheckHealth_Call) RunAndReturn(run func(context.Context, *milvuspb.CheckHealthRequest, ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error)) *MockRootCoordClient_CheckHealth_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ClearReadTaskQueue provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ClearReadTaskQueue")
+	}
+
+	var r0 *internalpb.ClearReadTaskQueueResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ClearReadTaskQueueRequest, ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ClearReadTaskQueueRequest, ...grpc.CallOption) *internalpb.ClearReadTaskQueueResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ClearReadTaskQueueResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ClearReadTaskQueueRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_ClearReadTaskQueue_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearReadTaskQueue'
+type MockRootCoordClient_ClearReadTaskQueue_Call struct {
+	*mock.Call
+}
+
+// ClearReadTaskQueue is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *internalpb.ClearReadTaskQueueRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) ClearReadTaskQueue(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ClearReadTaskQueue_Call {
+	return &MockRootCoordClient_ClearReadTaskQueue_Call{Call: _e.mock.On("ClearReadTaskQueue",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_ClearReadTaskQueue_Call) Run(run func(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption)) *MockRootCoordClient_ClearReadTaskQueue_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*internalpb.ClearReadTaskQueueRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_ClearReadTaskQueue_Call) Return(_a0 *internalpb.ClearReadTaskQueueResponse, _a1 error) *MockRootCoordClient_ClearReadTaskQueue_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_ClearReadTaskQueue_Call) RunAndReturn(run func(context.Context, *internalpb.ClearReadTaskQueueRequest, ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)) *MockRootCoordClient_ClearReadTaskQueue_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1554,6 +1776,80 @@ func (_c *MockRootCoordClient_CreatePartition_Call) Return(_a0 *commonpb.Status,
 }
 
 func (_c *MockRootCoordClient_CreatePartition_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePartitionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_CreatePartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreatePartitionV2 provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePartitionV2")
+	}
+
+	var r0 *rootcoordpb.CreatePartitionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest, ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest, ...grpc.CallOption) *rootcoordpb.CreatePartitionResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.CreatePartitionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreatePartitionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_CreatePartitionV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePartitionV2'
+type MockRootCoordClient_CreatePartitionV2_Call struct {
+	*mock.Call
+}
+
+// CreatePartitionV2 is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.CreatePartitionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) CreatePartitionV2(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreatePartitionV2_Call {
+	return &MockRootCoordClient_CreatePartitionV2_Call{Call: _e.mock.On("CreatePartitionV2",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_CreatePartitionV2_Call) Run(run func(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption)) *MockRootCoordClient_CreatePartitionV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.CreatePartitionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_CreatePartitionV2_Call) Return(_a0 *rootcoordpb.CreatePartitionResponse, _a1 error) *MockRootCoordClient_CreatePartitionV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_CreatePartitionV2_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePartitionRequest, ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error)) *MockRootCoordClient_CreatePartitionV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

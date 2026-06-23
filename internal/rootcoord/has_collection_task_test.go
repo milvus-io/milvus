@@ -80,6 +80,7 @@ func Test_hasCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil, nil)
 
 		core := newTestCore(withMeta(meta))

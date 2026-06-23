@@ -588,8 +588,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
             TargetBitmap(real_batch_size, true));
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -661,6 +664,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
     auto res = MoveOrSliceBitmap(
@@ -816,8 +820,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             TargetBitmap(real_batch_size, true));
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -859,7 +866,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
 
             for (const auto& sub_value : array.value()) {
                 auto sub_array = milvus::BsonView::GetValueFromBsonView<
-                    bsoncxx::array::view>(sub_value.get_value());
+                    milvus::bson::array_view>(sub_value.get_value());
 
                 if (!sub_array.has_value())
                     continue;
@@ -880,6 +887,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
     auto res = MoveOrSliceBitmap(
@@ -1209,8 +1217,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             TargetBitmap(real_batch_size, true));
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -1333,6 +1344,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
     auto res = MoveOrSliceBitmap(
@@ -1543,8 +1555,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             TargetBitmap(real_batch_size, true));
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -1642,7 +1657,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                         }
                         case proto::plan::GenericValue::kArrayVal: {
                             auto val = milvus::BsonView::GetValueFromBsonView<
-                                bsoncxx::array::view>(sub_value.get_value());
+                                milvus::bson::array_view>(
+                                sub_value.get_value());
                             if (!val.has_value()) {
                                 continue;
                             }
@@ -1677,6 +1693,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
     auto res = MoveOrSliceBitmap(
@@ -1832,8 +1849,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             TargetBitmap(real_batch_size, true));
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -1876,7 +1896,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             std::set<int> exist_elements_index;
             for (const auto& sub_value : array.value()) {
                 auto sub_array = milvus::BsonView::GetValueFromBsonView<
-                    bsoncxx::array::view>(sub_value.get_value());
+                    milvus::bson::array_view>(sub_value.get_value());
 
                 if (!sub_array.has_value())
                     continue;
@@ -1903,6 +1923,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
     auto res = MoveOrSliceBitmap(
@@ -2095,8 +2116,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
             TargetBitmap(real_batch_size, true));
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
+        auto cache_compute_start = CacheClock::now();
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -2193,7 +2217,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                         }
                         case proto::plan::GenericValue::kArrayVal: {
                             auto val = milvus::BsonView::GetValueFromBsonView<
-                                bsoncxx::array::view>(sub_value.get_value());
+                                milvus::bson::array_view>(
+                                sub_value.get_value());
                             if (!val.has_value()) {
                                 continue;
                             }
@@ -2220,6 +2245,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut(CacheElapsedUs(cache_compute_start));
     }
 
     auto res = MoveOrSliceBitmap(

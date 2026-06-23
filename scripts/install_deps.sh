@@ -276,10 +276,11 @@ install_ubuntu_deps() {
         lcov libtool m4 autoconf automake
         python3 python3-pip python3-venv
         pkg-config uuid-dev libaio-dev
-        libopenblas-dev libgoogle-perftools-dev
+        libgoogle-perftools-dev
     )
 
-    # Version-specific GCC and clang-format
+    # Version-specific GCC and clang-format. CI runs the cpp format checker on
+    # ubuntu22.04 with clang-format-15, so 22.04 must install that exact version.
     local gcc_packages=()
     local clang_format_package=""
 
@@ -290,11 +291,11 @@ install_ubuntu_deps() {
             ;;
         22.04)
             gcc_packages=(g++ gcc gfortran g++-11 gcc-11)
-            clang_format_package="clang-format-14 clang-tidy-14"
+            clang_format_package="clang-format-15 clang-tidy-15"
             ;;
         24.04)
             gcc_packages=(g++ gcc gfortran g++-13 gcc-13)
-            clang_format_package="clang-format-17 clang-tidy-17"
+            clang_format_package="clang-format-18 clang-tidy-18"
             ;;
         *)
             print_warn "Ubuntu ${ubuntu_version} not explicitly supported, using default packages"
@@ -354,7 +355,7 @@ install_rocky_deps() {
         gcc gcc-c++ gcc-gfortran \
         wget curl which git make ninja-build \
         automake python3-devel python3-pip \
-        openblas-devel libaio libuuid-devel \
+        libaio libuuid-devel \
         zip unzip ccache lcov libtool m4 autoconf
 
     # Install clang-tools for formatting
@@ -393,7 +394,7 @@ install_amazon_linux_deps() {
         wget curl which git make ninja-build \
         gcc gcc-c++ gcc-gfortran \
         automake python3-devel python3-pip \
-        openblas-devel libaio libuuid-devel \
+        libaio libuuid-devel \
         zip unzip ccache libtool m4 autoconf \
         openssl-devel zlib-devel
 
@@ -426,7 +427,7 @@ install_centos_deps() {
         automake python3-devel python3-pip \
         devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran devtoolset-11-libatomic-devel \
         llvm-toolset-11.0-clang llvm-toolset-11.0-clang-tools-extra \
-        openblas-devel libaio libuuid-devel \
+        libaio libuuid-devel \
         zip unzip ccache lcov libtool m4 autoconf automake
 
     # Enable devtoolset

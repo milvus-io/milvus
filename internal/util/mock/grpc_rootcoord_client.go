@@ -37,6 +37,10 @@ type GrpcRootCoordClient struct {
 	Err error
 }
 
+func (m *GrpcRootCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{}, m.Err
 }
@@ -65,6 +69,10 @@ func (m *GrpcRootCoordClient) CreateRole(ctx context.Context, in *milvuspb.Creat
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
@@ -90,6 +98,10 @@ func (m *GrpcRootCoordClient) SelectGrant(ctx context.Context, in *milvuspb.Sele
 }
 
 func (m *GrpcRootCoordClient) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
 
@@ -168,6 +180,10 @@ func (m *GrpcRootCoordClient) ShowCollectionIDs(ctx context.Context, in *rootcoo
 
 func (m *GrpcRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	return &rootcoordpb.CreatePartitionResponse{}, m.Err
 }
 
 func (m *GrpcRootCoordClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

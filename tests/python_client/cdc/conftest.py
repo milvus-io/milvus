@@ -90,6 +90,57 @@ def pytest_addoption(parser):
         default="chaos-testing",
         help="Kubernetes namespace for Milvus deployment",
     )
+    parser.addoption(
+        "--import-2pc-workload",
+        action="store",
+        default="true",
+        help="Whether CDC stability suites should include Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-minio-host",
+        action="store",
+        default="",
+        help="Upstream MinIO host or host:port used by Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-minio-bucket",
+        action="store",
+        default="",
+        help="Upstream MinIO bucket used by Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-downstream-minio-host",
+        action="store",
+        default="",
+        help="Downstream MinIO host or host:port used by CDC Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-downstream-minio-bucket",
+        action="store",
+        default="",
+        help="Downstream MinIO bucket used by CDC Import 2PC workload",
+    )
+    parser.addoption(
+        "--import-2pc-rows",
+        action="store",
+        default="20",
+        help="Rows per Import 2PC checker operation",
+    )
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in ("1", "true", "yes", "y")
+
+
+def _minio_endpoint(host):
+    host = (host or "").strip()
+    if not host:
+        return ""
+    if ":" in host:
+        return host
+    return f"{host}:9000"
 
 
 @pytest.fixture(scope="session")
@@ -181,6 +232,46 @@ def milvus_ns(request):
 
 
 @pytest.fixture(scope="session")
+def import_2pc_workload(request):
+    return _as_bool(request.config.getoption("--import-2pc-workload"))
+
+
+@pytest.fixture(scope="session")
+def import_2pc_minio_endpoint(request):
+    host = request.config.getoption("--import-2pc-minio-host") or request.config.getoption("--minio_host")
+    return _minio_endpoint(host)
+
+
+@pytest.fixture(scope="session")
+def import_2pc_minio_bucket(request):
+    return request.config.getoption("--import-2pc-minio-bucket") or request.config.getoption("--minio_bucket")
+
+
+@pytest.fixture(scope="session")
+def import_2pc_downstream_minio_endpoint(request):
+    host = (
+        request.config.getoption("--import-2pc-downstream-minio-host")
+        or request.config.getoption("--import-2pc-minio-host")
+        or request.config.getoption("--minio_host")
+    )
+    return _minio_endpoint(host)
+
+
+@pytest.fixture(scope="session")
+def import_2pc_downstream_minio_bucket(request):
+    return (
+        request.config.getoption("--import-2pc-downstream-minio-bucket")
+        or request.config.getoption("--import-2pc-minio-bucket")
+        or request.config.getoption("--minio_bucket")
+    )
+
+
+@pytest.fixture(scope="session")
+def import_2pc_rows(request):
+    return int(request.config.getoption("--import-2pc-rows"))
+
+
+@pytest.fixture(scope="session")
 def switchover_helper(request, upstream_client, downstream_client):
     """Returns a callable that performs CDC topology switchover."""
     upstream_uri = request.config.getoption("--upstream-uri")
@@ -233,6 +324,94 @@ def switchover_helper(request, upstream_client, downstream_client):
         time.sleep(10)
 
     return do_switchover
+
+
+@pytest.fixture(scope="session")
+def kubectl_helper(milvus_ns):
+    """Helpers for pod-kill failover scenarios."""
+    import subprocess as _sp
+    import time as _time
+
+    def delete_pods(instance_label):
+        cmd = [
+            "kubectl",
+            "delete",
+            "pods",
+            "-l",
+            f"app.kubernetes.io/instance={instance_label}",
+            "-n",
+            milvus_ns,
+            "--grace-period=0",
+            "--force",
+        ]
+        result = _sp.run(cmd, capture_output=True, text=True, check=False)
+        logger.info(
+            f"[KUBECTL] delete pods {instance_label}: rc={result.returncode}, "
+            f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+        )
+        return result
+
+    def wait_for_pods_ready(instance_label, timeout=300):
+        """Wait for pods matching the label to be Ready.
+
+        Two phases because right after `kubectl delete pods`, the operator
+        hasn't recreated pods yet — `kubectl wait` would error with "no
+        matching resources found". So:
+          1. Poll until at least one pod matches.
+          2. Then `kubectl wait` for Ready on the remaining time budget.
+        """
+        deadline = _time.time() + timeout
+        existence = None
+        while _time.time() < deadline:
+            existence = _sp.run(
+                [
+                    "kubectl",
+                    "get",
+                    "pods",
+                    "-l",
+                    f"app.kubernetes.io/instance={instance_label}",
+                    "-n",
+                    milvus_ns,
+                    "--no-headers",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if existence.stdout.strip():
+                break
+            _time.sleep(5)
+        else:
+            raise TimeoutError(f"no pods matched {instance_label} within {timeout}s")
+
+        remaining = max(1, int(deadline - _time.time()))
+        cmd = [
+            "kubectl",
+            "wait",
+            "--for=condition=Ready",
+            "pods",
+            "-l",
+            f"app.kubernetes.io/instance={instance_label}",
+            "-n",
+            milvus_ns,
+            f"--timeout={remaining}s",
+        ]
+        result = _sp.run(cmd, capture_output=True, text=True, check=False)
+        logger.info(f"[KUBECTL] wait pods {instance_label}: rc={result.returncode}")
+        if result.returncode != 0:
+            raise TimeoutError(
+                f"pods matching {instance_label} did not become Ready within {remaining}s: "
+                f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+            )
+        return result
+
+    class KubectlHelper:
+        pass
+
+    KubectlHelper.delete_pods = staticmethod(delete_pods)
+    KubectlHelper.wait_for_pods_ready = staticmethod(wait_for_pods_ready)
+
+    return KubectlHelper()
 
 
 @pytest.fixture(scope="session", autouse=True)

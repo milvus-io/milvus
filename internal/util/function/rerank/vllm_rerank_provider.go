@@ -20,7 +20,6 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,12 +27,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/vllm"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type vllmProvider struct {
 	baseProvider
 	client         *vllm.VLLMClient
 	truncateParams map[string]any
+	timeoutMs      int64
 }
 
 func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (ModelProvider, error) {
@@ -52,7 +53,7 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 			}
 		case models.VllmTruncateParamName:
 			if vllmTrun, err := strconv.ParseInt(param.Value, 10, 64); err != nil {
-				return nil, fmt.Errorf("Rerank params error, %s: %s is not a number", models.VllmTruncateParamName, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("Rerank params error, %s: %s is not a number", models.VllmTruncateParamName, param.Value)
 			} else {
 				truncateParams[models.VllmTruncateParamName] = vllmTrun
 			}
@@ -60,7 +61,7 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 		}
 	}
 	if endpoint == "" {
-		return nil, fmt.Errorf("rerank function lost params endpoint")
+		return nil, merr.WrapErrParameterInvalidMsg("rerank function lost params endpoint")
 	}
 
 	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
@@ -73,16 +74,19 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 		return nil, err
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := vllmProvider{
 		baseProvider:   baseProvider{batchSize: maxBatch},
 		client:         client,
 		truncateParams: truncateParams,
+		timeoutMs:      timeoutMs,
 	}
 	return &provider, nil
 }
 
 func (provider *vllmProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(query, docs, provider.truncateParams, 30)
+	rerankResp, err := provider.client.Rerank(query, docs, provider.truncateParams, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

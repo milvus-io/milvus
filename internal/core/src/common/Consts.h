@@ -45,6 +45,7 @@ const char EDEK[] = "edek";
 const char EZID[] = "encryption_zone";
 
 const char INDEX_ROOT_PATH[] = "index_files";
+const char INDEX_ROOT_PATH_V1[] = "index_v1";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
 const char ANALYZE_ROOT_PATH[] = "analyze_stats";
 const char CENTROIDS_NAME[] = "centroids";
@@ -110,6 +111,7 @@ const std::string JSON_CAST_FUNCTION = "json_cast_function";
 const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;
 const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
 const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
+const bool DEFAULT_JSON_KEY_STATS_ENABLED = true;
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
 const bool DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX = false;

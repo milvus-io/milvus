@@ -18,6 +18,7 @@ package allocator
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -84,13 +85,21 @@ func (alloc *rootCoordAllocator) AllocID(ctx context.Context) (typeutil.UniqueID
 	return resp.ID, nil
 }
 
-// AllocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
+// AllocN allocates `n` UniqueIDs from RootCoord, invoking AllocID grpc
 func (alloc *rootCoordAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	if n <= 0 {
 		n = 1
 	}
+	if n > math.MaxUint32 {
+		return 0, 0, merr.WrapErrParameterInvalidMsg(
+			"too large to allocate IDs in a single batch: requested %d, max %d",
+			n,
+			uint64(math.MaxUint32),
+		)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	resp, err := alloc.mixCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),

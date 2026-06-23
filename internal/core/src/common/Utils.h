@@ -12,6 +12,7 @@
 #pragma once
 
 #include <fcntl.h>
+#include "common/FastMem.h"
 #include <fmt/core.h>
 #include <google/protobuf/text_format.h>
 #include <sys/mman.h>
@@ -275,7 +276,7 @@ CopyAndWrapSparseRow(const void* data,
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
-    std::memcpy(row.data(), data, size);
+    milvus::fastmem::FastMemcpy(row.data(), data, size);
     if (validate) {
         AssertInfo(size % knowhere::sparse::SparseRow<
                               SparseValueType>::element_size() ==
@@ -323,7 +324,8 @@ SparseBytesToRows(const Iterable& rows, const bool validate = false) {
 // SparseRowsToProto converts a list of knowhere::sparse::SparseRow<SparseValueType> to
 // a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
 // of the source data. source(i) returns the i-th row to be copied.
-inline void SparseRowsToProto(
+inline void
+SparseRowsToProto(
     const std::function<
         const knowhere::sparse::SparseRow<SparseValueType>*(size_t)>& source,
     int64_t rows,

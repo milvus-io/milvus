@@ -111,9 +111,10 @@ func (s *statsInspectorSuite) SetupTest() {
 					ExternalField: "pk_col",
 				},
 				{
-					FieldID:  201,
-					Name:     "var",
-					DataType: schemapb.DataType_VarChar,
+					FieldID:       201,
+					Name:          "var",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "var_col",
 					TypeParams: []*commonpb.KeyValuePair{
 						{
 							Key: "enable_match", Value: "true",
@@ -289,11 +290,16 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
 		},
 	}
 
-	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_TextIndexJob, true, nil)
+	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_Sort, true, nil)
 	s.NoError(err)
-	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
-	s.Nil(task)
+	sortTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_Sort)
+	s.Nil(sortTask)
 	s.alloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
+
+	err = s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_TextIndexJob, true, nil)
+	s.NoError(err)
+	textTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
+	s.NotNil(textTask)
 }
 
 func (s *statsInspectorSuite) TestGetStatsTask() {
@@ -353,6 +359,32 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTask() {
 	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
 }
 
+func (s *statsInspectorSuite) TestTriggerTextStatsTaskExternalCollection() {
+	segmentID := UniqueID(200)
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  2,
+			PartitionID:   3,
+			InsertChannel: "by-dev-rootcoord-dml-channel",
+			IsSorted:      false,
+			State:         commonpb.SegmentState_Flushed,
+			NumOfRows:     1000,
+			MaxRowNum:     2000,
+			Level:         2,
+		},
+	}
+	s.mt.segments.segments[segmentID] = seg
+	s.mt.segments.secondaryIndexes.coll2Segments[2] = map[UniqueID]*SegmentInfo{
+		segmentID: seg,
+	}
+
+	s.inspector.triggerTextStatsTask()
+
+	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
+	s.NotNil(task)
+}
+
 func (s *statsInspectorSuite) TestTriggerBM25StatsTask() {
 	// BM25 functionality is disabled in current version
 	s.inspector.triggerBM25StatsTask()
@@ -410,20 +442,41 @@ func (s *statsInspectorSuite) TestNeedDoTextIndex() {
 	// Test case when text index is needed
 	segment := s.mt.segments.segments[20]
 	segment.IsSorted = true
-	result := needDoTextIndex(segment, []int64{101})
+	result := needDoTextIndex(segment, []int64{101}, false)
 	s.True(result, "Segment should need text index")
 
 	// Test case when text index already exists
 	segment.TextStatsLogs = map[int64]*datapb.TextIndexStats{
 		101: {},
 	}
-	result = needDoTextIndex(segment, []int64{101})
+	result = needDoTextIndex(segment, []int64{101}, false)
 	s.False(result, "Segment should not need text index")
 
 	// Test case with unsorted segment
 	segment.IsSorted = false
-	result = needDoTextIndex(segment, []int64{101})
+	result = needDoTextIndex(segment, []int64{101}, false)
 	s.False(result, "Unsorted segment should not need text index")
+
+	result = needDoTextIndex(segment, []int64{101}, true)
+	s.False(result, "Segment with existing text index should not need text index")
+
+	segment.TextStatsLogs = nil
+	result = needDoTextIndex(segment, []int64{101}, true)
+	s.True(result, "Unsorted external segment can build text index")
+
+	segment.State = commonpb.SegmentState_Growing
+	result = needDoTextIndex(segment, []int64{101}, true)
+	s.False(result, "Growing segment should not need text index")
+
+	segment.State = commonpb.SegmentState_Flushed
+	segment.Level = datapb.SegmentLevel_L0
+	result = needDoTextIndex(segment, []int64{101}, true)
+	s.False(result, "L0 segment should not need text index")
+
+	segment.Level = datapb.SegmentLevel_Legacy
+	segment.TextStatsLogs = map[int64]*datapb.TextIndexStats{102: {}}
+	result = needDoTextIndex(segment, []int64{101}, true)
+	s.True(result, "Segment should build missing text index field")
 }
 
 func (s *statsInspectorSuite) TestEnableBM25() {

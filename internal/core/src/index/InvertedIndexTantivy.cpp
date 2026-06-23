@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/uuid/random_generator.hpp>
+#include "common/FastMem.h"
 #include <boost/uuid/uuid_io.hpp>
 #include <fcntl.h>
 #include <string.h>
@@ -140,7 +141,7 @@ InvertedIndexTantivy<T>::Serialize(const Config& config) {
     auto index_valid_data_length = null_offset_.size() * sizeof(size_t);
     std::shared_ptr<uint8_t[]> index_valid_data(
         new uint8_t[index_valid_data_length]);
-    memcpy(
+    milvus::fastmem::FastMemcpy(
         index_valid_data.get(), null_offset_.data(), index_valid_data_length);
     lock.unlock();
     BinarySet res_set;
@@ -257,7 +258,7 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
         null_offset_.resize((size_t)size / sizeof(size_t));
-        memcpy(null_offset_.data(), data, (size_t)size);
+        milvus::fastmem::FastMemcpy(null_offset_.data(), data, (size_t)size);
     };
     auto null_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {
@@ -305,10 +306,10 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_datas);
         AssertInfo(null_offsets_data_codecs.codecs_.size() > 0,
                    "null offset file is empty");
-        for (auto&& null_offsets_codec : null_offsets_data_codecs.codecs_) {
-            fill_null_offsets(null_offsets_codec->PayloadData(),
-                              null_offsets_codec->PayloadSize());
-        }
+        auto null_offsets_codec =
+            AssembleIndexDataCodec(null_offsets_data_codecs);
+        fill_null_offsets(null_offsets_codec->PayloadData(),
+                          null_offsets_codec->PayloadSize());
     }
 }
 
@@ -615,8 +616,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
                 }
             } else {
                 for (size_t i = 0; i < n; i++) {
-                    wrapper_->template add_array_data(
-                        arr[i].data(), arr[i].size(), i);
+                    wrapper_->add_array_data(arr[i].data(), arr[i].size(), i);
                 }
             }
         } else {
@@ -627,7 +627,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
             for (size_t i = 0; i < n; i++) {
-                wrapper_->template add_array_data_by_single_segment_writer(
+                wrapper_->add_array_data_by_single_segment_writer(
                     arr[i].data(), arr[i].size());
             }
         } else {
@@ -661,7 +661,8 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::Float:
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
-        case proto::schema::DataType::VarChar: {
+        case proto::schema::DataType::VarChar:
+        case proto::schema::DataType::Text: {
             // Generally, we will not build inverted index with single segment except for building index
             // for query node with older version(2.4). See more comments above `inverted_index_single_segment_`.
             if (!inverted_index_single_segment_) {
@@ -750,13 +751,12 @@ InvertedIndexTantivy<T>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             if (!inverted_index_single_segment_) {
-                wrapper_->template add_array_data(
-                    reinterpret_cast<const ElementType*>(
-                        array_column[i].data()),
-                    length,
-                    offset++);
+                wrapper_->add_array_data(reinterpret_cast<const ElementType*>(
+                                             array_column[i].data()),
+                                         length,
+                                         offset++);
             } else {
-                wrapper_->template add_array_data_by_single_segment_writer(
+                wrapper_->add_array_data_by_single_segment_writer(
                     reinterpret_cast<const ElementType*>(
                         array_column[i].data()),
                     length);
@@ -790,11 +790,10 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? output.size() : 0;
             if (!inverted_index_single_segment_) {
-                wrapper_->template add_array_data(
-                    output.data(), length, offset++);
+                wrapper_->add_array_data(output.data(), length, offset++);
             } else {
-                wrapper_->template add_array_data_by_single_segment_writer(
-                    output.data(), length);
+                wrapper_->add_array_data_by_single_segment_writer(output.data(),
+                                                                  length);
             }
         }
     }
@@ -929,14 +928,19 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
     for (const auto& fn : file_names) {
         pairs.emplace_back(fn, path_ + "/" + fn);
     }
-    reader.ReadEntriesToFiles(pairs);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    reader.ReadEntriesStreamToFiles(
+        pairs, storage::io::GetPriorityFromLoadPriority(load_priority));
 
     if (has_null) {
         auto null_entry = reader.ReadEntry(INDEX_NULL_OFFSET_FILE_NAME);
         null_offset_.resize(null_entry.data.size() / sizeof(size_t));
-        std::memcpy(null_offset_.data(),
-                    null_entry.data.data(),
-                    null_entry.data.size());
+        milvus::fastmem::FastMemcpy(null_offset_.data(),
+                                    null_entry.data.data(),
+                                    null_entry.data.size());
     }
 
     auto load_in_mmap =

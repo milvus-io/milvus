@@ -15,10 +15,12 @@
 #include <cxxabi.h>
 #include <folly/ExceptionWrapper.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -30,6 +32,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Channel.h"
+#include "common/Consts.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
@@ -65,6 +68,42 @@
 #include "storage/Util.h"
 
 namespace milvus::segcore {
+
+namespace {
+
+void
+InitEmptyVectorArrayRow(proto::schema::VectorField* row,
+                        DataType element_type) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT: {
+            row->mutable_float_vector();
+            break;
+        }
+        case DataType::VECTOR_BINARY: {
+            row->mutable_binary_vector();
+            break;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            row->mutable_float16_vector();
+            break;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            row->mutable_bfloat16_vector();
+            break;
+        }
+        case DataType::VECTOR_INT8: {
+            row->mutable_int8_vector();
+            break;
+        }
+        default: {
+            ThrowInfo(DataTypeInvalid,
+                      "unsupported ArrayOfVector element type {}",
+                      element_type);
+        }
+    }
+}
+
+}  // namespace
 
 void
 // Takes a non-const DataArray& because VARCHAR strings are moved (not copied)
@@ -490,7 +529,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         case DataType::VECTOR_SPARSE_U32_F32: {
-            // does nothing here
+            vector_array->mutable_sparse_float_vector();
             break;
         }
         case DataType::VECTOR_INT8: {
@@ -501,12 +540,14 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
         }
         case DataType::VECTOR_ARRAY: {
             auto obj = vector_array->mutable_vector_array();
+            obj->set_dim(dim);
             obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
                 field_meta.get_element_type()));
             obj->mutable_data()->Reserve(count);
             for (int i = 0; i < count; i++) {
                 auto* row = obj->mutable_data()->Add();
                 row->set_dim(dim);
+                InitEmptyVectorArrayRow(row, field_meta.get_element_type());
             }
             break;
         }
@@ -523,7 +564,8 @@ CreateEmptyVectorDataArray(int64_t count,
                            int64_t valid_count,
                            const void* valid_data,
                            const FieldMeta& field_meta) {
-    int64_t data_count = (field_meta.is_nullable() && valid_data != nullptr)
+    int64_t data_count = (field_meta.is_nullable() && valid_data != nullptr &&
+                          field_meta.get_data_type() != DataType::VECTOR_ARRAY)
                              ? valid_count
                              : count;
     auto data_array = CreateEmptyVectorDataArray(data_count, field_meta);
@@ -606,6 +648,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
             obj->mutable_data()->Add(data, data + count);
             break;
         }
+        case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
@@ -771,6 +814,24 @@ CreateVectorDataArrayFrom(const void* data_raw,
                           int64_t count,
                           int64_t valid_count,
                           const FieldMeta& field_meta) {
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+        field_meta.is_nullable() && valid_data != nullptr) {
+        auto data_array = CreateEmptyVectorDataArray(
+            count, valid_count, valid_data, field_meta);
+        auto dst = data_array->mutable_vectors()
+                       ->mutable_vector_array()
+                       ->mutable_data();
+        auto src = reinterpret_cast<const VectorFieldProto*>(data_raw);
+        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+        int64_t src_offset = 0;
+        for (int64_t i = 0; i < count; ++i) {
+            if (valid_data_bool[i]) {
+                dst->at(i) = src[src_offset++];
+            }
+        }
+        return data_array;
+    }
+
     auto data_array =
         CreateVectorDataArrayFrom(data_raw, valid_count, field_meta);
     if (field_meta.is_nullable() && valid_data != nullptr) {
@@ -793,7 +854,14 @@ CreateDataArrayFrom(const void* data_raw,
             data_raw, valid_data, count, field_meta);
     }
 
-    return CreateVectorDataArrayFrom(data_raw, count, field_meta);
+    auto data_array = CreateVectorDataArrayFrom(data_raw, count, field_meta);
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+        field_meta.is_nullable() && valid_data != nullptr) {
+        auto obj = data_array->mutable_valid_data();
+        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+        obj->Add(valid_data_bool, valid_data_bool + count);
+    }
+    return data_array;
 }
 
 // TODO remove merge dataArray, instead fill target entity when get data slice
@@ -801,10 +869,9 @@ CreateDataArrayFrom(const void* data_raw,
 // IMPORTANT: This function uses std::move to transfer string/bytes data from
 // the per-segment output_fields_data_ (accessed via MergeBase) into the merged
 // DataArray. This is safe because each per-segment DataArray is discarded after
-// MergeDataArray completes — the caller (GetSearchResultDataSlice) never reads
-// the per-segment output_fields_data_ again after this point. Each offset
-// within a segment is referenced at most once in merge_bases (guaranteed by the
-// deduplication in ReduceSearchResultForOneNQ), so no element is moved twice.
+// MergeDataArray completes — callers must not read the per-segment
+// output_fields_data_ again after this point. Each offset within a segment must
+// be referenced at most once in merge_bases, so no element is moved twice.
 // If this invariant changes, the std::move calls below must be revisited.
 std::unique_ptr<DataArray>
 MergeDataArray(std::vector<MergeBase>& merge_bases,
@@ -831,11 +898,25 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             }
 
             if (!is_valid) {
+                if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+                    auto vector_array = data_array->mutable_vectors();
+                    auto dim = field_meta.get_dim();
+                    vector_array->set_dim(dim);
+                    auto obj = vector_array->mutable_vector_array();
+                    obj->set_dim(dim);
+                    obj->set_element_type(
+                        proto::schema::DataType(field_meta.get_element_type()));
+                    auto* row = obj->mutable_data()->Add();
+                    row->set_dim(dim);
+                    InitEmptyVectorArrayRow(row, field_meta.get_element_type());
+                }
                 continue;
             }
 
             int64_t physical_offset =
-                merge_base.getValidDataOffset(field_meta.get_id());
+                field_meta.get_data_type() == DataType::VECTOR_ARRAY
+                    ? src_offset
+                    : merge_base.getValidDataOffset(field_meta.get_id());
 
             auto vector_array = data_array->mutable_vectors();
             auto dim = 0;
@@ -851,13 +932,13 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
                 auto data = VEC_FIELD_DATA(src_field_data, float16);
                 auto obj = vector_array->mutable_float16_vector();
-                obj->assign(data + physical_offset * dim * sizeof(float16),
+                obj->append(data + physical_offset * dim * sizeof(float16),
                             dim * sizeof(float16));
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_BFLOAT16) {
                 auto data = VEC_FIELD_DATA(src_field_data, bfloat16);
                 auto obj = vector_array->mutable_bfloat16_vector();
-                obj->assign(data + physical_offset * dim * sizeof(bfloat16),
+                obj->append(data + physical_offset * dim * sizeof(bfloat16),
                             dim * sizeof(bfloat16));
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                 AssertInfo(
@@ -866,7 +947,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto num_bytes = dim / 8;
                 auto data = VEC_FIELD_DATA(src_field_data, binary);
                 auto obj = vector_array->mutable_binary_vector();
-                obj->assign(data + physical_offset * num_bytes, num_bytes);
+                obj->append(data + physical_offset * num_bytes, num_bytes);
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_SPARSE_U32_F32) {
                 auto* mutable_src_vec = src_field_data->mutable_vectors()
@@ -882,11 +963,12 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
                 auto data = VEC_FIELD_DATA(src_field_data, int8);
                 auto obj = vector_array->mutable_int8_vector();
-                obj->assign(data + physical_offset * dim * sizeof(int8),
+                obj->append(data + physical_offset * dim * sizeof(int8),
                             dim * sizeof(int8));
             } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
                 auto& data = src_field_data->vectors().vector_array();
                 auto obj = vector_array->mutable_vector_array();
+                obj->set_dim(dim);
                 obj->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
                 *(obj->mutable_data()->Add()) = data.data(physical_offset);
@@ -944,6 +1026,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }
+            case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT: {
                 auto* mutable_src = src_field_data->mutable_scalars()
@@ -1472,6 +1555,8 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
                                           load_index_info->field_id,
                                           load_index_info->index_build_id,
                                           load_index_info->index_version};
+    index_meta.index_store_path_version =
+        load_index_info->index_store_path_version;
     config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
     if (load_index_info->field_type == milvus::DataType::JSON) {
@@ -1627,4 +1712,111 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
 
     return ret;
 }
+
+// sortEqualScoresOneNQ sorts an equal-score run within [nq_begin, nq_end) by
+// PK ASC, using in-place cyclic permutation. Handles optional element_indices_
+// and composite_group_by_values_ fields.
+static void
+sortEqualScoresOneNQ(size_t nq_begin,
+                     size_t nq_end,
+                     SearchResult* search_result) {
+    if (nq_end - nq_begin <= 1)
+        return;
+
+    std::vector<size_t> indices;
+    size_t start = nq_begin;
+    while (start < nq_end) {
+        size_t end = start + 1;
+        while (end < nq_end &&
+               std::fabs(search_result->distances_[end] -
+                         search_result->distances_[start]) < EPSILON) {
+            ++end;
+        }
+
+        if (end - start > 1) {
+            indices.resize(end - start);
+            std::iota(indices.begin(), indices.end(), 0);
+
+            std::sort(indices.begin(),
+                      indices.end(),
+                      [&search_result, start](size_t i, size_t j) {
+                          return search_result->primary_keys_[start + i] <
+                                 search_result->primary_keys_[start + j];
+                      });
+
+            const bool has_element_level =
+                search_result->element_level_ &&
+                !search_result->element_indices_.empty();
+            const bool has_group_by = search_result->HasGroupBy();
+
+            // In-place cyclic permutation over the equal-score run.
+            for (size_t i = 0; i < indices.size();) {
+                size_t target = indices[i];
+                if (target == i) {
+                    ++i;
+                    continue;
+                }
+
+                PkType temp_pk =
+                    std::move(search_result->primary_keys_[start + i]);
+                int64_t temp_offset = search_result->seg_offsets_[start + i];
+                int32_t temp_elem_idx =
+                    has_element_level
+                        ? search_result->element_indices_[start + i]
+                        : -1;
+                CompositeGroupKey temp_group_by_val;
+                if (has_group_by) {
+                    temp_group_by_val =
+                        std::move(search_result->composite_group_by_values_
+                                      .value()[start + i]);
+                }
+
+                size_t curr = i;
+                while (indices[curr] != i) {
+                    size_t next = indices[curr];
+                    search_result->primary_keys_[start + curr] =
+                        std::move(search_result->primary_keys_[start + next]);
+                    search_result->seg_offsets_[start + curr] =
+                        search_result->seg_offsets_[start + next];
+                    if (has_element_level) {
+                        search_result->element_indices_[start + curr] =
+                            search_result->element_indices_[start + next];
+                    }
+                    if (has_group_by) {
+                        search_result->composite_group_by_values_
+                            .value()[start + curr] =
+                            std::move(search_result->composite_group_by_values_
+                                          .value()[start + next]);
+                    }
+                    indices[curr] = curr;
+                    curr = next;
+                }
+
+                search_result->primary_keys_[start + curr] = std::move(temp_pk);
+                search_result->seg_offsets_[start + curr] = temp_offset;
+                if (has_element_level) {
+                    search_result->element_indices_[start + curr] =
+                        temp_elem_idx;
+                }
+                if (has_group_by) {
+                    search_result->composite_group_by_values_
+                        .value()[start + curr] = std::move(temp_group_by_val);
+                }
+                indices[curr] = curr;
+            }
+        }
+
+        start = end;
+    }
+}
+
+void
+SortEqualScoresByPks(SearchResult* search_result) {
+    for (int64_t i = 0; i < search_result->total_nq_; i++) {
+        auto nq_begin = search_result->topk_per_nq_prefix_sum_[i];
+        auto nq_end = search_result->topk_per_nq_prefix_sum_[i + 1];
+        sortEqualScoresOneNQ(nq_begin, nq_end, search_result);
+    }
+}
+
 }  // namespace milvus::segcore

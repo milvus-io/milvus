@@ -29,12 +29,12 @@ import (
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/compress"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	_ "github.com/milvus-io/milvus/internal/storage/compress" // register a custom zstd codec here, to avoid to much memory usage when serializing.
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -122,7 +122,7 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 		w.arrowType = arrow.ListOf(elemType)
 		w.builder = array.NewListBuilder(memory.DefaultAllocator, elemType)
 	} else {
-		if w.nullable && typeutil.IsVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
+		if w.nullable && typeutil.IsSupportedNullableVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
 			w.arrowType = &arrow.BinaryType{}
 			w.builder = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
 		} else {
@@ -302,17 +302,17 @@ func (w *NativePayloadWriter) AddDataToPayloadForUT(data interface{}, validData 
 		}
 		return w.AddVectorArrayFieldDataToPayload(val)
 	default:
-		return errors.New("unsupported datatype")
+		return merr.WrapErrServiceInternalMsg("unsupported datatype")
 	}
 }
 
 func (w *NativePayloadWriter) AddBoolToPayload(data []bool, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished bool payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished bool payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into bool payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into bool payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -327,7 +327,7 @@ func (w *NativePayloadWriter) AddBoolToPayload(data []bool, validData []bool) er
 
 	builder, ok := w.builder.(*array.BooleanBuilder)
 	if !ok {
-		return errors.New("failed to cast ArrayBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast ArrayBuilder")
 	}
 	builder.AppendValues(data, validData)
 
@@ -336,11 +336,11 @@ func (w *NativePayloadWriter) AddBoolToPayload(data []bool, validData []bool) er
 
 func (w *NativePayloadWriter) AddByteToPayload(data []byte, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished byte payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished byte payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into byte payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into byte payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -355,7 +355,7 @@ func (w *NativePayloadWriter) AddByteToPayload(data []byte, validData []bool) er
 
 	builder, ok := w.builder.(*array.Int8Builder)
 	if !ok {
-		return errors.New("failed to cast ByteBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast ByteBuilder")
 	}
 
 	builder.Reserve(len(data))
@@ -371,11 +371,11 @@ func (w *NativePayloadWriter) AddByteToPayload(data []byte, validData []bool) er
 
 func (w *NativePayloadWriter) AddInt8ToPayload(data []int8, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished int8 payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished int8 payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into int8 payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into int8 payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -390,7 +390,7 @@ func (w *NativePayloadWriter) AddInt8ToPayload(data []int8, validData []bool) er
 
 	builder, ok := w.builder.(*array.Int8Builder)
 	if !ok {
-		return errors.New("failed to cast Int8Builder")
+		return merr.WrapErrServiceInternalMsg("failed to cast Int8Builder")
 	}
 	builder.AppendValues(data, validData)
 
@@ -399,11 +399,11 @@ func (w *NativePayloadWriter) AddInt8ToPayload(data []int8, validData []bool) er
 
 func (w *NativePayloadWriter) AddInt16ToPayload(data []int16, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished int16 payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished int16 payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into int16 payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into int16 payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -418,7 +418,7 @@ func (w *NativePayloadWriter) AddInt16ToPayload(data []int16, validData []bool) 
 
 	builder, ok := w.builder.(*array.Int16Builder)
 	if !ok {
-		return errors.New("failed to cast Int16Builder")
+		return merr.WrapErrServiceInternalMsg("failed to cast Int16Builder")
 	}
 	builder.AppendValues(data, validData)
 
@@ -427,11 +427,11 @@ func (w *NativePayloadWriter) AddInt16ToPayload(data []int16, validData []bool) 
 
 func (w *NativePayloadWriter) AddInt32ToPayload(data []int32, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished int32 payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished int32 payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into int32 payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into int32 payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -446,7 +446,7 @@ func (w *NativePayloadWriter) AddInt32ToPayload(data []int32, validData []bool) 
 
 	builder, ok := w.builder.(*array.Int32Builder)
 	if !ok {
-		return errors.New("failed to cast Int32Builder")
+		return merr.WrapErrServiceInternalMsg("failed to cast Int32Builder")
 	}
 	builder.AppendValues(data, validData)
 
@@ -455,11 +455,11 @@ func (w *NativePayloadWriter) AddInt32ToPayload(data []int32, validData []bool) 
 
 func (w *NativePayloadWriter) AddInt64ToPayload(data []int64, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished int64 payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished int64 payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into int64 payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into int64 payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -474,7 +474,7 @@ func (w *NativePayloadWriter) AddInt64ToPayload(data []int64, validData []bool) 
 
 	builder, ok := w.builder.(*array.Int64Builder)
 	if !ok {
-		return errors.New("failed to cast Int64Builder")
+		return merr.WrapErrServiceInternalMsg("failed to cast Int64Builder")
 	}
 	builder.AppendValues(data, validData)
 
@@ -483,11 +483,11 @@ func (w *NativePayloadWriter) AddInt64ToPayload(data []int64, validData []bool) 
 
 func (w *NativePayloadWriter) AddFloatToPayload(data []float32, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished float payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished float payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into float payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into float payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -502,7 +502,7 @@ func (w *NativePayloadWriter) AddFloatToPayload(data []float32, validData []bool
 
 	builder, ok := w.builder.(*array.Float32Builder)
 	if !ok {
-		return errors.New("failed to cast FloatBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast FloatBuilder")
 	}
 	builder.AppendValues(data, validData)
 
@@ -511,11 +511,11 @@ func (w *NativePayloadWriter) AddFloatToPayload(data []float32, validData []bool
 
 func (w *NativePayloadWriter) AddDoubleToPayload(data []float64, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished double payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished double payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into double payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into double payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -530,7 +530,7 @@ func (w *NativePayloadWriter) AddDoubleToPayload(data []float64, validData []boo
 
 	builder, ok := w.builder.(*array.Float64Builder)
 	if !ok {
-		return errors.New("failed to cast DoubleBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast DoubleBuilder")
 	}
 	builder.AppendValues(data, validData)
 
@@ -539,11 +539,11 @@ func (w *NativePayloadWriter) AddDoubleToPayload(data []float64, validData []boo
 
 func (w *NativePayloadWriter) AddTimestamptzToPayload(data []int64, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished int64 payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished int64 payload")
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into int64 payload")
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into int64 payload")
 	}
 
 	if !w.nullable && len(validData) != 0 {
@@ -558,7 +558,7 @@ func (w *NativePayloadWriter) AddTimestamptzToPayload(data []int64, validData []
 
 	builder, ok := w.builder.(*array.Int64Builder)
 	if !ok {
-		return errors.New("failed to cast Int64Builder")
+		return merr.WrapErrServiceInternalMsg("failed to cast Int64Builder")
 	}
 	builder.AppendValues(data, validData)
 
@@ -567,7 +567,7 @@ func (w *NativePayloadWriter) AddTimestamptzToPayload(data []int64, validData []
 
 func (w *NativePayloadWriter) AddOneStringToPayload(data string, isValid bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished string payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished string payload")
 	}
 
 	if !w.nullable && !isValid {
@@ -576,7 +576,7 @@ func (w *NativePayloadWriter) AddOneStringToPayload(data string, isValid bool) e
 
 	builder, ok := w.builder.(*array.StringBuilder)
 	if !ok {
-		return errors.New("failed to cast StringBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast StringBuilder")
 	}
 
 	if !isValid {
@@ -590,7 +590,7 @@ func (w *NativePayloadWriter) AddOneStringToPayload(data string, isValid bool) e
 
 func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField, isValid bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished array payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished array payload")
 	}
 
 	if !w.nullable && !isValid {
@@ -599,12 +599,12 @@ func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField, i
 
 	bytes, err := proto.Marshal(data)
 	if err != nil {
-		return errors.New("Marshal ListValue failed")
+		return merr.WrapErrServiceInternalMsg("Marshal ListValue failed")
 	}
 
 	builder, ok := w.builder.(*array.BinaryBuilder)
 	if !ok {
-		return errors.New("failed to cast BinaryBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast BinaryBuilder")
 	}
 
 	if !isValid {
@@ -618,7 +618,7 @@ func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField, i
 
 func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, isValid bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished json payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished json payload")
 	}
 
 	if !w.nullable && !isValid {
@@ -627,7 +627,7 @@ func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, isValid bool) err
 
 	builder, ok := w.builder.(*array.BinaryBuilder)
 	if !ok {
-		return errors.New("failed to cast JsonBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast JsonBuilder")
 	}
 
 	if !isValid {
@@ -641,7 +641,7 @@ func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, isValid bool) err
 
 func (w *NativePayloadWriter) AddOneGeometryToPayload(data []byte, isValid bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished geometry payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished geometry payload")
 	}
 
 	if !w.nullable && !isValid {
@@ -650,7 +650,7 @@ func (w *NativePayloadWriter) AddOneGeometryToPayload(data []byte, isValid bool)
 
 	builder, ok := w.builder.(*array.BinaryBuilder)
 	if !ok {
-		return errors.New("failed to cast geometryBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast geometryBuilder")
 	}
 
 	if !isValid {
@@ -662,20 +662,25 @@ func (w *NativePayloadWriter) AddOneGeometryToPayload(data []byte, isValid bool)
 	return nil
 }
 
+func validateNullableVectorValidData(validData []bool) (int, error) {
+	if len(validData) == 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("validData is required for nullable vector payload")
+	}
+	return int(funcutil.CountValidRows(validData)), nil
+}
+
 func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished binary vector payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished binary vector payload")
 	}
 
 	byteLength := dim / 8
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * byteLength
 		if len(data) != expectedDataLen {
@@ -684,7 +689,7 @@ func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int, val
 		}
 	} else {
 		if len(data) == 0 {
-			return errors.New("can't add empty msgs into binary vector payload")
+			return merr.WrapErrServiceInternalMsg("can't add empty msgs into binary vector payload")
 		}
 		numRows = len(data) / byteLength
 		if !w.nullable && len(validData) != 0 {
@@ -696,7 +701,7 @@ func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int, val
 	if w.nullable {
 		builder, ok := w.builder.(*array.BinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to BinaryBuilder for nullable BinaryVector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to BinaryBuilder for nullable BinaryVector")
 		}
 
 		builder.Reserve(numRows)
@@ -712,7 +717,7 @@ func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int, val
 	} else {
 		builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to FixedSizeBinaryBuilder for non-nullable BinaryVector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to FixedSizeBinaryBuilder for non-nullable BinaryVector")
 		}
 
 		builder.Reserve(numRows)
@@ -726,17 +731,15 @@ func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int, val
 
 func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished float vector payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished float vector payload")
 	}
 
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * dim
 		if len(data) != expectedDataLen {
@@ -745,7 +748,7 @@ func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int, v
 		}
 	} else {
 		if len(data) == 0 {
-			return errors.New("can't add empty msgs into float vector payload")
+			return merr.WrapErrServiceInternalMsg("can't add empty msgs into float vector payload")
 		}
 		numRows = len(data) / dim
 		if !w.nullable && len(validData) != 0 {
@@ -759,7 +762,7 @@ func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int, v
 	if w.nullable {
 		builder, ok := w.builder.(*array.BinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to BinaryBuilder for nullable FloatVector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to BinaryBuilder for nullable FloatVector")
 		}
 
 		builder.Reserve(numRows)
@@ -781,7 +784,7 @@ func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int, v
 	} else {
 		builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to FixedSizeBinaryBuilder for non-nullable FloatVector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to FixedSizeBinaryBuilder for non-nullable FloatVector")
 		}
 
 		builder.Reserve(numRows)
@@ -801,18 +804,16 @@ func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int, v
 
 func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished float16 payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished float16 payload")
 	}
 
 	byteLength := dim * 2
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * byteLength
 		if len(data) != expectedDataLen {
@@ -821,7 +822,7 @@ func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int, va
 		}
 	} else {
 		if len(data) == 0 {
-			return errors.New("can't add empty msgs into float16 payload")
+			return merr.WrapErrServiceInternalMsg("can't add empty msgs into float16 payload")
 		}
 		numRows = len(data) / byteLength
 		if !w.nullable && len(validData) != 0 {
@@ -833,7 +834,7 @@ func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int, va
 	if w.nullable {
 		builder, ok := w.builder.(*array.BinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to BinaryBuilder for nullable Float16Vector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to BinaryBuilder for nullable Float16Vector")
 		}
 
 		builder.Reserve(numRows)
@@ -849,7 +850,7 @@ func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int, va
 	} else {
 		builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to FixedSizeBinaryBuilder for non-nullable Float16Vector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to FixedSizeBinaryBuilder for non-nullable Float16Vector")
 		}
 
 		builder.Reserve(numRows)
@@ -863,18 +864,16 @@ func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int, va
 
 func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished BFloat16 payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished BFloat16 payload")
 	}
 
 	byteLength := dim * 2
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * byteLength
 		if len(data) != expectedDataLen {
@@ -883,7 +882,7 @@ func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int, v
 		}
 	} else {
 		if len(data) == 0 {
-			return errors.New("can't add empty msgs into BFloat16 payload")
+			return merr.WrapErrServiceInternalMsg("can't add empty msgs into BFloat16 payload")
 		}
 		numRows = len(data) / byteLength
 		if !w.nullable && len(validData) != 0 {
@@ -895,7 +894,7 @@ func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int, v
 	if w.nullable {
 		builder, ok := w.builder.(*array.BinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to BinaryBuilder for nullable BFloat16Vector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to BinaryBuilder for nullable BFloat16Vector")
 		}
 
 		builder.Reserve(numRows)
@@ -911,7 +910,7 @@ func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int, v
 	} else {
 		builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to FixedSizeBinaryBuilder for non-nullable BFloat16Vector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to FixedSizeBinaryBuilder for non-nullable BFloat16Vector")
 		}
 
 		builder.Reserve(numRows)
@@ -925,17 +924,15 @@ func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int, v
 
 func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVectorFieldData) error {
 	if w.finished {
-		return errors.New("can't append data to finished sparse float vector payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished sparse float vector payload")
 	}
 
 	var numRows int
-	if w.nullable && len(data.ValidData) > 0 {
+	if w.nullable {
 		numRows = len(data.ValidData)
-		validCount := 0
-		for _, valid := range data.ValidData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(data.ValidData)
+		if err != nil {
+			return err
 		}
 		if len(data.Contents) != validCount {
 			msg := fmt.Sprintf("when nullable, Contents length(%d) must equal to valid count(%d)", len(data.Contents), validCount)
@@ -951,7 +948,7 @@ func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVec
 
 	builder, ok := w.builder.(*array.BinaryBuilder)
 	if !ok {
-		return errors.New("failed to cast SparseFloatVectorBuilder")
+		return merr.WrapErrServiceInternalMsg("failed to cast SparseFloatVectorBuilder")
 	}
 
 	builder.Reserve(numRows)
@@ -970,17 +967,15 @@ func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVec
 
 func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int, validData []bool) error {
 	if w.finished {
-		return errors.New("can't append data to finished int8 vector payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished int8 vector payload")
 	}
 
 	var numRows int
-	if w.nullable && len(validData) > 0 {
+	if w.nullable {
 		numRows = len(validData)
-		validCount := 0
-		for _, valid := range validData {
-			if valid {
-				validCount++
-			}
+		validCount, err := validateNullableVectorValidData(validData)
+		if err != nil {
+			return err
 		}
 		expectedDataLen := validCount * dim
 		if len(data) != expectedDataLen {
@@ -989,7 +984,7 @@ func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int, valid
 		}
 	} else {
 		if len(data) == 0 {
-			return errors.New("can't add empty msgs into int8 vector payload")
+			return merr.WrapErrServiceInternalMsg("can't add empty msgs into int8 vector payload")
 		}
 		numRows = len(data) / dim
 		if !w.nullable && len(validData) != 0 {
@@ -1001,7 +996,7 @@ func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int, valid
 	if w.nullable {
 		builder, ok := w.builder.(*array.BinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to BinaryBuilder for nullable Int8Vector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to BinaryBuilder for nullable Int8Vector")
 		}
 
 		builder.Reserve(numRows)
@@ -1019,7 +1014,7 @@ func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int, valid
 	} else {
 		builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
 		if !ok {
-			return errors.New("failed to cast to FixedSizeBinaryBuilder for non-nullable Int8Vector")
+			return merr.WrapErrServiceInternalMsg("failed to cast to FixedSizeBinaryBuilder for non-nullable Int8Vector")
 		}
 
 		builder.Reserve(numRows)
@@ -1035,7 +1030,7 @@ func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int, valid
 
 func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	if w.finished {
-		return errors.New("can't reuse a finished writer")
+		return merr.WrapErrServiceInternalMsg("can't reuse a finished writer")
 	}
 
 	w.finished = true
@@ -1044,14 +1039,14 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	var metadata arrow.Metadata
 	if w.dataType == schemapb.DataType_ArrayOfVector {
 		if w.elementType == nil {
-			return errors.New("element type for DataType_ArrayOfVector must be set")
+			return merr.WrapErrServiceInternalMsg("element type for DataType_ArrayOfVector must be set")
 		}
 
 		metadata = arrow.NewMetadata(
 			[]string{"elementType", "dim"},
 			[]string{fmt.Sprintf("%d", int32(*w.elementType)), fmt.Sprintf("%d", w.dim.GetValue())},
 		)
-	} else if w.nullable && typeutil.IsVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType) {
+	} else if w.nullable && typeutil.IsSupportedNullableVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType) {
 		metadata = arrow.NewMetadata(
 			[]string{"dim"},
 			[]string{fmt.Sprintf("%d", w.dim.GetValue())},
@@ -1079,7 +1074,7 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 
 	arrowWriterProps := pqarrow.DefaultWriterProps()
 	if w.dataType == schemapb.DataType_ArrayOfVector ||
-		(w.nullable && typeutil.IsVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType)) {
+		(w.nullable && typeutil.IsSupportedNullableVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType)) {
 		// Store metadata in the Arrow writer properties
 		arrowWriterProps = pqarrow.NewArrowWriterProperties(
 			pqarrow.WithStoreSchema(),
@@ -1103,7 +1098,7 @@ func (w *NativePayloadWriter) GetPayloadBufferFromWriter() ([]byte, error) {
 
 	// The cpp version of payload writer handles the empty buffer as error
 	if len(data) == 0 {
-		return nil, errors.New("empty buffer")
+		return nil, merr.WrapErrServiceInternalMsg("empty buffer")
 	}
 
 	return data, nil
@@ -1180,16 +1175,16 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 // AddVectorArrayFieldDataToPayload adds VectorArrayFieldData to payload using Arrow ListArray
 func (w *NativePayloadWriter) AddVectorArrayFieldDataToPayload(data *VectorArrayFieldData) error {
 	if w.finished {
-		return errors.New("can't append data to finished vector array payload")
+		return merr.WrapErrServiceInternalMsg("can't append data to finished vector array payload")
 	}
 
 	if len(data.Data) == 0 {
-		return errors.New("can't add empty vector array field data")
+		return merr.WrapErrServiceInternalMsg("can't add empty vector array field data")
 	}
 
 	builder, ok := w.builder.(*array.ListBuilder)
 	if !ok {
-		return errors.New("failed to cast to ListBuilder for VectorArray")
+		return merr.WrapErrServiceInternalMsg("failed to cast to ListBuilder for VectorArray")
 	}
 
 	switch data.ElementType {
@@ -1204,7 +1199,7 @@ func (w *NativePayloadWriter) AddVectorArrayFieldDataToPayload(data *VectorArray
 	case schemapb.DataType_Int8Vector:
 		return w.addInt8VectorArrayToPayload(builder, data)
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", data.ElementType.String()))
+		return merr.WrapErrParameterInvalidMsg("unsupported element type in VectorArray: %s", data.ElementType.String())
 	}
 }
 
@@ -1222,19 +1217,22 @@ func (w *NativePayloadWriter) addFloatVectorArrayToPayload(builder *array.ListBu
 			return merr.WrapErrParameterInvalidMsg("expected FloatVector but got different type")
 		}
 
+		floatData := vectorField.GetFloatVector().GetData()
+
+		numVectors, err := validateVectorArrayElementCount(len(floatData), int(data.Dim))
+		if err != nil {
+			return err
+		}
+
 		// Start a new list for this row
 		builder.Append(true)
 
-		floatData := vectorField.GetFloatVector().GetData()
-
-		dim := vectorField.GetDim()
-		numVectors := len(floatData) / int(dim)
 		for i := 0; i < numVectors; i++ {
-			start := i * int(dim)
-			end := start + int(dim)
+			start := i * int(data.Dim)
+			end := start + int(data.Dim)
 			vectorSlice := floatData[start:end]
 
-			bytes := make([]byte, dim*4)
+			bytes := make([]byte, data.Dim*4)
 			for j, f := range vectorSlice {
 				binary.LittleEndian.PutUint32(bytes[j*4:], math.Float32bits(f))
 			}
@@ -1260,12 +1258,15 @@ func (w *NativePayloadWriter) addBinaryVectorArrayToPayload(builder *array.ListB
 			return merr.WrapErrParameterInvalidMsg("expected BinaryVector but got different type")
 		}
 
-		// Start a new list for this row
-		builder.Append(true)
-
 		binaryData := vectorField.GetBinaryVector()
 		byteWidth := (data.Dim + 7) / 8
-		numVectors := len(binaryData) / int(byteWidth)
+		numVectors, err := validateVectorArrayElementCount(len(binaryData), int(byteWidth))
+		if err != nil {
+			return err
+		}
+
+		// Start a new list for this row
+		builder.Append(true)
 
 		for i := 0; i < numVectors; i++ {
 			start := i * int(byteWidth)
@@ -1291,12 +1292,15 @@ func (w *NativePayloadWriter) addFloat16VectorArrayToPayload(builder *array.List
 			return merr.WrapErrParameterInvalidMsg("expected Float16Vector but got different type")
 		}
 
-		// Start a new list for this row
-		builder.Append(true)
-
 		float16Data := vectorField.GetFloat16Vector()
 		byteWidth := data.Dim * 2
-		numVectors := len(float16Data) / int(byteWidth)
+		numVectors, err := validateVectorArrayElementCount(len(float16Data), int(byteWidth))
+		if err != nil {
+			return err
+		}
+
+		// Start a new list for this row
+		builder.Append(true)
 
 		for i := 0; i < numVectors; i++ {
 			start := i * int(byteWidth)
@@ -1322,12 +1326,15 @@ func (w *NativePayloadWriter) addBFloat16VectorArrayToPayload(builder *array.Lis
 			return merr.WrapErrParameterInvalidMsg("expected BFloat16Vector but got different type")
 		}
 
-		// Start a new list for this row
-		builder.Append(true)
-
 		bfloat16Data := vectorField.GetBfloat16Vector()
 		byteWidth := data.Dim * 2
-		numVectors := len(bfloat16Data) / int(byteWidth)
+		numVectors, err := validateVectorArrayElementCount(len(bfloat16Data), int(byteWidth))
+		if err != nil {
+			return err
+		}
+
+		// Start a new list for this row
+		builder.Append(true)
 
 		for i := 0; i < numVectors; i++ {
 			start := i * int(byteWidth)
@@ -1353,11 +1360,14 @@ func (w *NativePayloadWriter) addInt8VectorArrayToPayload(builder *array.ListBui
 			return merr.WrapErrParameterInvalidMsg("expected Int8Vector but got different type")
 		}
 
+		int8Data := vectorField.GetInt8Vector()
+		numVectors, err := validateVectorArrayElementCount(len(int8Data), int(data.Dim))
+		if err != nil {
+			return err
+		}
+
 		// Start a new list for this row
 		builder.Append(true)
-
-		int8Data := vectorField.GetInt8Vector()
-		numVectors := len(int8Data) / int(data.Dim)
 
 		for i := 0; i < numVectors; i++ {
 			start := i * int(data.Dim)

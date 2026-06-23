@@ -140,21 +140,25 @@ class ColumnVector final : public SimpleVector {
                                                              std::move(bitmap));
     }
 
-    ColumnVector(FieldDataPtr&& value, TargetBitmap&& valid_bitmap)
+    ColumnVector(FieldDataPtr&& value,
+                 TargetBitmap&& valid_bitmap,
+                 size_t null_count)
         : SimpleVector(value ? value->get_data_type() : DataType::NONE,
                        value ? value->Length() : 0),
           is_bitmap_(false),
           valid_values_(std::move(valid_bitmap)) {
         AssertInfo(value, "ColumnVector value cannot be null");
+        AssertInfo(valid_values_.size() == length_,
+                   "ColumnVector valid bitmap size {} must match length {}",
+                   valid_values_.size(),
+                   length_);
+        AssertInfo(null_count <= length_,
+                   "ColumnVector null count {} must not exceed length {}",
+                   null_count,
+                   length_);
         values_ = std::move(value);
-        // Compute null_count_ from valid_bitmap: count false bits (nulls)
-        size_t nulls = 0;
-        for (size_t i = 0; i < valid_values_.size(); ++i) {
-            if (!valid_values_[i]) {
-                ++nulls;
-            }
-        }
-        null_count_ = (nulls > 0) ? std::optional<size_t>(nulls) : std::nullopt;
+        null_count_ =
+            null_count > 0 ? std::optional<size_t>(null_count) : std::nullopt;
     }
 
     virtual ~ColumnVector() override {

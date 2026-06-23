@@ -2223,6 +2223,66 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("nullable float16 and bfloat16 vector all null rejects partial row payload", func(t *testing.T) {
+		testCases := []struct {
+			name     string
+			dataType schemapb.DataType
+			vector   *schemapb.VectorField
+		}{
+			{
+				name:     "float16",
+				dataType: schemapb.DataType_Float16Vector,
+				vector: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: []byte{0x01, 0x02},
+					},
+				},
+			},
+			{
+				name:     "bfloat16",
+				dataType: schemapb.DataType_BFloat16Vector,
+				vector: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: []byte{0x01, 0x02},
+					},
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				data := []*schemapb.FieldData{
+					{
+						FieldName: "test",
+						Type:      tc.dataType,
+						ValidData: []bool{false, false},
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: tc.vector,
+						},
+					},
+				}
+
+				schema := &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:       "test",
+							DataType:   tc.dataType,
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+							Nullable:   true,
+						},
+					},
+				}
+				h, err := typeutil.CreateSchemaHelper(schema)
+				require.NoError(t, err)
+
+				err = newValidateUtil().checkAligned(data, h, 2)
+				require.Error(t, err)
+			})
+		}
+	})
+
 	t.Run("nullable int8 vector all null", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -2302,6 +2362,121 @@ func Test_validateUtil_Validate(t *testing.T) {
 		err := v.Validate(data, nil, 100)
 
 		assert.Error(t, err)
+	})
+
+	t.Run("nullable vector fills missing valid data", func(t *testing.T) {
+		testCases := []struct {
+			name      string
+			dataType  schemapb.DataType
+			dim       string
+			fieldData *schemapb.FieldData
+		}{
+			{
+				name:     "FloatVector",
+				dataType: schemapb.DataType_FloatVector,
+				dim:      "2",
+				fieldData: &schemapb.FieldData{
+					FieldName: "vec",
+					Type:      schemapb.DataType_FloatVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim: 2,
+						Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+							Data: []float32{1, 2, 3, 4},
+						}},
+					}},
+				},
+			},
+			{
+				name:     "BinaryVector",
+				dataType: schemapb.DataType_BinaryVector,
+				dim:      "8",
+				fieldData: &schemapb.FieldData{
+					FieldName: "vec",
+					Type:      schemapb.DataType_BinaryVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  8,
+						Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2}},
+					}},
+				},
+			},
+			{
+				name:     "Float16Vector",
+				dataType: schemapb.DataType_Float16Vector,
+				dim:      "2",
+				fieldData: &schemapb.FieldData{
+					FieldName: "vec",
+					Type:      schemapb.DataType_Float16Vector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}},
+					}},
+				},
+			},
+			{
+				name:     "BFloat16Vector",
+				dataType: schemapb.DataType_BFloat16Vector,
+				dim:      "2",
+				fieldData: &schemapb.FieldData{
+					FieldName: "vec",
+					Type:      schemapb.DataType_BFloat16Vector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}},
+					}},
+				},
+			},
+			{
+				name:     "Int8Vector",
+				dataType: schemapb.DataType_Int8Vector,
+				dim:      "2",
+				fieldData: &schemapb.FieldData{
+					FieldName: "vec",
+					Type:      schemapb.DataType_Int8Vector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4}},
+					}},
+				},
+			},
+			{
+				name:     "SparseFloatVector",
+				dataType: schemapb.DataType_SparseFloatVector,
+				fieldData: &schemapb.FieldData{
+					FieldName: "vec",
+					Type:      schemapb.DataType_SparseFloatVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+							Contents: [][]byte{
+								typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
+								typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2}),
+							},
+						}},
+					}},
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				fieldSchema := &schemapb.FieldSchema{
+					FieldID:  100,
+					Name:     "vec",
+					DataType: tc.dataType,
+					Nullable: true,
+				}
+				if tc.dim != "" {
+					fieldSchema.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: tc.dim}}
+				}
+				h, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{fieldSchema},
+				})
+				require.NoError(t, err)
+
+				err = newValidateUtil().Validate([]*schemapb.FieldData{tc.fieldData}, h, 2)
+				require.NoError(t, err)
+				assert.Equal(t, []bool{true, true}, tc.fieldData.GetValidData())
+			})
+		}
 	})
 
 	t.Run("not aligned", func(t *testing.T) {
@@ -7738,7 +7913,9 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
 		v := newValidateUtil()
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
@@ -7758,7 +7935,9 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
 		v := newValidateUtil()
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
@@ -7786,7 +7965,9 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "3"}},
 		}
 		v := newValidateUtil()
 		v.checkNAN = false
@@ -7815,7 +7996,9 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "1"}},
 		}
 		v := newValidateUtil(withNANCheck())
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
@@ -7850,11 +8033,80 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
 		v := newValidateUtil(withNANCheck())
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.NoError(t, err)
+	})
+
+	t.Run("exceeds max capacity", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			FieldName: "test",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Data: []*schemapb.VectorField{
+								{
+									Data: &schemapb.VectorField_FloatVector{
+										FloatVector: &schemapb.FloatArray{
+											Data: []float32{1.0, 2.0, 3.0, 4.0},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "2"},
+				{Key: common.MaxCapacityKey, Value: "1"},
+			},
+		}
+		v := newValidateUtil(withMaxCapCheck())
+		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max capacity")
+	})
+
+	t.Run("payload length not divisible by dim", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			FieldName: "test",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Data: []*schemapb.VectorField{
+								{
+									Data: &schemapb.VectorField_FloatVector{
+										FloatVector: &schemapb.FloatArray{
+											Data: []float32{1.0, 2.0, 3.0},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+		}
+		v := newValidateUtil()
+		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "divisible")
 	})
 }
 
@@ -8018,6 +8270,47 @@ func TestFillWithNullValue_Geometry(t *testing.T) {
 		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[1])
 		assert.Equal(t, []byte{0x03, 0x04}, field.GetScalars().GetGeometryData().GetData()[2])
 		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[3])
+	})
+
+	t.Run("ArrayOfVector expands to dense with null placeholder", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			FieldName: "vec_array",
+			Type:      schemapb.DataType_ArrayOfVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 4,
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Data: []*schemapb.VectorField{
+								{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}},
+								{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{5, 6, 7, 8}}}},
+							},
+							Dim:         4,
+							ElementType: schemapb.DataType_FloatVector,
+						},
+					},
+				},
+			},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:        "vec_array",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			Nullable:    true,
+		}
+		err := FillWithNullValue(field, fieldSchema, 3)
+		assert.NoError(t, err)
+
+		vectorArray := field.GetVectors().GetVectorArray()
+		require.NotNil(t, vectorArray)
+		// Plan B: ArrayOfVector is expanded to dense; null row gets an empty per-row placeholder.
+		assert.Equal(t, 3, len(vectorArray.Data))
+		assert.Equal(t, []float32{1, 2, 3, 4}, vectorArray.Data[0].GetFloatVector().GetData())
+		assert.Empty(t, vectorArray.Data[1].GetFloatVector().GetData())
+		assert.Equal(t, int64(4), vectorArray.Data[1].GetDim())
+		assert.Equal(t, []float32{5, 6, 7, 8}, vectorArray.Data[2].GetFloatVector().GetData())
 	})
 }
 
@@ -8189,5 +8482,72 @@ func Test_MetaNullableCompat_v25_vs_v26(t *testing.T) {
 		}
 		assert.NoError(t, err, "2.6 schema upsert queryPreExecute should pass")
 		assert.Equal(t, numRows, len(fieldData.GetValidData()), "nullable $meta should have ValidData")
+	})
+}
+
+func Test_fillVectorArrayNullValueImpl(t *testing.T) {
+	makeCompact := func(k int) []*schemapb.VectorField {
+		out := make([]*schemapb.VectorField, k)
+		for i := 0; i < k; i++ {
+			out[i] = &schemapb.VectorField{
+				Dim: 8,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{float32(i + 1)}},
+				},
+			}
+		}
+		return out
+	}
+
+	t.Run("partial null expansion", func(t *testing.T) {
+		compact := makeCompact(2)
+		validData := []bool{true, false, true, false}
+		res, err := fillVectorArrayNullValueImpl(compact, validData, 8, schemapb.DataType_FloatVector)
+		require.NoError(t, err)
+		require.Len(t, res, 4)
+		assert.Equal(t, float32(1), res[0].GetFloatVector().GetData()[0])
+		assert.Equal(t, float32(2), res[2].GetFloatVector().GetData()[0])
+		assert.Empty(t, res[1].GetFloatVector().GetData())
+		assert.EqualValues(t, 8, res[1].GetDim())
+		assert.Empty(t, res[3].GetFloatVector().GetData())
+		assert.EqualValues(t, 8, res[3].GetDim())
+	})
+
+	t.Run("all valid short-circuits", func(t *testing.T) {
+		compact := makeCompact(3)
+		validData := []bool{true, true, true}
+		res, err := fillVectorArrayNullValueImpl(compact, validData, 8, schemapb.DataType_FloatVector)
+		require.NoError(t, err)
+		require.Len(t, res, 3)
+		assert.Equal(t, float32(1), res[0].GetFloatVector().GetData()[0])
+		assert.Equal(t, float32(2), res[1].GetFloatVector().GetData()[0])
+		assert.Equal(t, float32(3), res[2].GetFloatVector().GetData()[0])
+	})
+
+	t.Run("all null expansion", func(t *testing.T) {
+		compact := makeCompact(0)
+		validData := []bool{false, false, false}
+		res, err := fillVectorArrayNullValueImpl(compact, validData, 8, schemapb.DataType_FloatVector)
+		require.NoError(t, err)
+		require.Len(t, res, 3)
+		for i := 0; i < 3; i++ {
+			assert.Empty(t, res[i].GetFloatVector().GetData(), "row %d", i)
+			assert.EqualValues(t, 8, res[i].GetDim(), "row %d", i)
+		}
+	})
+
+	t.Run("length mismatch returns error", func(t *testing.T) {
+		compact := makeCompact(3)
+		validData := []bool{true, false, false, false}
+		res, err := fillVectorArrayNullValueImpl(compact, validData, 8, schemapb.DataType_FloatVector)
+		assert.Error(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("unsupported element type returns error", func(t *testing.T) {
+		res, err := fillVectorArrayNullValueImpl(nil, []bool{false}, 8, schemapb.DataType_None)
+		require.Error(t, err)
+		assert.Nil(t, res)
+		assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
 	})
 }

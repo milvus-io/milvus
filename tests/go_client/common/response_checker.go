@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	// "github.com/twpayne/go-geom/encoding/wkb"
@@ -56,6 +57,37 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 			if !contains {
 				t.Fatalf("CheckErr failed, actualErr doesn't contains any expErrorMsg, actual msg:%s, trace:%s", actualErr, trace())
 			}
+		}
+	}
+}
+
+func IsTSafeStalledError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "tsafe stalled")
+}
+
+func RetryOnTSafeStalled(ctx context.Context, operation func() error) error {
+	return retryOnTSafeStalled(ctx, 30*time.Second, time.Second, operation)
+}
+
+func retryOnTSafeStalled(ctx context.Context, timeout time.Duration, interval time.Duration, operation func() error) error {
+	var err error
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		err = operation()
+		if !IsTSafeStalledError(err) {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-deadline.C:
+			return err
+		case <-ticker.C:
 		}
 	}
 }

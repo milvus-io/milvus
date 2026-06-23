@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -32,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -158,50 +156,17 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 
 	indexes := i.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
 	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-
-	// MinSchemaVersion enforcement is only applied while the collection has an in-flight
-	// physical backfill (e.g. AlterCollectionSchema adding a BM25 function): until backfill
-	// writes the new field's data, an index built on the empty binlog would silently return
-	// wrong results. For metadata-only schema changes (e.g. nullable AddCollectionField),
-	// the index builder handles null/default values, so no delay is needed.
-	// Within the physical-backfill branch we still double-check segment binlogs because a
-	// function output field that was backfilled in a previous schema version is already
-	// present in this segment.
-	coll := i.meta.GetCollection(segment.CollectionID)
-	collectionInPhysicalBackfill := coll != nil && coll.Schema != nil && coll.Schema.GetDoPhysicalBackfill()
 	var segmentBinlogFields map[int64]struct{}
+
 	for _, index := range indexes {
 		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
 			continue
 		}
-		if collectionInPhysicalBackfill && index.MinSchemaVersion > segment.GetSchemaVersion() {
-			if segmentBinlogFields == nil {
-				segmentBinlogFields = getSegmentBinlogFields(segment)
-			}
-			if _, hasField := segmentBinlogFields[index.FieldID]; !hasField {
-				log.Ctx(ctx).Info("skip index creation: field data not yet present in segment, waiting for physical backfill",
-					zap.Int64("segmentID", segment.ID),
-					zap.Int64("indexID", index.IndexID),
-					zap.Int64("fieldID", index.FieldID),
-					zap.Int32("segSchemaVersion", segment.GetSchemaVersion()),
-					zap.Int32("indexMinSchemaVersion", index.MinSchemaVersion))
-				continue
-			}
-			// Transient inconsistency window: backfill has already written the field's
-			// binlog data to this segment, but the metadata tick has not yet bumped
-			// segment.SchemaVersion to match. The window should close within one backfill
-			// tick. Bail out with an error so the inspector retries on the next tick by
-			// which time the metadata is expected to have caught up. Sustained occurrences
-			// indicate the metadata-update path is stuck and warrant investigation.
-			log.Ctx(ctx).Warn("inconsistent state: field binlogs present but segment schema version still behind, will retry",
-				zap.Int64("segmentID", segment.ID),
-				zap.Int64("indexID", index.IndexID),
-				zap.Int64("fieldID", index.FieldID),
-				zap.Int32("segSchemaVersion", segment.GetSchemaVersion()),
-				zap.Int32("indexMinSchemaVersion", index.MinSchemaVersion))
-			return merr.WrapErrServiceInternal(
-				fmt.Sprintf("segment schema version %d behind index min schema version %d while field %d binlogs already present, retry next tick",
-					segment.GetSchemaVersion(), index.MinSchemaVersion, index.FieldID))
+		if segmentBinlogFields == nil {
+			segmentBinlogFields = getSegmentBinlogFields(segment)
+		}
+		if !i.canCreateIndexForSegment(ctx, segment, index, segmentBinlogFields) {
+			continue
 		}
 		if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
 			log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
@@ -213,16 +178,45 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 }
 
 // getSegmentBinlogFields returns the set of field IDs that have binlog data in the segment.
-// binlog.GetFieldID() is a columnGroupID, not a real field ID; the actual field IDs
-// are always in binlog.GetChildFields().
+// StorageV2/V3 column groups report real field IDs through ChildFields; legacy entries may use FieldID directly.
 func getSegmentBinlogFields(segment *SegmentInfo) map[int64]struct{} {
 	result := make(map[int64]struct{})
 	for _, binlog := range segment.GetBinlogs() {
+		if len(binlog.GetChildFields()) == 0 {
+			if segment.GetStorageVersion() == storage.StorageV1 {
+				result[binlog.GetFieldID()] = struct{}{}
+			}
+			continue
+		}
 		for _, childFieldID := range binlog.GetChildFields() {
 			result[childFieldID] = struct{}{}
 		}
 	}
 	return result
+}
+
+func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index, segmentBinlogFields map[int64]struct{}) bool {
+	_, hasField := segmentBinlogFields[index.FieldID]
+	if !i.isFunctionOutputField(segment.CollectionID, index.FieldID) || hasField {
+		return true
+	}
+	log.Ctx(ctx).Debug("function output field has no binlog, skip create index", zap.Int64("segmentID", segment.ID), zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID))
+	return false
+}
+
+func (i *indexInspector) isFunctionOutputField(collectionID, fieldID int64) bool {
+	collection := i.meta.GetCollection(collectionID)
+	if collection == nil || collection.Schema == nil {
+		return false
+	}
+	for _, functionSchema := range collection.Schema.GetFunctions() {
+		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
+			if outputFieldID == fieldID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
@@ -254,15 +248,16 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	}
 
 	segIndex := &model.SegmentIndex{
-		SegmentID:      segment.ID,
-		CollectionID:   segment.CollectionID,
-		PartitionID:    segment.PartitionID,
-		NumRows:        segment.NumOfRows,
-		IndexID:        indexID,
-		BuildID:        buildID,
-		CreatedUTCTime: uint64(time.Now().Unix()),
-		WriteHandoff:   false,
-		IndexType:      indexType,
+		SegmentID:             segment.ID,
+		CollectionID:          segment.CollectionID,
+		PartitionID:           segment.PartitionID,
+		NumRows:               segment.NumOfRows,
+		IndexID:               indexID,
+		BuildID:               buildID,
+		CreatedUTCTime:        uint64(time.Now().Unix()),
+		WriteHandoff:          false,
+		IndexType:             indexType,
+		IndexStorePathVersion: i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion(),
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err

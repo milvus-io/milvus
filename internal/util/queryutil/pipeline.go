@@ -22,6 +22,8 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Well-known pipeline channel names
@@ -71,7 +73,7 @@ func (n *Node) unpackInputs(msg OpMsg) ([]any, error) {
 	for i, input := range n.inputs {
 		val, ok := msg[input]
 		if !ok {
-			return nil, fmt.Errorf("node [%s]: input channel '%s' not found", n.name, input)
+			return nil, merr.WrapErrParameterInvalidMsg("node [%s]: input channel '%s' not found", n.name, input)
 		}
 		inputs[i] = val
 	}
@@ -81,7 +83,7 @@ func (n *Node) unpackInputs(msg OpMsg) ([]any, error) {
 // packOutputs stores output values into the message by channel names.
 func (n *Node) packOutputs(outputs []any, msg OpMsg) error {
 	if len(outputs) != len(n.outputs) {
-		return fmt.Errorf("node [%s]: output count mismatch, expected %d, got %d",
+		return merr.WrapErrParameterInvalidMsg("node [%s]: output count mismatch, expected %d, got %d",
 			n.name, len(n.outputs), len(outputs))
 	}
 	for i, output := range n.outputs {
@@ -99,7 +101,7 @@ func (n *Node) Run(ctx context.Context, span trace.Span, msg OpMsg) error {
 
 	outputs, err := n.op.Run(ctx, span, inputs...)
 	if err != nil {
-		return fmt.Errorf("node [%s] operator failed: %w", n.name, err)
+		return merr.Wrapf(err, "node [%s] operator failed", n.name)
 	}
 
 	return n.packOutputs(outputs, msg)
@@ -144,7 +146,7 @@ func (p *Pipeline) Run(ctx context.Context, span trace.Span, initialMsg OpMsg) (
 
 	for _, node := range p.nodes {
 		if err := node.Run(ctx, span, msg); err != nil {
-			return nil, fmt.Errorf("pipeline [%s]: %w", p.name, err)
+			return nil, merr.Wrapf(err, "pipeline [%s]", p.name)
 		}
 	}
 

@@ -78,9 +78,16 @@ struct FileSliceSizeGuard {
     int64_t old_slice_size_;
 };
 
-int64_t
+struct LoadedJsonOffsetStats {
+    int64_t count;
+    int64_t exists_count;
+    int64_t null_count;
+};
+
+LoadedJsonOffsetStats
 BuildAndLoadJsonInvertedIndexForOffsetRegression(
-    const std::vector<std::string>& json_raw_data) {
+    const std::vector<std::string>& json_raw_data,
+    const std::vector<uint8_t>* valid_data = nullptr) {
     constexpr int64_t collection_id = 1;
     constexpr int64_t partition_id = 2;
     constexpr int64_t segment_id = 3;
@@ -90,6 +97,7 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
 
     auto field_meta = milvus::segcore::gen_field_meta(
         collection_id, partition_id, segment_id, field_id, DataType::JSON);
+    field_meta.field_schema.set_nullable(valid_data != nullptr);
     auto index_meta =
         gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
@@ -119,9 +127,30 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
         jsons.push_back(milvus::Json(simdjson::padded_string(json)));
     }
 
-    auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
-    json_field->add_json_data(jsons);
+    auto json_field = std::make_shared<FieldData<milvus::Json>>(
+        DataType::JSON, valid_data != nullptr);
+    if (valid_data == nullptr) {
+        json_field->add_json_data(jsons);
+    } else {
+        arrow::BinaryBuilder builder;
+        for (size_t i = 0; i < jsons.size(); ++i) {
+            if (((*valid_data)[i / 8] & (1U << (i % 8))) == 0) {
+                AssertInfo(builder.AppendNull().ok(),
+                           "failed to append null JSON");
+                continue;
+            }
+            auto data = jsons[i].data();
+            AssertInfo(
+                builder.Append(data.data(), static_cast<int32_t>(data.size()))
+                    .ok(),
+                "failed to append JSON");
+        }
+
+        std::shared_ptr<arrow::Array> json_array;
+        AssertInfo(builder.Finish(&json_array).ok(),
+                   "failed to finish JSON array");
+        json_field->FillFieldData(json_array);
+    }
     json_index->BuildWithFieldData({json_field});
 
     auto stats = json_index->Upload();
@@ -139,7 +168,11 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
         milvus::proto::common::LoadPriority::HIGH;
 
     loaded_json_index->Load(milvus::tracer::TraceContext{}, load_config);
-    return loaded_json_index->Count();
+    auto exists = loaded_json_index->Exists();
+    auto nulls = loaded_json_index->IsNull();
+    return {loaded_json_index->Count(),
+            static_cast<int64_t>(exists.count()),
+            static_cast<int64_t>(nulls.count())};
 }
 
 }  // namespace
@@ -511,8 +544,10 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNonExistOffsets) {
         json_raw_data.emplace_back(R"({"a": 1.0})");
     }
 
-    EXPECT_EQ(BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
-              json_raw_data.size());
+    auto stats =
+        BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data);
+    EXPECT_EQ(stats.count, json_raw_data.size());
+    EXPECT_EQ(stats.exists_count, 10);
 }
 
 TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
@@ -520,12 +555,19 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
 
     std::vector<std::string> json_raw_data;
     for (int i = 0; i < 20; ++i) {
-        json_raw_data.emplace_back(R"({"a": null})");
+        json_raw_data.emplace_back(R"({"a": 1.0})");
     }
     for (int i = 0; i < 10; ++i) {
         json_raw_data.emplace_back(R"({"a": 1.0})");
     }
+    std::vector<uint8_t> valid_data((json_raw_data.size() + 7) / 8, 0xFF);
+    for (size_t i = 0; i < 20; ++i) {
+        valid_data[i / 8] &= ~(1U << (i % 8));
+    }
 
-    EXPECT_EQ(BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
-              json_raw_data.size());
+    auto stats = BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data,
+                                                                  &valid_data);
+    EXPECT_EQ(stats.count, json_raw_data.size());
+    EXPECT_EQ(stats.exists_count, 10);
+    EXPECT_EQ(stats.null_count, 20);
 }

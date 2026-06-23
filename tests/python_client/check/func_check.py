@@ -11,6 +11,30 @@ from pymilvus import Collection, DataType, Partition, ResourceGroupInfo, Role
 from pymilvus.client.types import CompactionPlans
 from utils.util_log import test_log as log
 
+_CONSISTENCY_LEVEL_NAMES = {
+    0: "Strong",
+    1: "Session",
+    2: "Bounded",
+    3: "Eventually",
+    4: "Customized",
+}
+_CONSISTENCY_LEVEL_NAME_BY_LOWER = {v.lower(): v for v in _CONSISTENCY_LEVEL_NAMES.values()}
+
+
+def _normalize_consistency_level(level):
+    if isinstance(level, str):
+        level = level.strip()
+        if level.isdigit():
+            return _CONSISTENCY_LEVEL_NAMES.get(int(level), level)
+        name = level.rsplit("_", 1)[-1]
+        if name.startswith("Cl"):
+            name = name[2:]
+        return _CONSISTENCY_LEVEL_NAME_BY_LOWER.get(name.lower(), level)
+    try:
+        return _CONSISTENCY_LEVEL_NAMES.get(int(level), level)
+    except (TypeError, ValueError):
+        return level
+
 
 class Error:
     def __init__(self, error):
@@ -147,7 +171,7 @@ class ResponseChecker:
             #     f"but got {res.code} {res.message}")
             assert error_dict[ct.err_msg] in res.message, (
                 f"Response of API {self.func_name} "
-                f"expect get error message {error_dict[ct.err_code]}, "
+                f"expect get error message {error_dict[ct.err_msg]}, "
                 f"but got {res.code} {res.message}"
             )
 
@@ -251,7 +275,9 @@ class ResponseChecker:
             assert res["collection_name"] == check_items.get("collection_name")
         assert res["auto_id"] == check_items.get("auto_id", False)
         assert res["num_shards"] == check_items.get("num_shards", 1)
-        assert res["consistency_level"] == check_items.get("consistency_level", 0)
+        assert _normalize_consistency_level(res["consistency_level"]) == _normalize_consistency_level(
+            check_items.get("consistency_level", 0)
+        )
         assert res["enable_dynamic_field"] == check_items.get("enable_dynamic_field", True)
         assert res["num_partitions"] == check_items.get("num_partitions", 1)
         if check_items.get("id_name", None):
@@ -478,9 +504,13 @@ class ResponseChecker:
                 num_to_check = min(100, len(distances))  # check 100 items if more than that
                 eps = 1e-6
                 if check_items.get("metric").upper() in ["IP", "COSINE", "BM25"]:
-                    assert all(distances[i] >= distances[i + 1] - eps for i in range(num_to_check - 1))
+                    assert all(distances[i] >= distances[i + 1] - eps for i in range(num_to_check - 1)), (
+                        f"distances not descending within eps={eps}: {distances[:num_to_check]}"
+                    )
                 else:
-                    assert all(distances[i] <= distances[i + 1] + eps for i in range(num_to_check - 1))
+                    assert all(distances[i] <= distances[i + 1] + eps for i in range(num_to_check - 1)), (
+                        f"distances not ascending within eps={eps}: {distances[:num_to_check]}"
+                    )
                 if check_items.get("vector_nq") is None or check_items.get("original_vectors") is None:
                     log.debug("skip distance check for knowhere does not return the precise distances")
                 else:

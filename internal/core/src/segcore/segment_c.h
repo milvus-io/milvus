@@ -115,18 +115,30 @@ CFuture*
 AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
 
 /**
- * @brief Async reopen segment using Future mechanism with built-in cancellation
- * @param c_trace: tracing context param
- * @param c_segment: segment handle to reopen
- * @param load_info_blob: serialized SegmentLoadInfo protobuf message
- * @param load_info_length: length of load_info_blob in bytes
+ * @brief Async reopen segment using Future mechanism with built-in cancellation.
+ *
+ * Reopen applies a new SegmentLoadInfo and the latest collection schema.
+ * schema_blob/schema_length are required so sealed segments compute LoadDiff
+ * against the new schema and handle schema changes through the same load-diff
+ * framework as manifest/binlog/index updates.
+ *
+ * @param c_trace tracing context param
+ * @param c_segment segment handle to reopen
+ * @param load_info_blob serialized SegmentLoadInfo protobuf message
+ * @param load_info_length length of load_info_blob in bytes
+ * @param schema_blob serialized CollectionSchema protobuf message; must not be null
+ * @param schema_length length of schema_blob in bytes; must be positive
+ * @param schema_version schema version assigned to the parsed schema
  * @return CFuture* that resolves when reopen completes (result pointer is nullptr)
  */
 CFuture*
 AsyncReopenSegment(CTraceContext c_trace,
                    CSegmentInterface c_segment,
                    const uint8_t* load_info_blob,
-                   const int64_t load_info_length);
+                   const int64_t load_info_length,
+                   const void* schema_blob,
+                   const int64_t schema_length,
+                   const uint64_t schema_version);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
@@ -288,13 +300,18 @@ ExprResCacheEraseSegment(int64_t segment_id);
  * @brief Configuration for flushing growing segment data to storage.
  */
 typedef struct CFlushConfig {
-    const char* segment_path;  // base path for segment manifest and data
-    int64_t read_version;      // version to read (-1 = latest)
-    uint32_t retry_limit;      // retry limit for commit
+    const char* segment_path;   // base path for segment manifest and data
+    int64_t read_version;       // version to read (-1 = latest)
+    uint32_t retry_limit;       // retry limit for commit
+    const char* writer_format;  // writer.format
     // TEXT column configurations
-    int64_t* text_field_ids;      // array of TEXT field IDs
-    const char** text_lob_paths;  // array of LOB paths for each TEXT field
-    size_t num_text_columns;      // number of TEXT columns
+    int64_t* text_field_ids;       // array of TEXT field IDs
+    const char** text_lob_paths;   // array of LOB paths for each TEXT field
+    size_t num_text_columns;       // number of TEXT columns
+    int64_t* bm25_field_ids;       // array of BM25 sparse output field IDs
+    int64_t* bm25_stats_log_ids;   // array of BM25 stats log IDs
+    size_t num_bm25_fields;        // number of BM25 output fields
+    bool write_merged_bm25_stats;  // whether to write compound BM25 stats
 } CFlushConfig;
 
 /**
@@ -304,6 +321,10 @@ typedef struct CFlushResult {
     char* manifest_path;  // path to the committed manifest (caller must free)
     int64_t committed_version;  // committed version number
     int64_t num_rows;           // number of rows flushed
+    int64_t* bm25_field_ids;    // field ids for serialized BM25 stats
+    uint8_t** bm25_stats;       // serialized BM25 stats per field
+    size_t* bm25_stats_sizes;   // serialized BM25 stats sizes
+    size_t num_bm25_stats;      // number of BM25 stats entries
 } CFlushResult;
 
 /**
@@ -335,6 +356,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
  */
 void
 FreeFlushResult(CFlushResult* result);
+
+CStatus
+SegmentSetCommitTimestamp(CSegmentInterface c_segment, uint64_t commit_ts);
 
 #ifdef __cplusplus
 }

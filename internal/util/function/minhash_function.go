@@ -12,18 +12,16 @@ import "C"
 
 import (
 	"encoding/binary"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/analyzer/canalyzer"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // MinHashFunctionRunner
@@ -76,10 +74,10 @@ func NewMinHashFunctionRunner(
 	funSchema *schemapb.FunctionSchema,
 ) (FunctionRunner, error) {
 	if len(funSchema.GetOutputFieldIds()) != 1 {
-		return nil, fmt.Errorf("minhash function should only have one output field, but now %d", len(funSchema.GetOutputFieldIds()))
+		return nil, merr.WrapErrParameterInvalidMsg("minhash function should only have one output field, but now %d", len(funSchema.GetOutputFieldIds()))
 	}
 	if len(funSchema.GetInputFieldIds()) != 1 {
-		return nil, fmt.Errorf("minhash function should only have one input field, but now %d", len(funSchema.GetInputFieldIds()))
+		return nil, merr.WrapErrParameterInvalidMsg("minhash function should only have one input field, but now %d", len(funSchema.GetInputFieldIds()))
 	}
 	var inputField, outputField *schemapb.FieldSchema
 	for _, field := range collSchema.GetFields() {
@@ -92,10 +90,10 @@ func NewMinHashFunctionRunner(
 		}
 	}
 	if outputField == nil {
-		return nil, errors.New("no output field")
+		return nil, merr.WrapErrParameterInvalidMsg("no output field")
 	}
 	if inputField == nil {
-		return nil, errors.New("no input field")
+		return nil, merr.WrapErrParameterInvalidMsg("no input field")
 	}
 
 	params := getAnalyzerParams(inputField)
@@ -116,19 +114,19 @@ func NewMinHashFunctionRunner(
 		case NumHashesKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("param num_hashes:%s is not a number", param.GetValue())
+				return nil, merr.WrapErrParameterInvalidMsg("param num_hashes:%s is not a number", param.GetValue())
 			}
 			if val <= 0 {
-				return nil, fmt.Errorf("param num_hashes:%d must be positive", val)
+				return nil, merr.WrapErrParameterInvalidMsg("param num_hashes:%d must be positive", val)
 			}
 			numHashes = int(val)
 		case ShingleSizeKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("param shingle_size:%s is not a number", param.GetValue())
+				return nil, merr.WrapErrParameterInvalidMsg("param shingle_size:%s is not a number", param.GetValue())
 			}
 			if val <= 0 {
-				return nil, fmt.Errorf("param shingle_size:%d must be positive", val)
+				return nil, merr.WrapErrParameterInvalidMsg("param shingle_size:%d must be positive", val)
 			}
 			shingleSize = int(val)
 		case HashFuncKey:
@@ -138,7 +136,7 @@ func NewMinHashFunctionRunner(
 			case "sha1":
 				hashFunc = HashFuncSHA1
 			default:
-				return nil, fmt.Errorf("unknown hash function: %s", param.GetValue())
+				return nil, merr.WrapErrParameterInvalidMsg("unknown hash function: %s", param.GetValue())
 			}
 		case TokenLevelKey:
 			switch strings.ToLower(param.GetValue()) {
@@ -147,12 +145,12 @@ func NewMinHashFunctionRunner(
 			case "word":
 				useCharToken = false
 			default:
-				return nil, fmt.Errorf("unknown token_level: %s (expected 'char' or 'word')", param.GetValue())
+				return nil, merr.WrapErrParameterInvalidMsg("unknown token_level: %s (expected 'char' or 'word')", param.GetValue())
 			}
 		case SeedKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("param seed:%s is not a number", param.GetValue())
+				return nil, merr.WrapErrParameterInvalidMsg("param seed:%s is not a number", param.GetValue())
 			}
 			seed = int(val)
 		}
@@ -171,7 +169,7 @@ func NewMinHashFunctionRunner(
 			}
 		}
 		if outputDim <= 0 || outputDim%32 != 0 {
-			return nil, fmt.Errorf("minhash function output field '%s' dim not found or invalid(dim > 0, dim %% 32 == 0)", outputField.GetName())
+			return nil, merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim not found or invalid(dim > 0, dim %% 32 == 0)", outputField.GetName())
 		}
 		numHashes = int(outputDim / 32)
 		funSchema.Params = append(funSchema.Params, &commonpb.KeyValuePair{
@@ -203,10 +201,10 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 
 	// check input field count
 	if len(funSchema.GetInputFieldNames()) != 1 {
-		return fmt.Errorf("minhash function should only have one input field, but now %d", len(funSchema.GetInputFieldNames()))
+		return merr.WrapErrParameterInvalidMsg("minhash function should only have one input field, but now %d", len(funSchema.GetInputFieldNames()))
 	}
 	if len(funSchema.GetOutputFieldNames()) != 1 {
-		return fmt.Errorf("minhash function should only have one output field, but now %d", len(funSchema.GetOutputFieldNames()))
+		return merr.WrapErrParameterInvalidMsg("minhash function should only have one output field, but now %d", len(funSchema.GetOutputFieldNames()))
 	}
 
 	// Find fields by name (since FieldIDs may not be assigned yet during validation)
@@ -223,14 +221,14 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 	}
 
 	if inputField == nil {
-		return fmt.Errorf("minhash function input field '%s' not found", inputFieldName)
+		return merr.WrapErrParameterInvalidMsg("minhash function input field '%s' not found", inputFieldName)
 	}
 	if outputField == nil {
-		return fmt.Errorf("minhash function output field '%s' not found", outputFieldName)
+		return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' not found", outputFieldName)
 	}
 
 	if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_String {
-		return fmt.Errorf("minhash function input field '%s' is not string type, is %s",
+		return merr.WrapErrParameterInvalidMsg("minhash function input field '%s' is not string type, is %s",
 			inputFieldName, inputField.GetDataType())
 	}
 	// check function params
@@ -240,45 +238,45 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 		case NumHashesKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return fmt.Errorf("param num_hashes:%s is not a number", param.GetValue())
+				return merr.WrapErrParameterInvalidMsg("param num_hashes:%s is not a number", param.GetValue())
 			}
 			numHashes = int(val)
 			if numHashes <= 0 {
-				return fmt.Errorf("param num_hashes:%d must be positive", numHashes)
+				return merr.WrapErrParameterInvalidMsg("param num_hashes:%d must be positive", numHashes)
 			}
 		case ShingleSizeKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return fmt.Errorf("param shingle_size:%s is not a number", param.GetValue())
+				return merr.WrapErrParameterInvalidMsg("param shingle_size:%s is not a number", param.GetValue())
 			}
 			if val <= 0 {
-				return fmt.Errorf("param shingle_size:%d must be positive", val)
+				return merr.WrapErrParameterInvalidMsg("param shingle_size:%d must be positive", val)
 			}
 		case HashFuncKey:
 			switch strings.ToLower(param.GetValue()) {
 			case "xxhash", "xxhash64", "sha1":
 				// valid hash function
 			default:
-				return fmt.Errorf("unknown hash function: %s (expected 'xxhash64' or 'sha1')", param.GetValue())
+				return merr.WrapErrParameterInvalidMsg("unknown hash function: %s (expected 'xxhash64' or 'sha1')", param.GetValue())
 			}
 		case TokenLevelKey:
 			switch strings.ToLower(param.GetValue()) {
 			case "char", "character", "word":
 				// valid token level
 			default:
-				return fmt.Errorf("unknown token_level: %s (expected 'char' or 'word')", param.GetValue())
+				return merr.WrapErrParameterInvalidMsg("unknown token_level: %s (expected 'char' or 'word')", param.GetValue())
 			}
 		case SeedKey:
 			_, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return fmt.Errorf("param seed:%s is not a number", param.GetValue())
+				return merr.WrapErrParameterInvalidMsg("param seed:%s is not a number", param.GetValue())
 			}
 		}
 	}
 	// check numHashes with output field
 	var outputDim int64 = -1
 	if outputField.GetDataType() != schemapb.DataType_BinaryVector {
-		return fmt.Errorf("minhash function output field '%s' is not binary vector type", outputFieldName)
+		return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' is not binary vector type", outputFieldName)
 	}
 	for _, param := range outputField.GetTypeParams() {
 		if param.GetKey() == "dim" {
@@ -293,11 +291,11 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 	if numHashes > 0 {
 		expectedDim := int64(numHashes * 32) // binary vector, each hash is 4 bytes (32 bits), but stored as 8 bits in binary vector
 		if outputDim != expectedDim {
-			return fmt.Errorf("minhash function output field '%s' dim %d does not match expected dim %d (numHashes %d * one minhash signature size of 32bit)", outputFieldName, outputDim, expectedDim, numHashes)
+			return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim %d does not match expected dim %d (numHashes %d * one minhash signature size of 32bit)", outputFieldName, outputDim, expectedDim, numHashes)
 		}
 	} else {
 		if outputDim%32 != 0 {
-			return fmt.Errorf("minhash function output field '%s' dim %d is not multiple of 32 (one minhash signature size)", outputFieldName, outputDim)
+			return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim %d is not multiple of 32 (one minhash signature size)", outputFieldName, outputDim)
 		}
 	}
 	// else no numHashes specified, skip output field validation
@@ -345,16 +343,16 @@ func (m *MinHashFunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	defer m.mu.RUnlock()
 
 	if m.closed {
-		return nil, errors.New("MinHash function closed")
+		return nil, merr.WrapErrServiceInternalMsg("MinHash function closed")
 	}
 
 	if len(inputs) > 1 {
-		return nil, errors.New("MinHash function received more than one input column")
+		return nil, merr.WrapErrParameterInvalidMsg("MinHash function received more than one input column")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, errors.New("MinHash function input not string list")
+		return nil, merr.WrapErrParameterInvalidMsg("MinHash function input not string list")
 	}
 
 	rowNum := len(text)

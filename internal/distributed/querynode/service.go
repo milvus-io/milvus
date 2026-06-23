@@ -484,6 +484,10 @@ func (s *Server) SyncFileResource(ctx context.Context, req *internalpb.SyncFileR
 	return s.querynode.SyncFileResource(ctx, req)
 }
 
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return s.querynode.ClearReadTaskQueue(ctx, req)
+}
+
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	return s.querynode.ComputePhraseMatchSlop(ctx, req)
 }

@@ -38,6 +38,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "fmt/core.h"
 #include "fmt/ranges.h"
@@ -317,23 +318,12 @@ ManifestGroupTranslator::get_cells(
                                             DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                             load_priority_);
 
-    {
-        std::string rg_info;
-        for (size_t i = 0; i < cids.size(); ++i) {
-            auto [start, end] = meta_.get_row_group_range(cids[i]);
-            if (i > 0)
-                rg_info += ", ";
-            rg_info += fmt::format("cid{}:[{},{})", cids[i], start, end);
-        }
-        LOG_INFO(
-            "[StorageV2] translator {} submits {} batch tasks for manifest "
-            "column group {}, loading cids=[{}], row_group_ranges=[{}]",
-            key_,
-            load_futures.size(),
-            column_group_index_,
-            fmt::join(cids, ","),
-            rg_info);
-    }
+    LOG_INFO(
+        "[StorageV2] translator {} submits {} batch tasks for manifest "
+        "column group {}",
+        key_,
+        load_futures.size(),
+        column_group_index_);
 
     // Pop loop — convert each cell immediately, no ArrowTable accumulation
     std::unordered_map<milvus::cachinglayer::cid_t,
@@ -409,14 +399,20 @@ ManifestGroupTranslator::load_group_chunk(
     // Iterate through fields to get field_id and create chunk.
     // Normal collections store field IDs as column names (numeric strings).
     // External collections use original column names, so we fall back to
-    // matching against external field names when stoll fails.
+    // matching against external field names when stoll fails. Function output
+    // columns are Milvus-generated and use numeric field ids like normal
+    // internal columns.
     for (int i = 0; i < schema->num_fields(); ++i) {
         auto column_name = schema->field(i)->name();
         int64_t field_id = -1;
-        try {
-            field_id = std::stoll(column_name);
-        } catch (const std::exception&) {
-            // External collection fallback: resolve by column name
+        if (auto parsed_fid = ParseFieldIdColumnName(column_name);
+            parsed_fid.has_value()) {
+            field_id = parsed_fid->get();
+        } else {
+            // External collection fallback: column_name is non-numeric, so it
+            // comes from an external manifest external_field mapping. Normal
+            // fields and function-output fields are stored by numeric field id
+            // and take the strict field-id path above.
             for (const auto& [fid, meta] : field_metas_) {
                 if (meta.is_external_field() &&
                     meta.get_external_field() == column_name) {

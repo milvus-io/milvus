@@ -85,6 +85,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	}
 
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -105,6 +106,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.SetIndexSliceSize(cIndexSliceSize)
+	cStreamBudgetRatio := C.double(paramtable.Get().CommonCfg.StreamBudgetRatio.GetAsFloat())
+	C.SetStreamBudgetRatio(cStreamBudgetRatio)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
@@ -139,6 +142,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
 	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
 
+	cJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
+	C.SetDefaultJSONKeyStatsEnable(cJSONKeyStatsEnabled)
+
 	cGrowingJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledGrowingSegmentJSONKeyStats.GetAsBool())
 	C.SetDefaultGrowingJSONKeyStatsEnable(cGrowingJSONKeyStatsEnabled)
 
@@ -154,8 +160,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
 	C.SetExprResCacheEnable(cExprResCacheEnabled)
 
-	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
-	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
+	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		UpdateExprResCacheConfig()
+	}
 
 	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
 
@@ -165,13 +172,18 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
 	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
 
+	err := InitArrowReaderConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
 	if err := InitLocalChunkManager(localDataRootPath); err != nil {
 		return err
 	}
 
-	err := InitRemoteChunkManager(paramtable.Get())
+	err = InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
 		return err
 	}
@@ -224,5 +236,18 @@ func SyncPreferFieldDataWhenIndexHasRawData(ctx context.Context, params *paramta
 	if v {
 		log.Ctx(ctx).Info("preferFieldDataWhenIndexHasRawData=true: sealed retrieve will read field data instead of index raw data; " +
 			"both will stay resident in memory, increasing the memory footprint for fields whose index also holds raw data")
+	}
+}
+
+// SyncEnableGrowingSourceFlush pushes the effective growing-source flush switch
+// into segcore so growing segments only retain raw chunks when the Go flush path
+// may later persist them through StorageV3 FlushGrowingSegmentData.
+func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.ComponentParam) {
+	storageV3Enabled := params.CommonCfg.UseLoonFFI.GetAsBool()
+	v := storageV3Enabled && params.CommonCfg.EnableGrowingSourceFlush.GetAsBool()
+	C.SegcoreSetStorageV3Enabled(C.bool(storageV3Enabled))
+	C.SegcoreSetEnableGrowingSourceFlush(C.bool(v))
+	if v {
+		log.Ctx(ctx).Info("enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
 }

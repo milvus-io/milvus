@@ -26,6 +26,10 @@ func TestRegistry(t *testing.T) {
 	id, err := message.UnmarshalMessageID(&commonpb.MessageID{WALName: commonpb.WALName(message.WALNameKafka), Id: kafkaID(123).Marshal()})
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(kafkaID(123)))
+
+	id, err = message.UnmarshalMessageID(kafkaID(-2).IntoProto())
+	assert.NoError(t, err)
+	assert.True(t, id.EQ(kafkaID(-2)))
 }
 
 func TestKafka(t *testing.T) {

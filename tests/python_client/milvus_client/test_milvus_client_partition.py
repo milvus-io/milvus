@@ -1519,8 +1519,7 @@ class TestPartitionParams(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # load with 3 replicas
         error = {ct.err_code: 65535,
-                 ct.err_msg: "when load 3 replica count: service resource insufficient"
-                             "[currentStreamingNode=2][expectedStreamingNode=3]"}
+                 ct.err_msg: "service resource insufficient"}
         self.load_partitions(client, collection_name, [partition_name],
                              replica_number=3,
                              check_task=CheckTasks.err_res, check_items=error)

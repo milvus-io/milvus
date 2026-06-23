@@ -112,3 +112,13 @@ func IsValidPhysicalTs(t uint64) bool {
 func IsValidHybridTs(t uint64) bool {
 	return IsValidPhysicalTs(t >> logicalBits)
 }
+
+// EffectiveTimestamp returns max(rawTs, commitTs) when commitTs is non-zero.
+// For import/CDC segments, row timestamps may predate the actual commit time;
+// using the larger value prevents premature expiration.
+func EffectiveTimestamp(rawTs, commitTs uint64) uint64 {
+	if commitTs != 0 && commitTs > rawTs {
+		return commitTs
+	}
+	return rawTs
+}

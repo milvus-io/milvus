@@ -49,6 +49,9 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     IndexStatsPtr
     Upload(const Config& config) override;
 
+    IndexStatsPtr
+    UploadUnified(const Config& config) override;
+
     void
     Load(const Config& config);
 

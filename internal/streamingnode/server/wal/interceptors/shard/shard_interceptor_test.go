@@ -13,11 +13,15 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -102,6 +106,91 @@ func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *test
 	})
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "input schema version: 0")
+	assert.Nil(t, msgID)
+}
+
+func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *testing.T) {
+	collectionID := int64(99001)
+	vchannel := "by-dev-rootcoord-dml_0_99001v0"
+	schema := &schemapb.CollectionSchema{
+		Name:    "test",
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+				},
+			},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "bm25",
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{101},
+				OutputFieldIds: []int64{102},
+			},
+		},
+	}
+	errCh := function.AllocFunctionRunners(collectionID, vchannel, schema)
+	if errCh != nil {
+		assert.NoError(t, <-errCh)
+	}
+	defer function.ReleaseFunctionRunners(collectionID, vchannel)
+
+	ok, err := function.RunWithAnalyzer(context.Background(), collectionID, schema.GetVersion(), 101, func(function.Analyzer) error {
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.True(t, ok)
+
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	impl := &shardInterceptor{shardManager: shardManager}
+
+	noFunctionSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	noFunctionSchema.Version = 2
+	noFunctionSchema.Functions = nil
+	impl.updateFunctionRunners(collectionID, vchannel, noFunctionSchema)
+
+	ok, err = function.RunWithAnalyzer(context.Background(), collectionID, schema.GetVersion(), 101, func(function.Analyzer) error {
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
+	b := NewInterceptorBuilder()
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	i := b.Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	defer i.Close()
+
+	msg := message.NewDeleteMessageBuilderV1().
+		WithVChannel("vchannel").
+		WithHeader(&messagespb.DeleteMessageHeader{
+			CollectionId: 1,
+			Rows:         10,
+		}).
+		WithBody(&msgpb.DeleteRequest{}).
+		MustBuildMutable().WithTimeTick(1)
+
+	shardManager.EXPECT().CheckIfCollectionExists(int64(1)).Return(nil)
+	shardManager.EXPECT().ApplyDelete(mock.MatchedBy(func(deleteMsg message.MutableDeleteMessageV1) bool {
+		return deleteMsg.Header().GetCollectionId() == int64(1) && deleteMsg.Header().GetRows() == uint64(10)
+	})).Return(nil)
+
+	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return nil, errors.New("append failed")
+	})
+	assert.Error(t, err)
 	assert.Nil(t, msgID)
 }
 

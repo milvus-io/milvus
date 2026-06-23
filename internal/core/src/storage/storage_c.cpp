@@ -30,7 +30,9 @@
 #include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
+#include "storage/KeyRetriever.h"
 #include "storage/Types.h"
+#include "storage/loon_ffi/property_singleton.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
@@ -127,6 +129,10 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.vector_field_enable_mmap =
             c_mmap_config.vector_field_enable_mmap;
         mmap_config.mmap_populate = c_mmap_config.mmap_populate;
+        mmap_config.json_stats_enable_mmap =
+            c_mmap_config.json_stats_enable_mmap;
+        mmap_config.json_stats_mmap_path =
+            std::string(c_mmap_config.json_stats_mmap_path);
         milvus::storage::MmapManager::GetInstance().Init(mmap_config);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -162,6 +168,31 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
             c_disk_write_config.rate_limiter_config.high_priority_ratio,
             c_disk_write_config.rate_limiter_config.middle_priority_ratio,
             c_disk_write_config.rate_limiter_config.low_priority_ratio);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
+    try {
+        if (c_arrow_reader_config.hole_size_limit_bytes < 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "arrow reader hole size limit must be non-negative");
+        }
+        if (c_arrow_reader_config.range_size_limit_bytes < 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "arrow reader range size limit must be non-negative");
+        }
+        milvus::storage::ConfigureArrowReaderProperties(
+            c_arrow_reader_config.hole_size_limit_bytes,
+            c_arrow_reader_config.range_size_limit_bytes);
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetArrowReaderConfig(c_arrow_reader_config.hole_size_limit_bytes,
+                                  c_arrow_reader_config.range_size_limit_bytes);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

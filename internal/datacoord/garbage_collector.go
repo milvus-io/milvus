@@ -225,7 +225,6 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 	metaSignal := make(chan gcCmd)
 	orphanSignal := make(chan gcCmd)
 	lobSignal := make(chan gcCmd)
-	// control signal channels
 	controlChannels := map[string]chan gcCmd{
 		"meta":   metaSignal,
 		"orphan": orphanSignal,
@@ -348,7 +347,8 @@ func (gc *garbageCollector) work(ctx context.Context) {
 		gc.runRecycleTaskWithPauser(ctx, "orphan", gc.option.scanInterval, func(ctx context.Context, signal <-chan gcCmd) {
 			// orphan file not controlled by collection level pause for now
 			gc.recycleUnusedBinlogFiles(ctx)
-			gc.recycleUnusedIndexFiles(ctx)
+			gc.recycleUnusedIndexFilesV0(ctx)
+			gc.recycleUnusedIndexFilesV1(ctx)
 		})
 	}()
 	go func() {
@@ -514,9 +514,10 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	defer func() { log.Info("recycleUnusedBinlogFiles done", zap.Duration("timeCost", time.Since(start))) }()
 
 	type scanTask struct {
-		prefix  string
-		checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool
-		label   string
+		prefix            string
+		checker           func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool
+		segmentIDFromPath func(rootPath, filePath string) (int64, error)
+		label             string
 	}
 	scanTasks := []scanTask{
 		{
@@ -524,7 +525,8 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				return segment != nil
 			},
-			label: metrics.InsertFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.InsertFileLabel,
 		},
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath),
@@ -536,7 +538,8 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 				}
 				return segment != nil && segment.IsStatsLogExists(logID)
 			},
-			label: metrics.StatFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.StatFileLabel,
 		},
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath),
@@ -548,19 +551,56 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 				}
 				return segment != nil && segment.IsDeltaLogExists(logID)
 			},
-			label: metrics.DeleteFileLabel,
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             metrics.DeleteFileLabel,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.TextIndexPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getTextLogPaths(segment, gc.option.cli.RootPath())[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromTextIndexPath,
+			label:             common.TextIndexPath,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.JSONStatsPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getJSONKeyLogs(segment, gc)[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromJSONStatsPath,
+			label:             common.JSONStatsPath,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.JSONIndexPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getJSONKeyLogs(segment, gc)[objectInfo.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseSegmentIDFromJSONIndexPath,
+			label:             common.JSONIndexPath,
 		},
 	}
 
 	for _, task := range scanTasks {
-		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.checker)
+		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.segmentIDFromPath, task.checker)
 	}
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recycleUnusedBinLogWithChecker scans the prefix and checks the path with checker.
 // GC the file if checker returns false.
-func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, prefix string, label string, checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool) {
+func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, prefix string, label string, segmentIDFromPath func(rootPath, filePath string) (int64, error), checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool) {
 	logger := log.With(zap.String("prefix", prefix))
 	logger.Info("garbageCollector recycleUnusedBinlogFiles start", zap.String("prefix", prefix))
 	lastFilePath := ""
@@ -599,7 +639,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 
 		// Parse segmentID from file path.
 		// TODO: Does all files in the same segment have the same segmentID?
-		segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.cli.RootPath(), chunkInfo.FilePath)
+		segmentID, err := segmentIDFromPath(gc.option.cli.RootPath(), chunkInfo.FilePath)
 		if err != nil {
 			// Try V3 path format: insert_log/{coll}/{part}/{seg}/...
 			// V3 orphan files are managed by loon (milvus-storage), skip them.
@@ -711,11 +751,11 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
 	// We do this because collection meta drop relies on all segment being GCed.
 	if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
-		segment.GetDmlPosition().GetTimestamp() > cpTimestamp {
+		segmentEffectiveDmlTs(segment.SegmentInfo) > cpTimestamp {
 		// segment gc shall only happen when channel cp is after segment dml cp.
 		log.WithRateGroup("GC_FAIL_CP_BEFORE", 1, 60).
 			RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
-				zap.Uint64("dmlPosTs", segment.GetDmlPosition().GetTimestamp()),
+				zap.Uint64("dmlPosTs", segmentEffectiveDmlTs(segment.SegmentInfo)),
 				zap.Uint64("channelCpTs", cpTimestamp),
 			)
 		return false
@@ -817,69 +857,179 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		cloned := segment.Clone()
-
-		// V3 segment: delete entire basePath recursively
-		if cloned.GetStorageVersion() == storage.StorageV3 {
-			basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
-			if err != nil {
-				log.Warn("GC V3 segment failed to parse manifest path",
-					zap.String("manifestPath", cloned.GetManifestPath()),
-					zap.Error(err))
-				cloned = nil
-				continue
-			}
-			log.Info("GC V3 segment start, removing basePath...",
-				zap.String("basePath", basePath))
-			if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
-				log.Warn("GC V3 segment remove basePath failed",
-					zap.String("basePath", basePath),
-					zap.Error(err))
-				cloned = nil
-				continue
-			}
-			if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
-				log.Warn("GC segment meta failed to drop segment", zap.Error(err))
-				cloned = nil
-				continue
-			}
-			log.Info("GC V3 segment done")
-			cloned = nil
-			continue
-		}
-
-		// V1/V2 segment: delete individual log files
-		binlog.DecompressBinLogs(cloned.SegmentInfo)
-
-		logs := getLogs(cloned)
-		for key := range getTextLogs(cloned) {
-			logs[key] = struct{}{}
-		}
-
-		for key := range getJSONKeyLogs(cloned, gc) {
-			logs[key] = struct{}{}
-		}
-
-		log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
-			zap.Int("delta_logs", len(cloned.GetDeltalogs())),
-			zap.Int("stats_logs", len(cloned.GetStatslogs())),
-			zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
-			zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
-			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
-		if err := gc.removeObjectFiles(ctx, logs); err != nil {
-			log.Warn("GC segment remove logs failed", zap.Error(err))
-			cloned = nil
-			continue
-		}
-
-		if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
-			log.Warn("GC segment meta failed to drop segment", zap.Error(err))
-			cloned = nil
-			continue
-		}
-		log.Info("GC segment meta drop segment done")
-		cloned = nil // release memory
+		gc.recycleDroppedSegment(ctx, segmentID, segment)
 	}
+}
+
+// recycleDroppedSegment deletes a single dropped segment's object files,
+// segment-index files, segment-index meta, and segment meta in that order.
+//
+// The ordering matters: files first so a meta-only retry after partial
+// file deletion can still observe the leftover keys; segment-index meta
+// next so segment meta deletion (the final marker) is the only step that
+// commits the GC; if any step fails the later state is preserved for the
+// next GC cycle to retry.
+//
+// This path can race with recycleUnusedSegIndexes on the same BuildID
+// whenever a dropped segment's parent field index has also been marked
+// IsDeleted — both paths call removeObjectFiles for the same index files
+// and call indexMeta.RemoveSegmentIndex(buildID). The races are safe today
+// only because two invariants hold elsewhere:
+//
+//  1. removeObjectFiles swallows merr.ErrIoKeyNotFound (see the loop in
+//     removeObjectFiles below), so a double file delete is a no-op for the
+//     loser.
+//  2. indexMeta.RemoveSegmentIndex acquires a per-buildID keyLock and
+//     returns nil when segmentBuildInfo.Get(buildID) is !ok (see
+//     index_meta.go), so a double catalog delete is a no-op for the loser.
+//
+// Any future refactor on either side — tightening removeObjectFiles to
+// surface NotFound, or batching RemoveSegmentIndex past the per-buildID
+// keyLock — must preserve these invariants, otherwise dropped-segment GC
+// will silently break under load.
+func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64, segment *SegmentInfo) {
+	log := log.With(zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	segIndexes, indexFiles, indexSnapshotBlocked := gc.getDroppedSegmentIndexFiles(segmentID)
+	if indexSnapshotBlocked {
+		log.Info("skip GC segment since segment index is protected by snapshot",
+			zap.Int("segmentIndexes", len(segIndexes)))
+		return
+	}
+
+	cloned := segment.Clone()
+	if err := gc.removeDroppedSegmentFiles(ctx, cloned, indexFiles); err != nil {
+		log.Warn("GC segment remove files failed", zap.Error(err))
+		return
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := gc.removeDroppedSegmentIndexMeta(ctx, segIndexes); err != nil {
+		log.Warn("GC segment index meta failed, wait to retry", zap.Error(err))
+		return
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
+		log.Warn("GC segment meta failed to drop segment", zap.Error(err))
+		return
+	}
+	log.Info("GC segment meta drop segment done", zap.Int("segmentIndexes", len(segIndexes)))
+}
+
+func (gc *garbageCollector) getDroppedSegmentIndexFiles(segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, bool) {
+	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
+	if len(segIndexes) == 0 {
+		return nil, nil, false
+	}
+	if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+		for _, segIdx := range segIndexes {
+			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
+				return segIndexes, nil, true
+			}
+		}
+	}
+	indexFiles := make(map[string]struct{}, len(segIndexes))
+	for _, segIdx := range segIndexes {
+		for key := range gc.getAllIndexFilesOfIndex(segIdx) {
+			indexFiles[key] = struct{}{}
+		}
+	}
+	return segIndexes, indexFiles, false
+}
+
+// getAllSegmentIndexesForDroppedSegment wraps indexMeta.GetAllSegmentIndexes
+// with a defensive nil guard. Production newMeta always wires indexMeta, but
+// the guard is cheap and turns any unexpected nil into "no index records"
+// instead of a panic during a GC sweep — keeping a single misbuilt gc
+// instance from taking the whole datacoord down.
+func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int64) []*model.SegmentIndex {
+	if gc.meta == nil || gc.meta.indexMeta == nil {
+		return nil
+	}
+	return gc.meta.indexMeta.GetAllSegmentIndexes(segmentID)
+}
+
+func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, cloned *SegmentInfo, indexFiles map[string]struct{}) error {
+	log := log.With(zap.Int64("segmentID", cloned.GetID()))
+
+	// V3 segment data lives under the manifest base path. Segment index files still
+	// live under index file prefixes and must be deleted from recorded file keys.
+	if cloned.GetStorageVersion() == storage.StorageV3 {
+		basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
+		if err != nil {
+			log.Warn("GC V3 segment failed to parse manifest path",
+				zap.String("manifestPath", cloned.GetManifestPath()),
+				zap.Error(err))
+			return err
+		}
+		log.Info("GC V3 segment start, removing basePath...",
+			zap.String("basePath", basePath),
+			zap.Int("indexFiles", len(indexFiles)))
+		if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
+			log.Warn("GC V3 segment remove basePath failed",
+				zap.String("basePath", basePath),
+				zap.Error(err))
+			return err
+		}
+		if len(indexFiles) == 0 {
+			log.Info("GC V3 segment files done")
+			return nil
+		}
+		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+			log.Warn("GC V3 segment remove index files failed", zap.Error(err))
+			return err
+		}
+		log.Info("GC V3 segment files done")
+		return nil
+	}
+
+	binlog.DecompressBinLogs(cloned.SegmentInfo)
+	logs := getLogs(cloned)
+	for key := range getTextLogs(cloned) {
+		logs[key] = struct{}{}
+	}
+	for key := range getJSONKeyLogs(cloned, gc) {
+		logs[key] = struct{}{}
+	}
+	for key := range indexFiles {
+		logs[key] = struct{}{}
+	}
+
+	log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
+		zap.Int("delta_logs", len(cloned.GetDeltalogs())),
+		zap.Int("stats_logs", len(cloned.GetStatslogs())),
+		zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
+		zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
+		zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
+		zap.Int("index_files", len(indexFiles)))
+	if err := gc.removeObjectFiles(ctx, logs); err != nil {
+		log.Warn("GC segment remove logs failed", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+	if len(segIndexes) == 0 {
+		return nil
+	}
+	for _, segIdx := range segIndexes {
+		if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-chan gcCmd) {
@@ -957,15 +1107,46 @@ func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
 // Returns segmentID or error if path doesn't match.
 func parseV3SegmentID(rootPath, filePath string) (int64, error) {
 	if !strings.HasPrefix(filePath, rootPath) {
-		return 0, fmt.Errorf("path %q does not contain rootPath %q", filePath, rootPath)
+		return 0, merr.WrapErrServiceInternalMsg("path %q does not contain rootPath %q", filePath, rootPath)
 	}
 	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
 	parts := strings.Split(p, "/")
-	// Minimum: insert_log/coll/part/seg/something
 	if len(parts) < 5 || parts[0] != common.SegmentInsertLogPath {
-		return 0, fmt.Errorf("not a V3 insert_log path: %s", filePath)
+		return 0, merr.WrapErrServiceInternalMsg("not a V3 insert_log path: %s", filePath)
 	}
 	return strconv.ParseInt(parts[3], 10, 64)
+}
+
+func parseSegmentIDFromAuxIndexPath(rootPath, filePath string) (int64, error) {
+	if !strings.HasPrefix(filePath, rootPath) {
+		return 0, merr.WrapErrServiceInternalMsg("path %q does not contain rootPath %q", filePath, rootPath)
+	}
+	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
+	parts := strings.Split(p, "/")
+	if len(parts) < 8 || (parts[0] != common.TextIndexPath && parts[0] != common.JSONIndexPath) {
+		return 0, merr.WrapErrServiceInternalMsg("not an auxiliary index path: %s", filePath)
+	}
+	return strconv.ParseInt(parts[5], 10, 64)
+}
+
+func parseSegmentIDFromJSONStatsPath(rootPath, filePath string) (int64, error) {
+	if !strings.HasPrefix(filePath, rootPath) {
+		return 0, merr.WrapErrServiceInternalMsg("path %q does not contain rootPath %q", filePath, rootPath)
+	}
+	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
+	parts := strings.Split(p, "/")
+	if len(parts) < 9 || parts[0] != common.JSONStatsPath {
+		return 0, merr.WrapErrServiceInternalMsg("not a json stats path: %s", filePath)
+	}
+	return strconv.ParseInt(parts[6], 10, 64)
+}
+
+func parseSegmentIDFromTextIndexPath(rootPath, filePath string) (int64, error) {
+	return parseSegmentIDFromAuxIndexPath(rootPath, filePath)
+}
+
+func parseSegmentIDFromJSONIndexPath(rootPath, filePath string) (int64, error) {
+	return parseSegmentIDFromAuxIndexPath(rootPath, filePath)
 }
 
 func getLogs(sinfo *SegmentInfo) map[string]struct{} {
@@ -994,9 +1175,20 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 }
 
 func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
+	return getTextLogPaths(sinfo, "")
+}
+
+func getTextLogPaths(sinfo *SegmentInfo, rootPath string) map[string]struct{} {
 	textLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetTextStatsLogs() {
-		for _, file := range flog.GetFiles() {
+		files := flog.GetFiles()
+		if rootPath != "" {
+			basePath := metautil.BuildTextIndexPrefix(rootPath,
+				flog.GetBuildID(), flog.GetVersion(),
+				sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			files = metautil.BuildStatsFilePaths(basePath, files)
+		}
+		for _, file := range files {
 			textLogs[file] = struct{}{}
 		}
 	}
@@ -1008,8 +1200,22 @@ func getJSONKeyLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{
 	jsonkeyLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetJsonKeyStats() {
 		for _, file := range flog.GetFiles() {
-			prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONIndexPath,
-				flog.GetBuildID(), flog.GetVersion(), sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			var prefix string
+			if flog.GetJsonKeyStatsDataFormat() >= 2 {
+				prefix = metautil.BuildJSONKeyStatsPrefix(
+					gc.option.cli.RootPath(),
+					flog.GetJsonKeyStatsDataFormat(),
+					flog.GetBuildID(),
+					flog.GetVersion(),
+					sinfo.GetCollectionID(),
+					sinfo.GetPartitionID(),
+					sinfo.GetID(),
+					flog.GetFieldID(),
+				)
+			} else {
+				prefix = fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONIndexPath,
+					flog.GetBuildID(), flog.GetVersion(), sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
+			}
 			file = path.Join(prefix, file)
 			jsonkeyLogs[file] = struct{}{}
 		}
@@ -1076,10 +1282,17 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 	defer func() { log.Info("recycleUnusedSegIndexes done", zap.Duration("timeCost", time.Since(start))) }()
 
 	segIndexes := gc.meta.indexMeta.GetAllSegIndexes()
-	for _, segIdx := range segIndexes {
+	for _, candidate := range segIndexes {
 		if ctx.Err() != nil {
 			// process canceled.
 			return
+		}
+		// GetAllSegIndexes returns a point-in-time snapshot. Refresh by buildID
+		// before making deletion decisions so GC does not act on stale task state
+		// or stale index file keys.
+		segIdx, ok := gc.getLatestSegmentIndexForGC(candidate)
+		if !ok {
+			continue
 		}
 		if gc.collectionGCPaused(segIdx.CollectionID) {
 			continue
@@ -1089,7 +1302,24 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
 		if gc.meta.GetSegment(ctx, segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			// Non-terminal tasks may still be writing index files or updating meta.
+			// Keep the SegmentIndex until the task reaches a terminal state.
+			if segIdx.IndexState == commonpb.IndexState_Unissued ||
+				segIdx.IndexState == commonpb.IndexState_InProgress ||
+				segIdx.IndexState == commonpb.IndexState_Retry {
+				log.Info("skip GC segment index since index task is not terminal",
+					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Int64("partitionID", segIdx.PartitionID),
+					zap.Int64("segmentID", segIdx.SegmentID),
+					zap.Int64("indexID", segIdx.IndexID),
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.String("state", segIdx.IndexState.String()))
+				continue
+			}
 			indexFiles := gc.getAllIndexFilesOfIndex(segIdx)
+			// Empty indexFiles is valid for fake-finished small/no-train indexes.
+			// removeObjectFiles is a no-op in that case; the stale meta still needs
+			// to be removed when its segment or field index is gone.
 			log := log.With(zap.Int64("collectionID", segIdx.CollectionID),
 				zap.Int64("partitionID", segIdx.PartitionID),
 				zap.Int64("segmentID", segIdx.SegmentID),
@@ -1127,13 +1357,28 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 	}
 }
 
-// recycleUnusedIndexFiles is used to delete those index files that no longer exist in the meta.
-func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
-	start := time.Now()
-	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFiles"), zap.Time("startAt", start))
-	log.Info("start recycleUnusedIndexFiles...")
+// getLatestSegmentIndexForGC takes a SegmentIndex candidate from GC scanning and
+// returns the latest SegmentIndex meta for the same buildID. The bool return
+// value is false when the candidate is nil or the buildID no longer exists.
+func (gc *garbageCollector) getLatestSegmentIndexForGC(candidate *model.SegmentIndex) (*model.SegmentIndex, bool) {
+	if candidate == nil {
+		return nil, false
+	}
+	if gc.meta == nil || gc.meta.indexMeta == nil || gc.meta.indexMeta.segmentBuildInfo == nil {
+		return candidate, true
+	}
+	return gc.meta.indexMeta.GetIndexJob(candidate.BuildID)
+}
 
-	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexPath) + "/"
+// recycleUnusedIndexFilesV0 deletes orphan files under the legacy v0 index_files prefix.
+// v0 paths are rooted by buildID, so the first-level directory can be parsed and
+// checked against index meta directly.
+func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
+	start := time.Now()
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFilesV0"), zap.Time("startAt", start))
+	log.Info("start recycleUnusedIndexFilesV0...")
+
+	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexV0Path) + "/"
 
 	// Resolve snapshotMeta once. Both IsBuildIDGCBlocked paths below are O(1) so
 	// no caching of intermediate state is needed.
@@ -1146,9 +1391,11 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 		keyCount++
 		logger := log.With(zap.String("prefix", prefix), zap.String("key", key))
 
+		// This recycler only walks index_files/ (v0). Its first path level is buildID;
+		// v1 collectionID directories live under index_v1/ and are handled below.
 		buildID, err := parseBuildIDFromFilePath(key)
 		if err != nil {
-			logger.Warn("garbageCollector recycleUnusedIndexFiles parseIndexFileKey", zap.Error(err))
+			logger.Warn("garbageCollector recycleUnusedIndexFilesV0 parseIndexFileKey", zap.Error(err))
 			return true
 		}
 		logger = logger.With(zap.Int64("buildID", buildID))
@@ -1161,7 +1408,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			return true
 		}
 		if segIdx == nil {
-			// buildID no longer exists in meta. Orphan buildID walk: no collection context,
+			// buildID no longer exists in meta. Orphan buildID walk has no collection context,
 			// so IsBuildIDGCBlocked(-1, buildID) fail-closes on ANY unloaded RefIndex globally.
 			if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(-1, buildID) {
 				logger.Info("skip GC index files since buildID is protected by snapshot",
@@ -1170,13 +1417,13 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			}
 
 			// buildID no longer exists in meta, remove all index files
-			logger.Info("garbageCollector recycleUnusedIndexFiles find meta has not exist, remove index files")
+			logger.Info("garbageCollector recycleUnusedIndexFilesV0 find meta has not exist, remove index files")
 			err = gc.option.cli.RemoveWithPrefix(ctx, key)
 			if err != nil {
-				logger.Warn("garbageCollector recycleUnusedIndexFiles remove index files failed", zap.Error(err))
+				logger.Warn("garbageCollector recycleUnusedIndexFilesV0 remove index files failed", zap.Error(err))
 				return true
 			}
-			logger.Info("garbageCollector recycleUnusedIndexFiles remove index files success")
+			logger.Info("garbageCollector recycleUnusedIndexFilesV0 remove index files success")
 			return true
 		}
 
@@ -1204,14 +1451,14 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			if _, ok := filesMap[file]; !ok {
 				future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
 					logger := logger.With(zap.String("file", file))
-					logger.Info("garbageCollector recycleUnusedIndexFiles remove file...")
+					logger.Info("garbageCollector recycleUnusedIndexFilesV0 remove file...")
 
 					if err := gc.option.cli.Remove(ctx, file); err != nil {
-						logger.Warn("garbageCollector recycleUnusedIndexFiles remove file failed", zap.Error(err))
+						logger.Warn("garbageCollector recycleUnusedIndexFilesV0 remove file failed", zap.Error(err))
 						return struct{}{}, err
 					}
 					deletedFilesNum.Inc()
-					logger.Info("garbageCollector recycleUnusedIndexFiles remove file success")
+					logger.Info("garbageCollector recycleUnusedIndexFilesV0 remove file success")
 					return struct{}{}, nil
 				})
 				futures = append(futures, future)
@@ -1234,21 +1481,95 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 	})
 	log = log.With(zap.Duration("timeCost", time.Since(start)), zap.Int("keyCount", keyCount), zap.Error(err))
 	if err != nil {
-		log.Warn("garbageCollector recycleUnusedIndexFiles failed", zap.Error(err))
+		log.Warn("garbageCollector recycleUnusedIndexFilesV0 failed", zap.Error(err))
 		return
 	}
-	log.Info("recycleUnusedIndexFiles done")
+	log.Info("recycleUnusedIndexFilesV0 done")
 }
 
-// getAllIndexFilesOfIndex returns the all index files of index.
+// getAllIndexFilesOfIndex returns all expected index files using the path version
+// recorded on the SegmentIndex: v0 builds index_files paths, v1 builds index_v1 paths.
 func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
+	builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
+		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
+		segmentIndex.PartitionID, segmentIndex.SegmentID,
+		segmentIndex.BuildID, segmentIndex.IndexVersion)
 	filesMap := make(map[string]struct{})
 	for _, fileID := range segmentIndex.IndexFileKeys {
-		filepath := metautil.BuildSegmentIndexFilePath(gc.option.cli.RootPath(), segmentIndex.BuildID, segmentIndex.IndexVersion,
-			segmentIndex.PartitionID, segmentIndex.SegmentID, fileID)
-		filesMap[filepath] = struct{}{}
+		filesMap[builder.BuildFilePath(fileID)] = struct{}{}
 	}
 	return filesMap
+}
+
+// recycleUnusedIndexFilesV1 cleans index files for v1 format entries (collection-partitioned paths).
+// v1 uses the separate index_v1 prefix and puts collectionID before buildID,
+// so GC iterates deleted metadata entries instead of trying to parse buildID from a prefix walk.
+func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFilesV1"))
+
+	snapshotMeta := gc.meta.GetSnapshotMeta()
+	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexesWithV1Path()
+	if len(deletedIndexes) == 0 {
+		return
+	}
+
+	log.Info("start recycleUnusedIndexFilesV1", zap.Int("deletedCount", len(deletedIndexes)))
+	futures := make([]*conc.Future[struct{}], 0, len(deletedIndexes))
+	for _, segIdx := range deletedIndexes {
+		segIdx := segIdx
+		if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
+			log.Info("skip GC v1 index files since buildID is protected by snapshot",
+				zap.Int64("collectionID", segIdx.CollectionID),
+				zap.Int64("buildID", segIdx.BuildID))
+			continue
+		}
+
+		future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+			builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
+				segIdx.IndexStorePathVersion, segIdx.CollectionID,
+				segIdx.PartitionID, segIdx.SegmentID,
+				segIdx.BuildID, segIdx.IndexVersion)
+			prefix := builder.BuildPrefix() + "/"
+
+			if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
+				log.Warn("recycleUnusedIndexFilesV1 remove failed",
+					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Int64("partitionID", segIdx.PartitionID),
+					zap.Int64("segmentID", segIdx.SegmentID),
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.Int64("indexID", segIdx.IndexID),
+					zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+					zap.String("prefix", prefix),
+					zap.Error(err))
+				return struct{}{}, err
+			}
+			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
+				log.Warn("recycleUnusedIndexFilesV1 remove segment index meta failed",
+					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Int64("partitionID", segIdx.PartitionID),
+					zap.Int64("segmentID", segIdx.SegmentID),
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.Int64("indexID", segIdx.IndexID),
+					zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+					zap.String("prefix", prefix),
+					zap.Error(err))
+				return struct{}{}, err
+			}
+			log.Info("recycleUnusedIndexFilesV1 removed index files and meta",
+				zap.Int64("collectionID", segIdx.CollectionID),
+				zap.Int64("partitionID", segIdx.PartitionID),
+				zap.Int64("segmentID", segIdx.SegmentID),
+				zap.Int64("buildID", segIdx.BuildID),
+				zap.Int64("indexID", segIdx.IndexID),
+				zap.Stringer("pathVersion", segIdx.IndexStorePathVersion),
+				zap.String("prefix", prefix))
+			return struct{}{}, nil
+		})
+		futures = append(futures, future)
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		log.Warn("some task failure in remove object pool", zap.Error(err))
+	}
 }
 
 // recycleUnusedAnalyzeFiles is used to delete those analyze stats files that no longer exist in the meta.

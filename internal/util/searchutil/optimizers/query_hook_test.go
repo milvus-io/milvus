@@ -402,6 +402,92 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	})
 }
 
+func TestShouldUseTwoStageSearch(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key, "2000")
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "5")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.Key)
+		paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.Key)
+	})
+
+	tests := []struct {
+		name                string
+		twoStageEnabled     string
+		topk                int64
+		effectiveSegmentNum int
+		searchType          internalpb.SearchType
+		want                bool
+	}{
+		{
+			name:                "disabled",
+			twoStageEnabled:     "false",
+			topk:                3000,
+			effectiveSegmentNum: 10,
+			searchType:          internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
+			want:                false,
+		},
+		{
+			name:                "segments_below_threshold",
+			topk:                3000,
+			effectiveSegmentNum: 3,
+			searchType:          internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
+			want:                false,
+		},
+		{
+			name:                "topk_below_threshold",
+			topk:                1000,
+			effectiveSegmentNum: 10,
+			searchType:          internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
+			want:                false,
+		},
+		{
+			name:                "thresholds_met_exactly",
+			topk:                2000,
+			effectiveSegmentNum: 5,
+			searchType:          internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
+			want:                true,
+		},
+		{
+			name:                "thresholds_exceeded",
+			topk:                3000,
+			effectiveSegmentNum: 10,
+			searchType:          internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER,
+			want:                true,
+		},
+		{
+			name:                "wrong_search_type",
+			topk:                3000,
+			effectiveSegmentNum: 10,
+			searchType:          internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER,
+			want:                false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.twoStageEnabled != "" {
+				paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, test.twoStageEnabled)
+				t.Cleanup(func() {
+					paramtable.Get().Save(paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
+				})
+			}
+
+			req := &querypb.SearchRequest{
+				Req: &internalpb.SearchRequest{
+					Topk:       test.topk,
+					SearchType: test.searchType,
+				},
+			}
+			if got := ShouldUseTwoStageSearch(req, test.effectiveSegmentNum); got != test.want {
+				t.Fatalf("ShouldUseTwoStageSearch() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func (suite *QueryHookSuite) verifyQueryInfo(req *querypb.SearchRequest, topK int64, isTopkReduce bool, isRecallEvaluation bool, param string) {
 	queryInfo := suite.getQueryInfo(req)
 	suite.Equal(topK, queryInfo.GetTopk())

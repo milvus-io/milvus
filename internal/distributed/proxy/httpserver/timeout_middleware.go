@@ -17,16 +17,16 @@
 package httpserver
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
@@ -62,105 +62,153 @@ type Timeout struct {
 	handler gin.HandlerFunc
 }
 
-// Writer is a writer with memory buffer
-type Writer struct {
-	gin.ResponseWriter
-	body         *bytes.Buffer
-	headers      http.Header
-	mu           sync.Mutex
-	timeout      atomic.Bool
-	wroteHeaders bool
-	code         int
+const timeoutRecorderNoWritten = -1
+
+type timeoutResponseRecorder struct {
+	body        *bytes.Buffer
+	headers     http.Header
+	mu          sync.Mutex
+	closed      bool
+	status      int
+	size        int
+	closeNotify chan bool
 }
 
-// NewWriter will return a timeout.Writer pointer
-func NewWriter(w gin.ResponseWriter, buf *bytes.Buffer) *Writer {
-	return &Writer{ResponseWriter: w, body: buf, headers: make(http.Header)}
+func newTimeoutResponseRecorder(buf *bytes.Buffer) *timeoutResponseRecorder {
+	return &timeoutResponseRecorder{
+		body:        buf,
+		headers:     make(http.Header),
+		status:      http.StatusOK,
+		size:        timeoutRecorderNoWritten,
+		closeNotify: make(chan bool),
+	}
 }
 
-// Write will write data to response body
-func (w *Writer) Write(data []byte) (int, error) {
+func (w *timeoutResponseRecorder) Header() http.Header {
+	return w.headers
+}
+
+func (w *timeoutResponseRecorder) Write(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.timeout.Load() || w.body == nil {
-		return 0, errors.New("Response writer closed")
+	if w.closed || w.body == nil {
+		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
 	}
-	return w.body.Write(data)
+	if !w.written() {
+		w.size = 0
+	}
+	n, err := w.body.Write(data)
+	w.size += n
+	return n, err
 }
 
-// WriteHeader sends an HTTP response header with the provided status code.
-// If the response writer has already written headers or if a timeout has occurred,
-// this method does nothing.
-func (w *Writer) WriteHeader(code int) {
-	// gin is using -1 to skip writing the status code
-	// see https://github.com/gin-gonic/gin/blob/a0acf1df2814fcd828cb2d7128f2f4e2136d3fac/response_writer.go#L61
+func (w *timeoutResponseRecorder) WriteString(s string) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed || w.body == nil {
+		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
+	}
+	if !w.written() {
+		w.size = 0
+	}
+	n, err := w.body.WriteString(s)
+	w.size += n
+	return n, err
+}
+
+func (w *timeoutResponseRecorder) WriteHeader(code int) {
 	if code == -1 {
 		return
 	}
-
 	checkWriteHeaderCode(code)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.timeout.Load() || w.wroteHeaders {
+	if w.closed || w.written() {
 		return
 	}
-	w.writeHeader(code)
-	w.ResponseWriter.WriteHeader(code)
+	w.status = code
 }
 
-func (w *Writer) writeHeader(code int) {
-	w.wroteHeaders = true
-	w.code = code
-}
-
-// Header will get response headers
-func (w *Writer) Header() http.Header {
-	return w.headers
-}
-
-// WriteString will write string to response body
-func (w *Writer) WriteString(s string) (int, error) {
-	return w.Write([]byte(s))
-}
-
-// FreeBuffer will release buffer pointer
-func (w *Writer) FreeBuffer() {
-	// if not reset body,old bytes will put in bufPool
-	w.body.Reset()
-	w.body = nil
-}
-
-// Status we must override Status func here,
-// or the http status code returned by gin.Context.Writer.Status()
-// will always be 200 in other custom gin middlewares.
-func (w *Writer) Status() int {
-	if w.code == 0 || w.timeout.Load() {
-		return w.ResponseWriter.Status()
-	}
-	return w.code
-}
-
-// WriteHeaderNow implements gin.ResponseWriter interface to prevent
-// bypassing the mutex when writing headers directly.
-func (w *Writer) WriteHeaderNow() {
+func (w *timeoutResponseRecorder) WriteHeaderNow() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.timeout.Load() {
+	if w.closed || w.written() {
 		return
 	}
-	w.ResponseWriter.WriteHeaderNow()
+	w.size = 0
 }
 
-// Flush implements the http.Flusher interface. It guards against
-// flushing after timeout to prevent bypassing the mutex.
-func (w *Writer) Flush() {
+func (w *timeoutResponseRecorder) Status() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.timeout.Load() {
-		return
+	return w.status
+}
+
+func (w *timeoutResponseRecorder) Size() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.size
+}
+
+func (w *timeoutResponseRecorder) Written() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.written()
+}
+
+func (w *timeoutResponseRecorder) Flush() {}
+
+func (w *timeoutResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, merr.WrapErrServiceInternalMsg("response writer does not support hijack")
+}
+
+func (w *timeoutResponseRecorder) CloseNotify() <-chan bool {
+	return w.closeNotify
+}
+
+func (w *timeoutResponseRecorder) Pusher() http.Pusher {
+	return nil
+}
+
+func (w *timeoutResponseRecorder) CommitTo(realWriter gin.ResponseWriter) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed || w.body == nil {
+		return merr.WrapErrServiceInternalMsg("response writer closed")
 	}
-	w.ResponseWriter.Flush()
+
+	dst := realWriter.Header()
+	for k, vv := range w.headers {
+		dst[k] = append([]string(nil), vv...)
+	}
+	realWriter.WriteHeader(w.status)
+	if w.body.Len() == 0 {
+		if w.written() || w.status != http.StatusOK {
+			realWriter.WriteHeaderNow()
+		}
+		return nil
+	}
+	_, err := realWriter.Write(w.body.Bytes())
+	return err
+}
+
+func (w *timeoutResponseRecorder) Close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.body != nil {
+		w.body.Reset()
+		w.body = nil
+	}
+	w.closed = true
+}
+
+func (w *timeoutResponseRecorder) CloseForTimeout() {
+	w.Close()
+}
+
+func (w *timeoutResponseRecorder) written() bool {
+	return w.size != timeoutRecorderNoWritten
 }
 
 func checkWriteHeaderCode(code int) {
@@ -169,29 +217,60 @@ func checkWriteHeaderCode(code int) {
 	}
 }
 
+var timeoutContextKeysToPropagate = []string{
+	HTTPReturnCode,
+	HTTPReturnMessage,
+	ContextRequest,
+	ContextResponse,
+	"traceID",
+}
+
+func propagateTimeoutContextKeys(dst *gin.Context, src *gin.Context) {
+	for _, key := range timeoutContextKeysToPropagate {
+		if value, ok := src.Get(key); ok {
+			dst.Set(key, value)
+		}
+	}
+}
+
 func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
-	t := &Timeout{
+	timeoutHandler := &Timeout{
 		handler: handler,
 	}
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
-		topCtx, cancel := context.WithCancel(gCtx.Request.Context())
-		defer cancel()
-		gCtx.Request = gCtx.Request.WithContext(topCtx)
-
 		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
-		timeoutSecond, err := strconv.ParseInt(gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
-		if err == nil {
+		requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
+		if requestTimeout != "" {
+			timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
+			if err != nil {
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+					mhttp.HTTPReturnCode: merr.Code(merr.ErrParameterInvalid),
+					mhttp.HTTPReturnMessage: merr.WrapErrParameterInvalidMsg(
+						"%s parse failed, err: %s",
+						mhttp.HTTPHeaderRequestTimeout,
+						err.Error(),
+					).Error(),
+				})
+				return
+			}
 			timeout = time.Duration(timeoutSecond) * time.Second
 		}
+		topCtx, cancel := context.WithTimeout(gCtx.Request.Context(), timeout)
+		defer cancel()
+		req := gCtx.Request.WithContext(topCtx)
+		gCtx.Request = req
+
 		finish := make(chan struct{}, 1)
 		panicChan := make(chan interface{}, 1)
 
-		w := gCtx.Writer
+		realWriter := gCtx.Writer
 		buffer := bufPool.Get()
-		tw := NewWriter(w, buffer)
-		gCtx.Writer = tw
 		buffer.Reset()
+		recorder := newTimeoutResponseRecorder(buffer)
+		handlerCtx := gCtx.Copy()
+		handlerCtx.Request = req
+		handlerCtx.Writer = recorder
 
 		go func() {
 			defer func() {
@@ -199,53 +278,50 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 					panicChan <- p
 				}
 			}()
-			t.handler(gCtx)
+			timeoutHandler.handler(handlerCtx)
 			finish <- struct{}{}
 		}()
 
-		t := time.NewTimer(timeout)
-		defer t.Stop()
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
 
 		select {
 		case p := <-panicChan:
-			tw.FreeBuffer()
-			gCtx.Writer = w
+			recorder.Close()
+			bufPool.Put(buffer)
 			gCtx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{mhttp.HTTPReturnCode: http.StatusInternalServerError})
 			panic(p)
 
 		case <-finish:
-			gCtx.Next()
-			tw.mu.Lock()
-			defer tw.mu.Unlock()
-			dst := tw.ResponseWriter.Header()
-			for k, vv := range tw.Header() {
-				dst[k] = vv
+			propagateTimeoutContextKeys(gCtx, handlerCtx)
+			if handlerCtx.IsAborted() {
+				gCtx.Abort()
 			}
-
-			if _, err := tw.ResponseWriter.Write(buffer.Bytes()); err != nil {
+			gCtx.Next()
+			if err := recorder.CommitTo(realWriter); err != nil {
 				log.Warn("failed to write response body", zap.Error(err))
-				tw.FreeBuffer()
+				recorder.Close()
 				bufPool.Put(buffer)
 				return
 			}
-			tw.FreeBuffer()
+			recorder.Close()
 			bufPool.Put(buffer)
 
-		case <-t.C:
-			cancel() // cancel context immediately so handler can detect timeout
+		case <-timer.C:
+			cancel()
 			gCtx.Abort()
-			tw.mu.Lock()
-			defer tw.mu.Unlock()
-			tw.timeout.Store(true)
-			tw.FreeBuffer()
+			gCtx.Set(HTTPReturnCode, merr.TimeoutCode)
+			gCtx.Set(HTTPReturnMessage, "request timeout")
+			recorder.CloseForTimeout()
 			bufPool.Put(buffer)
 
-			// Write timeout response directly to the original writer.
-			// Do NOT swap gCtx.Writer — handler goroutine may still be using it.
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusRequestTimeout)
+			realWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
+			if traceID, ok := getTraceID(gCtx); ok {
+				setTraceIDHeaderTo(realWriter.Header(), traceID)
+			}
+			realWriter.WriteHeader(http.StatusRequestTimeout)
 			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
-			w.Write(body)
+			realWriter.Write(body)
 		}
 	}
 }

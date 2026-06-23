@@ -16,7 +16,6 @@ package packed
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -147,7 +147,7 @@ func fetchRowCountsConcurrently(
 		futures[k] = pool.Submit(func() (struct{}, error) {
 			fetchedInfo, err := GetFileInfo(format, fileInfos[idx].FilePath, storageConfig, extfs)
 			if err != nil {
-				return struct{}{}, fmt.Errorf("failed to get file info for %s: %w", fileInfos[idx].FilePath, err)
+				return struct{}{}, merr.Wrapf(err, "failed to get file info for %s", fileInfos[idx].FilePath)
 			}
 			// Distinct indexes across workers -> no race on rowCounts.
 			rowCounts[idx] = fetchedInfo.NumRows
@@ -184,7 +184,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 	log := log.Ctx(ctx)
 
 	if exploreManifestPath == "" {
-		return nil, fmt.Errorf("explore manifest path is required")
+		return nil, merr.WrapErrServiceInternalMsg("explore manifest path is required")
 	}
 
 	extfs := ExternalSpecContext{
@@ -196,7 +196,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 	exploreStart := time.Now()
 	fileInfos, err := ReadFileInfosFromManifestPath(exploreManifestPath, storageConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read explore manifest: %w", err)
+		return nil, merr.Wrap(err, "failed to read explore manifest")
 	}
 	rawCount := len(fileInfos)
 	// Apply the same sort+format-filter that DataCoord used to derive
@@ -220,11 +220,11 @@ func FetchFragmentsFromExternalSourceWithRange(
 		fileIndexEnd = int64(len(fileInfos))
 	}
 	if fileIndexBegin >= int64(len(fileInfos)) {
-		return nil, fmt.Errorf("fileIndexBegin %d >= total files %d", fileIndexBegin, len(fileInfos))
+		return nil, merr.WrapErrServiceInternalMsg("fileIndexBegin %d >= total files %d", fileIndexBegin, len(fileInfos))
 	}
 	fileInfos = fileInfos[fileIndexBegin:fileIndexEnd]
 	if len(fileInfos) == 0 {
-		return nil, fmt.Errorf("no files in range [%d, %d)", fileIndexBegin, fileIndexEnd)
+		return nil, merr.WrapErrServiceInternalMsg("no files in range [%d, %d)", fileIndexBegin, fileIndexEnd)
 	}
 
 	getFileInfoStart := time.Now()
@@ -243,7 +243,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fragmentIDGenerator)...)
 	}
 	if len(fragments) == 0 {
-		return nil, fmt.Errorf("no data files in range [%d, %d)", fileIndexBegin, fileIndexEnd)
+		return nil, merr.WrapErrServiceInternalMsg("no data files in range [%d, %d)", fileIndexBegin, fileIndexEnd)
 	}
 
 	log.Info("Created fragments from file range",
@@ -257,19 +257,21 @@ func FetchFragmentsFromExternalSourceWithRange(
 
 // BuildCurrentSegmentFragments builds segment to fragments mapping from current segments.
 // It reads fragment info from manifest if available, otherwise creates virtual fragments.
+// When columns is non-empty, only manifest column groups containing at least
+// one requested column are considered.
 // Returns error if a segment has a manifest path but the manifest cannot be read.
 func BuildCurrentSegmentFragments(
 	segments []*datapb.SegmentInfo,
 	storageConfig *indexpb.StorageConfig,
+	columns []string,
 ) (SegmentFragments, error) {
 	result := make(SegmentFragments)
 	for _, seg := range segments {
 		// Try to read from manifest if available
 		if seg.GetManifestPath() != "" && storageConfig != nil {
-			fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig)
+			fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig, columns)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read manifest for segment %d at %s: %w",
-					seg.GetID(), seg.GetManifestPath(), err)
+				return nil, merr.Wrapf(err, "failed to read manifest for segment %d at %s", seg.GetID(), seg.GetManifestPath())
 			}
 			if len(fragments) > 0 {
 				result[seg.GetID()] = fragments
@@ -294,8 +296,7 @@ func BuildCurrentSegmentFragments(
 	return result, nil
 }
 
-// CreateSegmentManifestWithBasePath creates a manifest file with a custom base path.
-// This allows creating temporary manifests that will be renamed later.
+// CreateSegmentManifestWithBasePath creates a manifest file at the given base path.
 func CreateSegmentManifestWithBasePath(
 	ctx context.Context,
 	basePath string,
@@ -336,6 +337,9 @@ func GetColumnNamesFromSchema(schema *schemapb.CollectionSchema) []string {
 	isExternal := schema.GetExternalSource() != ""
 	var columns []string
 	for _, field := range schema.GetFields() {
+		if field.GetIsFunctionOutput() {
+			continue // function output fields don't exist in external data
+		}
 		extField := field.GetExternalField()
 		if extField != "" {
 			columns = append(columns, extField)

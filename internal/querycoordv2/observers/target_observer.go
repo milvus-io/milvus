@@ -61,6 +61,7 @@ const (
 	UpdateCollection targetOp = iota + 1
 	ReleaseCollection
 	ReleasePartition
+	UpdatePartition
 )
 
 type targetUpdateRequest struct {
@@ -243,6 +244,39 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				ob.targetMgr.RemovePartitionFromNextTarget(ctx, req.CollectionID, req.PartitionIDs...)
 				ob.keylocks.Unlock(req.CollectionID)
 				req.Notifier <- nil
+			case UpdatePartition:
+				// Fast path: check with read lock first
+				ob.keylocks.RLock(req.CollectionID)
+				exists := ob.targetMgr.IsCurrentTargetExist(ctx, req.CollectionID, req.PartitionIDs[0])
+				ob.keylocks.RUnlock(req.CollectionID)
+
+				if exists {
+					close(req.ReadyNotifier)
+					req.Notifier <- nil
+				} else {
+					// Slow path: need to update next target
+					ob.keylocks.Lock(req.CollectionID)
+					// Double check after acquiring write lock
+					if ob.targetMgr.IsCurrentTargetExist(ctx, req.CollectionID, req.PartitionIDs[0]) {
+						close(req.ReadyNotifier)
+						req.Notifier <- nil
+					} else {
+						err := ob.updateNextTarget(ctx, req.CollectionID)
+						if err != nil {
+							log.Warn("failed to manually update next target",
+								zap.Int64("collectionID", req.CollectionID),
+								zap.String("opType", req.opType.String()),
+								zap.Error(err))
+							close(req.ReadyNotifier)
+						} else {
+							ob.mut.Lock()
+							ob.readyNotifiers[req.CollectionID] = append(ob.readyNotifiers[req.CollectionID], req.ReadyNotifier)
+							ob.mut.Unlock()
+						}
+						req.Notifier <- err
+					}
+					ob.keylocks.Unlock(req.CollectionID)
+				}
 			}
 			log.Info("manually trigger update target done",
 				zap.Int64("collectionID", req.CollectionID),
@@ -318,6 +352,20 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, e
 	ob.updateChan <- targetUpdateRequest{
 		CollectionID:  collectionID,
 		opType:        UpdateCollection,
+		Notifier:      notifier,
+		ReadyNotifier: readyCh,
+	}
+	return readyCh, <-notifier
+}
+
+func (ob *TargetObserver) UpdatePartition(collectionID int64, partitionID int64) (chan struct{}, error) {
+	notifier := make(chan error)
+	readyCh := make(chan struct{})
+	defer close(notifier)
+	ob.updateChan <- targetUpdateRequest{
+		CollectionID:  collectionID,
+		PartitionIDs:  []int64{partitionID},
+		opType:        UpdatePartition,
 		Notifier:      notifier,
 		ReadyNotifier: readyCh,
 	}
@@ -466,14 +514,16 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		readyDelegatorsInCollection = append(readyDelegatorsInCollection, readyDelegatorsInReplica...)
 	}
 
-	// segment data satisfies next target spec
-	segmentDataReady := !paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() ||
-		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) == nil
-
 	syncSuccess := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsInCollection, newVersion)
 	syncedChannelNames := lo.Uniq(lo.Map(readyDelegatorsInCollection, func(ch *meta.DmChannel, _ int) string { return ch.ChannelName }))
 	// only after all channel are synced, we can consider the current target is ready
-	return syncSuccess && lo.Every(syncedChannelNames, lo.Keys(channelNames)) && segmentDataReady
+	if !syncSuccess || !lo.Every(syncedChannelNames, lo.Keys(channelNames)) {
+		return false
+	}
+
+	// segment data satisfies next target spec
+	return !paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() ||
+		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) == nil
 }
 
 // sync next target info to delegator as readable snapshot

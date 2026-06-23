@@ -33,6 +33,8 @@ const (
 	MessageTypeCreatePartition           MessageType = MessageType(messagespb.MessageType_CreatePartition)
 	MessageTypeDropPartition             MessageType = MessageType(messagespb.MessageType_DropPartition)
 	MessageTypeImport                    MessageType = MessageType(messagespb.MessageType_Import)
+	MessageTypeCommitImport              MessageType = MessageType(messagespb.MessageType_CommitImport)
+	MessageTypeRollbackImport            MessageType = MessageType(messagespb.MessageType_RollbackImport)
 	MessageTypeCreateSegment             MessageType = MessageType(messagespb.MessageType_CreateSegment)
 	MessageTypeFlush                     MessageType = MessageType(messagespb.MessageType_Flush)
 	MessageTypeManualFlush               MessageType = MessageType(messagespb.MessageType_ManualFlush)
@@ -110,6 +112,10 @@ type (
 	DropPartitionRequest                   = msgpb.DropPartitionRequest
 	ImportMessageHeader                    = messagespb.ImportMessageHeader
 	ImportMsg                              = msgpb.ImportMsg
+	CommitImportMessageHeader              = messagespb.CommitImportMessageHeader
+	CommitImportMessageBody                = messagespb.CommitImportMessageBody
+	RollbackImportMessageHeader            = messagespb.RollbackImportMessageHeader
+	RollbackImportMessageBody              = messagespb.RollbackImportMessageBody
 	CreateSegmentMessageHeader             = messagespb.CreateSegmentMessageHeader
 	CreateSegmentMessageBody               = messagespb.CreateSegmentMessageBody
 	FlushMessageHeader                     = messagespb.FlushMessageHeader
@@ -571,6 +577,90 @@ var MustAsBroadcastImportMessageV1 = MustAsSpecializedBroadcastMessage[*ImportMe
 
 // NewImportMessageBuilderV1 creates a new message builder for ImportMessageV1
 var NewImportMessageBuilderV1 = newMutableMessageBuilder[*ImportMessageHeader, *ImportMsg]
+
+// Type aliases for CommitImportMessageV2
+type (
+	MutableCommitImportMessageV2         = specializedMutableMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+	ImmutableCommitImportMessageV2       = SpecializedImmutableMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+	BroadcastCommitImportMessageV2       = SpecializedBroadcastMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+	BroadcastResultCommitImportMessageV2 = BroadcastResult[*CommitImportMessageHeader, *CommitImportMessageBody]
+	AckResultCommitImportMessageV2       = AckResult[*CommitImportMessageHeader, *CommitImportMessageBody]
+)
+
+// MessageTypeWithVersion for CommitImportMessageV2
+var MessageTypeCommitImportV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeCommitImport,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for CommitImportMessageV2
+var SpecializedTypeCommitImportV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*CommitImportMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*CommitImportMessageHeader)(nil)),
+}
+
+// AsMutableCommitImportMessageV2 converts a BasicMessage to MutableCommitImportMessageV2
+var AsMutableCommitImportMessageV2 = asSpecializedMutableMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// MustAsMutableCommitImportMessageV2 converts a BasicMessage to MutableCommitImportMessageV2, panics on error
+var MustAsMutableCommitImportMessageV2 = mustAsSpecializedMutableMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// AsImmutableCommitImportMessageV2 converts an ImmutableMessage to ImmutableCommitImportMessageV2
+var AsImmutableCommitImportMessageV2 = asSpecializedImmutableMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// MustAsImmutableCommitImportMessageV2 converts an ImmutableMessage to ImmutableCommitImportMessageV2, panics on error
+var MustAsImmutableCommitImportMessageV2 = MustAsSpecializedImmutableMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// AsBroadcastCommitImportMessageV2 converts a BasicMessage to BroadcastCommitImportMessageV2
+var AsBroadcastCommitImportMessageV2 = asSpecializedBroadcastMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// MustAsBroadcastCommitImportMessageV2 converts a BasicMessage to BroadcastCommitImportMessageV2, panics on error
+var MustAsBroadcastCommitImportMessageV2 = MustAsSpecializedBroadcastMessage[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// NewCommitImportMessageBuilderV2 creates a new message builder for CommitImportMessageV2
+var NewCommitImportMessageBuilderV2 = newMutableMessageBuilder[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// Type aliases for RollbackImportMessageV2
+type (
+	MutableRollbackImportMessageV2         = specializedMutableMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+	ImmutableRollbackImportMessageV2       = SpecializedImmutableMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+	BroadcastRollbackImportMessageV2       = SpecializedBroadcastMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+	BroadcastResultRollbackImportMessageV2 = BroadcastResult[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+	AckResultRollbackImportMessageV2       = AckResult[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+)
+
+// MessageTypeWithVersion for RollbackImportMessageV2
+var MessageTypeRollbackImportV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeRollbackImport,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for RollbackImportMessageV2
+var SpecializedTypeRollbackImportV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*RollbackImportMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*RollbackImportMessageHeader)(nil)),
+}
+
+// AsMutableRollbackImportMessageV2 converts a BasicMessage to MutableRollbackImportMessageV2
+var AsMutableRollbackImportMessageV2 = asSpecializedMutableMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+
+// MustAsMutableRollbackImportMessageV2 converts a BasicMessage to MutableRollbackImportMessageV2, panics on error
+var MustAsMutableRollbackImportMessageV2 = mustAsSpecializedMutableMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+
+// AsImmutableRollbackImportMessageV2 converts an ImmutableMessage to ImmutableRollbackImportMessageV2
+var AsImmutableRollbackImportMessageV2 = asSpecializedImmutableMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+
+// MustAsImmutableRollbackImportMessageV2 converts an ImmutableMessage to ImmutableRollbackImportMessageV2, panics on error
+var MustAsImmutableRollbackImportMessageV2 = MustAsSpecializedImmutableMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+
+// AsBroadcastRollbackImportMessageV2 converts a BasicMessage to BroadcastRollbackImportMessageV2
+var AsBroadcastRollbackImportMessageV2 = asSpecializedBroadcastMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+
+// MustAsBroadcastRollbackImportMessageV2 converts a BasicMessage to BroadcastRollbackImportMessageV2, panics on error
+var MustAsBroadcastRollbackImportMessageV2 = MustAsSpecializedBroadcastMessage[*RollbackImportMessageHeader, *RollbackImportMessageBody]
+
+// NewRollbackImportMessageBuilderV2 creates a new message builder for RollbackImportMessageV2
+var NewRollbackImportMessageBuilderV2 = newMutableMessageBuilder[*RollbackImportMessageHeader, *RollbackImportMessageBody]
 
 // Type aliases for CreateSegmentMessageV2
 type (
@@ -2290,6 +2380,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterWALMessageHeader{}):                  MessageTypeAlterWAL,
 	reflect.TypeOf(&messagespb.BatchUpdateManifestMessageHeader{}):       MessageTypeBatchUpdateManifest,
 	reflect.TypeOf(&messagespb.BeginTxnMessageHeader{}):                  MessageTypeBeginTxn,
+	reflect.TypeOf(&messagespb.CommitImportMessageHeader{}):              MessageTypeCommitImport,
 	reflect.TypeOf(&messagespb.CommitTxnMessageHeader{}):                 MessageTypeCommitTxn,
 	reflect.TypeOf(&messagespb.CreateCollectionMessageHeader{}):          MessageTypeCreateCollection,
 	reflect.TypeOf(&messagespb.CreateDatabaseMessageHeader{}):            MessageTypeCreateDatabase,
@@ -2320,6 +2411,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.RefreshExternalCollectionMessageHeader{}): MessageTypeRefreshExternalCollection,
 	reflect.TypeOf(&messagespb.RestoreRBACMessageHeader{}):               MessageTypeRestoreRBAC,
 	reflect.TypeOf(&messagespb.RestoreSnapshotMessageHeader{}):           MessageTypeRestoreSnapshot,
+	reflect.TypeOf(&messagespb.RollbackImportMessageHeader{}):            MessageTypeRollbackImport,
 	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):               MessageTypeRollbackTxn,
 	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):              MessageTypeSchemaChange,
 	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):                  MessageTypeTimeTick,
@@ -2360,6 +2452,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeAlterWALV2:                  SpecializedTypeAlterWALV2,
 	MessageTypeBatchUpdateManifestV2:       SpecializedTypeBatchUpdateManifestV2,
 	MessageTypeBeginTxnV2:                  SpecializedTypeBeginTxnV2,
+	MessageTypeCommitImportV2:              SpecializedTypeCommitImportV2,
 	MessageTypeCommitTxnV2:                 SpecializedTypeCommitTxnV2,
 	MessageTypeCreateCollectionV1:          SpecializedTypeCreateCollectionV1,
 	MessageTypeCreateDatabaseV2:            SpecializedTypeCreateDatabaseV2,
@@ -2390,6 +2483,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeRefreshExternalCollectionV2: SpecializedTypeRefreshExternalCollectionV2,
 	MessageTypeRestoreRBACV2:               SpecializedTypeRestoreRBACV2,
 	MessageTypeRestoreSnapshotV2:           SpecializedTypeRestoreSnapshotV2,
+	MessageTypeRollbackImportV2:            SpecializedTypeRollbackImportV2,
 	MessageTypeRollbackTxnV2:               SpecializedTypeRollbackTxnV2,
 	MessageTypeSchemaChangeV2:              SpecializedTypeSchemaChangeV2,
 	MessageTypeTimeTickV1:                  SpecializedTypeTimeTickV1,
@@ -2414,6 +2508,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeAlterWALV2:                  MessageTypeAlterWALV2,
 	SpecializedTypeBatchUpdateManifestV2:       MessageTypeBatchUpdateManifestV2,
 	SpecializedTypeBeginTxnV2:                  MessageTypeBeginTxnV2,
+	SpecializedTypeCommitImportV2:              MessageTypeCommitImportV2,
 	SpecializedTypeCommitTxnV2:                 MessageTypeCommitTxnV2,
 	SpecializedTypeCreateCollectionV1:          MessageTypeCreateCollectionV1,
 	SpecializedTypeCreateDatabaseV2:            MessageTypeCreateDatabaseV2,
@@ -2444,6 +2539,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeRefreshExternalCollectionV2: MessageTypeRefreshExternalCollectionV2,
 	SpecializedTypeRestoreRBACV2:               MessageTypeRestoreRBACV2,
 	SpecializedTypeRestoreSnapshotV2:           MessageTypeRestoreSnapshotV2,
+	SpecializedTypeRollbackImportV2:            MessageTypeRollbackImportV2,
 	SpecializedTypeRollbackTxnV2:               MessageTypeRollbackTxnV2,
 	SpecializedTypeSchemaChangeV2:              MessageTypeSchemaChangeV2,
 	SpecializedTypeTimeTickV1:                  MessageTypeTimeTickV1,

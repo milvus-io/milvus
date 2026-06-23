@@ -22,6 +22,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 func TestIsNonRetryableErr(t *testing.T) {
@@ -73,6 +75,48 @@ func TestIsNonRetryableErr_WrappedErrors(t *testing.T) {
 
 	wrappedRetryable := fmt.Errorf("network issue: %w", ErrIoUnexpectEOF)
 	assert.False(t, IsNonRetryableErr(wrappedRetryable))
+}
+
+func TestIsRetryableErrWrapped(t *testing.T) {
+	err := errors.Wrap(ErrServiceUnavailable, "proxy task wrapper")
+	assert.True(t, IsRetryableErr(err))
+
+	nonRetryableErr := errors.Wrap(ErrParameterInvalid, "proxy task wrapper")
+	assert.False(t, IsRetryableErr(nonRetryableErr))
+}
+
+func TestChannelTSafeStalledStatus(t *testing.T) {
+	err := WrapErrChannelTSafeStalled("channel-1", "lag 3s")
+	assert.ErrorIs(t, err, ErrChannelTSafeStalled)
+	assert.True(t, IsRetryableErr(err))
+
+	status := Status(err)
+	assert.True(t, status.GetRetriable())
+	assert.Equal(t, commonpb.ErrorCode_TimeTickLongDelay, status.GetErrorCode())
+
+	roundTripErr := Error(status)
+	assert.ErrorIs(t, roundTripErr, ErrChannelTSafeStalled)
+	assert.True(t, IsRetryableErr(roundTripErr))
+}
+
+func TestStatusInputErrorForcesNonRetriable(t *testing.T) {
+	// Boundary invariant: an input error must never be reported as retriable,
+	// even when the underlying sentinel is retriable. Retrying a malformed
+	// request unchanged can never succeed.
+	retriable := ErrServiceUnavailable // retriable=true
+	assert.True(t, IsRetryableErr(retriable))
+
+	inputErr := WrapErrAsInputError(retriable)
+	assert.Equal(t, InputError, GetErrorType(inputErr))
+
+	status := Status(inputErr)
+	assert.False(t, status.GetRetriable(), "input error must be non-retriable at the boundary")
+	_, flagged := status.GetExtraInfo()[InputErrorFlagKey]
+	assert.True(t, flagged, "input error flag should still be set")
+
+	// A non-input retriable error is unaffected.
+	plain := Status(retriable)
+	assert.True(t, plain.GetRetriable())
 }
 
 func TestIsMilvusError_WrappedChain(t *testing.T) {

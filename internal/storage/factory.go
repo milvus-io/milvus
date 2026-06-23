@@ -3,9 +3,8 @@ package storage
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -55,7 +54,7 @@ func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string
 	case "remote", "minio", "opendal":
 		return NewRemoteChunkManager(ctx, f.config)
 	default:
-		return nil, errors.New("no chunk manager implemented with engine: " + engine)
+		return nil, merr.WrapErrServiceInternalMsg("no chunk manager implemented with engine: " + engine)
 	}
 }
 

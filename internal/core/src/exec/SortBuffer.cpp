@@ -238,7 +238,8 @@ SortBuffer::Compare(const char* lhs, const char* rhs) const {
                     lhs_val, rhs_val, sort_key.ascending);
                 break;
             }
-            case DataType::INT64: {
+            case DataType::INT64:
+            case DataType::TIMESTAMPTZ: {
                 auto lhs_val =
                     RowContainer::valueAt<int64_t>(lhs, row_column.offset());
                 auto rhs_val =
@@ -354,18 +355,10 @@ SortBuffer::ExtractOutput(int64_t num_rows) {
 
     // Extract each column
     for (size_t col = 0; col < column_types_.size(); ++col) {
-        auto column_type = column_types_[col];
-
-        // Create output ColumnVector with proper size
-        // ColumnVector(DataType, size_t length) creates an empty vector with pre-allocated storage
-        auto output_vec = std::make_shared<ColumnVector>(column_type, num_rows);
-
-        // Use RowContainer's extractColumn to fill the output
-        data_->extractColumn(rows_ptr,
-                             static_cast<int32_t>(num_rows),
-                             static_cast<int32_t>(col),
-                             output_vec);
-
+        auto output_vec =
+            data_->extractColumnVector(rows_ptr,
+                                       static_cast<int32_t>(num_rows),
+                                       static_cast<int32_t>(col));
         result.push_back(std::move(output_vec));
     }
 

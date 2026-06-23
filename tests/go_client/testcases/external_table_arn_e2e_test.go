@@ -68,7 +68,7 @@ func TestExternalTableArnE2E(t *testing.T) {
 	const rowsPerFile = int64(100)
 
 	for i := 0; i < numFiles; i++ {
-		data, err := generateParquetBytes(rowsPerFile, int64(i)*rowsPerFile)
+		data, err := generateParquetBytes(externalDataSchemaBasic, rowsPerFile, int64(i)*rowsPerFile, testVecDim)
 		require.NoError(t, err)
 
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
@@ -244,7 +244,7 @@ func TestExternalTableArnE2E_StrictVerification(t *testing.T) {
 	const numFiles = 2
 	const rowsPerFile = int64(50)
 	for i := 0; i < numFiles; i++ {
-		data, err := generateParquetBytes(rowsPerFile, int64(i)*rowsPerFile)
+		data, err := generateParquetBytes(externalDataSchemaBasic, rowsPerFile, int64(i)*rowsPerFile, testVecDim)
 		require.NoError(t, err)
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
 		_, err = minioClient.PutObject(ctx, isolatedBucket, objectKey,
@@ -399,7 +399,7 @@ func TestExternalTableArnE2E_NegativeControl(t *testing.T) {
 	extPath := fmt.Sprintf("external-arn-neg/%s", collName)
 	externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, isolatedBucket, extPath)
 
-	data, err := generateParquetBytes(50, 0)
+	data, err := generateParquetBytes(externalDataSchemaBasic, 50, 0, testVecDim)
 	require.NoError(t, err)
 	objectKey := fmt.Sprintf("%s/data0.parquet", extPath)
 	_, err = minioClient.PutObject(ctx, isolatedBucket, objectKey,

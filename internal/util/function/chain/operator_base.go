@@ -20,7 +20,6 @@ package chain
 
 import (
 	"cmp"
-	"fmt"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -54,7 +53,7 @@ func pickByIndices[T any, A typedArray[T], B typedBuilder[T]](arr A, builder B, 
 	arrLen := arr.Len()
 	for _, idx := range indices {
 		if idx < 0 || idx >= arrLen {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("index out of bounds: %d (array length: %d)", idx, arrLen))
+			return nil, merr.WrapErrServiceInternalMsg("index out of bounds: %d (array length: %d)", idx, arrLen)
 		}
 		if arr.IsNull(idx) {
 			builder.AppendNull()
@@ -102,7 +101,7 @@ func dispatchPickByIndices(pool memory.Allocator, data arrow.Array, indices []in
 	case *array.String:
 		return pickByIndices(arr, array.NewStringBuilder(pool), indices)
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported array type %T", data))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported array type %T", data)
 	}
 }
 
@@ -126,7 +125,7 @@ func (o *BaseOp) ReadInputColumns(opName string, df *DataFrame) ([]*arrow.Chunke
 	for i, name := range o.inputs {
 		col := df.Column(name)
 		if col == nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("%s: column %q not found", opName, name))
+			return nil, merr.WrapErrServiceInternalMsg("%s: column %q not found", opName, name)
 		}
 		cols[i] = col
 	}

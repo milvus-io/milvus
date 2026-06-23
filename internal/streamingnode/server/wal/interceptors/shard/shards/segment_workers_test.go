@@ -15,6 +15,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
@@ -293,6 +294,41 @@ func TestSegmentAllocWorker_InitSegmentConfig(t *testing.T) {
 	assert.Equal(t, firstSegmentID, w.segmentID)
 	assert.Equal(t, firstStorageVersion, w.storageVersion)
 	assert.Equal(t, firstLimitation, w.limitation)
+}
+
+func TestSegmentAllocWorkerStorageVersionFollowsUseLoonFFI(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	param := paramtable.Get()
+	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
+
+	for name, tc := range map[string]struct {
+		useLoonFFI            string
+		useGrowingSourceFlush bool
+		expected              int64
+	}{
+		"v2_without_growing_source": {useLoonFFI: "false", useGrowingSourceFlush: false, expected: storage.StorageV2},
+		"v2_with_growing_source":    {useLoonFFI: "false", useGrowingSourceFlush: true, expected: storage.StorageV2},
+		"v3_without_growing_source": {useLoonFFI: "true", useGrowingSourceFlush: false, expected: storage.StorageV3},
+		"v3_with_growing_source":    {useLoonFFI: "true", useGrowingSourceFlush: true, expected: storage.StorageV3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			param.Save(param.CommonCfg.UseLoonFFI.Key, tc.useLoonFFI)
+			w := &segmentAllocWorker{
+				ctx:                   context.Background(),
+				collectionID:          1,
+				partitionID:           2,
+				vchannel:              "v1",
+				wal:                   mock_wal.NewMockWAL(t),
+				useGrowingSourceFlush: tc.useGrowingSourceFlush,
+			}
+			w.SetLogger(log.With())
+
+			err := w.initSegmentConfig()
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, w.storageVersion)
+		})
+	}
 }
 
 // TestSegmentFlushWorker_WaitForTxnManagerRecoverDone tests the txn manager wait behavior

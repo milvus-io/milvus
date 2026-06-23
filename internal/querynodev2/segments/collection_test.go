@@ -17,6 +17,8 @@
 package segments
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -26,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -50,6 +53,7 @@ func (s *CollectionManagerSuite) SetupTest() {
 func (s *CollectionManagerSuite) TestUpdateSchema() {
 	s.Run("normal_case", func() {
 		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+		schema.Version = 100
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:  common.StartOfUserFieldID + int64(len(schema.Fields)),
 			Name:     "added_field",
@@ -59,6 +63,126 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 		err := s.cm.UpdateSchema(1, schema, 100)
 		s.NoError(err)
+		s.Equal(uint64(100), s.cm.Get(1).SchemaVersion())
+	})
+
+	s.Run("stale_version", func() {
+		currentSchema, currentVersion := s.cm.Get(1).SchemaAndVersion()
+		staleSchema := mock_segcore.GenTestCollectionSchema("stale_collection", schemapb.DataType_Int64, false)
+		staleSchema.Version = int32(currentVersion - 1)
+
+		err := s.cm.UpdateSchema(1, staleSchema, currentVersion+1)
+		s.NoError(err)
+
+		updatedSchema, updatedVersion := s.cm.Get(1).SchemaAndVersion()
+		s.Equal(currentVersion, updatedVersion)
+		s.Same(currentSchema, updatedSchema)
+	})
+
+	s.Run("stale_schema_version_with_larger_timestamp", func() {
+		cm := NewCollectionManager()
+		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
+		baseSchema.Version = 7
+		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 50,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
+		schemaV8 := mock_segcore.GenTestCollectionSchema("collection_v8", schemapb.DataType_Int64, false)
+		schemaV8.Version = 8
+		schemaV8.Fields = append(schemaV8.Fields, &schemapb.FieldSchema{
+			FieldID:  common.StartOfUserFieldID + int64(len(schemaV8.Fields)),
+			Name:     "field_v8",
+			DataType: schemapb.DataType_Bool,
+			Nullable: true,
+		})
+
+		err = cm.UpdateSchema(10, schemaV8, 8)
+		s.NoError(err)
+		s.Equal(uint64(8), cm.Get(10).SchemaVersion())
+
+		schemaV7 := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
+		schemaV7.Version = 7
+
+		err = cm.UpdateSchema(10, schemaV7, 200)
+		s.NoError(err)
+
+		updatedSchema, updatedVersion := cm.Get(10).SchemaAndVersion()
+		s.Equal(uint64(8), updatedVersion)
+		s.Same(schemaV8, updatedSchema)
+	})
+
+	s.Run("same_schema_version_with_newer_barrier_updates_properties", func() {
+		cm := NewCollectionManager()
+		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 50,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
+		updatedSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		updatedSchema.Version = baseSchema.GetVersion()
+		updatedSchema.Properties = []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLFieldKey, Value: "int64Field"},
+		}
+
+		err = cm.UpdateSchema(10, updatedSchema, 100)
+		s.NoError(err)
+
+		schema, version := cm.Get(10).SchemaAndVersion()
+		s.Equal(uint64(0), version)
+		s.Same(updatedSchema, schema)
+		s.Equal("int64Field", common.CloneKeyValuePairs(schema.GetProperties()).ToMap()[common.CollectionTTLFieldKey])
+	})
+
+	s.Run("higher_schema_version_after_high_barrier_refresh_uses_monotonic_segcore_schema_version", func() {
+		cm := NewCollectionManager()
+		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
+			LoadType:        querypb.LoadType_LoadCollection,
+			SchemaBarrierTs: 100,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
+		schemaV1 := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+		schemaV1.Version = 1
+		plan, shouldUpdate := prepareCollectionSchemaUpdate(cm.Get(10), uint64(schemaV1.GetVersion()), 80)
+		s.True(shouldUpdate)
+		s.Equal(uint64(1), plan.logicalSchemaVersion)
+		s.Equal(uint64(100), plan.schemaBarrierTs)
+		s.Equal(uint64(101), plan.segcoreSchemaVersion)
+
+		cm.Get(10).setSchema(schemaV1, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
+		schemaV2 := mock_segcore.GenTestCollectionSchema("collection_v2", schemapb.DataType_Int64, false)
+		schemaV2.Version = 2
+		plan, shouldUpdate = prepareCollectionSchemaUpdate(cm.Get(10), uint64(schemaV2.GetVersion()), 80)
+		s.True(shouldUpdate)
+		s.Equal(uint64(2), plan.logicalSchemaVersion)
+		s.Equal(uint64(100), plan.schemaBarrierTs)
+		s.Equal(uint64(102), plan.segcoreSchemaVersion)
+	})
+
+	s.Run("manager_uses_schema_version_from_caller", func() {
+		cm := NewCollectionManager()
+		baseSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(10, baseSchema, mock_segcore.GenTestIndexMeta(10, baseSchema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
+		defer cm.Unref(10, 1)
+
+		schema := mock_segcore.GenTestCollectionSchema("collection_v2", schemapb.DataType_Int64, false)
+		schema.Version = 2
+		err = cm.UpdateSchema(10, schema, 2)
+		s.NoError(err)
+
+		_, version := cm.Get(10).SchemaAndVersion()
+		s.Equal(uint64(2), version)
 	})
 
 	s.Run("not_exist_collection", func() {
@@ -76,10 +200,58 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 	s.Run("nil_schema", func() {
 		s.NotPanics(func() {
-			err := s.cm.UpdateSchema(1, nil, 100)
+			err := s.cm.UpdateSchema(1, nil, 101)
 			s.Error(err)
 		})
 	})
+}
+
+func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
+	coll := s.cm.Get(1)
+	schema := mock_segcore.GenTestCollectionSchema("collection_0", schemapb.DataType_Int64, false)
+	coll.setSchema(schema, 0, 0, initialSegcoreSchemaVersion(0, 0))
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	errCh := make(chan string, 1)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+
+			schema, version := coll.SchemaAndVersion()
+			if schema.GetName() != fmt.Sprintf("collection_%d", version) {
+				select {
+				case errCh <- fmt.Sprintf("schema %s does not match version %d", schema.GetName(), version):
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	for i := 1; i <= 1000; i++ {
+		schema := mock_segcore.GenTestCollectionSchema(fmt.Sprintf("collection_%d", i), schemapb.DataType_Int64, false)
+		coll.setSchema(schema, uint64(i), uint64(i), initialSegcoreSchemaVersion(uint64(i), uint64(i)))
+	}
+	close(stop)
+	wg.Wait()
+
+	select {
+	case msg := <-errCh:
+		s.Fail(msg)
+	default:
+	}
+
+	schema, version := coll.SchemaAndVersion()
+	s.Equal(uint64(1000), version)
+	s.Equal("collection_1000", schema.GetName())
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
@@ -90,6 +262,7 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 
 	// Add a new vector field to simulate schema evolution.
 	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+	schema.Version = 2
 	newVecFieldID := int64(200)
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		FieldID:  newVecFieldID,
@@ -114,14 +287,19 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 
 	// PutOrRef on an existing collection should update its IndexMeta.
 	err := s.cm.PutOrRef(1, schema, newIndexMeta, &querypb.LoadMetaInfo{
-		LoadType:      querypb.LoadType_LoadCollection,
-		SchemaVersion: 100,
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
 	})
 	s.Require().NoError(err)
 	defer s.cm.Unref(1, 1)
 
+	updatedCollection := s.cm.Get(1)
+	updatedSchema, updatedVersion := updatedCollection.SchemaAndVersion()
+	s.Equal(uint64(2), updatedVersion)
+	s.Len(updatedSchema.GetFields(), len(schema.GetFields()))
+
 	// Verify IndexMeta now contains the new field.
-	updatedIndexMeta := s.cm.Get(1).GetCCollection().IndexMeta()
+	updatedIndexMeta := updatedCollection.GetCCollection().IndexMeta()
 	found := false
 	for _, meta := range updatedIndexMeta.GetIndexMetas() {
 		if meta.GetFieldID() == newVecFieldID {
@@ -132,6 +310,169 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 	s.True(found,
 		"PutOrRef should update IndexMeta for existing collections; field %d is missing",
 		newVecFieldID)
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInSchemaVersionDomain() {
+	cm := NewCollectionManager()
+	initialSchema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+	err := cm.PutOrRef(10, initialSchema, mock_segcore.GenTestIndexMeta(10, initialSchema), &querypb.LoadMetaInfo{
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
+	})
+	s.Require().NoError(err)
+	defer cm.Unref(10, 1)
+
+	_, version := cm.Get(10).SchemaAndVersion()
+	s.Equal(uint64(0), version)
+
+	updatedSchema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	updatedSchema.Version = 1
+	err = cm.UpdateSchema(10, updatedSchema, 200)
+	s.Require().NoError(err)
+
+	schema, version := cm.Get(10).SchemaAndVersion()
+	s.Equal(uint64(1), version)
+	s.Same(updatedSchema, schema)
+}
+
+func (s *CollectionManagerSuite) TestLoadMetaSchemaVersionCompatibility() {
+	s.Run("use_schema_version_when_schema_is_present", func() {
+		schema := mock_segcore.GenTestCollectionSchema("collection_v7", schemapb.DataType_Int64, false)
+		schema.Version = 7
+		loadMeta := &querypb.LoadMetaInfo{
+			SchemaBarrierTs: 100,
+		}
+
+		s.Equal(uint64(7), getLoadMetaSchemaVersion(schema, loadMeta))
+	})
+
+	s.Run("keep_zero_schema_version_for_new_collection", func() {
+		schema := mock_segcore.GenTestCollectionSchema("collection_v0", schemapb.DataType_Int64, false)
+		loadMeta := &querypb.LoadMetaInfo{
+			SchemaBarrierTs: 100,
+		}
+
+		s.Equal(uint64(0), getLoadMetaSchemaVersion(schema, loadMeta))
+	})
+
+	s.Run("fallback_to_legacy_barrier_without_schema", func() {
+		loadMeta := &querypb.LoadMetaInfo{
+			SchemaBarrierTs: 100,
+		}
+
+		s.Equal(uint64(100), getLoadMetaSchemaVersion(nil, loadMeta))
+	})
+}
+
+func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {
+	schema := mock_segcore.GenTestCollectionSchema("collection_cagra", schemapb.DataType_Int64, false)
+	vectorFieldID := int64(0)
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_FloatVector {
+			vectorFieldID = field.GetFieldID()
+			break
+		}
+	}
+	s.Require().NotZero(vectorFieldID)
+
+	tests := []struct {
+		name       string
+		indexType  string
+		adaptValue string
+		expected   bool
+	}{
+		{
+			name:       "GPU_CAGRA adapt for CPU",
+			indexType:  "GPU_CAGRA",
+			adaptValue: "true",
+			expected:   false,
+		},
+		{
+			name:       "GPU_CUVS_CAGRA adapt for CPU",
+			indexType:  "GPU_CUVS_CAGRA",
+			adaptValue: "1",
+			expected:   false,
+		},
+		{
+			name:      "GPU_CAGRA without adapt for CPU",
+			indexType: "GPU_CAGRA",
+			expected:  true,
+		},
+		{
+			name:       "other GPU index",
+			indexType:  "GPU_IVF_FLAT",
+			adaptValue: "true",
+			expected:   true,
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			indexParams := []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: test.indexType},
+				{Key: common.MetricTypeKey, Value: "L2"},
+			}
+			if test.adaptValue != "" {
+				indexParams = append(indexParams, &commonpb.KeyValuePair{Key: "adapt_for_cpu", Value: test.adaptValue})
+			}
+			indexMeta := &segcorepb.CollectionIndexMeta{
+				MaxIndexRowCount: 1,
+				IndexMetas: []*segcorepb.FieldIndexMeta{
+					{
+						FieldID:     vectorFieldID,
+						IndexName:   test.indexType,
+						IndexParams: indexParams,
+					},
+				},
+			}
+
+			collection, err := NewCollection(10, schema, indexMeta, &querypb.LoadMetaInfo{
+				LoadType: querypb.LoadType_LoadCollection,
+			})
+			s.Require().NoError(err)
+			defer DeleteCollection(collection)
+			s.Equal(test.expected, collection.IsGpuIndex())
+		})
+	}
+
+	s.Run("GPU_CAGRA adapt for CPU from load config", func() {
+		params := paramtable.Get()
+		oldEnable := params.KnowhereConfig.Enable.GetValue()
+		adaptKey := params.KnowhereConfig.IndexParam.KeyPrefix + "GPU_CAGRA.load.adapt_for_cpu"
+		oldAdaptValue := params.GetWithDefault(adaptKey, "")
+		defer params.Save(params.KnowhereConfig.Enable.Key, oldEnable)
+		defer func() {
+			if oldAdaptValue == "" {
+				params.Remove(adaptKey)
+				return
+			}
+			params.Save(adaptKey, oldAdaptValue)
+		}()
+
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(adaptKey, "true")
+
+		indexMeta := &segcorepb.CollectionIndexMeta{
+			MaxIndexRowCount: 1,
+			IndexMetas: []*segcorepb.FieldIndexMeta{
+				{
+					FieldID:   vectorFieldID,
+					IndexName: "GPU_CAGRA",
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+						{Key: common.MetricTypeKey, Value: "L2"},
+					},
+				},
+			},
+		}
+
+		collection, err := NewCollection(10, schema, indexMeta, &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
+		defer DeleteCollection(collection)
+		s.False(collection.IsGpuIndex())
+	})
 }
 
 func (s *CollectionManagerSuite) TestRef() {

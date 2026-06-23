@@ -72,6 +72,13 @@ func NewL0Segment(collection *Collection,
 	return segment, nil
 }
 
+func (s *L0Segment) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {
+}
+
+func (s *L0Segment) GetBM25Stats() map[int64]*storage.BM25Stats {
+	return map[int64]*storage.BM25Stats{}
+}
+
 func (s *L0Segment) PinIfNotReleased() error {
 	return nil
 }

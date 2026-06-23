@@ -90,6 +90,10 @@ func RegisterMgrRoute(proxy *Proxy) {
 			HandlerFunc: proxy.CheckQueryNodeDistribution,
 		})
 		management.Register(&management.Handler{
+			Path:        management.RouteClearReadTaskQueue,
+			HandlerFunc: proxy.ClearReadTaskQueueManagement,
+		})
+		management.Register(&management.Handler{
 			Path:        management.RouteQueryCoordBalanceStatus,
 			HandlerFunc: proxy.CheckQueryCoordBalanceStatus,
 		})
@@ -394,6 +398,28 @@ func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http
 		balanceStatus = "active"
 	}
 	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
+}
+
+func (node *Proxy) ClearReadTaskQueueManagement(w http.ResponseWriter, req *http.Request) {
+	resp, err := node.mixCoord.ClearReadTaskQueue(req.Context(), &internalpb.ClearReadTaskQueueRequest{
+		Base:     commonpbutil.NewMsgBase(),
+		TaskType: req.URL.Query().Get("task_type"),
+		Reason:   req.URL.Query().Get("reason"),
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"msg": "failed to clear read task queue, %s"}`, err.Error())
+		return
+	}
+	if !merr.Ok(resp.GetStatus()) {
+		w.WriteHeader(http.StatusInternalServerError)
+		bs, _ := json.Marshal(resp)
+		w.Write(bs)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	bs, _ := json.Marshal(resp)
+	w.Write(bs)
 }
 
 func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {

@@ -17,7 +17,9 @@
 #pragma once
 
 #include <algorithm>
+#include "common/FastMem.h"
 #include <cstring>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -147,14 +149,16 @@ class JsonScalarIndexWrapper : public BaseIndex {
             auto null_len = this->null_offset_.size() * sizeof(size_t);
             if (null_len > 0) {
                 std::shared_ptr<uint8_t[]> null_data(new uint8_t[null_len]);
-                memcpy(null_data.get(), this->null_offset_.data(), null_len);
+                milvus::fastmem::FastMemcpy(
+                    null_data.get(), this->null_offset_.data(), null_len);
                 res_set.Append(
                     INDEX_NULL_OFFSET_FILE_NAME, null_data, null_len);
             }
             auto ne_len = non_exist_offsets_.size() * sizeof(size_t);
             if (ne_len > 0) {
                 std::shared_ptr<uint8_t[]> ne_data(new uint8_t[ne_len]);
-                memcpy(ne_data.get(), non_exist_offsets_.data(), ne_len);
+                milvus::fastmem::FastMemcpy(
+                    ne_data.get(), non_exist_offsets_.data(), ne_len);
                 res_set.Append(
                     INDEX_NON_EXIST_OFFSET_FILE_NAME, ne_data, ne_len);
             }
@@ -191,7 +195,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
         if (has_non_exist) {
             auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
             non_exist_offsets_.resize(e.data.size() / sizeof(size_t));
-            std::memcpy(
+            milvus::fastmem::FastMemcpy(
                 non_exist_offsets_.data(), e.data.data(), e.data.size());
         }
         LOG_INFO("LoadEntries JsonScalarIndexWrapper done, has_non_exist: {}",
@@ -246,7 +250,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
             auto fill = [&](const uint8_t* data, int64_t size) {
                 non_exist_offsets_.resize((size_t)size / sizeof(size_t));
-                memcpy(non_exist_offsets_.data(), data, (size_t)size);
+                milvus::fastmem::FastMemcpy(
+                    non_exist_offsets_.data(), data, (size_t)size);
             };
 
             auto load_priority =
@@ -272,6 +277,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
             // Try sliced files
             std::vector<std::string> sliced;
+            std::optional<std::string> slice_meta_file;
             for (auto& f : index_files) {
                 auto name = boost::filesystem::path(f).filename().string();
                 if (name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
@@ -279,10 +285,14 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     sliced.push_back(f);
                 }
                 if (name == INDEX_FILE_SLICE_META) {
-                    sliced.push_back(f);
+                    slice_meta_file = f;
                 }
             }
             if (!sliced.empty()) {
+                AssertInfo(
+                    slice_meta_file.has_value(),
+                    "non_exist_offset slices found but _meta_slice is missing");
+                sliced.push_back(slice_meta_file.value());
                 auto datas = this->file_manager_->LoadIndexToMemory(
                     sliced, load_priority);
                 auto slice_meta = std::move(datas.at(INDEX_FILE_SLICE_META));
@@ -290,9 +300,9 @@ class JsonScalarIndexWrapper : public BaseIndex {
                     CompactIndexDatasByKey(INDEX_NON_EXIST_OFFSET_FILE_NAME,
                                            std::move(slice_meta),
                                            datas);
-                for (auto&& c : non_exist_codecs.codecs_) {
-                    fill(c->PayloadData(), c->PayloadSize());
-                }
+                auto non_exist_codec = AssembleIndexDataCodec(non_exist_codecs);
+                fill(non_exist_codec->PayloadData(),
+                     non_exist_codec->PayloadSize());
                 return;
             }
 

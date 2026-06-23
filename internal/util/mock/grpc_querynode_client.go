@@ -34,6 +34,10 @@ type GrpcQueryNodeClient struct {
 	Err error
 }
 
+func (m *GrpcQueryNodeClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) GetStatistics(ctx context.Context, in *querypb.GetStatisticsRequest, opts ...grpc.CallOption) (*internalpb.GetStatisticsResponse, error) {
 	return &internalpb.GetStatisticsResponse{}, m.Err
 }

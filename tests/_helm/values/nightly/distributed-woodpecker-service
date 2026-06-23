@@ -95,7 +95,13 @@ extraConfigFiles:
     common:
       storage:
         enablev2: true
+        # enable storage v3
+        useLoonFFI: true
+    dataNode:
+      storage:
+        format: vortex
     dataCoord:
+      targetVecIndexVersion: 10
       gc:
         interval: 1800
         missingTolerance: 1800

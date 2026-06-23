@@ -73,20 +73,21 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 			zap.Duration("tsLag", tsLag))
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:      segment.ID,
-		PartitionID:    segment.PartitionID,
-		CollectionID:   segment.CollectionID,
-		BinlogPaths:    segment.Binlogs,
-		NumOfRows:      segment.NumOfRows,
-		InsertChannel:  segment.InsertChannel,
-		IndexInfos:     indexes,
-		StartPosition:  segment.GetStartPosition(),
-		DeltaPosition:  channelCheckpoint,
-		Level:          segment.GetLevel(),
-		StorageVersion: segment.GetStorageVersion(),
-		IsSorted:       segment.GetIsSorted(),
-		ManifestPath:   segment.GetManifestPath(),
-		DataVersion:    segment.GetDataVersion(),
+		SegmentID:       segment.ID,
+		PartitionID:     segment.PartitionID,
+		CollectionID:    segment.CollectionID,
+		BinlogPaths:     segment.Binlogs,
+		NumOfRows:       segment.NumOfRows,
+		InsertChannel:   segment.InsertChannel,
+		IndexInfos:      indexes,
+		StartPosition:   segment.GetStartPosition(),
+		DeltaPosition:   channelCheckpoint,
+		Level:           segment.GetLevel(),
+		StorageVersion:  segment.GetStorageVersion(),
+		IsSorted:        segment.GetIsSorted(),
+		ManifestPath:    segment.GetManifestPath(),
+		CommitTimestamp: segment.GetCommitTimestamp(),
+		DataVersion:     segment.GetDataVersion(),
 	}
 
 	// Deltalogs are always populated (delta log loading has its own manifest path)

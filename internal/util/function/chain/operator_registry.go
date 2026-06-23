@@ -41,17 +41,17 @@ var (
 // Returns an error if an operator with the same type is already registered.
 func RegisterOperator(opType string, factory OperatorFactory) error {
 	if opType == "" {
-		return merr.WrapErrParameterInvalidMsg("operator type cannot be empty")
+		return merr.WrapErrParameterMissingMsg("operator type cannot be empty")
 	}
 	if factory == nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("operator factory cannot be nil for %q", opType))
+		return merr.WrapErrServiceInternalMsg("operator factory cannot be nil for %q", opType)
 	}
 
 	operatorRegistryMu.Lock()
 	defer operatorRegistryMu.Unlock()
 
 	if _, exists := operatorRegistry[opType]; exists {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("operator %q already registered", opType))
+		return merr.WrapErrServiceInternalMsg("operator %q already registered", opType)
 	}
 	operatorRegistry[opType] = factory
 	return nil

@@ -492,6 +492,21 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 	}
 }
 
+func TestArrayOfVectorSerializationRejectsInvalidPayloadLength(t *testing.T) {
+	entry := serdeMap[schemapb.DataType_ArrayOfVector]
+	arrowType := entry.arrowType(4, schemapb.DataType_FloatVector)
+	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+	defer builder.Release()
+
+	err := entry.serialize(builder, &schemapb.VectorField{
+		Data: &schemapb.VectorField_FloatVector{
+			FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5}},
+		},
+	}, schemapb.DataType_FloatVector)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not divisible")
+}
+
 func TestArrayOfVectorEmptyArray(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1149,4 +1164,82 @@ func TestActualSizeInBytesCompareWithDataSizeInBytes(t *testing.T) {
 
 		assert.Less(t, actualSize, uint64(totalRows*byteWidth))
 	})
+}
+
+func TestBuildRecord_NullableArrayOfVector(t *testing.T) {
+	dim := 4
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     100,
+				Name:        "vec_array",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				Nullable:    true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+				},
+			},
+		},
+	}
+
+	vec0 := makeFloatVec(dim, 1, 2, 3, 4)
+	vec1 := makeFloatVec(dim)
+	vec2 := makeFloatVec(dim, 5, 6, 7, 8)
+
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				Data:        []*schemapb.VectorField{vec0, vec1, vec2},
+				ElementType: schemapb.DataType_FloatVector,
+				Dim:         int64(dim),
+				ValidData:   []bool{true, false, true},
+				Nullable:    true,
+			},
+		},
+	}
+
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	assert.NoError(t, err)
+
+	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer recordBuilder.Release()
+
+	err = BuildRecord(recordBuilder, insertData, schema)
+	assert.NoError(t, err)
+
+	record := recordBuilder.NewRecord()
+	defer record.Release()
+
+	assert.Equal(t, int64(3), record.NumRows())
+
+	// Verify metadata preserved (elementType + dim)
+	field := arrowSchema.Field(0)
+	assert.True(t, field.HasMetadata())
+
+	elementTypeStr, ok := field.Metadata.GetValue("elementType")
+	assert.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("%d", int32(schemapb.DataType_FloatVector)), elementTypeStr)
+
+	dimStr, ok := field.Metadata.GetValue("dim")
+	assert.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("%d", dim), dimStr)
+
+	// Verify null bitmap
+	col := record.Column(0)
+	assert.True(t, col.IsValid(0))
+	assert.True(t, col.IsNull(1))
+	assert.True(t, col.IsValid(2))
+
+	field2Col := map[FieldID]int{100: 0}
+	simpleRecord := NewSimpleArrowRecord(record, field2Col)
+	rb := NewRecordBuilder(schema)
+	err = rb.Append(simpleRecord, 0, int(record.NumRows()))
+	assert.NoError(t, err)
+
+	rebuiltRecord := rb.Build()
+	defer rebuiltRecord.Release()
+	assert.True(t, rebuiltRecord.Column(100).IsValid(0))
+	assert.True(t, rebuiltRecord.Column(100).IsNull(1))
+	assert.True(t, rebuiltRecord.Column(100).IsValid(2))
 }

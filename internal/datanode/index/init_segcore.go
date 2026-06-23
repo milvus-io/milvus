@@ -57,6 +57,8 @@ func InitSegcore(nodeID int64) error {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.SetIndexSliceSize(cIndexSliceSize)
+	cStreamBudgetRatio := C.double(paramtable.Get().CommonCfg.StreamBudgetRatio.GetAsFloat())
+	C.SetStreamBudgetRatio(cStreamBudgetRatio)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
@@ -88,6 +90,22 @@ func InitSegcore(nodeID int64) error {
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
+
+	// Apply Arrow IO thread pool capacity from paramtable. Without this call the
+	// pool stays at Arrow's built-in default (kDefaultNumIoThreads = 8), which is
+	// almost always undersized for DataNode under concurrent storage v2 reads
+	// (sort compaction, import, stats). Mirror of the QueryNode wiring in #49208.
+	C.SetArrowIOThreadPoolCapacity(C.int(initcore.ResolveArrowIOThreadPoolCapacity()))
+
+	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
+	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
+		return err
+	}
+
+	// Wire hot-reload watchers so capacity / coalescing-limit changes take effect
+	// without restart, matching QueryNode behavior.
+	initcore.RegisterArrowIOThreadPoolWatchers(paramtable.Get(), "datanode")
+	initcore.RegisterArrowReaderConfigWatchers(paramtable.Get(), "datanode")
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()

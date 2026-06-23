@@ -129,7 +129,9 @@ func newMock0Allocator(t *testing.T) *allocator.MockAllocator {
 	mock0Allocator := allocator.NewMockAllocator(t)
 	mock0Allocator.EXPECT().AllocID(mock.Anything).Return(100, nil).Maybe()
 	mock0Allocator.EXPECT().AllocTimestamp(mock.Anything).Return(1000, nil).Maybe()
-	mock0Allocator.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Maybe()
+	mock0Allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
+		return 100, 100 + i, nil
+	}).Maybe()
 	return mock0Allocator
 }
 
@@ -220,8 +222,16 @@ func (m *mockMixCoord) AddCollectionField(ctx context.Context, req *milvuspb.Add
 	panic("implement me")
 }
 
+func (m *mockMixCoord) AddCollectionStructField(ctx context.Context, req *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	panic("implement me")
+}
+
+func (m *mockMixCoord) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }
 
 func (m *mockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
@@ -389,6 +399,10 @@ func (m *mockMixCoord) DropCollectionFunction(ctx context.Context, request *milv
 }
 
 func (m *mockMixCoord) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -624,6 +638,10 @@ func (m *mockMixCoord) GetCredential(ctx context.Context, req *rootcoordpb.GetCr
 }
 
 func (m *mockMixCoord) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockMixCoord) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
@@ -1069,6 +1087,18 @@ func (s *mockMixCoord) PinSnapshotData(ctx context.Context, req *datapb.PinSnaps
 }
 
 func (s *mockMixCoord) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 

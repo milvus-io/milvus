@@ -18,7 +18,6 @@ package externalspec
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"sort"
 	"strconv"
@@ -273,27 +272,30 @@ func sortedKeys(m map[string]bool) []string {
 // allowlisted scheme (SSRF guard), non-empty host, no embedded userinfo.
 // Accepts two URI shapes — Milvus form (host=endpoint, path[0]=bucket) and
 // AWS form (host=bucket, endpoint from spec.extfs).
+//
+// For minio://, URI.host is treated as the endpoint; callers should use
+// minio://<endpoint>/<bucket>/<key>.
 func ValidateExternalSource(source string) error {
 	if source == "" {
-		return fmt.Errorf("external_source is empty")
+		return merr.WrapErrParameterInvalidMsg("external_source is empty")
 	}
 	u, err := url.Parse(source)
 	if err != nil {
-		return fmt.Errorf("invalid external_source URL: %w", err)
+		return merr.Wrap(err, "invalid external_source URL")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme == "" {
-		return fmt.Errorf("external_source must have an explicit scheme (e.g. s3://, aws://, gs://)")
+		return merr.WrapErrParameterInvalidMsg("external_source must have an explicit scheme (e.g. s3://, aws://, gs://)")
 	}
 	if !allowedExternalSourceSchemes[scheme] {
-		return fmt.Errorf("external_source scheme %q is not allowed; allowed schemes: %s",
+		return merr.WrapErrParameterInvalidMsg("external_source scheme %q is not allowed; allowed schemes: %s",
 			scheme, strings.Join(sortedKeys(allowedExternalSourceSchemes), ", "))
 	}
 	if u.User != nil {
-		return fmt.Errorf("external_source must not embed credentials in the URL (use extfs.access_key_id / extfs.access_key_value instead)")
+		return merr.WrapErrParameterInvalidMsg("external_source must not embed credentials in the URL (use extfs.access_key_id / extfs.access_key_value instead)")
 	}
 	if u.Host == "" {
-		return fmt.Errorf("external_source must have a non-empty host (e.g. s3://bucket/key or s3://endpoint/bucket/key)")
+		return merr.WrapErrParameterInvalidMsg("external_source must have a non-empty host (e.g. s3://bucket/key, s3://endpoint/bucket/key, or minio://endpoint/bucket/key)")
 	}
 	return nil
 }
@@ -320,18 +322,30 @@ func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 // anonymous=true), and region for AWS-family schemes. role_arn subsumes
 // use_iam (do not double-count). No inheritance from Milvus fs.* config.
 func ValidateExtfsComplete(externalSource string, extfs map[string]string) error {
-	// extfs.cloud_provider is required and must be from the allowed set.
-	// Inferring cloud_provider from URI scheme is ambiguous (s3:// matches
-	// AWS S3 and self-hosted MinIO; no scheme-only signal can pick the
-	// correct URI parsing form, auth protocol, or default endpoint). Force
-	// the caller to be explicit so misconfiguration fails at the API
-	// boundary instead of silently routing to the wrong backend.
+	// Parse once; caller's ValidateExternalSource has already guaranteed a scheme.
+	u, err := url.Parse(externalSource)
+	scheme := ""
+	if err == nil {
+		scheme = strings.ToLower(u.Scheme)
+	}
+
+	// extfs.cloud_provider is required and must be from the allowed set, except
+	// for minio:// where the scheme selects MinIO validation semantics. This is
+	// a local classification only; it is not written back to external_spec.
+	// Inferring cloud_provider from s3:// is ambiguous (AWS S3 vs self-hosted
+	// MinIO), so s3-family URIs still require the caller to be explicit.
 	cp := strings.ToLower(extfs[ExtfsKeyCloudProvider])
+	if scheme == SchemeMinIO && cp == "" {
+		cp = CloudProviderMinIO
+	}
 	if cp == "" {
-		return fmt.Errorf("extfs.cloud_provider is required: one of [aws, gcp, aliyun, tencent, huawei, azure, minio]; inferring from URI scheme is ambiguous (e.g. s3:// matches both AWS S3 and self-hosted MinIO)")
+		return merr.WrapErrParameterMissingMsg("extfs.cloud_provider is required: one of [aws, gcp, aliyun, tencent, huawei, azure, minio]; inferring from URI scheme is ambiguous (e.g. s3:// matches both AWS S3 and self-hosted MinIO)")
 	}
 	if !validCloudProviders[cp] {
-		return fmt.Errorf("extfs.cloud_provider=%q is not supported: must be one of [aws, gcp, aliyun, tencent, huawei, azure, minio]", cp)
+		return merr.WrapErrParameterInvalidMsg("extfs.cloud_provider=%q is not supported: must be one of [aws, gcp, aliyun, tencent, huawei, azure, minio]", cp)
+	}
+	if scheme == SchemeMinIO && cp != CloudProviderMinIO {
+		return merr.WrapErrParameterInvalidMsg("scheme=minio requires extfs.cloud_provider=%q, got %q", CloudProviderMinIO, cp)
 	}
 
 	hasAKSK := extfs[ExtfsKeyAccessKeyID] != "" && extfs[ExtfsKeyAccessKeyValue] != ""
@@ -342,7 +356,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	hasAnonymous := extfs[ExtfsKeyAnonymous] == "true"
 
 	if hasAKOnly {
-		return fmt.Errorf("extfs.access_key_id and extfs.access_key_value must be set together (found one without the other)")
+		return merr.WrapErrParameterMissingMsg("extfs.access_key_id and extfs.access_key_value must be set together (found one without the other)")
 	}
 
 	modes := 0
@@ -352,41 +366,34 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}
 	}
 	if modes == 0 {
-		return fmt.Errorf("extfs credential mode missing: set exactly one of {access_key_id+access_key_value}, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
+		return merr.WrapErrParameterInvalidMsg("extfs credential mode missing: set exactly one of {access_key_id+access_key_value}, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
 	}
 	if modes > 1 {
-		return fmt.Errorf("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
-	}
-
-	// Parse once; caller's ValidateExternalSource has already guaranteed a scheme.
-	u, err := url.Parse(externalSource)
-	scheme := ""
-	if err == nil {
-		scheme = strings.ToLower(u.Scheme)
+		return merr.WrapErrParameterInvalidMsg("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account, or anonymous=true")
 	}
 
 	if hasGCPImpersonation {
 		if scheme != "" && scheme != SchemeGS && scheme != SchemeGCS && cp != CloudProviderGCP {
-			return fmt.Errorf("extfs.gcp_target_service_account is only valid for GCP (scheme=gs/gcs or cloud_provider=gcp), got scheme=%q cloud_provider=%q", scheme, cp)
+			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account is only valid for GCP (scheme=gs/gcs or cloud_provider=gcp), got scheme=%q cloud_provider=%q", scheme, cp)
 		}
 		sa := extfs[ExtfsKeyGCPTargetServiceAccount]
 		if !strings.Contains(sa, "@") || !strings.HasSuffix(sa, ".gserviceaccount.com") {
-			return fmt.Errorf("extfs.gcp_target_service_account must be a GCP service account email ending in .gserviceaccount.com, got %q", sa)
+			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account must be a GCP service account email ending in .gserviceaccount.com, got %q", sa)
 		}
 	}
 
 	if awsFamilyScheme[scheme] && extfs[ExtfsKeyRegion] == "" {
-		return fmt.Errorf("extfs.region is required for scheme %q (AWS-family schemes need region for SigV4 signing)", scheme)
+		return merr.WrapErrParameterMissingMsg("extfs.region is required for scheme %q (AWS-family schemes need region for SigV4 signing)", scheme)
 	}
 
 	// Azure consistency: scheme=azure requires cloud_provider=azure, and
 	// cloud_provider=azure requires scheme=azure. Pairing guards against
 	// misconfigured dispatch to a non-Azure storage backend.
 	if scheme == SchemeAzure && cp != CloudProviderAzure {
-		return fmt.Errorf("scheme=azure requires extfs.cloud_provider=%q, got %q", CloudProviderAzure, cp)
+		return merr.WrapErrParameterInvalidMsg("scheme=azure requires extfs.cloud_provider=%q, got %q", CloudProviderAzure, cp)
 	}
 	if cp == CloudProviderAzure && scheme != "" && scheme != SchemeAzure {
-		return fmt.Errorf("extfs.cloud_provider=azure requires scheme=azure, got scheme=%q", scheme)
+		return merr.WrapErrParameterInvalidMsg("extfs.cloud_provider=azure requires scheme=azure, got scheme=%q", scheme)
 	}
 
 	// Two-form URI contract: Milvus-form (scheme://endpoint/bucket/key) has
@@ -413,7 +420,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 			// cloud_provider + region. cp=minio has no canonical endpoint
 			// and must use Milvus-form URI to embed the host explicitly.
 			if DeriveEndpoint(cp, extfs[ExtfsKeyRegion]) == "" {
-				return fmt.Errorf("cannot resolve endpoint for %q with cloud_provider=%q: set extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", externalSource, cp)
+				return merr.WrapErrParameterInvalidMsg("cannot resolve endpoint for %q with cloud_provider=%q: set extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", externalSource, cp)
 			}
 		}
 	}

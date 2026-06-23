@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <memory>
 #include <string>
@@ -27,11 +28,15 @@
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
+#include "storage/FileWriter.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
 
 namespace milvus::storage {
+
+size_t
+DefaultEntryStreamSliceSize();
 
 struct Entry {
     std::vector<uint8_t> data;
@@ -57,6 +62,43 @@ class IndexEntryReader {
     void
     ReadEntriesToFiles(const std::vector<std::pair<std::string, std::string>>&
                            name_path_pairs);
+
+    void
+    ReadEntryStreamToFile(const std::string& name,
+                          const std::string& local_path,
+                          io::Priority write_priority = io::Priority::MIDDLE);
+
+    void
+    ReadEntriesStreamToFiles(
+        const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
+        io::Priority write_priority = io::Priority::MIDDLE);
+
+    /// Stream entry data via transient memory budget.
+    /// Downloads are concurrent (full bandwidth). Slices are delivered in entry
+    /// order to `slice_consumer`; the data pointer is valid only for the
+    /// duration of that call. Global TransientMemoryBudget controls total
+    /// inflight slice bytes across all concurrent entry streams.
+    /// CRC32c is verified incrementally. Consumers may receive partial data
+    /// before a later slice error is reported. Slow consumers keep their slice
+    /// budget until the callback returns, which can block other streams.
+    /// Plain entries are split into `slice_size` byte slices. Encrypted entries
+    /// ignore `slice_size` and use the slice boundaries stored in the V3
+    /// directory.
+    void
+    ReadEntryStream(
+        const std::string& name,
+        std::function<void(const uint8_t* data, size_t len)> slice_consumer,
+        size_t slice_size = DefaultEntryStreamSliceSize());
+
+    /// Return the uncompressed data size of an entry without reading it.
+    size_t
+    GetEntrySize(const std::string& name) const;
+
+    /// Check if an entry exists in the index file.
+    bool
+    HasEntry(const std::string& name) const {
+        return entry_index_.find(name) != entry_index_.end();
+    }
 
     template <typename T>
     T
@@ -115,6 +157,18 @@ class IndexEntryReader {
     ReadEncryptedEntry(const EntryMeta& meta);
 
     void
+    ReadPlainEntryStream(const PlainEntryMeta& pm,
+                         const std::function<void(const uint8_t* data,
+                                                  size_t len)>& slice_consumer,
+                         size_t slice_size);
+
+    void
+    ReadEncryptedEntryStream(
+        const EncryptedEntryMeta& em,
+        const std::function<void(const uint8_t* data, size_t len)>&
+            slice_consumer);
+
+    void
     VerifyCrc32c(uint32_t expected,
                  const uint8_t* data,
                  size_t size,
@@ -129,6 +183,13 @@ class IndexEntryReader {
     struct EntryDownloadState {
         std::string name;
         int fd;
+        uint32_t expected_crc;
+        std::vector<RangeCrc> range_crcs;
+    };
+
+    struct EntryStreamDownloadState {
+        std::string name;
+        std::unique_ptr<PositionedFileWriter> writer;
         uint32_t expected_crc;
         std::vector<RangeCrc> range_crcs;
     };
@@ -148,6 +209,20 @@ class IndexEntryReader {
     // Verify CRC and close file descriptor
     void
     FinalizeEntryDownload(EntryDownloadState& state);
+
+    EntryStreamDownloadState
+    PrepareEntryStreamDownload(const std::string& name,
+                               const std::string& local_path,
+                               const EntryMeta& meta,
+                               io::Priority write_priority);
+
+    void
+    SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
+                                   EntryStreamDownloadState& state,
+                                   std::vector<std::future<void>>& futures);
+
+    void
+    FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
 
     std::shared_ptr<milvus::InputStream> input_;
     int64_t file_size_ = 0;

@@ -17,7 +17,7 @@
 package storage
 
 import (
-	"fmt"
+	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -25,9 +25,23 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func isNullableDenseVectorArrowType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_FloatVector,
+		schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector:
+		return true
+	default:
+		return false
+	}
+}
 
 func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
 	// a could never be nil here
@@ -35,7 +49,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.BooleanBuilder:
 		ba, ok := a.(*array.Boolean)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			if defaultValue != nil {
@@ -51,7 +65,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Int8Builder:
 		ia, ok := a.(*array.Int8)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
@@ -67,7 +81,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Int16Builder:
 		ia, ok := a.(*array.Int16)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
@@ -83,7 +97,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Int32Builder:
 		ia, ok := a.(*array.Int32)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
@@ -99,7 +113,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Int64Builder:
 		ia, ok := a.(*array.Int64)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
@@ -115,7 +129,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Float32Builder:
 		fa, ok := a.(*array.Float32)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
 			if defaultValue != nil {
@@ -140,7 +154,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		}
 		fa, ok := a.(*array.Float64)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
 			b.AppendNull()
@@ -152,7 +166,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.StringBuilder:
 		sa, ok := a.(*array.String)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if sa.IsNull(idx) {
 			if defaultValue != nil {
@@ -170,7 +184,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.BinaryBuilder:
 		ba, ok := a.(*array.Binary)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			// could be internal $meta json
@@ -189,7 +203,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.FixedSizeBinaryBuilder:
 		ba, ok := a.(*array.FixedSizeBinary)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			b.AppendNull()
@@ -203,7 +217,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		// Handle ListBuilder for ArrayOfVector type
 		la, ok := a.(*array.List)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if la.IsNull(idx) {
 			b.AppendNull()
@@ -220,7 +234,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		case *array.FixedSizeBinaryBuilder:
 			fixedArray, ok := valuesArray.(*array.FixedSizeBinary)
 			if !ok {
-				return 0, fmt.Errorf("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
+				return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
 			}
 			for i := start; i < end; i++ {
 				val := fixedArray.Value(int(i))
@@ -228,12 +242,12 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 				totalSize += uint64(len(val))
 			}
 		default:
-			return 0, fmt.Errorf("unsupported value builder type in ListBuilder: %T", valueBuilder)
+			return 0, merr.WrapErrServiceInternalMsg("unsupported value builder type in ListBuilder: %T", valueBuilder)
 		}
 
 		return totalSize, nil
 	default:
-		return 0, fmt.Errorf("unsupported builder type: %T", builder)
+		return 0, merr.WrapErrServiceInternalMsg("unsupported builder type: %T", builder)
 	}
 }
 
@@ -244,7 +258,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (arrow.Array, error) {
 	// if not nullable, return error
 	if !schema.GetNullable() {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("missing field data %s", schema.Name))
+		return nil, merr.WrapErrServiceInternalMsg("missing field data %s", schema.Name)
 	}
 	dim, _ := typeutil.GetDim(schema)
 
@@ -252,7 +266,11 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 	if schema.GetDataType() == schemapb.DataType_ArrayOfVector {
 		elementType = schema.GetElementType()
 	}
-	builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[schema.GetDataType()].arrowType(int(dim), elementType)) // serdeEntry[schema.GetDataType()].newBuilder()
+	arrowType := serdeMap[schema.GetDataType()].arrowType(int(dim), elementType)
+	if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
+		arrowType = arrow.BinaryTypes.Binary
+	}
+	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
 	if schema.GetDefaultValue() != nil {
 		switch schema.GetDataType() {
 		case schemapb.DataType_Bool:
@@ -308,7 +326,7 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 				lo.RepeatBy(numRows, func(_ int) []byte { return schema.GetDefaultValue().GetBytesData() }),
 				nil)
 		default:
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("Unexpected default value type: %s", schema.GetDataType().String()))
+			return nil, merr.WrapErrServiceInternalMsg("Unexpected default value type: %s", schema.GetDataType().String())
 		}
 	} else {
 		builder.AppendNulls(numRows)
@@ -322,8 +340,9 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 // small batch size will cause write performance degradation. To work around this issue, we accumulate
 // records and write them in batches. This requires additional memory copy.
 type RecordBuilder struct {
-	fields   []*schemapb.FieldSchema
-	builders []array.Builder
+	fields      []*schemapb.FieldSchema
+	arrowFields []arrow.Field
+	builders    []array.Builder
 
 	nRows int
 	size  uint64
@@ -336,7 +355,7 @@ func (b *RecordBuilder) Append(rec Record, start, end int) error {
 			col := rec.Column(f.FieldID)
 			size, err := appendValueAt(builder, col, offset, f.GetDefaultValue())
 			if err != nil {
-				return fmt.Errorf("failed to append value at offset %d for field %s: %w", offset, f.GetName(), err)
+				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())
 			}
 			b.size += size
 		}
@@ -353,6 +372,12 @@ func (b *RecordBuilder) GetSize() uint64 {
 	return b.size
 }
 
+func (b *RecordBuilder) Release() {
+	for _, builder := range b.builders {
+		builder.Release()
+	}
+}
+
 func (b *RecordBuilder) Build() Record {
 	arrays := make([]arrow.Array, len(b.builders))
 	fields := make([]arrow.Field, len(b.builders))
@@ -361,11 +386,8 @@ func (b *RecordBuilder) Build() Record {
 		arrays[c] = builder.NewArray()
 		f := b.fields[c]
 		fid := f.FieldID
-		fields[c] = arrow.Field{
-			Name:     f.GetName(),
-			Type:     arrays[c].DataType(),
-			Nullable: f.Nullable,
-		}
+		fields[c] = b.arrowFields[c]
+		fields[c].Type = arrays[c].DataType()
 		field2Col[fid] = c
 	}
 
@@ -384,6 +406,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 	}
 
 	builders := make([]array.Builder, len(fields))
+	arrowFields := make([]arrow.Field, len(fields))
 	for i, field := range fields {
 		dim, _ := typeutil.GetDim(field)
 
@@ -391,7 +414,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 		if field.DataType == schemapb.DataType_ArrayOfVector {
 			elementType = field.GetElementType()
 		}
-		if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
+		if field.GetNullable() && isNullableDenseVectorArrowType(field.DataType) {
 			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
 		} else if field.DataType == schemapb.DataType_Text {
 			// TEXT fields are stored as binary (LOB references) in manifest storage,
@@ -401,10 +424,34 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
 			builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
 		}
+		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType)
 	}
 
 	return &RecordBuilder{
-		fields:   fields,
-		builders: builders,
+		fields:      fields,
+		arrowFields: arrowFields,
+		builders:    builders,
+	}
+}
+
+func newRecordBuilderArrowField(field *schemapb.FieldSchema, arrowType arrow.DataType, dim int64, elementType schemapb.DataType) arrow.Field {
+	keys := []string{packed.ArrowFieldIdMetadataKey}
+	values := []string{strconv.Itoa(int(field.GetFieldID()))}
+
+	if field.GetNullable() && isNullableDenseVectorArrowType(field.GetDataType()) {
+		keys = append(keys, "dim")
+		values = append(values, strconv.Itoa(int(dim)))
+	}
+
+	if field.GetDataType() == schemapb.DataType_ArrayOfVector {
+		keys = append(keys, "elementType", "dim")
+		values = append(values, strconv.Itoa(int(elementType)), strconv.Itoa(int(dim)))
+	}
+
+	return arrow.Field{
+		Name:     field.GetName(),
+		Type:     arrowType,
+		Nullable: field.GetNullable(),
+		Metadata: arrow.NewMetadata(keys, values),
 	}
 }

@@ -163,6 +163,18 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	resp, err := cluster.QueryImport(t.GetNodeID(), req)
 	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
+		// Clear partial progress recorded from the failed attempt. Otherwise,
+		// if the retried attempt's PickSegment lands on a different subset of
+		// the preallocated segments, the segments it skips will keep stale
+		// NumOfRows without insert binlogs — causing sort compaction to fail
+		// with "unexpected row count" or EOF.
+		if segmentIDs := t.GetSegmentIDs(); len(segmentIDs) > 0 {
+			if resetErr := t.meta.UpdateSegmentsInfo(context.TODO(), ResetImportingSegmentRows(segmentIDs...)); resetErr != nil {
+				log.Warn("failed to reset import segment row counts on retry",
+					WrapTaskLog(t, zap.Error(resetErr))...)
+				return
+			}
+		}
 		updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update import task state to pending", WrapTaskLog(t, zap.Error(updateErr))...)

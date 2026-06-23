@@ -98,6 +98,7 @@ service QueryCoord {
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
+  rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
@@ -183,6 +184,7 @@ service QueryNode {
     
     // file resource
     rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
+    rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
     rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
 }
@@ -350,7 +352,7 @@ message LoadMetaInfo {
     string resource_group = 6; // Only used for metrics label.
     repeated int64 load_fields = 7;
     repeated common.KeyValuePair db_properties = 8;
-    uint64 schema_version = 9; // used for schema change detection.
+    uint64 schema_barrier_ts = 9; // Wire-compatible rename of legacy schema_version; timestamp barrier used to fence stale load results.
 }
 
 message WatchDmChannelsRequest {
@@ -408,6 +410,11 @@ message SegmentLoadInfo {
     int32 data_version = 25;
     bool use_take_for_output = 26;
     int64 estimated_bytes_per_row = 27;
+    // commit_timestamp mirrors data_coord.SegmentInfo.commit_timestamp.
+    // QueryNode uses it for: delete-buffer pinning, ListAfter calls, and
+    // passing to C++ segcore to overwrite the in-memory timestamp column
+    // (enabling correct MVCC visibility and TTL evaluation).
+    uint64 commit_timestamp = 28;
 }
 
 message FieldIndexInfo {
@@ -425,6 +432,7 @@ message FieldIndexInfo {
     int32 current_index_version = 11;
     int64 index_store_version = 12 [deprecated = true];
     int32 current_scalar_index_version = 13;
+    index.IndexStorePathVersion index_store_path_version = 14;
 }
 
 message JsonStatsInfo {
@@ -1022,7 +1030,7 @@ message UpdateSchemaRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
-    uint64 version = 4;
+    uint64 schema_barrier_ts = 4; // Wire-compatible rename of legacy version; timestamp barrier used to fence stale load results.
 }
 
 message UpdateIndexRequest {

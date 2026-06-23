@@ -244,6 +244,8 @@ func buildSchemaHelperWithArraysT(t *testing.T) *typeutil.SchemaHelper {
 		{FieldID: 201, Name: "ArrayInt", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 		{FieldID: 202, Name: "ArrayFloat", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double},
 		{FieldID: 203, Name: "ArrayVarchar", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
+		{FieldID: 204, Name: "ArrayBool", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+		{FieldID: 205, Name: "NullableArrayInt", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
 	}
 	schema := &schemapb.CollectionSchema{
 		Name:   "rewrite_array_test",
@@ -426,6 +428,31 @@ func TestRewrite_Range_AND_InvalidRange_String_LowerGreaterThanUpper(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+}
+
+func TestRewrite_Range_AND_InvalidRange_Nullable_KeepsPredicate(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	expr, err := parser.ParseExpr(helper, `NullableInt64Field > 100 and NullableInt64Field < 50`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr), "nullable impossible range must not fold to valid false")
+	require.NotNil(t, expr.GetBinaryExpr())
+}
+
+func TestRewrite_Range_AND_InvalidRange_Nullable_UnderNotDoesNotBecomeAlwaysTrue(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	for _, exprStr := range []string{
+		`not (NullableInt64Field > 100 and NullableInt64Field < 50)`,
+		`not ((NullableInt64Field > 10 and NullableInt64Field < 20) and (NullableInt64Field > 30 and NullableInt64Field < 40))`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "nullable impossible range under NOT must preserve NULL semantics: %s", exprStr)
+		require.NotNil(t, expr.GetUnaryExpr(), "nullable impossible range under NOT should remain negated: %s", exprStr)
+	}
 }
 
 // Test AlwaysFalse propagation through nested AND expressions

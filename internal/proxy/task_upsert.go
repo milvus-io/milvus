@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -249,7 +248,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	primaryFieldData, err := typeutil.GetPrimaryFieldData(it.req.GetFieldsData(), primaryFieldSchema)
 	if err != nil {
 		log.Error("get primary field data failed", zap.Error(err))
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name))
+		return merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name)
 	}
 
 	upsertIDs, err := parsePrimaryFieldData2IDs(primaryFieldData)
@@ -346,21 +345,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// Two nullable data formats are supported:
-	//
-	//	COMPRESSED FORMAT (SDK format, before validateUtil.fillWithValue processing):
-	//		Logical data: [1, null, 2]
-	//		Storage: Data=[1, 2] + ValidData=[true, false, true]
-	//		- Data array contains only non-null values (compressed)
-	//		- ValidData array tracks null positions for all rows
-	//
-	//	FULL FORMAT (Milvus internal format, after validateUtil.fillWithValue processing):
-	//		Logical data: [1, null, 2]
-	//		Storage: Data=[1, 0, 2] + ValidData=[true, false, true]
-	//		- Data array contains values for all rows (nulls filled with zero/default)
-	//		- ValidData array still tracks null positions
-	//
-	// Note: we will unify the nullable format to FULL FORMAT before executing the merge logic
+	// Scalar nullable payloads are expanded before merge. Nullable vector payloads
+	// must remain compact: ValidData tracks logical rows, and vector data stores
+	// only valid rows.
 	insertIdxInUpsert := make([]int, 0)
 	updateIdxInUpsert := make([]int, 0)
 	// 1. split upsert data into insert and update by query result
@@ -410,7 +397,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			oldPK := typeutil.GetPK(upsertIDs, int64(upsertIdx))
 			idx, ok := existPKToIndex[oldPK]
 			if !ok {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("upsert pk %v not found in query result", oldPK))
+				return merr.WrapErrParameterInvalidMsg("upsert pk %v not found in query result", oldPK)
 			}
 			existIndices[i] = int64(idx)
 		}
@@ -434,7 +421,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 			dstField := it.insertFieldData[fieldIdx]
 			upsertField := upsertFieldMap[existField.FieldId]
-			isNullableVector := len(existField.GetValidData()) > 0 && typeutil.IsVectorType(existField.GetType())
+			isNullableVector := typeutil.IsCompactNullableVectorFieldData(existField)
 			existComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{existField})
 			existSrcIndices := make([]int64, len(updateIdxInUpsert))
 			for i, existIdx := range existIndices {
@@ -539,7 +526,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 		// Process insert data by column (field), similar to update path
 		for _, srcField := range insertWithNullField {
-			isNullableVector := len(srcField.GetValidData()) > 0 && typeutil.IsVectorType(srcField.GetType())
+			isNullableVector := typeutil.IsCompactNullableVectorFieldData(srcField)
 			srcComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{srcField})
 
 			// Find or create destination field in it.insertFieldData
@@ -748,7 +735,7 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		default:
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+			return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 		}
 
 	case *schemapb.FieldData_Vectors:
@@ -756,13 +743,14 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 		return nil
 
 	default:
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+		return merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.Type.String())
 	}
 
 	return nil
 }
 
-// GenNullableFieldData generates nullable field data in FULL FORMAT
+// GenNullableFieldData generates all-null nullable field data.
+// Scalar fields use expanded zero values; vector fields use compact empty data.
 func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
 	switch field.DataType {
 	case schemapb.DataType_Bool:
@@ -1053,7 +1041,7 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 		}, nil
 
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.DataType.String()))
+		return nil, merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.DataType.String())
 	}
 }
 
@@ -1172,6 +1160,11 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		log.Warn("fill field properties failed when upsert", zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
+	err = normalizeFP32ToFP16BF16VectorFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
+	if err != nil {
+		log.Warn("normalize fp32 to fp16/bf16 vector field data failed when upsert", zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
+	}
 
 	if it.partitionKeyMode {
 		fieldSchema, _ := typeutil.GetPartitionKeyFieldSchema(it.schema.CollectionSchema)
@@ -1190,7 +1183,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck()).
+	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
@@ -1296,6 +1289,9 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 	it.schemaVersion = schema.Version
+	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
+		return err
+	}
 
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
 	// A non-REPLACE op implicitly promotes the request to partial_update=true
@@ -1314,6 +1310,10 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if it.req.GetPartialUpdate() && len(schema.GetStructArrayFields()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("partial upsert is not supported for collections with struct array fields")
+	}
+
 	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("check partition key mode failed",
@@ -1323,7 +1323,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	if it.partitionKeyMode {
 		if len(it.req.GetPartitionName()) > 0 {
-			return errors.New("not support manually specifying the partition names if partition key mode is used")
+			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 		}
 	} else {
 		// set default partition name if not use partition key

@@ -21,6 +21,7 @@
 #include <arrow/type.h>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,9 +30,11 @@
 #include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/VirtualPK.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "milvus-storage/lob_column/lob_reference.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
 #include "query/PlanImpl.h"
@@ -47,6 +50,67 @@ namespace {
 
 constexpr int64_t kTestRows = 5;
 constexpr int64_t kVecDim = 4;
+constexpr int64_t kBinaryVecDim = 16;
+
+std::string
+BuildDenseVectorBytes(int row, int byte_width, int seed) {
+    std::string bytes(byte_width, '\0');
+    for (int i = 0; i < byte_width; ++i) {
+        bytes[i] = static_cast<char>((seed + row * byte_width + i) & 0xff);
+    }
+    return bytes;
+}
+
+std::string
+BuildDenseVectorBytesForRows(const std::vector<int>& rows,
+                             int byte_width,
+                             int seed) {
+    std::string bytes;
+    bytes.reserve(rows.size() * byte_width);
+    for (auto row : rows) {
+        bytes += BuildDenseVectorBytes(row, byte_width, seed);
+    }
+    return bytes;
+}
+
+knowhere::sparse::SparseRow<SparseValueType>
+BuildSparseRow(int row) {
+    knowhere::sparse::SparseRow<SparseValueType> sparse_row(2);
+    sparse_row.set_at(0, row, 1.0f + row);
+    sparse_row.set_at(1, row + 10, 2.0f + row);
+    return sparse_row;
+}
+
+std::string
+BuildSparseRowBytes(int row) {
+    auto sparse_row = BuildSparseRow(row);
+    return std::string(reinterpret_cast<const char*>(sparse_row.data()),
+                       sparse_row.data_byte_size());
+}
+
+void
+AppendFixedSizeBinaryRow(arrow::FixedSizeBinaryBuilder& builder,
+                         int row,
+                         int byte_width,
+                         int seed) {
+    auto bytes = BuildDenseVectorBytes(row, byte_width, seed);
+    EXPECT_TRUE(
+        builder.Append(reinterpret_cast<const uint8_t*>(bytes.data())).ok());
+}
+
+void
+AppendSparseRow(arrow::BinaryBuilder& builder, int row) {
+    auto bytes = BuildSparseRowBytes(row);
+    EXPECT_TRUE(builder
+                    .Append(reinterpret_cast<const uint8_t*>(bytes.data()),
+                            static_cast<int32_t>(bytes.size()))
+                    .ok());
+}
+
+ChunkedSegmentSealedImpl*
+CreateExternalSegment(SegmentSealedUPtr& holder,
+                      const SchemaPtr& schema,
+                      int64_t segment_id);
 
 // Mock Reader that returns a pre-built Arrow Table from take().
 class MockTakeReader : public milvus_storage::api::Reader {
@@ -232,6 +296,384 @@ BuildNullableVectorArrowTable() {
     return arrow::Table::Make(schema, {vec_arr});
 }
 
+struct ExternalNullableVectorSchema {
+    SchemaPtr schema;
+    FieldId pk_id;
+    FieldId vec_id;
+    DataType data_type;
+    int64_t dim;
+};
+
+ExternalNullableVectorSchema
+BuildExternalNullableVectorSchema(DataType data_type, int64_t dim) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+
+    ExternalNullableVectorSchema info;
+    info.pk_id = FieldId(100);
+    info.vec_id = FieldId(101);
+    info.data_type = data_type;
+    info.dim = dim;
+
+    schema->AddField(FieldMeta(FieldName("pk"),
+                               info.pk_id,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "pk"));
+    schema->AddField(FieldMeta(FieldName("vec_col"),
+                               info.vec_id,
+                               data_type,
+                               dim,
+                               knowhere::metric::L2,
+                               true,
+                               std::nullopt,
+                               "vec_col"));
+    schema->set_primary_field_id(info.pk_id);
+    schema->set_external_source("s3://test-bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+    info.schema = schema;
+    return info;
+}
+
+int64_t
+DenseVectorByteWidth(DataType data_type, int64_t dim) {
+    switch (data_type) {
+        case DataType::VECTOR_BINARY:
+            return (dim + 7) / 8;
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+            return dim * 2;
+        case DataType::VECTOR_INT8:
+            return dim;
+        default:
+            return dim * sizeof(float);
+    }
+}
+
+std::string
+MakeBytes(int64_t byte_width, uint8_t start) {
+    std::string bytes;
+    bytes.resize(byte_width);
+    for (int64_t i = 0; i < byte_width; ++i) {
+        bytes[i] = static_cast<char>(start + i);
+    }
+    return bytes;
+}
+
+std::shared_ptr<arrow::Table>
+BuildNullableDenseVectorArrowTable(DataType data_type, int64_t dim) {
+    auto byte_width = DenseVectorByteWidth(data_type, dim);
+    auto fsb_type = arrow::fixed_size_binary(byte_width);
+    arrow::FixedSizeBinaryBuilder builder(fsb_type);
+    auto row0 = MakeBytes(byte_width, 1);
+    auto row2 = MakeBytes(byte_width, 101);
+    EXPECT_TRUE(
+        builder.Append(reinterpret_cast<const uint8_t*>(row0.data())).ok());
+    EXPECT_TRUE(builder.AppendNull().ok());
+    EXPECT_TRUE(
+        builder.Append(reinterpret_cast<const uint8_t*>(row2.data())).ok());
+    auto vec_arr = builder.Finish().ValueOrDie();
+
+    auto schema = arrow::schema({
+        arrow::field("vec_col", fsb_type),
+    });
+    return arrow::Table::Make(schema, {vec_arr});
+}
+
+std::string
+MakeSparseContent(uint32_t id, SparseValueType value) {
+    knowhere::sparse::SparseRow<SparseValueType> row(1);
+    row.set_at(0, id, value);
+    return std::string(reinterpret_cast<const char*>(row.data()),
+                       row.data_byte_size());
+}
+
+std::shared_ptr<arrow::Table>
+BuildNullableSparseVectorArrowTable(std::string* row0, std::string* row2) {
+    *row0 = MakeSparseContent(3, 1.5F);
+    *row2 = MakeSparseContent(7, 2.5F);
+
+    arrow::BinaryBuilder builder;
+    EXPECT_TRUE(builder
+                    .Append(reinterpret_cast<const uint8_t*>(row0->data()),
+                            row0->size())
+                    .ok());
+    EXPECT_TRUE(builder.AppendNull().ok());
+    EXPECT_TRUE(builder
+                    .Append(reinterpret_cast<const uint8_t*>(row2->data()),
+                            row2->size())
+                    .ok());
+    auto vec_arr = builder.Finish().ValueOrDie();
+
+    auto schema = arrow::schema({
+        arrow::field("vec_col", arrow::binary()),
+    });
+    return arrow::Table::Make(schema, {vec_arr});
+}
+
+void
+AssertNullableDenseVectorTake(DataType data_type, int64_t dim) {
+    auto info = BuildExternalNullableVectorSchema(data_type, dim);
+    auto table = BuildNullableDenseVectorArrowTable(data_type, dim);
+    auto byte_width = DenseVectorByteWidth(data_type, dim);
+    auto row0 = MakeBytes(byte_width, 1);
+    auto row2 = MakeBytes(byte_width, 101);
+    auto expected = row0 + row2;
+
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema, 1);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.vec_id};
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 1);
+
+    const auto& retrieved = results->fields_data(0);
+    ASSERT_EQ(retrieved.valid_data_size(), 3);
+    EXPECT_TRUE(retrieved.valid_data(0));
+    EXPECT_FALSE(retrieved.valid_data(1));
+    EXPECT_TRUE(retrieved.valid_data(2));
+    ASSERT_EQ(retrieved.vectors().dim(), dim);
+
+    std::string actual;
+    switch (data_type) {
+        case DataType::VECTOR_BINARY:
+            actual = retrieved.vectors().binary_vector();
+            break;
+        case DataType::VECTOR_FLOAT16:
+            actual = retrieved.vectors().float16_vector();
+            break;
+        case DataType::VECTOR_BFLOAT16:
+            actual = retrieved.vectors().bfloat16_vector();
+            break;
+        case DataType::VECTOR_INT8:
+            actual = retrieved.vectors().int8_vector();
+            break;
+        default:
+            FAIL() << "unsupported dense vector type";
+    }
+    ASSERT_EQ(actual.size(), expected.size());
+    EXPECT_EQ(actual, expected);
+
+    auto search_plan = std::make_unique<query::Plan>(info.schema);
+    search_plan->target_entries_ = {info.vec_id};
+    SearchResult search_results;
+    ok = segment->TestTryTakeForSearch(
+        search_plan.get(), offsets.data(), offsets.size(), search_results);
+    ASSERT_TRUE(ok);
+    auto& searched = search_results.output_fields_data_.at(info.vec_id);
+    ASSERT_EQ(searched->valid_data_size(), 3);
+    EXPECT_TRUE(searched->valid_data(0));
+    EXPECT_FALSE(searched->valid_data(1));
+    EXPECT_TRUE(searched->valid_data(2));
+    ASSERT_EQ(searched->vectors().dim(), dim);
+}
+
+void
+AssertNullableSparseVectorTake() {
+    auto info =
+        BuildExternalNullableVectorSchema(DataType::VECTOR_SPARSE_U32_F32, 0);
+    std::string row0;
+    std::string row2;
+    auto table = BuildNullableSparseVectorArrowTable(&row0, &row2);
+
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema, 1);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.vec_id};
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 1);
+
+    const auto& retrieved = results->fields_data(0);
+    ASSERT_EQ(retrieved.valid_data_size(), 3);
+    EXPECT_TRUE(retrieved.valid_data(0));
+    EXPECT_FALSE(retrieved.valid_data(1));
+    EXPECT_TRUE(retrieved.valid_data(2));
+    const auto& sparse = retrieved.vectors().sparse_float_vector();
+    ASSERT_EQ(sparse.contents_size(), 2);
+    EXPECT_EQ(sparse.contents(0), row0);
+    EXPECT_EQ(sparse.contents(1), row2);
+    EXPECT_EQ(sparse.dim(), 8);
+
+    auto search_plan = std::make_unique<query::Plan>(info.schema);
+    search_plan->target_entries_ = {info.vec_id};
+    SearchResult search_results;
+    ok = segment->TestTryTakeForSearch(
+        search_plan.get(), offsets.data(), offsets.size(), search_results);
+    ASSERT_TRUE(ok);
+    auto& searched = search_results.output_fields_data_.at(info.vec_id);
+    ASSERT_EQ(searched->valid_data_size(), 3);
+    EXPECT_TRUE(searched->valid_data(0));
+    EXPECT_FALSE(searched->valid_data(1));
+    EXPECT_TRUE(searched->valid_data(2));
+    const auto& search_sparse = searched->vectors().sparse_float_vector();
+    ASSERT_EQ(search_sparse.contents_size(), 2);
+    EXPECT_EQ(search_sparse.contents(0), row0);
+    EXPECT_EQ(search_sparse.contents(1), row2);
+    EXPECT_EQ(search_sparse.dim(), 8);
+}
+
+struct AdditionalVectorSchemaInfo {
+    SchemaPtr schema;
+    FieldId binary_vec_id;
+    FieldId float16_vec_id;
+    FieldId bfloat16_vec_id;
+    FieldId int8_vec_id;
+    FieldId sparse_vec_id;
+};
+
+AdditionalVectorSchemaInfo
+BuildAdditionalVectorSchema() {
+    auto schema = std::make_shared<Schema>();
+
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+
+    AdditionalVectorSchemaInfo info;
+    auto pk_id = FieldId(200);
+    info.binary_vec_id = FieldId(201);
+    info.float16_vec_id = FieldId(202);
+    info.bfloat16_vec_id = FieldId(203);
+    info.int8_vec_id = FieldId(204);
+    info.sparse_vec_id = FieldId(205);
+
+    schema->AddField(FieldMeta(
+        FieldName("pk"), pk_id, DataType::INT64, false, std::nullopt, "pk"));
+    schema->AddField(FieldMeta(FieldName("binary_vec_col"),
+                               info.binary_vec_id,
+                               DataType::VECTOR_BINARY,
+                               kBinaryVecDim,
+                               knowhere::metric::JACCARD,
+                               true,
+                               std::nullopt,
+                               "binary_vec_col"));
+    schema->AddField(FieldMeta(FieldName("float16_vec_col"),
+                               info.float16_vec_id,
+                               DataType::VECTOR_FLOAT16,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               true,
+                               std::nullopt,
+                               "float16_vec_col"));
+    schema->AddField(FieldMeta(FieldName("bfloat16_vec_col"),
+                               info.bfloat16_vec_id,
+                               DataType::VECTOR_BFLOAT16,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               true,
+                               std::nullopt,
+                               "bfloat16_vec_col"));
+    schema->AddField(FieldMeta(FieldName("int8_vec_col"),
+                               info.int8_vec_id,
+                               DataType::VECTOR_INT8,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               true,
+                               std::nullopt,
+                               "int8_vec_col"));
+    schema->AddField(FieldMeta(FieldName("sparse_vec_col"),
+                               info.sparse_vec_id,
+                               DataType::VECTOR_SPARSE_U32_F32,
+                               0,
+                               knowhere::metric::IP,
+                               true,
+                               std::nullopt,
+                               "sparse_vec_col"));
+
+    schema->set_primary_field_id(pk_id);
+    schema->set_external_source("s3://test-bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+
+    info.schema = schema;
+    return info;
+}
+
+std::shared_ptr<arrow::Table>
+BuildAdditionalVectorArrowTable() {
+    arrow::Int64Builder pk_builder;
+    for (int i = 0; i < kTestRows; i++) {
+        EXPECT_TRUE(pk_builder.Append(i).ok());
+    }
+    auto pk_arr = pk_builder.Finish().ValueOrDie();
+
+    auto binary_type = arrow::fixed_size_binary(kBinaryVecDim / 8);
+    arrow::FixedSizeBinaryBuilder binary_builder(binary_type);
+    auto float16_type = arrow::fixed_size_binary(kVecDim * 2);
+    arrow::FixedSizeBinaryBuilder float16_builder(float16_type);
+    auto bfloat16_type = arrow::fixed_size_binary(kVecDim * 2);
+    arrow::FixedSizeBinaryBuilder bfloat16_builder(bfloat16_type);
+    auto int8_type = arrow::fixed_size_binary(kVecDim);
+    arrow::FixedSizeBinaryBuilder int8_builder(int8_type);
+    arrow::BinaryBuilder sparse_builder;
+
+    for (int i = 0; i < kTestRows; i++) {
+        AppendFixedSizeBinaryRow(binary_builder, i, kBinaryVecDim / 8, 11);
+        AppendFixedSizeBinaryRow(float16_builder, i, kVecDim * 2, 31);
+        AppendFixedSizeBinaryRow(bfloat16_builder, i, kVecDim * 2, 51);
+        AppendFixedSizeBinaryRow(int8_builder, i, kVecDim, 71);
+        AppendSparseRow(sparse_builder, i);
+    }
+
+    auto binary_arr = binary_builder.Finish().ValueOrDie();
+    auto float16_arr = float16_builder.Finish().ValueOrDie();
+    auto bfloat16_arr = bfloat16_builder.Finish().ValueOrDie();
+    auto int8_arr = int8_builder.Finish().ValueOrDie();
+    auto sparse_arr = sparse_builder.Finish().ValueOrDie();
+
+    auto schema = arrow::schema({
+        arrow::field("pk", arrow::int64()),
+        arrow::field("binary_vec_col", binary_type),
+        arrow::field("float16_vec_col", float16_type),
+        arrow::field("bfloat16_vec_col", bfloat16_type),
+        arrow::field("int8_vec_col", int8_type),
+        arrow::field("sparse_vec_col", arrow::binary()),
+    });
+
+    return arrow::Table::Make(
+        schema,
+        {pk_arr, binary_arr, float16_arr, bfloat16_arr, int8_arr, sparse_arr});
+}
+
+std::shared_ptr<arrow::Table>
+BuildNullableBinaryVectorArrowTable() {
+    auto binary_type = arrow::fixed_size_binary(kBinaryVecDim / 8);
+    arrow::FixedSizeBinaryBuilder binary_builder(binary_type);
+    AppendFixedSizeBinaryRow(binary_builder, 0, kBinaryVecDim / 8, 11);
+    EXPECT_TRUE(binary_builder.AppendNull().ok());
+    AppendFixedSizeBinaryRow(binary_builder, 2, kBinaryVecDim / 8, 11);
+    auto binary_arr = binary_builder.Finish().ValueOrDie();
+
+    auto schema = arrow::schema({
+        arrow::field("binary_vec_col", binary_type),
+    });
+    return arrow::Table::Make(schema, {binary_arr});
+}
+
 // Build an external schema with all supported types.
 // Returns {schema, field_ids} where field_ids are in order:
 // bool, int8, int16, int32, int64, float, double, varchar, vec
@@ -335,6 +777,164 @@ BuildExternalSchema() {
 
     info.schema = schema;
     return info;
+}
+
+ExternalSchemaInfo
+BuildInternalSchemaForTake() {
+    auto info = BuildExternalSchema();
+    auto schema = std::make_shared<Schema>();
+
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+
+    schema->AddField(FieldMeta(FieldName("bool_col"),
+                               info.bool_id,
+                               DataType::BOOL,
+                               true,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("int8_col"),
+                               info.int8_id,
+                               DataType::INT8,
+                               true,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("int16_col"),
+                               info.int16_id,
+                               DataType::INT16,
+                               true,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("int32_col"),
+                               info.int32_id,
+                               DataType::INT32,
+                               true,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("int64_col"),
+                               info.int64_id,
+                               DataType::INT64,
+                               false,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("float_col"),
+                               info.float_id,
+                               DataType::FLOAT,
+                               true,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("double_col"),
+                               info.double_id,
+                               DataType::DOUBLE,
+                               true,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("varchar_col"),
+                               info.varchar_id,
+                               DataType::VARCHAR,
+                               65535,
+                               true,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("vec_col"),
+                               info.vec_id,
+                               DataType::VECTOR_FLOAT,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               true,
+                               std::nullopt));
+
+    schema->set_primary_field_id(info.int64_id);
+    info.schema = schema;
+    return info;
+}
+
+std::shared_ptr<arrow::Table>
+BuildInternalTakeArrowTable(const ExternalSchemaInfo& info) {
+    auto external_table = BuildTestArrowTable();
+    std::vector<std::shared_ptr<arrow::Field>> fields;
+    std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
+    fields.reserve(external_table->num_columns());
+    columns.reserve(external_table->num_columns());
+
+    auto add_column = [&](FieldId field_id, const std::string& external_name) {
+        auto col = external_table->GetColumnByName(external_name);
+        ASSERT_NE(col, nullptr);
+        auto field = external_table->schema()->GetFieldByName(external_name);
+        ASSERT_NE(field, nullptr);
+        fields.push_back(field->WithName(std::to_string(field_id.get())));
+        columns.push_back(col);
+    };
+
+    add_column(info.bool_id, "bool_col");
+    add_column(info.int8_id, "int8_col");
+    add_column(info.int16_id, "int16_col");
+    add_column(info.int32_id, "int32_col");
+    add_column(info.int64_id, "int64_col");
+    add_column(info.float_id, "float_col");
+    add_column(info.double_id, "double_col");
+    add_column(info.varchar_id, "varchar_col");
+    add_column(info.vec_id, "vec_col");
+
+    return arrow::Table::Make(arrow::schema(fields), columns);
+}
+
+struct InternalSchemaWithTextAndDynamicFields {
+    ExternalSchemaInfo base;
+    FieldId text_id;
+    FieldId dynamic_id;
+};
+
+InternalSchemaWithTextAndDynamicFields
+BuildInternalSchemaWithTextAndDynamicFields() {
+    InternalSchemaWithTextAndDynamicFields info;
+    info.base = BuildInternalSchemaForTake();
+    info.text_id = FieldId(109);
+    info.dynamic_id = FieldId(110);
+
+    info.base.schema->AddField(FieldMeta(FieldName("text_col"),
+                                         info.text_id,
+                                         DataType::TEXT,
+                                         65535,
+                                         true,
+                                         std::nullopt));
+    info.base.schema->AddField(FieldMeta(FieldName("$meta"),
+                                         info.dynamic_id,
+                                         DataType::JSON,
+                                         true,
+                                         std::nullopt));
+    info.base.schema->set_dynamic_field_id(info.dynamic_id);
+    return info;
+}
+
+std::shared_ptr<arrow::Table>
+BuildInternalTakeArrowTableWithTextAndDynamicFields(
+    const InternalSchemaWithTextAndDynamicFields& info) {
+    arrow::Int64Builder int64_b;
+    arrow::BinaryBuilder text_b;
+    arrow::BinaryBuilder dynamic_b;
+    for (int i = 0; i < kTestRows; i++) {
+        EXPECT_TRUE(int64_b.Append(i * 10000).ok());
+        auto text = "text_" + std::to_string(i);
+        auto encoded_text = milvus_storage::lob_column::EncodeInlineText(text);
+        EXPECT_TRUE(text_b
+                        .Append(encoded_text.data(),
+                                static_cast<int32_t>(encoded_text.size()))
+                        .ok());
+        auto dynamic = R"({"foo":)" + std::to_string(i) + R"(,"bar":true})";
+        EXPECT_TRUE(
+            dynamic_b
+                .Append(reinterpret_cast<const uint8_t*>(dynamic.data()),
+                        static_cast<int32_t>(dynamic.size()))
+                .ok());
+    }
+
+    auto int64_arr = int64_b.Finish().ValueOrDie();
+    auto text_arr = text_b.Finish().ValueOrDie();
+    auto dynamic_arr = dynamic_b.Finish().ValueOrDie();
+    auto schema = arrow::schema({
+        arrow::field(std::to_string(info.base.int64_id.get()), arrow::int64()),
+        arrow::field(std::to_string(info.text_id.get()), arrow::binary()),
+        arrow::field(std::to_string(info.dynamic_id.get()), arrow::binary()),
+    });
+    return arrow::Table::Make(schema, {int64_arr, text_arr, dynamic_arr});
 }
 
 // Helper: create a ChunkedSegmentSealedImpl with external schema
@@ -502,7 +1102,7 @@ BuildExternalSchemaWithArray() {
                                DataType::ARRAY,
                                DataType::INT32,
                                true,
-                               std::nullopt,
+                               std::optional<DefaultValueType>{std::nullopt},
                                "array_col"));
 
     schema->set_primary_field_id(info.int64_id);
@@ -690,6 +1290,94 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_NullableVectorUsesCompactData) {
     EXPECT_FLOAT_EQ(fv.data(7), 11.0f);
 }
 
+TEST(ExternalTakeTest, TryTakeForRetrieve_AdditionalVectorTypes) {
+    auto info = BuildAdditionalVectorSchema();
+    auto table = BuildAdditionalVectorArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.binary_vec_id,
+                        info.float16_vec_id,
+                        info.bfloat16_vec_id,
+                        info.int8_vec_id,
+                        info.sparse_vec_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 2, 4};
+
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 5);
+
+    const std::vector<int> rows = {0, 2, 4};
+    auto& binary_vec = results->fields_data(0);
+    ASSERT_EQ(binary_vec.field_id(), info.binary_vec_id.get());
+    ASSERT_EQ(binary_vec.vectors().dim(), kBinaryVecDim);
+    EXPECT_EQ(binary_vec.vectors().binary_vector(),
+              BuildDenseVectorBytesForRows(rows, kBinaryVecDim / 8, 11));
+
+    auto& float16_vec = results->fields_data(1);
+    ASSERT_EQ(float16_vec.field_id(), info.float16_vec_id.get());
+    ASSERT_EQ(float16_vec.vectors().dim(), kVecDim);
+    EXPECT_EQ(float16_vec.vectors().float16_vector(),
+              BuildDenseVectorBytesForRows(rows, kVecDim * 2, 31));
+
+    auto& bfloat16_vec = results->fields_data(2);
+    ASSERT_EQ(bfloat16_vec.field_id(), info.bfloat16_vec_id.get());
+    ASSERT_EQ(bfloat16_vec.vectors().dim(), kVecDim);
+    EXPECT_EQ(bfloat16_vec.vectors().bfloat16_vector(),
+              BuildDenseVectorBytesForRows(rows, kVecDim * 2, 51));
+
+    auto& int8_vec = results->fields_data(3);
+    ASSERT_EQ(int8_vec.field_id(), info.int8_vec_id.get());
+    ASSERT_EQ(int8_vec.vectors().dim(), kVecDim);
+    EXPECT_EQ(int8_vec.vectors().int8_vector(),
+              BuildDenseVectorBytesForRows(rows, kVecDim, 71));
+
+    auto& sparse_vec = results->fields_data(4);
+    ASSERT_EQ(sparse_vec.field_id(), info.sparse_vec_id.get());
+    ASSERT_EQ(sparse_vec.vectors().dim(), 15);
+    auto& sparse_float = sparse_vec.vectors().sparse_float_vector();
+    ASSERT_EQ(sparse_float.contents_size(), rows.size());
+    EXPECT_EQ(sparse_float.contents(0), BuildSparseRowBytes(0));
+    EXPECT_EQ(sparse_float.contents(1), BuildSparseRowBytes(2));
+    EXPECT_EQ(sparse_float.contents(2), BuildSparseRowBytes(4));
+    EXPECT_EQ(sparse_float.dim(), 15);
+}
+
+TEST(ExternalTakeTest, TryTakeForRetrieve_NullableBinaryVectorUsesCompactData) {
+    auto info = BuildAdditionalVectorSchema();
+    auto table = BuildNullableBinaryVectorArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.binary_vec_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 1);
+
+    auto& binary_vec = results->fields_data(0);
+    ASSERT_EQ(binary_vec.field_id(), info.binary_vec_id.get());
+    ASSERT_EQ(binary_vec.valid_data_size(), 3);
+    EXPECT_TRUE(binary_vec.valid_data(0));
+    EXPECT_FALSE(binary_vec.valid_data(1));
+    EXPECT_TRUE(binary_vec.valid_data(2));
+    EXPECT_EQ(binary_vec.vectors().binary_vector(),
+              BuildDenseVectorBytesForRows({0, 2}, kBinaryVecDim / 8, 11));
+}
+
 // Test TryTakeForSearch with all supported data types
 TEST(ExternalTakeTest, TryTakeForSearch_MultiTypes) {
     auto [schema,
@@ -811,6 +1499,78 @@ TEST(ExternalTakeTest, TryTakeForSearch_NullableVectorUsesCompactData) {
     EXPECT_FLOAT_EQ(fv.data(7), 11.0f);
 }
 
+TEST(ExternalTakeTest, NullableBinaryVectorTakeUsesCompactData) {
+    AssertNullableDenseVectorTake(DataType::VECTOR_BINARY, 16);
+}
+
+TEST(ExternalTakeTest, NullableFloat16VectorTakeUsesCompactData) {
+    AssertNullableDenseVectorTake(DataType::VECTOR_FLOAT16, 4);
+}
+
+TEST(ExternalTakeTest, NullableBFloat16VectorTakeUsesCompactData) {
+    AssertNullableDenseVectorTake(DataType::VECTOR_BFLOAT16, 4);
+}
+
+TEST(ExternalTakeTest, NullableInt8VectorTakeUsesCompactData) {
+    AssertNullableDenseVectorTake(DataType::VECTOR_INT8, 4);
+}
+
+TEST(ExternalTakeTest, NullableSparseVectorTakeUsesCompactData) {
+    AssertNullableSparseVectorTake();
+}
+
+TEST(ExternalTakeTest, TryTakeForSearch_AdditionalVectorTypes) {
+    auto info = BuildAdditionalVectorSchema();
+    auto table = BuildAdditionalVectorArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(info.schema);
+    plan->target_entries_ = {info.binary_vec_id,
+                             info.float16_vec_id,
+                             info.bfloat16_vec_id,
+                             info.int8_vec_id,
+                             info.sparse_vec_id};
+
+    std::vector<int64_t> seg_offsets = {1, 3};
+    SearchResult results;
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), seg_offsets.data(), seg_offsets.size(), results);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results.output_fields_data_.size(), 5u);
+
+    const std::vector<int> rows = {1, 3};
+    auto& binary_vec = results.output_fields_data_.at(info.binary_vec_id);
+    ASSERT_EQ(binary_vec->vectors().dim(), kBinaryVecDim);
+    EXPECT_EQ(binary_vec->vectors().binary_vector(),
+              BuildDenseVectorBytesForRows(rows, kBinaryVecDim / 8, 11));
+
+    auto& float16_vec = results.output_fields_data_.at(info.float16_vec_id);
+    ASSERT_EQ(float16_vec->vectors().dim(), kVecDim);
+    EXPECT_EQ(float16_vec->vectors().float16_vector(),
+              BuildDenseVectorBytesForRows(rows, kVecDim * 2, 31));
+
+    auto& bfloat16_vec = results.output_fields_data_.at(info.bfloat16_vec_id);
+    ASSERT_EQ(bfloat16_vec->vectors().dim(), kVecDim);
+    EXPECT_EQ(bfloat16_vec->vectors().bfloat16_vector(),
+              BuildDenseVectorBytesForRows(rows, kVecDim * 2, 51));
+
+    auto& int8_vec = results.output_fields_data_.at(info.int8_vec_id);
+    ASSERT_EQ(int8_vec->vectors().dim(), kVecDim);
+    EXPECT_EQ(int8_vec->vectors().int8_vector(),
+              BuildDenseVectorBytesForRows(rows, kVecDim, 71));
+
+    auto& sparse_vec = results.output_fields_data_.at(info.sparse_vec_id);
+    ASSERT_EQ(sparse_vec->vectors().dim(), 14);
+    auto& sparse_float = sparse_vec->vectors().sparse_float_vector();
+    ASSERT_EQ(sparse_float.contents_size(), rows.size());
+    EXPECT_EQ(sparse_float.contents(0), BuildSparseRowBytes(1));
+    EXPECT_EQ(sparse_float.contents(1), BuildSparseRowBytes(3));
+    EXPECT_EQ(sparse_float.dim(), 14);
+}
+
 // Test fallback: returns false for non-external collection
 TEST(ExternalTakeTest, TryTakeForRetrieve_FallbackNonExternal) {
     auto schema = std::make_shared<Schema>();
@@ -921,6 +1681,191 @@ TEST(ExternalTakeTest, FillTargetEntry_DelegatesToTake) {
     ASSERT_EQ(str_arr->scalars().string_data().data_size(), 2);
     EXPECT_EQ(str_arr->scalars().string_data().data(0), "row_0");
     EXPECT_EQ(str_arr->scalars().string_data().data(1), "row_3");
+}
+
+TEST(InternalTakeTest, TryTakeForRetrieve_UsesFieldIdColumns) {
+    auto info = BuildInternalSchemaForTake();
+    auto table = BuildInternalTakeArrowTable(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.int64_id, info.varchar_id, info.vec_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {3, 1};
+
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, true);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 3);
+    ASSERT_EQ(results->ids().int_id().data_size(), 2);
+    EXPECT_EQ(results->ids().int_id().data(0), 30000);
+    EXPECT_EQ(results->ids().int_id().data(1), 10000);
+
+    auto& int64_data = results->fields_data(0);
+    ASSERT_EQ(int64_data.field_id(), info.int64_id.get());
+    ASSERT_EQ(int64_data.scalars().long_data().data_size(), 2);
+    EXPECT_EQ(int64_data.scalars().long_data().data(0), 30000);
+    EXPECT_EQ(int64_data.scalars().long_data().data(1), 10000);
+
+    auto& varchar_data = results->fields_data(1);
+    ASSERT_EQ(varchar_data.field_id(), info.varchar_id.get());
+    ASSERT_EQ(varchar_data.scalars().string_data().data_size(), 2);
+    EXPECT_EQ(varchar_data.scalars().string_data().data(0), "row_3");
+    EXPECT_EQ(varchar_data.scalars().string_data().data(1), "row_1");
+
+    auto& vec_data = results->fields_data(2);
+    ASSERT_EQ(vec_data.field_id(), info.vec_id.get());
+    ASSERT_EQ(vec_data.vectors().dim(), kVecDim);
+    ASSERT_EQ(vec_data.vectors().float_vector().data_size(), 2 * kVecDim);
+    EXPECT_FLOAT_EQ(vec_data.vectors().float_vector().data(0), 12.0f);
+    EXPECT_FLOAT_EQ(vec_data.vectors().float_vector().data(4), 4.0f);
+}
+
+TEST(InternalTakeTest, TryTakeForSearch_UsesFieldIdColumns) {
+    auto info = BuildInternalSchemaForTake();
+    auto table = BuildInternalTakeArrowTable(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(info.schema);
+    plan->target_entries_ = {info.int64_id, info.varchar_id};
+
+    SearchResult results;
+    std::vector<int64_t> offsets = {4, 0};
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), offsets.data(), offsets.size(), results);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results.output_fields_data_.size(), 2u);
+
+    auto& int64_data = results.output_fields_data_.at(info.int64_id);
+    ASSERT_EQ(int64_data->scalars().long_data().data_size(), 2);
+    EXPECT_EQ(int64_data->scalars().long_data().data(0), 40000);
+    EXPECT_EQ(int64_data->scalars().long_data().data(1), 0);
+
+    auto& varchar_data = results.output_fields_data_.at(info.varchar_id);
+    ASSERT_EQ(varchar_data->scalars().string_data().data_size(), 2);
+    EXPECT_EQ(varchar_data->scalars().string_data().data(0), "row_4");
+    EXPECT_EQ(varchar_data->scalars().string_data().data(1), "row_0");
+}
+
+TEST(InternalTakeTest, TryTakeForRetrieve_ResolvesTextOutputField) {
+    auto info = BuildInternalSchemaWithTextAndDynamicFields();
+    auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.base.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+    segment->SetTextLobPathForTesting(info.text_id, "/tmp/test_lob");
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.base.schema);
+    plan->field_ids_ = {info.base.int64_id, info.text_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {3, 1};
+
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, true);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 2);
+
+    auto& text_data = results->fields_data(1);
+    ASSERT_EQ(text_data.field_id(), info.text_id.get());
+    ASSERT_EQ(text_data.scalars().string_data().data_size(), 2);
+    EXPECT_EQ(text_data.scalars().string_data().data(0), "text_3");
+    EXPECT_EQ(text_data.scalars().string_data().data(1), "text_1");
+}
+
+TEST(InternalTakeTest, TryTakeForRetrieve_ProjectsDynamicField) {
+    auto info = BuildInternalSchemaWithTextAndDynamicFields();
+    auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.base.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.base.schema);
+    plan->field_ids_ = {info.base.int64_id, info.dynamic_id};
+    plan->target_dynamic_fields_ = {"foo"};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {3, 1};
+
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, true);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results->fields_data_size(), 2);
+
+    auto& dynamic_data = results->fields_data(1);
+    ASSERT_EQ(dynamic_data.field_id(), info.dynamic_id.get());
+    ASSERT_EQ(dynamic_data.scalars().json_data().data_size(), 2);
+    EXPECT_EQ(dynamic_data.scalars().json_data().data(0), R"({"foo":3})");
+    EXPECT_EQ(dynamic_data.scalars().json_data().data(1), R"({"foo":1})");
+}
+
+TEST(InternalTakeTest, TryTakeForSearch_ResolvesTextOutputField) {
+    auto info = BuildInternalSchemaWithTextAndDynamicFields();
+    auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.base.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+    segment->SetTextLobPathForTesting(info.text_id, "/tmp/test_lob");
+
+    auto plan = std::make_unique<query::Plan>(info.base.schema);
+    plan->target_entries_ = {info.base.int64_id, info.text_id};
+
+    SearchResult results;
+    std::vector<int64_t> offsets = {4, 0};
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), offsets.data(), offsets.size(), results);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results.output_fields_data_.size(), 2u);
+
+    auto& int64_data = results.output_fields_data_.at(info.base.int64_id);
+    ASSERT_EQ(int64_data->scalars().long_data().data_size(), 2);
+    EXPECT_EQ(int64_data->scalars().long_data().data(0), 40000);
+    EXPECT_EQ(int64_data->scalars().long_data().data(1), 0);
+
+    auto& text_data = results.output_fields_data_.at(info.text_id);
+    ASSERT_EQ(text_data->scalars().string_data().data_size(), 2);
+    EXPECT_EQ(text_data->scalars().string_data().data(0), "text_4");
+    EXPECT_EQ(text_data->scalars().string_data().data(1), "text_0");
+}
+
+TEST(InternalTakeTest, TryTakeForSearch_ProjectsDynamicField) {
+    auto info = BuildInternalSchemaWithTextAndDynamicFields();
+    auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.base.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(info.base.schema);
+    plan->target_entries_ = {info.base.int64_id, info.dynamic_id};
+    plan->target_dynamic_fields_ = {"foo"};
+
+    SearchResult results;
+    std::vector<int64_t> offsets = {4, 0};
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), offsets.data(), offsets.size(), results);
+    ASSERT_TRUE(ok);
+    ASSERT_EQ(results.output_fields_data_.size(), 2u);
+
+    auto& int64_data = results.output_fields_data_.at(info.base.int64_id);
+    ASSERT_EQ(int64_data->scalars().long_data().data_size(), 2);
+    EXPECT_EQ(int64_data->scalars().long_data().data(0), 40000);
+    EXPECT_EQ(int64_data->scalars().long_data().data(1), 0);
+
+    auto& dynamic_data = results.output_fields_data_.at(info.dynamic_id);
+    ASSERT_EQ(dynamic_data->scalars().json_data().data_size(), 2);
+    EXPECT_EQ(dynamic_data->scalars().json_data().data(0), R"({"foo":4})");
+    EXPECT_EQ(dynamic_data->scalars().json_data().data(1), R"({"foo":0})");
 }
 
 // ---------- TryTakeForRetrieve: error & edge-case paths ----------
@@ -1899,6 +2844,25 @@ TEST(InjectExtfsAllowlist, ExplicitCloudProviderRequiredForAwsFormSwap) {
     }
 }
 
+TEST(InjectExtfsAllowlist, MinIOSchemeUsesMilvusFormDefaults) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK"}})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "minio://localhost:9000/bucket/key", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "http://localhost:9000");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "bucket");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")), "false");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_id")), "AK");
+    EXPECT_EQ(props.count("extfs.42.cloud_provider"), 0u);
+    EXPECT_EQ(props.count("extfs.42.region"), 0u);
+}
+
 // milvus-storage's fs.* property registry does not yet declare
 // PROPERTY_FS_ANONYMOUS. Until upstream registers the key,
 // InjectExternalSpecProperties must not zero-init extfs.{cid}.anonymous
@@ -1984,6 +2948,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          element_type,
                          dim,
                          std::nullopt,
+                         nullable,
                          external_field);
     }
     if (IsVectorDataType(data_type)) {
@@ -2011,7 +2976,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          data_type,
                          element_type,
                          nullable,
-                         std::nullopt,
+                         std::optional<DefaultValueType>{std::nullopt},
                          external_field);
     }
     return FieldMeta(

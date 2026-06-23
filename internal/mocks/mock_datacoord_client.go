@@ -33,6 +33,80 @@ func (_m *MockDataCoordClient) EXPECT() *MockDataCoordClient_Expecter {
 	return &MockDataCoordClient_Expecter{mock: &_m.Mock}
 }
 
+// AbortImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) AbortImport(ctx context.Context, in *datapb.AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AbortImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AbortImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_AbortImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AbortImport'
+type MockDataCoordClient_AbortImport_Call struct {
+	*mock.Call
+}
+
+// AbortImport is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.AbortImportRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) AbortImport(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_AbortImport_Call {
+	return &MockDataCoordClient_AbortImport_Call{Call: _e.mock.On("AbortImport",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_AbortImport_Call) Run(run func(ctx context.Context, in *datapb.AbortImportRequest, opts ...grpc.CallOption)) *MockDataCoordClient_AbortImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.AbortImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_AbortImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoordClient_AbortImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_AbortImport_Call) RunAndReturn(run func(context.Context, *datapb.AbortImportRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataCoordClient_AbortImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocSegment provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataCoordClient) AllocSegment(ctx context.Context, in *datapb.AllocSegmentRequest, opts ...grpc.CallOption) (*datapb.AllocSegmentResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -592,6 +666,80 @@ func (_c *MockDataCoordClient_CommitBackfillResult_Call) Return(_a0 *datapb.Comm
 }
 
 func (_c *MockDataCoordClient_CommitBackfillResult_Call) RunAndReturn(run func(context.Context, *datapb.CommitBackfillResultRequest, ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error)) *MockDataCoordClient_CommitBackfillResult_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CommitImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) CommitImport(ctx context.Context, in *datapb.CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_CommitImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitImport'
+type MockDataCoordClient_CommitImport_Call struct {
+	*mock.Call
+}
+
+// CommitImport is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.CommitImportRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) CommitImport(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_CommitImport_Call {
+	return &MockDataCoordClient_CommitImport_Call{Call: _e.mock.On("CommitImport",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_CommitImport_Call) Run(run func(ctx context.Context, in *datapb.CommitImportRequest, opts ...grpc.CallOption)) *MockDataCoordClient_CommitImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.CommitImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_CommitImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoordClient_CommitImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_CommitImport_Call) RunAndReturn(run func(context.Context, *datapb.CommitImportRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataCoordClient_CommitImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3182,6 +3330,80 @@ func (_c *MockDataCoordClient_GetSegmentsByStates_Call) Return(_a0 *datapb.GetSe
 }
 
 func (_c *MockDataCoordClient_GetSegmentsByStates_Call) RunAndReturn(run func(context.Context, *datapb.GetSegmentsByStatesRequest, ...grpc.CallOption) (*datapb.GetSegmentsByStatesResponse, error)) *MockDataCoordClient_GetSegmentsByStates_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HandleCommitVchannel provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) HandleCommitVchannel(ctx context.Context, in *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleCommitVchannel")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.HandleCommitVchannelRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_HandleCommitVchannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleCommitVchannel'
+type MockDataCoordClient_HandleCommitVchannel_Call struct {
+	*mock.Call
+}
+
+// HandleCommitVchannel is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.HandleCommitVchannelRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) HandleCommitVchannel(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_HandleCommitVchannel_Call {
+	return &MockDataCoordClient_HandleCommitVchannel_Call{Call: _e.mock.On("HandleCommitVchannel",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_HandleCommitVchannel_Call) Run(run func(ctx context.Context, in *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption)) *MockDataCoordClient_HandleCommitVchannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.HandleCommitVchannelRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_HandleCommitVchannel_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoordClient_HandleCommitVchannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_HandleCommitVchannel_Call) RunAndReturn(run func(context.Context, *datapb.HandleCommitVchannelRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataCoordClient_HandleCommitVchannel_Call {
 	_c.Call.Return(run)
 	return _c
 }

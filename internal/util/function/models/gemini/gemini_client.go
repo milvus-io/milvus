@@ -17,10 +17,10 @@
 package gemini
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type GeminiClient struct {
@@ -29,7 +29,7 @@ type GeminiClient struct {
 
 func NewGeminiClient(apiKey string) (*GeminiClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.GeminiAKEnvStr)
+		return nil, merr.WrapErrParameterInvalidMsg("missing credentials config or configure the %s environment variable in the Milvus service", models.GeminiAKEnvStr)
 	}
 	return &GeminiClient{
 		apiKey: apiKey,
@@ -43,7 +43,7 @@ func (c *GeminiClient) headers() map[string]string {
 	}
 }
 
-func (c *GeminiClient) Embedding(url string, modelName string, texts []string, dim int, taskType string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *GeminiClient) Embedding(url string, modelName string, texts []string, dim int, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
 	modelName = strings.TrimPrefix(modelName, "models/")
 	requests := make([]BatchEmbedRequest, 0, len(texts))
 	for _, text := range texts {
@@ -66,7 +66,7 @@ func (c *GeminiClient) Embedding(url string, modelName string, texts []string, d
 		Requests: requests,
 	}
 
-	res, err := models.PostRequest[EmbeddingResponse](batchReq, url, c.headers(), timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](batchReq, url, c.headers(), timeoutMs)
 	if err != nil {
 		return nil, err
 	}

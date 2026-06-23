@@ -28,6 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -45,7 +46,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -560,6 +564,61 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
 	status, err := suite.node.UnsubDmChannel(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
+}
+
+func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "service unavailable",
+			err:  merr.WrapErrServiceUnavailable("streaming WAL is not initialized"),
+			want: true,
+		},
+		{
+			name: "handler client closed",
+			err:  handler.ErrClientClosed,
+			want: true,
+		},
+		{
+			name: "no streaming node deployed",
+			err:  registry.ErrNoStreamingNodeDeployed,
+			want: true,
+		},
+		{
+			name: "no release manual flush preparer",
+			err:  registry.ErrNoReleaseManualFlushPreparer,
+			want: true,
+		},
+		{
+			name: "streaming on shutdown",
+			err:  streamingstatus.NewOnShutdownError("wal is on shutdown"),
+			want: true,
+		},
+		{
+			name: "generic prepare failure",
+			err:  errors.New("prepare failed"),
+			want: false,
+		},
+		{
+			name: "streaming inner failure",
+			err:  streamingstatus.NewInner("prepare failed"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isReleaseManualFlushPrepareUnavailable(tt.err))
+		})
+	}
 }
 
 func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema,
@@ -1359,7 +1418,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 		CollectionID: suite.collectionID,
 		PartitionIDs: suite.partitionIDs,
 	}
-	indexMeta := suite.node.composeIndexMeta(ctx, mock_segcore.GenTestIndexInfoList(suite.collectionID, schema), schema)
+	indexMeta := segments.ComposeIndexMeta(ctx, mock_segcore.GenTestIndexInfoList(suite.collectionID, schema), schema)
 	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, indexMeta, LoadMeta)
 
 	// Delegator not found
@@ -1926,7 +1985,7 @@ func (suite *ServiceSuite) TestGetMetric_Failed() {
 	req.Request = "---"
 	resp, err = suite.node.GetMetrics(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 
 	// node unhealthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -2423,10 +2482,12 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	schema.Version = 100
 	req := &querypb.UpdateSchemaRequest{
-		CollectionID: suite.collectionID,
-		Schema:       suite.schema,
-		Version:      uint64(100),
+		CollectionID:    suite.collectionID,
+		Schema:          schema,
+		SchemaBarrierTs: uint64(100),
 	}
 	manager := suite.node.manager.Collection
 	// reset manager to align default teardown logic
@@ -2437,14 +2498,28 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	suite.node.manager.Collection = mockManager
 
 	suite.Run("normal", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(100)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
+
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("passes_barrier_to_collection_manager", func() {
+		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+		schema.Version = 2
+		req := &querypb.UpdateSchemaRequest{
+			CollectionID:    suite.collectionID,
+			Schema:          schema,
+			SchemaBarrierTs: uint64(100),
+		}
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
 	suite.Run("manager_returns_error", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.Error(merr.CheckRPCCall(status, err))

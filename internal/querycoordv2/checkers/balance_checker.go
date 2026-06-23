@@ -254,7 +254,7 @@ func (b *BalanceChecker) constructNormalBalanceQueue(ctx context.Context) *assig
 	// cause segment_checker and channel checker use different assign policy
 	filterServiceableCollections := func(ctx context.Context, cid int64) bool {
 		// Get all channels for this collection from distribution
-		channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(cid)
+		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(cid))
 		if len(channels) == 0 {
 			// No channels in distribution means collection is not ready
 			return false

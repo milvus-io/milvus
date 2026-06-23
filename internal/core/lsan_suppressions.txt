@@ -20,3 +20,11 @@ leak:__cxa_allocate_exception
 #      https://github.com/grpc/grpc/issues/24488
 leak:_GLOBAL__sub_I_audit_logging.cc
 leak:grpc_core::experimental::AuditLoggerRegistry
+
+# libcurl "share" handle: milvus-storage's S3 client initializes a global CURLSH
+# (shared connection/DNS cache) once and intentionally never calls
+# curl_share_cleanup, so it lives for the whole process. In the uninstrumented
+# libmilvus-storage.so this reachable global is reported as a leak at exit.
+# Not a bug.
+leak:curl_share_init
+leak:curl_share_setopt

@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -16,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -117,7 +117,7 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		guards.Unlock()
-		return nil, errors.Wrapf(err, "allocate new id failed")
+		return nil, merr.Wrapf(err, "allocate new id failed")
 	}
 
 	if err := bm.checkClusterRole(ctx); err != nil {
@@ -140,7 +140,7 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
-		return nil, errors.Wrapf(err, "allocate new id failed")
+		return nil, merr.Wrapf(err, "allocate new id failed")
 	}
 
 	startLockInstant := time.Now()

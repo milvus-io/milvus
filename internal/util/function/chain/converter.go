@@ -19,7 +19,6 @@
 package chain
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -46,7 +45,7 @@ func ToArrowType(t schemapb.DataType) (arrow.DataType, error) {
 		return arrow.PrimitiveTypes.Int16, nil
 	case schemapb.DataType_Int32:
 		return arrow.PrimitiveTypes.Int32, nil
-	case schemapb.DataType_Int64:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 		return arrow.PrimitiveTypes.Int64, nil
 	case schemapb.DataType_Float:
 		return arrow.PrimitiveTypes.Float32, nil
@@ -55,7 +54,7 @@ func ToArrowType(t schemapb.DataType) (arrow.DataType, error) {
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return arrow.BinaryTypes.String, nil
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported data type: %s", t.String()))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported data type: %s", t.String())
 	}
 }
 
@@ -79,7 +78,7 @@ func ToMilvusType(t arrow.DataType) (schemapb.DataType, error) {
 	case arrow.STRING:
 		return schemapb.DataType_VarChar, nil
 	default:
-		return schemapb.DataType_None, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported arrow type: %s", t.Name()))
+		return schemapb.DataType_None, merr.WrapErrServiceInternalMsg("unsupported arrow type: %s", t.Name())
 	}
 }
 
@@ -171,7 +170,7 @@ func exportChunkedValues[T any, A valueAccessor[T]](col *arrow.Chunked, colName 
 	for i := 0; i < len(col.Chunks()); i++ {
 		chunk, ok := col.Chunk(i).(A)
 		if !ok {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("column %s chunk %d type mismatch", colName, i))
+			return nil, merr.WrapErrServiceInternalMsg("column %s chunk %d type mismatch", colName, i)
 		}
 		for j := 0; j < chunk.Len(); j++ {
 			data = append(data, chunk.Value(j))
@@ -223,7 +222,7 @@ func exportIntFieldData(col *arrow.Chunked, name string) ([]int32, error) {
 				data = append(data, arr.Value(j))
 			}
 		default:
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("column %s chunk %d type mismatch, expected int type", name, i))
+			return nil, merr.WrapErrServiceInternalMsg("column %s chunk %d type mismatch, expected int type", name, i)
 		}
 	}
 	return data, nil
@@ -268,14 +267,14 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 	// Validate data lengths against totalRows to prevent out-of-bounds panics from malformed input.
 	if ids := resultData.GetIds(); ids != nil && totalRows > 0 {
 		if intIds := ids.GetIntId(); intIds != nil && int64(len(intIds.GetData())) < totalRows {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("ID data length (%d) is less than totalRows (%d)", len(intIds.GetData()), totalRows))
+			return nil, merr.WrapErrServiceInternalMsg("ID data length (%d) is less than totalRows (%d)", len(intIds.GetData()), totalRows)
 		}
 		if strIds := ids.GetStrId(); strIds != nil && int64(len(strIds.GetData())) < totalRows {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("ID data length (%d) is less than totalRows (%d)", len(strIds.GetData()), totalRows))
+			return nil, merr.WrapErrServiceInternalMsg("ID data length (%d) is less than totalRows (%d)", len(strIds.GetData()), totalRows)
 		}
 	}
 	if scores := resultData.GetScores(); len(scores) > 0 && int64(len(scores)) < totalRows {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("scores length (%d) is less than totalRows (%d)", len(scores), totalRows))
+		return nil, merr.WrapErrServiceInternalMsg("scores length (%d) is less than totalRows (%d)", len(scores), totalRows)
 	}
 
 	// Import ID column ($id)
@@ -322,10 +321,10 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 				continue
 			}
 			if seenFieldIDs[fieldID] {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("duplicate field id %d (fieldName=%q)", fieldID, fieldName))
+				return nil, merr.WrapErrServiceInternalMsg("duplicate field id %d (fieldName=%q)", fieldID, fieldName)
 			}
 			if seenFieldNames[fieldName] {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("duplicate field name %q (fieldId=%d conflicts with existing field)", fieldName, fieldID))
+				return nil, merr.WrapErrServiceInternalMsg("duplicate field name %q (fieldId=%d conflicts with existing field)", fieldName, fieldID)
 			}
 			seenFieldIDs[fieldID] = true
 			seenFieldNames[fieldName] = true
@@ -445,7 +444,7 @@ func importFieldData(builder *DataFrameBuilder, fieldData *schemapb.FieldData, o
 
 func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.FieldData, fieldName string, offsets []int64, alloc memory.Allocator) error {
 	if fieldName == "" {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("importFieldData: field_name is empty for field_id %d", fieldData.GetFieldId()))
+		return merr.WrapErrServiceInternalMsg("importFieldData: field_name is empty for field_id %d", fieldData.GetFieldId())
 	}
 
 	totalRows := offsets[len(offsets)-1]
@@ -453,7 +452,7 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 	validData := fieldData.GetValidData()
 	nullable := len(validData) > 0
 	if nullable && int64(len(validData)) < totalRows {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("field %s: validData length (%d) is less than totalRows (%d)", fieldName, len(validData), totalRows))
+		return merr.WrapErrServiceInternalMsg("field %s: validData length (%d) is less than totalRows (%d)", fieldName, len(validData), totalRows)
 	}
 
 	getValidSlice := func(chunkIdx int) []bool {
@@ -466,7 +465,7 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 	// validateLen checks that the extracted data slice has enough elements for totalRows.
 	validateLen := func(dataLen int) error {
 		if int64(dataLen) < totalRows {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("field %s: data length (%d) is less than totalRows (%d)", fieldName, dataLen, totalRows))
+			return merr.WrapErrServiceInternalMsg("field %s: data length (%d) is less than totalRows (%d)", fieldName, dataLen, totalRows)
 		}
 		return nil
 	}
@@ -526,6 +525,16 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 		}
 		chunks = importChunkedBatch(data, offsets, getValidSlice, array.NewInt64Builder, alloc)
 
+	case schemapb.DataType_Timestamptz:
+		data, err := getScalarTimestamptzData(fieldData, fieldName)
+		if err != nil {
+			return err
+		}
+		if err := validateLen(len(data)); err != nil {
+			return err
+		}
+		chunks = importChunkedBatch(data, offsets, getValidSlice, array.NewInt64Builder, alloc)
+
 	case schemapb.DataType_Float:
 		data, err := getScalarFloatData(fieldData, fieldName)
 		if err != nil {
@@ -557,7 +566,7 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 		chunks = importChunkedBatch(data, offsets, getValidSlice, array.NewStringBuilder, alloc)
 
 	default:
-		return merr.WrapErrServiceInternal(fmt.Sprintf("unsupported field type: %s", fieldData.GetType().String()))
+		return merr.WrapErrServiceInternalMsg("unsupported field type: %s", fieldData.GetType().String())
 	}
 
 	builder.SetFieldType(fieldName, fieldData.GetType())
@@ -573,11 +582,11 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 func getScalarBoolData(fieldData *schemapb.FieldData, fieldName string) ([]bool, error) {
 	scalars := fieldData.GetScalars()
 	if scalars == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: scalars is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: scalars is nil", fieldName)
 	}
 	boolData := scalars.GetBoolData()
 	if boolData == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: bool data is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: bool data is nil", fieldName)
 	}
 	return boolData.GetData(), nil
 }
@@ -585,11 +594,11 @@ func getScalarBoolData(fieldData *schemapb.FieldData, fieldName string) ([]bool,
 func getScalarIntData(fieldData *schemapb.FieldData, fieldName string) ([]int32, error) {
 	scalars := fieldData.GetScalars()
 	if scalars == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: scalars is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: scalars is nil", fieldName)
 	}
 	intData := scalars.GetIntData()
 	if intData == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: int data is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: int data is nil", fieldName)
 	}
 	return intData.GetData(), nil
 }
@@ -597,23 +606,35 @@ func getScalarIntData(fieldData *schemapb.FieldData, fieldName string) ([]int32,
 func getScalarLongData(fieldData *schemapb.FieldData, fieldName string) ([]int64, error) {
 	scalars := fieldData.GetScalars()
 	if scalars == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: scalars is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: scalars is nil", fieldName)
 	}
 	longData := scalars.GetLongData()
 	if longData == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: long data is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: long data is nil", fieldName)
 	}
 	return longData.GetData(), nil
+}
+
+func getScalarTimestamptzData(fieldData *schemapb.FieldData, fieldName string) ([]int64, error) {
+	scalars := fieldData.GetScalars()
+	if scalars == nil {
+		return nil, merr.WrapErrServiceInternalMsg("field %s: scalars is nil", fieldName)
+	}
+	timestamptzData := scalars.GetTimestamptzData()
+	if timestamptzData == nil {
+		return nil, merr.WrapErrServiceInternalMsg("field %s: timestamptz data is nil", fieldName)
+	}
+	return timestamptzData.GetData(), nil
 }
 
 func getScalarFloatData(fieldData *schemapb.FieldData, fieldName string) ([]float32, error) {
 	scalars := fieldData.GetScalars()
 	if scalars == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: scalars is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: scalars is nil", fieldName)
 	}
 	floatData := scalars.GetFloatData()
 	if floatData == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: float data is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: float data is nil", fieldName)
 	}
 	return floatData.GetData(), nil
 }
@@ -621,11 +642,11 @@ func getScalarFloatData(fieldData *schemapb.FieldData, fieldName string) ([]floa
 func getScalarDoubleData(fieldData *schemapb.FieldData, fieldName string) ([]float64, error) {
 	scalars := fieldData.GetScalars()
 	if scalars == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: scalars is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: scalars is nil", fieldName)
 	}
 	doubleData := scalars.GetDoubleData()
 	if doubleData == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: double data is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: double data is nil", fieldName)
 	}
 	return doubleData.GetData(), nil
 }
@@ -633,11 +654,11 @@ func getScalarDoubleData(fieldData *schemapb.FieldData, fieldName string) ([]flo
 func getScalarStringData(fieldData *schemapb.FieldData, fieldName string) ([]string, error) {
 	scalars := fieldData.GetScalars()
 	if scalars == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: scalars is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: scalars is nil", fieldName)
 	}
 	stringData := scalars.GetStringData()
 	if stringData == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("field %s: string data is nil", fieldName))
+		return nil, merr.WrapErrServiceInternalMsg("field %s: string data is nil", fieldName)
 	}
 	return stringData.GetData(), nil
 }
@@ -651,6 +672,14 @@ type ExportOptions struct {
 	// GroupByField specifies which column should be exported as GroupByFieldValue
 	// instead of being included in FieldsData. Empty means no group-by column.
 	GroupByField string
+	// GroupByFields specifies columns to export as GroupByFieldValues instead
+	// of FieldsData. It supersedes GroupByField when non-empty.
+	GroupByFields []string
+	// SkipColumns lists column names to omit from FieldsData. Columns with
+	// segment-specific semantics (e.g., $element_indices) are exported by the
+	// caller after this generic conversion; listing them here prevents them
+	// from leaking into FieldsData as if they were schema fields.
+	SkipColumns []string
 }
 
 // ToSearchResultData exports the DataFrame to SearchResultData.
@@ -688,9 +717,22 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 	}
 
 	// Determine which columns to skip or export specially
-	groupByField := ""
+	groupBySet := map[string]struct{}{}
+	var skipSet map[string]struct{}
 	if opts != nil {
-		groupByField = opts.GroupByField
+		if len(opts.GroupByFields) > 0 {
+			for _, name := range opts.GroupByFields {
+				groupBySet[name] = struct{}{}
+			}
+		} else if opts.GroupByField != "" {
+			groupBySet[opts.GroupByField] = struct{}{}
+		}
+		if len(opts.SkipColumns) > 0 {
+			skipSet = make(map[string]struct{}, len(opts.SkipColumns))
+			for _, name := range opts.SkipColumns {
+				skipSet[name] = struct{}{}
+			}
+		}
 	}
 
 	// Export other fields
@@ -698,16 +740,18 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 		if name == types.IDFieldName || name == types.ScoreFieldName || name == GroupScoreFieldName {
 			continue
 		}
+		if _, ok := skipSet[name]; ok {
+			continue
+		}
 
-		// Export group-by column to the plural channel for internal uniformity
-		// with the unified reducer. The task-output boundary downgrades plural
-		// → singular when legacy-wire is in effect.
-		if groupByField != "" && name == groupByField {
+		// Export group-by columns to the plural channel for internal
+		// uniformity with the unified reducer.
+		if _, ok := groupBySet[name]; ok {
 			fieldData, err := exportFieldData(df, name)
 			if err != nil {
 				return nil, err
 			}
-			result.GroupByFieldValues = []*schemapb.FieldData{fieldData}
+			result.GroupByFieldValues = append(result.GroupByFieldValues, fieldData)
 			continue
 		}
 
@@ -725,7 +769,7 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 func exportIDs(df *DataFrame) (*schemapb.IDs, error) {
 	col := df.Column(types.IDFieldName)
 	if col == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportIDs: column %s not found", types.IDFieldName))
+		return nil, merr.WrapErrServiceInternalMsg("exportIDs: column %s not found", types.IDFieldName)
 	}
 	dataType, _ := df.FieldType(types.IDFieldName)
 
@@ -733,7 +777,7 @@ func exportIDs(df *DataFrame) (*schemapb.IDs, error) {
 	case schemapb.DataType_Int64:
 		data, err := exportChunkedValues[int64, *array.Int64](col, types.IDFieldName)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportIDs: %v", err))
+			return nil, merr.WrapErrServiceInternalMsg("exportIDs: %v", err)
 		}
 		return &schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{
@@ -744,7 +788,7 @@ func exportIDs(df *DataFrame) (*schemapb.IDs, error) {
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		data, err := exportChunkedValues[string, *array.String](col, types.IDFieldName)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportIDs: %v", err))
+			return nil, merr.WrapErrServiceInternalMsg("exportIDs: %v", err)
 		}
 		return &schemapb.IDs{
 			IdField: &schemapb.IDs_StrId{
@@ -753,7 +797,7 @@ func exportIDs(df *DataFrame) (*schemapb.IDs, error) {
 		}, nil
 
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportIDs: unsupported ID type: %s", dataType.String()))
+		return nil, merr.WrapErrServiceInternalMsg("exportIDs: unsupported ID type: %s", dataType.String())
 	}
 }
 
@@ -761,12 +805,12 @@ func exportIDs(df *DataFrame) (*schemapb.IDs, error) {
 func exportScores(df *DataFrame) ([]float32, error) {
 	col := df.Column(types.ScoreFieldName)
 	if col == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportScores: column %s not found", types.ScoreFieldName))
+		return nil, merr.WrapErrServiceInternalMsg("exportScores: column %s not found", types.ScoreFieldName)
 	}
 
 	data, err := exportChunkedValues[float32, *array.Float32](col, types.ScoreFieldName)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportScores: %v", err))
+		return nil, merr.WrapErrServiceInternalMsg("exportScores: %v", err)
 	}
 	return data, nil
 }
@@ -775,7 +819,7 @@ func exportScores(df *DataFrame) ([]float32, error) {
 func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 	col := df.Column(name)
 	if col == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportFieldData: column %s not found", name))
+		return nil, merr.WrapErrServiceInternalMsg("exportFieldData: column %s not found", name)
 	}
 
 	dataType, _ := df.FieldType(name)
@@ -823,6 +867,17 @@ func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 			}
 		}
 
+	case schemapb.DataType_Timestamptz:
+		var data []int64
+		data, err = exportChunkedValues[int64, *array.Int64](col, name)
+		if err == nil {
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: data}},
+				},
+			}
+		}
+
 	case schemapb.DataType_Float:
 		var data []float32
 		data, err = exportChunkedValues[float32, *array.Float32](col, name)
@@ -856,12 +911,23 @@ func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 			}
 		}
 
+	case schemapb.DataType_Geometry:
+		var data [][]byte
+		data, err = exportGeometryFieldData(col, name)
+		if err == nil {
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: data}},
+				},
+			}
+		}
+
 	default:
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportFieldData: unsupported type %s for column %s", dataType.String(), name))
+		return nil, merr.WrapErrServiceInternalMsg("exportFieldData: unsupported type %s for column %s", dataType.String(), name)
 	}
 
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("exportFieldData: %v", err))
+		return nil, merr.WrapErrServiceInternalMsg("exportFieldData: %v", err)
 	}
 
 	// Export validity data for nullable fields
@@ -872,6 +938,25 @@ func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 	}
 
 	return fieldData, nil
+}
+
+func exportGeometryFieldData(col *arrow.Chunked, name string) ([][]byte, error) {
+	data := make([][]byte, 0, col.Len())
+	for i := 0; i < len(col.Chunks()); i++ {
+		switch chunk := col.Chunk(i).(type) {
+		case *array.String:
+			for j := 0; j < chunk.Len(); j++ {
+				data = append(data, []byte(chunk.Value(j)))
+			}
+		case *array.Binary:
+			for j := 0; j < chunk.Len(); j++ {
+				data = append(data, append([]byte(nil), chunk.Value(j)...))
+			}
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("column %s chunk %d type mismatch", name, i)
+		}
+	}
+	return data, nil
 }
 
 // maxChunkSize returns the maximum chunk size in the DataFrame.

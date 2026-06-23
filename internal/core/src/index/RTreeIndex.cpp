@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string.h>
+#include "common/FastMem.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
@@ -142,7 +143,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
 
     // 1. Extract and load null_offset file(s) if present
     {
-        auto find_file = [&](const std::string& target) -> auto {
+        auto find_file = [&](const std::string& target) -> auto{
             return std::find_if(
                 files.begin(), files.end(), [&](const std::string& filename) {
                     return GetFileName(filename) == target;
@@ -152,7 +153,8 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
             std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
             null_offset_.resize((size_t)size / sizeof(size_t));
-            memcpy(null_offset_.data(), data, (size_t)size);
+            milvus::fastmem::FastMemcpy(
+                null_offset_.data(), data, (size_t)size);
         };
 
         auto load_priority =
@@ -161,37 +163,45 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                 .value_or(milvus::proto::common::LoadPriority::HIGH);
 
         std::vector<std::string> null_offset_files;
+        bool loaded_null_offsets = false;
         if (auto it = find_file(INDEX_FILE_SLICE_META); it != files.end()) {
             // sliced case: collect all parts with prefix index_null_offset
             null_offset_files.push_back(*it);
             for (auto& f : files) {
                 auto filename = GetFileName(f);
-                static constexpr std::string_view kName = "index_null_offset";
-                if (filename.size() >= kName.size() &&
+                static constexpr std::string_view kName = "index_null_offset_";
+                if (filename.size() > kName.size() &&
                     filename.compare(
                         0, kName.size(), kName.data(), kName.size()) == 0) {
                     null_offset_files.push_back(f);
                 }
             }
-            if (!null_offset_files.empty()) {
+            if (null_offset_files.size() > 1) {
                 auto index_datas = mem_file_manager_->LoadIndexToMemory(
                     null_offset_files, load_priority);
-                auto compacted = CompactIndexDatas(index_datas);
-                auto codecs = std::move(compacted.at("index_null_offset"));
-                for (auto&& codec : codecs.codecs_) {
-                    fill_null_offsets(codec->PayloadData(),
-                                      codec->PayloadSize());
-                }
+                auto slice_meta =
+                    std::move(index_datas.at(INDEX_FILE_SLICE_META));
+                auto codecs = CompactIndexDatasByKey(
+                    "index_null_offset", std::move(slice_meta), index_datas);
+                AssertInfo(codecs.codecs_.size() > 0,
+                           "null offset file is empty");
+                auto codec = AssembleIndexDataCodec(codecs);
+                fill_null_offsets(codec->PayloadData(), codec->PayloadSize());
+                loaded_null_offsets = true;
+            } else {
+                null_offset_files.clear();
             }
-        } else if (auto it = find_file("index_null_offset");
-                   it != files.end()) {
-            null_offset_files.push_back(*it);
-            files.erase(it);
-            auto index_datas = mem_file_manager_->LoadIndexToMemory(
-                {*null_offset_files.begin()}, load_priority);
-            auto null_data = std::move(index_datas.at("index_null_offset"));
-            fill_null_offsets(null_data->PayloadData(),
-                              null_data->PayloadSize());
+        }
+        if (!loaded_null_offsets) {
+            if (auto it = find_file("index_null_offset"); it != files.end()) {
+                null_offset_files.push_back(*it);
+                files.erase(it);
+                auto index_datas = mem_file_manager_->LoadIndexToMemory(
+                    {*null_offset_files.begin()}, load_priority);
+                auto null_data = std::move(index_datas.at("index_null_offset"));
+                fill_null_offsets(null_data->PayloadData(),
+                                  null_data->PayloadSize());
+            }
         }
 
         // remove loaded null_offset files from files list
@@ -389,7 +399,7 @@ RTreeIndex<T>::Serialize(const Config& config) {
     BinarySet res_set;
     if (bytes > 0) {
         std::shared_ptr<uint8_t[]> buf(new uint8_t[bytes]);
-        std::memcpy(buf.get(), null_offset_.data(), bytes);
+        milvus::fastmem::FastMemcpy(buf.get(), null_offset_.data(), bytes);
         res_set.Append("index_null_offset", buf, bytes);
     }
     milvus::Disassemble(res_set);
@@ -692,14 +702,19 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     for (const auto& fn : file_names) {
         pairs.emplace_back(fn, path_ + "/" + fn);
     }
-    reader.ReadEntriesToFiles(pairs);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    reader.ReadEntriesStreamToFiles(
+        pairs, storage::io::GetPriorityFromLoadPriority(load_priority));
 
     if (has_null) {
         auto null_entry = reader.ReadEntry("index_null_offset");
         null_offset_.resize(null_entry.data.size() / sizeof(size_t));
-        std::memcpy(null_offset_.data(),
-                    null_entry.data.data(),
-                    null_entry.data.size());
+        milvus::fastmem::FastMemcpy(null_offset_.data(),
+                                    null_entry.data.data(),
+                                    null_entry.data.size());
     }
 
     // Determine base path (without extension) from local file names,

@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <cstdio>
+#include <cstring>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -37,6 +38,45 @@ class StringIndexBaseTest : public ::testing::Test {
 };
 
 class StringIndexSortTest : public StringIndexBaseTest {};
+
+namespace {
+
+void
+CorruptFirstPostingListRowId(BinarySet& binary_set, uint32_t row_id) {
+    milvus::Assemble(binary_set);
+    auto index_data = binary_set.GetByName("index_data");
+    ASSERT_NE(index_data, nullptr);
+    auto* data = index_data->data.get();
+
+    uint32_t unique_count = 0;
+    std::memcpy(&unique_count, data, sizeof(uint32_t));
+    ASSERT_GT(unique_count, 0);
+
+    auto* string_offsets =
+        reinterpret_cast<const uint32_t*>(data + sizeof(uint32_t));
+    auto string_data_start = sizeof(uint32_t) + unique_count * sizeof(uint32_t);
+    auto last_string_offset = string_offsets[unique_count - 1];
+    uint32_t last_string_len = 0;
+    std::memcpy(&last_string_len,
+                data + string_data_start + last_string_offset,
+                sizeof(uint32_t));
+    auto post_list_offsets_start = string_data_start + last_string_offset +
+                                   sizeof(uint32_t) + last_string_len;
+    auto* post_list_offsets =
+        reinterpret_cast<const uint32_t*>(data + post_list_offsets_start);
+    auto post_list_data_start =
+        post_list_offsets_start + unique_count * sizeof(uint32_t);
+    auto first_posting_list =
+        data + post_list_data_start + post_list_offsets[0];
+
+    uint32_t posting_list_len = 0;
+    std::memcpy(&posting_list_len, first_posting_list, sizeof(uint32_t));
+    ASSERT_GT(posting_list_len, 0);
+    std::memcpy(
+        first_posting_list + sizeof(uint32_t), &row_id, sizeof(uint32_t));
+}
+
+}  // namespace
 
 TEST_F(StringIndexSortTest, ConstructorMemory) {
     Config config;
@@ -248,6 +288,26 @@ TEST_F(StringIndexSortTest, SerializeDeserializeMemory) {
         ASSERT_TRUE(result.has_value());
         ASSERT_EQ(result.value(), strs[i]);
     }
+}
+
+TEST_F(StringIndexSortTest, LoadRejectsOutOfRangePostingListRowId) {
+    std::vector<std::string> values = {"a", "b", "c"};
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(values.size(), values.data());
+
+    auto memory_binary_set = index->Serialize({});
+    CorruptFirstPostingListRowId(memory_binary_set, values.size());
+    auto memory_index = milvus::index::CreateStringIndexSort({});
+    EXPECT_THROW(memory_index->Load(memory_binary_set), std::runtime_error);
+
+    auto mmap_binary_set = index->Serialize({});
+    CorruptFirstPostingListRowId(mmap_binary_set, values.size());
+    Config mmap_config;
+    mmap_config[MMAP_FILE_PATH] =
+        TestLocalPath + "string_index_sort_corrupt_row_id.idx";
+    auto mmap_index = milvus::index::CreateStringIndexSort({});
+    EXPECT_THROW(mmap_index->Load(mmap_binary_set, mmap_config),
+                 std::runtime_error);
 }
 
 TEST_F(StringIndexSortTest, SerializeDeserializeMmap) {

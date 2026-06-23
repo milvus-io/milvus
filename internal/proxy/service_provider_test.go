@@ -39,6 +39,45 @@ func TestNewInterceptor(t *testing.T) {
 	assert.Equal(t, "can't find collection[database=test][collection=test]", resp.Status.Reason)
 }
 
+func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBackfill(t *testing.T) {
+	ctx := context.Background()
+
+	origCache := globalMetaCache
+	defer func() { globalMetaCache = origCache }()
+
+	dbName := "test_db"
+	collectionName := "test_collection"
+	collectionID := int64(1000)
+	schema := &schemapb.CollectionSchema{
+		Name:               collectionName,
+		DoPhysicalBackfill: true,
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      common.StartOfUserFieldID,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	}
+
+	mockCache := &MockCache{}
+	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
+		collID:    collectionID,
+		schema:    newSchemaInfo(schema),
+		shardsNum: common.DefaultShardsNum,
+	}, nil)
+	globalMetaCache = mockCache
+
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{}}
+	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.False(t, resp.GetSchema().GetDoPhysicalBackfill())
+}
+
 func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *testing.T) {
 	ctx := context.Background()
 

@@ -1,0 +1,14 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: test-container-kill-by-pod-list
+  namespace: chaos-testing
+spec:
+  selector:
+    pods:
+      chaos-testing:
+        - milvus-chaos-etcd-0
+  mode: all
+  action: container-kill
+  containerNames:
+    - etcd

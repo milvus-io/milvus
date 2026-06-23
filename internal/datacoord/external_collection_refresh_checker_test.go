@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,16 +39,16 @@ func TestExternalCollectionRefreshChecker_NewChecker(t *testing.T) {
 	catalog := &stubCatalog{}
 
 	// Mock catalog methods
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, refreshMeta, closeChan, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, refreshMeta, closeChan, nil, nil, nil, nil, nil)
 	assert.NotNil(t, checker)
 }
 
@@ -60,14 +62,14 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -81,14 +83,14 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFailed},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -102,14 +104,14 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -126,16 +128,16 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 50},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -155,16 +157,16 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -184,16 +186,16 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 30, FailReason: "connection timeout"},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -213,16 +215,16 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 60},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -244,14 +246,14 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, StartTime: 0},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -267,14 +269,14 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, StartTime: now},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -296,18 +298,18 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
-		mockSaveTask := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).Return(nil).Build()
+		mockSaveTask := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(nil).Build()
 		defer mockSaveTask.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -357,11 +359,11 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 		}
 		jobs := []*datapb.ExternalCollectionRefreshJob{committedJob}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -369,7 +371,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		var failedCalls []int64
 		onFailed := func(jobID int64) { failedCalls = append(failedCalls, jobID) }
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, onFailed, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, onFailed, nil, nil)
 
 		// Feed tryTimeoutJob the STALE InProgress snapshot, not the
 		// committed Finished entry.
@@ -396,11 +398,11 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 			{JobId: 99, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, StartTime: oldStartTime},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -408,7 +410,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		var failedCalls []int64
 		onFailed := func(jobID int64) { failedCalls = append(failedCalls, jobID) }
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, onFailed, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, onFailed, nil, nil)
 
 		job := meta.GetJob(99)
 		checker.tryTimeoutJob(job)
@@ -428,14 +430,14 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -450,14 +452,14 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, EndTime: 0},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -476,16 +478,16 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, EndTime: oldEndTime},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockDropJob := mockey.Mock(mockey.GetMethod(catalog, "DropExternalCollectionRefreshJob")).Return(nil).Build()
+		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockDropJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -507,18 +509,18 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockDropTask := mockey.Mock(mockey.GetMethod(catalog, "DropExternalCollectionRefreshTask")).Return(nil).Build()
+		mockDropTask := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshTask).Return(nil).Build()
 		defer mockDropTask.UnPatch()
-		mockDropJob := mockey.Mock(mockey.GetMethod(catalog, "DropExternalCollectionRefreshJob")).Return(nil).Build()
+		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockDropJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -537,14 +539,14 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, EndTime: recentEndTime},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -560,16 +562,16 @@ func TestExternalCollectionRefreshChecker_Run(t *testing.T) {
 
 	catalog := &stubCatalog{}
 
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, refreshMeta, closeChan, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, refreshMeta, closeChan, nil, nil, nil, nil, nil)
 
 	// Run checker in goroutine and close immediately to test the run loop
 	done := make(chan struct{})
@@ -602,18 +604,18 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_UpdateStateFailed(t 
 		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 50},
 	}
 
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	// Mock save to fail
-	mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save failed")).Build()
+	mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save failed")).Build()
 	defer mockSaveJob.UnPatch()
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.aggregateJobState(job)
@@ -634,16 +636,16 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FailedWithProgressUp
 		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 30, FailReason: "worker error"},
 	}
 
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 	defer mockListTasks.UnPatch()
-	mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+	mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 	defer mockSaveJob.UnPatch()
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.aggregateJobState(job)
@@ -652,6 +654,126 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FailedWithProgressUp
 	updatedJob := meta.GetJob(1)
 	assert.Equal(t, indexpb.JobState_JobStateFailed, updatedJob.GetState())
 	assert.Equal(t, "worker error", updatedJob.GetFailReason())
+}
+
+func TestExternalCollectionRefreshChecker_AggregateJobState_FinishedApplyOnce(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
+		{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100, ResultReady: true},
+	}
+
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+	mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
+	defer mockSaveJob.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	applyStarted := make(chan struct{})
+	applyRelease := make(chan struct{})
+	var applyCalls atomic.Int32
+	applyJobInfo := func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+		if applyCalls.Add(1) == 1 {
+			close(applyStarted)
+		}
+		<-applyRelease
+		return nil
+	}
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, applyJobInfo, nil, nil, nil)
+
+	firstJob := meta.GetJob(1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		checker.aggregateJobState(firstJob)
+	}()
+
+	select {
+	case <-applyStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first apply did not start")
+	}
+
+	secondJob := meta.GetJob(1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		checker.aggregateJobState(secondJob)
+	}()
+
+	assert.Never(t, func() bool {
+		return applyCalls.Load() > 1
+	}, 50*time.Millisecond, 5*time.Millisecond)
+
+	close(applyRelease)
+	wg.Wait()
+
+	assert.Equal(t, int32(1), applyCalls.Load())
+	assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(1).GetState())
+}
+
+func TestExternalCollectionRefreshChecker_AggregateJobState_ClearsTaskResultsAfterFinishedPersisted(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{
+			TaskId:          1001,
+			JobId:           1,
+			State:           indexpb.JobState_JobStateFinished,
+			Progress:        100,
+			ResultReady:     true,
+			KeptSegments:    []int64{1},
+			UpdatedSegments: []*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
+		},
+		{
+			TaskId:          1002,
+			JobId:           1,
+			State:           indexpb.JobState_JobStateFinished,
+			Progress:        100,
+			ResultReady:     true,
+			UpdatedSegments: []*datapb.SegmentInfo{{ID: 20, CollectionID: 100, NumOfRows: 8}},
+		},
+	}
+
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+	mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
+	defer mockSaveJob.UnPatch()
+	mockSaveTask := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(nil).Build()
+	defer mockSaveTask.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+		return nil
+	}, nil, nil, nil)
+
+	checker.aggregateJobState(meta.GetJob(1))
+
+	assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(1).GetState())
+	task1 := meta.GetTask(1001)
+	assert.Empty(t, task1.GetKeptSegments())
+	assert.Empty(t, task1.GetUpdatedSegments())
+	task2 := meta.GetTask(1002)
+	assert.Empty(t, task2.GetKeptSegments())
+	assert.Empty(t, task2.GetUpdatedSegments())
 }
 
 func TestExternalCollectionRefreshChecker_TryTimeoutJob_UpdateStateFailed(t *testing.T) {
@@ -666,18 +788,18 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob_UpdateStateFailed(t *tes
 		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, StartTime: oldStartTime},
 	}
 
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	// Mock save to fail
-	mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save failed")).Build()
+	mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save failed")).Build()
 	defer mockSaveJob.UnPatch()
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.tryTimeoutJob(job)
@@ -698,18 +820,18 @@ func TestExternalCollectionRefreshChecker_CheckGC_DropJobFailed(t *testing.T) {
 		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, EndTime: oldEndTime},
 	}
 
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	// Mock drop to fail
-	mockDropJob := mockey.Mock(mockey.GetMethod(catalog, "DropExternalCollectionRefreshJob")).Return(errors.New("drop failed")).Build()
+	mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(errors.New("drop failed")).Build()
 	defer mockDropJob.UnPatch()
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.checkGC(job)
@@ -725,14 +847,14 @@ func TestExternalCollectionRefreshChecker_LogJobStats(t *testing.T) {
 	t.Run("empty_jobs", func(t *testing.T) {
 		catalog := &stubCatalog{}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		// Should not panic on empty jobs
 		checker.logJobStats(map[int64]*datapb.ExternalCollectionRefreshJob{})
@@ -741,14 +863,14 @@ func TestExternalCollectionRefreshChecker_LogJobStats(t *testing.T) {
 	t.Run("multiple_states", func(t *testing.T) {
 		catalog := &stubCatalog{}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		jobs := map[int64]*datapb.ExternalCollectionRefreshJob{
 			1: {JobId: 1, State: indexpb.JobState_JobStateInit},
@@ -775,11 +897,11 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -791,7 +913,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 			callbackCalled = true
 			callbackJob = job
 		}
-		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil, nil)
 
 		// Drive a full processing pass: aggregateJobState transitions the
 		// job to Finished, then ensureJobFinishedNotified fires the callback.
@@ -816,11 +938,11 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 30, FailReason: "worker error"},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -830,7 +952,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 		onFinished := func(_ context.Context, _ *datapb.ExternalCollectionRefreshJob) {
 			callbackCalled = true
 		}
-		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil, nil)
 
 		checker.processJobs()
 
@@ -851,11 +973,11 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 60},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -865,7 +987,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 		onFinished := func(_ context.Context, _ *datapb.ExternalCollectionRefreshJob) {
 			callbackCalled = true
 		}
-		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil, nil)
 
 		checker.processJobs()
 
@@ -882,18 +1004,18 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
 
 		// nil onJobFinished - should not panic
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 		assert.NotPanics(t, func() {
 			checker.processJobs()
@@ -916,11 +1038,11 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 			{TaskId: 1001, JobId: 42, State: indexpb.JobState_JobStateFailed, Progress: 40, FailReason: "boom"},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -930,7 +1052,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 		onFailed := func(jobID int64) {
 			failedJobs = append(failedJobs, jobID)
 		}
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, onFailed, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, onFailed, nil, nil)
 
 		checker.processJobs()
 
@@ -947,11 +1069,11 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 			{TaskId: 1001, JobId: 43, State: indexpb.JobState_JobStateFinished, Progress: 100},
 		}
 
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
-		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(nil).Build()
 		defer mockSaveJob.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -959,7 +1081,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 
 		failedCalled := false
 		onFailed := func(_ int64) { failedCalled = true }
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, onFailed, nil, nil)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, onFailed, nil, nil)
 
 		checker.processJobs()
 
@@ -974,14 +1096,14 @@ func TestExternalCollectionRefreshChecker_RunGracefulShutdown(t *testing.T) {
 	ctx := context.Background()
 	catalog := &stubCatalog{}
 
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 	done := make(chan struct{})
 	go func() {
@@ -1016,18 +1138,18 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_ProgressOnlyUpdateFa
 		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 50},
 	}
 
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	// Save succeeds for job state queries, but we'll mock UpdateJobProgress to fail
-	mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("progress save failed")).Build()
+	mockSaveJob := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("progress save failed")).Build()
 	defer mockSaveJob.UnPatch()
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.aggregateJobState(job)
@@ -1051,9 +1173,9 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 42, CollectionId: 100, State: indexpb.JobState_JobStateInit, TaskIds: nil},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -1061,7 +1183,7 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 
 		var gotJobID int64
 		onInit := func(jobID int64) { gotJobID = jobID }
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, onInit)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, onInit)
 
 		checker.processJob(meta.GetJob(42))
 		assert.Equal(t, int64(42), gotJobID, "onInitJobPending should be called for Init job without tasks")
@@ -1075,9 +1197,9 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 43, State: indexpb.JobState_JobStateInit},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -1085,7 +1207,7 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 
 		called := false
 		onInit := func(jobID int64) { called = true }
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, onInit)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, onInit)
 
 		checker.processJob(meta.GetJob(43))
 		assert.False(t, called, "onInitJobPending must not fire once tasks exist")
@@ -1096,9 +1218,9 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 44, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: nil},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -1106,7 +1228,7 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 
 		called := false
 		onInit := func(jobID int64) { called = true }
-		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, onInit)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil, onInit)
 
 		checker.processJob(meta.GetJob(44))
 		assert.False(t, called, "onInitJobPending must only fire for Init state")

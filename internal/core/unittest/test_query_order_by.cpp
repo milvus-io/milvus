@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <set>
 #include "test_utils/DataGen.h"
 #include "segcore/SegmentSealed.h"
@@ -17,7 +18,10 @@
 #include "plan/PlanNodeIdGenerator.h"
 #include "test_utils/storage_test_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "exec/QueryContext.h"
 #include "common/Consts.h"
+#include "common/FieldData.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 
@@ -100,8 +104,49 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
         return retrieve_plan;
     }
 
-    // Helper: build MvccNode -> ProjectNode -> OrderByNode chain
-    // Projects specified fields + SegmentOffsetFieldID, sorts by sort_field
+    RowVectorPtr
+    runProjectOnlyPlan(const std::vector<FieldId>& field_ids,
+                       const std::vector<std::string>& field_names,
+                       const std::vector<DataType>& field_types) {
+        std::vector<PlanNodePtr> sources;
+        PlanNodePtr mvcc_node =
+            std::make_shared<MvccNode>(GetNextPlanNodeId(), sources);
+        sources = {mvcc_node};
+        PlanNodePtr project_node =
+            std::make_shared<ProjectNode>(GetNextPlanNodeId(),
+                                          std::vector<FieldId>(field_ids),
+                                          std::vector<std::string>(field_names),
+                                          std::vector<DataType>(field_types),
+                                          sources);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            "test_project_node",
+            segment_.get(),
+            num_rows_,
+            MAX_TIMESTAMP,
+            0,
+            0,
+            query::PlanOptions{false},
+            std::make_shared<milvus::exec::QueryConfig>(
+                std::unordered_map<std::string, std::string>{}));
+        milvus::OpContext op_context;
+        query_context->set_op_context(&op_context);
+        auto plan_fragment = plan::PlanFragment(project_node);
+        return milvus::query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment,
+                                                               query_context);
+    }
+
+    ColumnVectorPtr
+    createInt64FieldDataColumn(const std::vector<int64_t>& data,
+                               TargetBitmap&& valid,
+                               size_t null_count) {
+        FixedVector<int64_t> values(data.size());
+        std::copy(data.begin(), data.end(), values.begin());
+        auto field_data = std::make_shared<FieldData<int64_t>>(
+            DataType::INT64, false, std::move(values));
+        return std::make_shared<ColumnVector>(
+            std::move(field_data), std::move(valid), null_count);
+    }
+
     PlanNodePtr
     buildOrderByPlan(const std::string& sort_field_name,
                      const std::vector<std::string>& project_field_names,
@@ -172,6 +217,49 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
 INSTANTIATE_TEST_SUITE_P(QueryOrderBySuite,
                          QueryOrderByTest,
                          ::testing::Values(true, false));
+
+TEST_P(QueryOrderByTest, ProjectNodeSegmentOffsetColumnAppendsAfterProjection) {
+    auto output = runProjectOnlyPlan(
+        {SegmentOffsetFieldID}, {"__segment_offset__"}, {DataType::INT64});
+    ASSERT_NE(output, nullptr);
+    ASSERT_EQ(output->size(), num_rows_);
+
+    auto col = std::dynamic_pointer_cast<ColumnVector>(output->child(0));
+    ASSERT_NE(col, nullptr);
+    ASSERT_EQ(col->size(), num_rows_);
+    for (int64_t i = 0; i < num_rows_; ++i) {
+        EXPECT_EQ(col->ValueAt<int64_t>(i), i);
+    }
+
+    auto other =
+        createInt64FieldDataColumn({num_rows_}, TargetBitmap(1, true), 0);
+    ASSERT_NO_THROW(col->append(*other));
+    EXPECT_EQ(col->size(), num_rows_ + 1);
+    EXPECT_EQ(col->ValueAt<int64_t>(num_rows_), num_rows_);
+}
+
+TEST_P(QueryOrderByTest,
+       ProjectNodeMissingFieldAllNullColumnAppendsAfterProjection) {
+    auto missing_field_id = FieldId(1000000);
+    auto output = runProjectOnlyPlan(
+        {missing_field_id}, {"missing_int64"}, {DataType::INT64});
+    ASSERT_NE(output, nullptr);
+    ASSERT_EQ(output->size(), num_rows_);
+
+    auto col = std::dynamic_pointer_cast<ColumnVector>(output->child(0));
+    ASSERT_NE(col, nullptr);
+    ASSERT_EQ(col->size(), num_rows_);
+    ASSERT_EQ(col->nullCount(), num_rows_);
+    for (int64_t i = 0; i < num_rows_; ++i) {
+        EXPECT_FALSE(col->ValidAt(i));
+    }
+
+    auto other = createInt64FieldDataColumn({0}, TargetBitmap(1, false), 1);
+    ASSERT_NO_THROW(col->append(*other));
+    EXPECT_EQ(col->size(), num_rows_ + 1);
+    EXPECT_EQ(col->nullCount(), num_rows_ + 1);
+    EXPECT_FALSE(col->ValidAt(num_rows_));
+}
 
 TEST_P(QueryOrderByTest, OrderBySingleInt64Asc) {
     auto nullable = GetParam();

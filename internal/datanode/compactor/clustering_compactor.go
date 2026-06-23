@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -587,7 +586,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	if err != nil {
 		return err
 	}
-	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
@@ -616,37 +615,26 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return merr.WrapErrIllegalCompactionPlan()
 	}
 
-	var rr storage.RecordReader
-	if segment.GetManifest() != "" {
-		rr, err = storage.NewManifestRecordReader(ctx,
-			segment.GetManifest(),
-			t.plan.Schema,
-			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-				return t.binlogIO.Download(ctx, paths)
-			}),
-			storage.WithCollectionID(t.GetCollection()),
-			storage.WithVersion(segment.StorageVersion),
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		)
-	} else {
-		rr, err = storage.NewBinlogRecordReader(ctx,
-			segment.GetFieldBinlogs(),
-			t.plan.Schema,
-			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-				return t.binlogIO.Download(ctx, paths)
-			}),
-			storage.WithCollectionID(t.GetCollection()),
-			storage.WithVersion(segment.StorageVersion),
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		)
-	}
-
+	rr, existingFields, err := newCompactionSegmentRecordReader(ctx, segment, t.plan.Schema, t.compactionParams.StorageConfig,
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return t.binlogIO.Download(ctx, paths)
+		}),
+		storage.WithCollectionID(t.GetCollection()),
+		storage.WithVersion(segment.StorageVersion),
+		storage.WithBufferSize(t.bufferSize),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
 	}
+	materializer, err := NewRecordMaterializer(t.plan.Schema, t.plan.Schema.GetFunctions(), existingFields)
+	if err != nil {
+		rr.Close()
+		log.Warn("new record materializer wrong", zap.Error(err))
+		return err
+	}
+	rr = newMaterializedRecordReader(rr, materializer)
 	defer rr.Close()
 
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
@@ -674,7 +662,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
 				log.Warn("convert interface to map wrong")
-				return errors.New("unexpected error")
+				return merr.WrapErrServiceInternalMsg("unexpected error")
 			}
 			expireTs := int64(-1)
 			if hasTTLField {
@@ -686,6 +674,12 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp), expireTs) {
 				continue
+			}
+
+			// Normalize import segment timestamps: overwrite to commit_ts
+			// so the output segment becomes a normal segment (commit_ts = 0).
+			if commitTs := segment.GetCommitTimestamp(); commitTs != 0 {
+				v.Timestamp = int64(commitTs)
 			}
 
 			clusteringKey := row[t.clusteringKeyField.FieldID]
@@ -916,9 +910,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
 
-	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
-	binlogs := make([]*datapb.FieldBinlog, 0)
-
+	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	requiredFields := typeutil.NewSet[int64]()
 	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
 	if t.ttlFieldID >= common.StartOfUserFieldID {
@@ -927,49 +919,20 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	selectedFields := lo.Filter(t.plan.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
 		return requiredFields.Contain(field.GetFieldID())
 	})
+	readSchema := proto.Clone(t.plan.GetSchema()).(*schemapb.CollectionSchema)
+	readSchema.Fields = selectedFields
+	readSchema.StructArrayFields = nil
 
-	switch segment.GetStorageVersion() {
-	case storage.StorageV1:
-		for _, fieldBinlog := range segment.GetFieldBinlogs() {
-			if requiredFields.Contain(fieldBinlog.GetFieldID()) {
-				binlogs = append(binlogs, fieldBinlog)
-			}
-		}
-	case storage.StorageV2, storage.StorageV3:
-		binlogs = segment.GetFieldBinlogs()
-	default:
-		log.Warn("unsupported storage version", zap.Int64("storage version", segment.GetStorageVersion()))
-		return nil, fmt.Errorf("unsupported storage version %d", segment.GetStorageVersion())
-	}
-	var rr storage.RecordReader
-	var err error
-	if segment.GetManifest() != "" {
-		rr, err = storage.NewManifestRecordReader(ctx,
-			segment.GetManifest(),
-			t.plan.GetSchema(),
-			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-				return t.binlogIO.Download(ctx, paths)
-			}),
-			storage.WithVersion(segment.StorageVersion),
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithNeededFields(requiredFields),
-			storage.WithCollectionID(t.GetCollection()),
-		)
-	} else {
-		rr, err = storage.NewBinlogRecordReader(ctx,
-			binlogs,
-			t.plan.GetSchema(),
-			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-				return t.binlogIO.Download(ctx, paths)
-			}),
-			storage.WithVersion(segment.StorageVersion),
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithNeededFields(requiredFields),
-			storage.WithCollectionID(t.GetCollection()),
-		)
-	}
+	rr, _, err := newCompactionSegmentRecordReader(ctx, segment, readSchema, t.compactionParams.StorageConfig,
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return t.binlogIO.Download(ctx, paths)
+		}),
+		storage.WithVersion(segment.StorageVersion),
+		storage.WithBufferSize(t.bufferSize),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithNeededFields(requiredFields),
+		storage.WithCollectionID(t.GetCollection()),
+	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return make(map[interface{}]int64), err
@@ -1012,7 +975,7 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 		// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
 		if !ok {
-			return nil, 0, errors.New("unexpected error")
+			return nil, 0, merr.WrapErrServiceInternalMsg("unexpected error")
 		}
 
 		expireTs := int64(-1)

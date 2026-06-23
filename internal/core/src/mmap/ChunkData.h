@@ -16,6 +16,7 @@
 #pragma once
 
 #include "common/Array.h"
+#include "common/FastMem.h"
 #include "common/VectorTrait.h"
 #include "common/Utils.h"
 #include "storage/MmapManager.h"
@@ -34,7 +35,8 @@ struct FixedLengthChunk {
         auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
         data_ = (Type*)(mcm->Allocate(mmap_descriptor_, sizeof(Type) * size));
         AssertInfo(data_ != nullptr,
-                   "failed to create a mmapchunk: {}, map_size");
+                   "failed to create a mmapchunk, map_size={}",
+                   sizeof(Type) * size);
     };
     void*
     data() {
@@ -124,7 +126,7 @@ VariableLengthChunk<std::string>::set(
             data_[i + begin] = std::string_view("");
         } else {
             char* data_ptr = buf + offset;
-            std::memcpy(data_ptr, src[i].data(), src[i].size());
+            milvus::fastmem::FastMemcpy(data_ptr, src[i].data(), src[i].size());
             data_[i + begin] = std::string_view(data_ptr, src[i].size());
         }
         offset += data_size;
@@ -156,7 +158,8 @@ VariableLengthChunk<knowhere::sparse::SparseRow<SparseValueType>>::set(
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].data_byte_size();
         uint8_t* data_ptr = buf + offset;
-        std::memcpy(data_ptr, (uint8_t*)src[i].data(), data_size);
+        milvus::fastmem::FastMemcpy(
+            data_ptr, (uint8_t*)src[i].data(), data_size);
         data_[i + begin] = knowhere::sparse::SparseRow<SparseValueType>(
             src[i].size(), data_ptr, false);
         offset += data_size;
@@ -239,13 +242,13 @@ VariableLengthChunk<Array>::set(
             uint32_t* target_offsets_ptr = nullptr;
             if (IsVariableDataType(element_type)) {
                 target_offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
-                std::copy(src_offsets_ptr,
-                          src_offsets_ptr + length,
-                          target_offsets_ptr);
+                milvus::fastmem::FastMemcpy(target_offsets_ptr,
+                                            src_offsets_ptr,
+                                            length * sizeof(uint32_t));
                 data_ptr += length * sizeof(uint32_t);
             }
             auto data_size = src[i].byte_size();
-            std::copy(src[i].data(), src[i].data() + data_size, data_ptr);
+            milvus::fastmem::FastMemcpy(data_ptr, src[i].data(), data_size);
             data_[i + begin] = ArrayView(
                 data_ptr, length, data_size, element_type, target_offsets_ptr);
             data_ptr += data_size;

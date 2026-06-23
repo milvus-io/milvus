@@ -31,9 +31,12 @@ import (
 )
 
 type segDistCriterion struct {
+	// Callers should not combine multiple node-scoped filters in one query.
 	nodes          []int64
 	collectionID   int64
 	channel        string
+	segmentID      int64
+	hasSegmentID   bool
 	hasOtherFilter bool
 }
 
@@ -85,10 +88,19 @@ func WithNodeID(nodeID int64) SegmentDistFilter {
 	return NodeSegDistFilter(nodeID)
 }
 
+type SegmentIDSegDistFilter int64
+
+func (f SegmentIDSegDistFilter) Match(s *Segment) bool {
+	return s.GetID() == int64(f)
+}
+
+func (f SegmentIDSegDistFilter) AddFilter(filter *segDistCriterion) {
+	filter.segmentID = int64(f)
+	filter.hasSegmentID = true
+}
+
 func WithSegmentID(segmentID int64) SegmentDistFilter {
-	return SegmentDistFilterFunc(func(s *Segment) bool {
-		return s.GetID() == segmentID
-	})
+	return SegmentIDSegDistFilter(segmentID)
 }
 
 type CollectionSegDistFilter int64
@@ -193,11 +205,16 @@ type nodeSegments struct {
 	segments        []*Segment
 	collSegments    map[int64][]*Segment
 	channelSegments map[string][]*Segment
+	segmentSegments map[int64][]*Segment
 }
 
 func (s nodeSegments) Filter(criterion *segDistCriterion, filter func(*Segment) bool) []*Segment {
 	var segments []*Segment
+	needFilter := criterion.hasOtherFilter
 	switch {
+	case criterion.hasSegmentID:
+		segments = s.segmentSegments[criterion.segmentID]
+		needFilter = needFilter || criterion.collectionID != 0 || criterion.channel != ""
 	case criterion.channel != "":
 		segments = s.channelSegments[criterion.channel]
 	case criterion.collectionID != 0:
@@ -205,7 +222,7 @@ func (s nodeSegments) Filter(criterion *segDistCriterion, filter func(*Segment) 
 	default:
 		segments = s.segments
 	}
-	if criterion.hasOtherFilter {
+	if needFilter {
 		segments = lo.Filter(segments, func(segment *Segment, _ int) bool {
 			return filter(segment)
 		})
@@ -218,6 +235,7 @@ func composeNodeSegments(segments []*Segment) nodeSegments {
 		segments:        segments,
 		collSegments:    lo.GroupBy(segments, func(segment *Segment) int64 { return segment.GetCollectionID() }),
 		channelSegments: lo.GroupBy(segments, func(segment *Segment) string { return segment.GetInsertChannel() }),
+		segmentSegments: lo.GroupBy(segments, func(segment *Segment) int64 { return segment.GetID() }),
 	}
 }
 
@@ -264,17 +282,15 @@ func (m *SegmentDistManager) GetByFilter(filters ...SegmentDistFilter) []*Segmen
 		return true
 	}
 
-	var candidates []nodeSegments
+	var ret []*Segment
 	if criterion.nodes != nil {
-		candidates = lo.Map(criterion.nodes, func(nodeID int64, _ int) nodeSegments {
-			return m.segments[nodeID]
-		})
-	} else {
-		candidates = lo.Values(m.segments)
+		for _, nodeID := range criterion.nodes {
+			ret = append(ret, m.segments[nodeID].Filter(criterion, mergedFilters)...)
+		}
+		return ret
 	}
 
-	var ret []*Segment
-	for _, nodeSegments := range candidates {
+	for _, nodeSegments := range m.segments {
 		ret = append(ret, nodeSegments.Filter(criterion, mergedFilters)...)
 	}
 	return ret

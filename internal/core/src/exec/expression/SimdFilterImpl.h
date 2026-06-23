@@ -25,6 +25,7 @@
 #pragma once
 
 #include <algorithm>
+#include "common/FastMem.h"
 #include <cstring>
 #include <vector>
 #include <xsimd/xsimd.hpp>
@@ -98,19 +99,19 @@ filterChunkImpl(
         const int byte_pos = i / 8;
         if constexpr (kStep >= 64) {
             uint64_t word;
-            std::memcpy(&word, bitmap + byte_pos, sizeof(word));
+            milvus::fastmem::FastMemcpy(&word, bitmap + byte_pos, sizeof(word));
             word |= combined;
-            std::memcpy(bitmap + byte_pos, &word, sizeof(word));
+            milvus::fastmem::FastMemcpy(bitmap + byte_pos, &word, sizeof(word));
         } else if constexpr (kStep >= 32) {
             uint32_t word;
-            std::memcpy(&word, bitmap + byte_pos, sizeof(word));
+            milvus::fastmem::FastMemcpy(&word, bitmap + byte_pos, sizeof(word));
             word |= static_cast<uint32_t>(combined);
-            std::memcpy(bitmap + byte_pos, &word, sizeof(word));
+            milvus::fastmem::FastMemcpy(bitmap + byte_pos, &word, sizeof(word));
         } else if constexpr (kStep >= 16) {
             uint16_t word;
-            std::memcpy(&word, bitmap + byte_pos, sizeof(word));
+            milvus::fastmem::FastMemcpy(&word, bitmap + byte_pos, sizeof(word));
             word |= static_cast<uint16_t>(combined);
-            std::memcpy(bitmap + byte_pos, &word, sizeof(word));
+            milvus::fastmem::FastMemcpy(bitmap + byte_pos, &word, sizeof(word));
         } else {
             bitmap[byte_pos] |= static_cast<uint8_t>(combined);
         }
@@ -129,14 +130,18 @@ filterChunkImpl(
                 const int byte_pos = i / 8;
                 if constexpr (kLanes >= 32) {
                     uint32_t word;
-                    std::memcpy(&word, bitmap + byte_pos, sizeof(word));
+                    milvus::fastmem::FastMemcpy(
+                        &word, bitmap + byte_pos, sizeof(word));
                     word |= static_cast<uint32_t>(mask);
-                    std::memcpy(bitmap + byte_pos, &word, sizeof(word));
+                    milvus::fastmem::FastMemcpy(
+                        bitmap + byte_pos, &word, sizeof(word));
                 } else if constexpr (kLanes >= 16) {
                     uint16_t word;
-                    std::memcpy(&word, bitmap + byte_pos, sizeof(word));
+                    milvus::fastmem::FastMemcpy(
+                        &word, bitmap + byte_pos, sizeof(word));
                     word |= static_cast<uint16_t>(mask);
-                    std::memcpy(bitmap + byte_pos, &word, sizeof(word));
+                    milvus::fastmem::FastMemcpy(
+                        bitmap + byte_pos, &word, sizeof(word));
                 } else if constexpr (kLanes >= 8) {
                     bitmap[byte_pos] |= static_cast<uint8_t>(mask);
                 } else {

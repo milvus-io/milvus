@@ -296,8 +296,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"float vector index does not support metric type: {metric_type}: "
-            f"invalid parameter[expected=valid index params][actual=invalid index params",
+            ct.err_msg: "float vector index does not support metric type",
         }
         self.create_collection(
             client,
@@ -937,8 +936,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                 nullable=True,
                 is_cluster_key=True,
             )
-            # Wait for previous schema bump's backfill segment-version propagation tick.
-            self.add_collection_field_wait_schema_version_consistency(
+            self.add_collection_field(
                 client,
                 collection_name,
                 field_name="field_new_var",
@@ -1121,7 +1119,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         )
 
         # not support search on null vector with is null or is not null filter
-        error = {ct.err_code: 999, ct.err_msg: "error: IsNull/IsNotNull operations are not supported on vector fields"}
+        error = {ct.err_code: 999, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
         self.search(
             client,
             collection_name,
@@ -3050,9 +3048,8 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 5. Load with replica_number=3 (should fail if only 2 querynodes available)
         error = {
-            ct.err_code: 999,
-            ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: "
-            "service resource insufficient[currentStreamingNode=2][expectedStreamingNode=3]",
+            ct.err_code: 65535,
+            ct.err_msg: "when load 3 replica count: service resource insufficient",
         }
         self.load_collection(
             client, collection_name, replica_number=3, check_task=CheckTasks.err_res, check_items=error
@@ -4262,7 +4259,7 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             "aliases": [],
             "consistency_level": 0,
             "consistency_level_name": "Strong",
-            "properties": {"timezone": "UTC"},
+            "properties": {"timezone": "UTC", "max_field_id": "102"},
             "num_partitions": 1,
             "enable_dynamic_field": True,
             "enable_namespace": False,

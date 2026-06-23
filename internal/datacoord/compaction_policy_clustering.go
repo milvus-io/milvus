@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -51,10 +52,6 @@ func (policy *clusteringCompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() &&
 		Params.DataCoordCfg.ClusteringCompactionEnable.GetAsBool() &&
 		Params.DataCoordCfg.ClusteringCompactionAutoEnable.GetAsBool()
-}
-
-func (policy *clusteringCompactionPolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	return nil, nil
 }
 
 func (policy *clusteringCompactionPolicy) Name() string {
@@ -191,18 +188,6 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			}
 		}
 
-		// Intentionally check internal consistency (all segments share the same schema version)
-		// rather than requiring segments to match the collection schema version.
-		// Clustering before backfill is more efficient: merging N segments first reduces
-		// N separate backfill tasks to 1 backfill task on the merged result.
-		if !policy.checkGroupSchemaVersionInternallyConsistent(group) {
-			log.Debug("segments in group have inconsistent schema versions, skip clustering compaction for this group",
-				zap.Int64("collectionID", group.collectionID),
-				zap.Int64("partitionID", group.partitionID),
-				zap.String("channel", group.channelName))
-			continue
-		}
-
 		segmentViews := GetViewsByInfo(group.segments...)
 		view := &ClusteringSegmentsView{
 			label:              segmentViews[0].label,
@@ -216,19 +201,6 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 
 	log.Info("finish trigger collection clustering compaction", zap.Int("viewNum", len(views)))
 	return views, newTriggerID, nil
-}
-
-func (policy *clusteringCompactionPolicy) checkGroupSchemaVersionInternallyConsistent(group *chanPartSegments) bool {
-	if len(group.segments) == 0 {
-		return true
-	}
-	firstSchemaVersion := group.segments[0].GetSchemaVersion()
-	for _, segment := range group.segments {
-		if segment.GetSchemaVersion() != firstSchemaVersion {
-			return false
-		}
-	}
-	return true
 }
 
 func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(collectionID UniqueID) (bool, int64) {
@@ -270,7 +242,7 @@ func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionVi
 
 func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int64) (int64, error) {
 	if expectedSegmentSize <= 0 {
-		return 0, fmt.Errorf("invalid expected segment size %d", expectedSegmentSize)
+		return 0, merr.WrapErrServiceInternalMsg("invalid expected segment size %d", expectedSegmentSize)
 	}
 
 	var totalSize float64
@@ -287,17 +259,17 @@ func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int6
 	}
 
 	if totalRows == 0 || totalSize == 0 {
-		return 0, fmt.Errorf("segment view does not contain size info to estimate row count")
+		return 0, merr.WrapErrServiceInternalMsg("segment view does not contain size info to estimate row count")
 	}
 
 	rowSize := totalSize / float64(totalRows)
 	if rowSize <= 0 {
-		return 0, fmt.Errorf("invalid row size calculated from segment view")
+		return 0, merr.WrapErrServiceInternalMsg("invalid row size calculated from segment view")
 	}
 
 	rows := float64(expectedSegmentSize) / rowSize
 	if rows <= 0 {
-		return 0, fmt.Errorf("estimated max row count is not positive")
+		return 0, merr.WrapErrServiceInternalMsg("estimated max row count is not positive")
 	}
 
 	return int64(rows), nil
@@ -356,9 +328,6 @@ func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collecti
 
 var _ CompactionView = (*ClusteringSegmentsView)(nil)
 
-// IsInlineExecutable returns false: clustering compaction is real compaction work.
-func (v *ClusteringSegmentsView) IsInlineExecutable() bool { return false }
-
 type ClusteringSegmentsView struct {
 	label              *CompactionGroupLabel
 	segments           []*SegmentView
@@ -379,6 +348,20 @@ func (v *ClusteringSegmentsView) GetSegmentsView() []*SegmentView {
 		return nil
 	}
 	return v.segments
+}
+
+func (v *ClusteringSegmentsView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return sumSegmentSize(v.segments)
+}
+
+func (v *ClusteringSegmentsView) GetCollectionTTL() time.Duration {
+	if v == nil {
+		return 0
+	}
+	return v.collectionTTL
 }
 
 func (v *ClusteringSegmentsView) Append(segments ...*SegmentView) {

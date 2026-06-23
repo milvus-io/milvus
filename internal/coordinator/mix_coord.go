@@ -491,6 +491,10 @@ func (s *mixCoordImpl) CreatePartition(ctx context.Context, req *milvuspb.Create
 	return s.rootcoordServer.CreatePartition(ctx, req)
 }
 
+func (s *mixCoordImpl) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	return s.rootcoordServer.CreatePartitionV2(ctx, req)
+}
+
 func (s *mixCoordImpl) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.DropPartition(ctx, req)
 }
@@ -571,6 +575,10 @@ func (c *mixCoordImpl) AddCollectionField(ctx context.Context, in *milvuspb.AddC
 	return c.rootcoordServer.AddCollectionField(ctx, in)
 }
 
+func (c *mixCoordImpl) AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	return c.rootcoordServer.AddCollectionStructField(ctx, in)
+}
+
 func (s *mixCoordImpl) CreateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error) {
 	return s.rootcoordServer.CreateCredential(ctx, req)
 }
@@ -593,6 +601,10 @@ func (s *mixCoordImpl) ListCredUsers(ctx context.Context, req *milvuspb.ListCred
 
 func (s *mixCoordImpl) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.CreateRole(ctx, req)
+}
+
+func (s *mixCoordImpl) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.AlterRole(ctx, req)
 }
 
 func (s *mixCoordImpl) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
@@ -1203,6 +1215,18 @@ func (s *mixCoordImpl) ListImports(ctx context.Context, req *internalpb.ListImpo
 	return s.datacoordServer.ListImports(ctx, req)
 }
 
+func (s *mixCoordImpl) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.CommitImport(ctx, req)
+}
+
+func (s *mixCoordImpl) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.AbortImport(ctx, req)
+}
+
+func (s *mixCoordImpl) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.HandleCommitVchannel(ctx, req)
+}
+
 func (s *mixCoordImpl) ListIndexes(ctx context.Context, req *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
 	return s.datacoordServer.ListIndexes(ctx, req)
 }
@@ -1238,6 +1262,52 @@ func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 
 func (s *mixCoordImpl) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	return s.queryCoordServer.ComputePhraseMatchSlop(ctx, req)
+}
+
+func (s *mixCoordImpl) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	resp := &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	var errs []error
+	proxyResp, err := s.rootcoordServer.ClearReadTaskQueue(ctx, req)
+	if err != nil {
+		errs = append(errs, err)
+	} else if proxyResp != nil {
+		resp.Results = append(resp.Results, proxyResp.GetResults()...)
+		resp.ProxyQueuedCleared += proxyResp.GetProxyQueuedCleared()
+		if !merr.Ok(proxyResp.GetStatus()) {
+			errs = append(errs, merr.Error(proxyResp.GetStatus()))
+		}
+	}
+
+	queryNodeResp, err := s.queryCoordServer.ClearReadTaskQueue(ctx, req)
+	if err != nil {
+		errs = append(errs, err)
+	} else if queryNodeResp != nil {
+		resp.Results = append(resp.Results, queryNodeResp.GetResults()...)
+		resp.QuerynodeQueuedCleared += queryNodeResp.GetQuerynodeQueuedCleared()
+		resp.QueuedNqCleared += queryNodeResp.GetQueuedNqCleared()
+		if !merr.Ok(queryNodeResp.GetStatus()) {
+			errs = append(errs, merr.Error(queryNodeResp.GetStatus()))
+		}
+	}
+
+	if err := merr.Combine(errs...); err != nil {
+		resp.Status = merr.Status(err)
+	}
+
+	log.Ctx(ctx).Info("cleared cluster read task queues",
+		zap.String("taskType", req.GetTaskType()),
+		zap.String("reason", req.GetReason()),
+		zap.Int64("proxyQueuedCleared", resp.GetProxyQueuedCleared()),
+		zap.Int64("queryNodeQueuedCleared", resp.GetQuerynodeQueuedCleared()),
+		zap.Int64("queuedNQCleared", resp.GetQueuedNqCleared()),
+		zap.Int("results", len(resp.GetResults())),
+		zap.Error(merr.Error(resp.GetStatus())))
+	return resp, nil
 }
 
 func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {

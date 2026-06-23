@@ -272,6 +272,36 @@ func (s *PackedBinlogRecordSuite) TestUnsuportedStorageVersion() {
 	s.Error(err)
 }
 
+func (s *PackedBinlogRecordSuite) TestStorageV1RejectsNullableArrayOfVectorWriter() {
+	s.schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+		{
+			Name:     "struct_array",
+			Nullable: true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:     200,
+					Name:        "embeddings",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					Nullable:    true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+						{Key: common.MaxCapacityKey, Value: "8"},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum,
+		WithVersion(StorageV1),
+		WithUploader(func(context.Context, map[string][]byte) error { return nil }),
+		WithStorageConfig(s.storageConfig),
+	)
+	s.Error(err)
+	s.Contains(err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
+}
+
 func (s *PackedBinlogRecordSuite) TestNoPrimaryKeyError() {
 	s.schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},

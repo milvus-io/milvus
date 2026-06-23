@@ -1,20 +1,19 @@
+# ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
+# fmt: off
 import json
-import numpy as np
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus import (
-    FieldSchema, CollectionSchema, DataType
-)
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
-from base.client_v2_base import TestMilvusClientV2Base
 import random
+
+import numpy as np
 import pytest
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from pymilvus import AnnSearchRequest, CollectionSchema, DataType, FieldSchema, RRFRanker, WeightedRanker
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa: F403
 
 epsilon = 0.001
-
 
 
 @pytest.mark.xdist_group("TestGroupSearch")
@@ -28,6 +27,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
           scalar values constant within each batch for group-by testing
     Index: IVF_FLAT/COSINE, DISKANN/L2, SPARSE_INVERTED_INDEX/IP, BIN_IVF_FLAT/JACCARD
     """
+
     def setup_class(self):
         super().setup_class(self)
         self.collection_name = "TestGroupSearch" + cf.gen_unique_str("group_by")
@@ -37,13 +37,16 @@ class TestGroupSearch(TestMilvusClientV2Base):
         self.bfloat16_vector_field_name = "bfloat16_vector"
         self.sparse_vector_field_name = "sparse_vector"
         self.binary_vector_field_name = "binary_vector"
-        self.vector_fields = [self.float_vector_field_name, self.bfloat16_vector_field_name,
-                              self.sparse_vector_field_name, self.binary_vector_field_name]
+        self.vector_fields = [
+            self.float_vector_field_name,
+            self.bfloat16_vector_field_name,
+            self.sparse_vector_field_name,
+            self.binary_vector_field_name,
+        ]
         self.float_vector_dim = 36
         self.bf16_vector_dim = 35
         self.binary_vector_dim = 32
-        self.dims = [self.float_vector_dim, self.bf16_vector_dim,
-                     128, self.binary_vector_dim]
+        self.dims = [self.float_vector_dim, self.bf16_vector_dim, 128, self.binary_vector_dim]
         self.float_vector_metric = "COSINE"
         self.bf16_vector_metric = "L2"
         self.sparse_vector_metric = "IP"
@@ -52,10 +55,18 @@ class TestGroupSearch(TestMilvusClientV2Base):
         self.bf16_vector_index = "DISKANN"
         self.sparse_vector_index = "SPARSE_INVERTED_INDEX"
         self.binary_vector_index = "BIN_IVF_FLAT"
-        self.index_types = [self.float_vector_index, self.bf16_vector_index,
-                            self.sparse_vector_index, self.binary_vector_index]
-        self.metric_types = [self.float_vector_metric, self.bf16_vector_metric,
-                             self.sparse_vector_metric, self.binary_vector_metric]
+        self.index_types = [
+            self.float_vector_index,
+            self.bf16_vector_index,
+            self.sparse_vector_index,
+            self.binary_vector_index,
+        ]
+        self.metric_types = [
+            self.float_vector_metric,
+            self.bf16_vector_metric,
+            self.sparse_vector_metric,
+            self.binary_vector_metric,
+        ]
         self.inverted_string_field = "varchar_inverted"
         self.indexed_json_field = "indexed_json"
         self.enable_dynamic_field = True
@@ -74,14 +85,20 @@ class TestGroupSearch(TestMilvusClientV2Base):
         fields = []
         fields.append(FieldSchema(name=self.primary_field, dtype=DataType.INT64, is_primary=True, auto_id=True))
         fields.append(
-            FieldSchema(name=self.float_vector_field_name, dtype=DataType.FLOAT_VECTOR, dim=self.float_vector_dim))
+            FieldSchema(
+                name=self.float_vector_field_name,
+                dtype=DataType.FLOAT_VECTOR,
+                dim=self.float_vector_dim,
+                nullable=True,
+            )
+        )
 
         for data_type in ct.all_scalar_data_types:
             fields.append(cf.gen_scalar_field(data_type, name=data_type.name, nullable=True))
 
         collection_schema = CollectionSchema(fields, enable_dynamic_field=self.enable_dynamic_field)
         collection_schema.add_field(self.bfloat16_vector_field_name, DataType.BFLOAT16_VECTOR, dim=self.bf16_vector_dim)
-        collection_schema.add_field(self.sparse_vector_field_name, DataType.SPARSE_FLOAT_VECTOR)
+        collection_schema.add_field(self.sparse_vector_field_name, DataType.SPARSE_FLOAT_VECTOR, nullable=True)
         collection_schema.add_field(self.binary_vector_field_name, DataType.BINARY_VECTOR, dim=self.binary_vector_dim)
 
         collection_schema.add_field(self.inverted_string_field, DataType.VARCHAR, max_length=256, nullable=True)
@@ -112,9 +129,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
             binary_vectors = cf.gen_vectors(nb, dim=self.binary_vector_dim, vector_data_type=DataType.BINARY_VECTOR)
             for i in range(nb):
                 row = {
-                    self.float_vector_field_name: float_vectors[i],
+                    self.float_vector_field_name: None if i % 10 == 9 else float_vectors[i],
                     self.bfloat16_vector_field_name: bf16_vectors[i],
-                    self.sparse_vector_field_name: sparse_vectors[i],
+                    self.sparse_vector_field_name: None if i % 10 == 9 else sparse_vectors[i],
                     self.binary_vector_field_name: binary_vectors[i],
                     DataType.BOOL.name: bool(i % 2) if random.random() < 0.8 else None,
                     DataType.INT8.name: int8_value if random.random() < 0.8 else None,
@@ -154,24 +171,32 @@ class TestGroupSearch(TestMilvusClientV2Base):
 
         # Create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=self.float_vector_field_name,
-                               metric_type=self.float_vector_metric,
-                               index_type=self.float_vector_index,
-                               params={"nlist": 128})
-        index_params.add_index(field_name=self.bfloat16_vector_field_name,
-                               metric_type=self.bf16_vector_metric,
-                               index_type=self.bf16_vector_index,
-                               params={})
-        index_params.add_index(field_name=self.sparse_vector_field_name,
-                               metric_type=self.sparse_vector_metric,
-                               index_type=self.sparse_vector_index,
-                               params={})
-        index_params.add_index(field_name=self.binary_vector_field_name,
-                               metric_type=self.binary_vector_metric,
-                               index_type=self.binary_vector_index,
-                               params={"nlist": 128})
+        index_params.add_index(
+            field_name=self.float_vector_field_name,
+            metric_type=self.float_vector_metric,
+            index_type=self.float_vector_index,
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name=self.bfloat16_vector_field_name,
+            metric_type=self.bf16_vector_metric,
+            index_type=self.bf16_vector_index,
+            params={},
+        )
+        index_params.add_index(
+            field_name=self.sparse_vector_field_name,
+            metric_type=self.sparse_vector_metric,
+            index_type=self.sparse_vector_index,
+            params={},
+        )
+        index_params.add_index(
+            field_name=self.binary_vector_field_name,
+            metric_type=self.binary_vector_metric,
+            index_type=self.binary_vector_index,
+            params={"nlist": 128},
+        )
         index_params.add_index(field_name=self.inverted_string_field, index_type="INVERTED")
-        index_params.add_index(field_name=self.indexed_json_field, index_type="INVERTED", json_cast_type='json')
+        index_params.add_index(field_name=self.indexed_json_field, index_type="INVERTED", json_cast_type="json")
         self.create_index(client, self.collection_name, index_params=index_params)
         self.wait_for_index_ready(client, self.collection_name, index_name=self.float_vector_field_name)
         self.wait_for_index_ready(client, self.collection_name, index_name=self.bfloat16_vector_field_name)
@@ -185,15 +210,18 @@ class TestGroupSearch(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("group_by_field, output_field", [
-        (DataType.VARCHAR.name, DataType.VARCHAR.name),
-        ("varchar_inverted", "varchar_inverted"),
-        (DataType.JSON.name, DataType.JSON.name),
-        ("indexed_json", "indexed_json"),
-        (f"{DataType.JSON.name}['number']", DataType.JSON.name),
-        ("dyna_field_name1", "dyna_field_name1"),
-        ("dyna_field_name2['string']", "dyna_field_name2"),
-    ])
+    @pytest.mark.parametrize(
+        "group_by_field, output_field",
+        [
+            (DataType.VARCHAR.name, DataType.VARCHAR.name),
+            ("varchar_inverted", "varchar_inverted"),
+            (DataType.JSON.name, DataType.JSON.name),
+            ("indexed_json", "indexed_json"),
+            (f"{DataType.JSON.name}['number']", DataType.JSON.name),
+            ("dyna_field_name1", "dyna_field_name1"),
+            ("dyna_field_name2['string']", "dyna_field_name2"),
+        ],
+    )
     def test_search_group_size(self, group_by_field, output_field):
         """
         target:
@@ -209,16 +237,24 @@ class TestGroupSearch(TestMilvusClientV2Base):
         for field, dim, idx_type, metric in zip(self.vector_fields, self.dims, self.index_types, self.metric_types):
             if field == self.binary_vector_field_name:
                 continue
-            search_vectors = cf.gen_vectors(nq, dim=dim,
-                                            vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                              field))
+            search_vectors = cf.gen_vectors(
+                nq, dim=dim, vector_data_type=cf.get_field_dtype_by_field_name(collection_info, field)
+            )
             search_params = {"params": cf.get_search_params_params(idx_type), "metric_type": metric}
             # when strict_group_size=true, it shall return results with entities = limit * group_size
-            res1 = self.search(client, self.collection_name, data=search_vectors, anns_field=field,
-                               search_params=search_params, limit=limit,
-                               group_by_field=group_by_field, filter=f"{output_field} is not null",
-                               group_size=group_size, strict_group_size=True,
-                               output_fields=[output_field])[0]
+            res1 = self.search(
+                client,
+                self.collection_name,
+                data=search_vectors,
+                anns_field=field,
+                search_params=search_params,
+                limit=limit,
+                group_by_field=group_by_field,
+                filter=f"{output_field} is not null",
+                group_size=group_size,
+                strict_group_size=True,
+                output_fields=[output_field],
+            )[0]
             for i in range(nq):
                 assert len(res1[i]) == limit * group_size
                 for idx in range(limit):
@@ -230,13 +266,19 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     assert len(set(group_values)) == 1
 
             # when strict_group_size=false, it shall return results with group counts = limit
-            res1 = self.search(client, self.collection_name,
-                               data=search_vectors,
-                               anns_field=field,
-                               search_params=search_params, limit=limit,
-                               group_by_field=group_by_field, filter=f"{output_field} is not null",
-                               group_size=group_size, strict_group_size=False,
-                               output_fields=[output_field])[0]
+            res1 = self.search(
+                client,
+                self.collection_name,
+                data=search_vectors,
+                anns_field=field,
+                search_params=search_params,
+                limit=limit,
+                group_by_field=group_by_field,
+                filter=f"{output_field} is not null",
+                group_size=group_size,
+                strict_group_size=False,
+                output_fields=[output_field],
+            )[0]
             for i in range(nq):
                 group_values = []
                 for idx in range(len(res1[i])):
@@ -261,23 +303,32 @@ class TestGroupSearch(TestMilvusClientV2Base):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
             search_params = {
-                "data": cf.gen_vectors(nq, dim=dim,
-                                       vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                         field)),
+                "data": cf.gen_vectors(
+                    nq, dim=dim, vector_data_type=cf.get_field_dtype_by_field_name(collection_info, field)
+                ),
                 "anns_field": field,
                 "param": {"params": cf.get_search_params_params(idx_type), "metric_type": metric},
                 "limit": limit,
-                "expr": f"{self.primary_field} > 0"}
+                "expr": f"{self.primary_field} > 0",
+            }
             req = AnnSearchRequest(**search_params)
             req_list.append(req)
         # 4. hybrid search group by
-        #rank_scorers = ["max", "avg", "sum"]
+        # rank_scorers = ["max", "avg", "sum"]
         rank_scorers = ["max"]
         for scorer in rank_scorers:
-            res = self.hybrid_search(client, self.collection_name, reqs=req_list, ranker=WeightedRanker(0.1, 0.3, 0.6),
-                                     limit=limit, group_by_field=DataType.VARCHAR.name, group_size=group_size,
-                                     rank_group_scorer=scorer, output_fields=[DataType.VARCHAR.name],
-                                     pipeline_trace=True)[0]
+            res = self.hybrid_search(
+                client,
+                self.collection_name,
+                reqs=req_list,
+                ranker=WeightedRanker(0.1, 0.3, 0.6),
+                limit=limit,
+                group_by_field=DataType.VARCHAR.name,
+                group_size=group_size,
+                rank_group_scorer=scorer,
+                output_fields=[DataType.VARCHAR.name],
+                pipeline_trace=True,
+            )[0]
             for i in range(nq):
                 group_values = []
                 for idx in range(len(res[i])):
@@ -293,9 +344,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     if curr_group_value == next_group_value:
                         group_distances.append(res[i][idx + 1].distance)
                     else:
-                        if scorer == 'sum':
+                        if scorer == "sum":
                             assert np.sum(group_distances) <= np.sum(tmp_distances)
-                        elif scorer == 'avg':
+                        elif scorer == "avg":
                             assert np.mean(group_distances) <= np.mean(tmp_distances)
                         else:  # default max
                             assert np.max(group_distances) <= np.max(tmp_distances)
@@ -316,21 +367,28 @@ class TestGroupSearch(TestMilvusClientV2Base):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
             search_param = {
-                "data": cf.gen_vectors(ct.default_nq, dim=dim,
-                                       vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                         field)),
+                "data": cf.gen_vectors(
+                    ct.default_nq, dim=dim, vector_data_type=cf.get_field_dtype_by_field_name(collection_info, field)
+                ),
                 "anns_field": field,
                 "param": {"metric_type": metric},
                 "limit": ct.default_limit,
-                "expr": f"{self.primary_field} > 0"}
+                "expr": f"{self.primary_field} > 0",
+            }
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
         # 4. hybrid search group by
-        res = self.hybrid_search(client, self.collection_name, reqs=req_list, ranker=WeightedRanker(0.1, 0.9, 0.3),
-                                 limit=ct.default_limit, group_by_field=DataType.VARCHAR.name,
-                                 output_fields=[DataType.VARCHAR.name],
-                                 check_task=CheckTasks.check_search_results,
-                                 check_items={"nq": ct.default_nq, "limit": ct.default_limit})[0]
+        res = self.hybrid_search(
+            client,
+            self.collection_name,
+            reqs=req_list,
+            ranker=WeightedRanker(0.1, 0.9, 0.3),
+            limit=ct.default_limit,
+            group_by_field=DataType.VARCHAR.name,
+            output_fields=[DataType.VARCHAR.name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+        )[0]
         for i in range(ct.default_nq):
             group_values = []
             for idx in range(ct.default_limit):
@@ -339,24 +397,118 @@ class TestGroupSearch(TestMilvusClientV2Base):
 
         # 5. hybrid search with RRFRanker on one vector field with group by
         req_list = []
-        for field, dim, idx_type, metric in zip(self.vector_fields[1:], self.dims[1:], self.index_types[1:], self.metric_types[1:]):
+        for field, dim, idx_type, metric in zip(
+            self.vector_fields[1:], self.dims[1:], self.index_types[1:], self.metric_types[1:]
+        ):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
             search_param = {
-                "data": cf.gen_vectors(ct.default_nq, dim=dim,
-                                       vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                         field)),
+                "data": cf.gen_vectors(
+                    ct.default_nq, dim=dim, vector_data_type=cf.get_field_dtype_by_field_name(collection_info, field)
+                ),
                 "anns_field": field,
                 "param": {"metric_type": metric},
                 "limit": ct.default_limit,
-                "expr": f"{self.primary_field} > 0"}
+                "expr": f"{self.primary_field} > 0",
+            }
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
-            self.hybrid_search(client, self.collection_name, reqs=req_list, ranker=RRFRanker(),
-                               limit=ct.default_limit, group_by_field=self.inverted_string_field,
-                               output_fields=[self.inverted_string_field],
-                               check_task=CheckTasks.check_search_results,
-                               check_items={"nq": ct.default_nq, "limit": ct.default_limit})
+            self.hybrid_search(
+                client,
+                self.collection_name,
+                reqs=req_list,
+                ranker=RRFRanker(),
+                limit=ct.default_limit,
+                group_by_field=self.inverted_string_field,
+                output_fields=[self.inverted_string_field],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_search_group_by_same_group_across_sub_requests(self):
+        """
+        target: reproduce hybrid search group-by with the same group value returned by different sub requests
+        method: create two vector fields; make each sub request prefer a different row with the same problem_id
+        expected: group_size=1 returns at most one hit per problem_id after weighted rerank
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 4
+        group_by_field = "problem_id"
+        vector_field_1 = "arcs_vector"
+        vector_field_2 = "description_vector"
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(self.primary_field, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(group_by_field, DataType.VARCHAR, max_length=64)
+        schema.add_field(vector_field_1, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(vector_field_2, DataType.FLOAT_VECTOR, dim=dim)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=vector_field_1, index_type="FLAT", metric_type="COSINE", params={})
+        index_params.add_index(field_name=vector_field_2, index_type="FLAT", metric_type="COSINE", params={})
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        rows = [
+            {
+                self.primary_field: 1,
+                group_by_field: "p1",
+                vector_field_1: [1.0, 0.0, 0.0, 0.0],
+                vector_field_2: [0.0, 1.0, 0.0, 0.0],
+            },
+            {
+                self.primary_field: 2,
+                group_by_field: "p1",
+                vector_field_1: [0.0, 1.0, 0.0, 0.0],
+                vector_field_2: [1.0, 0.0, 0.0, 0.0],
+            },
+            {
+                self.primary_field: 3,
+                group_by_field: "p2",
+                vector_field_1: [0.0, 0.0, 1.0, 0.0],
+                vector_field_2: [0.0, 0.0, 1.0, 0.0],
+            },
+            {
+                self.primary_field: 4,
+                group_by_field: "p3",
+                vector_field_1: [0.0, 0.0, 0.0, 1.0],
+                vector_field_2: [0.0, 0.0, 0.0, 1.0],
+            },
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        query_vector = [[1.0, 0.0, 0.0, 0.0]]
+        req_1 = AnnSearchRequest(
+            data=query_vector,
+            anns_field=vector_field_1,
+            param={"metric_type": "COSINE"},
+            limit=4,
+        )
+        req_2 = AnnSearchRequest(
+            data=query_vector,
+            anns_field=vector_field_2,
+            param={"metric_type": "COSINE"},
+            limit=4,
+        )
+        res = self.hybrid_search(
+            client,
+            collection_name,
+            reqs=[req_1, req_2],
+            ranker=WeightedRanker(0.5, 0.5),
+            limit=4,
+            group_by_field=group_by_field,
+            group_size=1,
+            strict_group_size=True,
+            output_fields=[group_by_field],
+            consistency_level="Strong",
+        )[0]
+
+        group_values = [hit.get(group_by_field) for hit in res[0]]
+        log.info(f"hybrid group-by results: ids={[hit.get(self.primary_field) for hit in res[0]]}, groups={group_values}")
+        assert len(group_values) == len(set(group_values)), f"duplicated group values in hybrid search: {group_values}"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_group_by_empty_results(self):
@@ -371,21 +523,28 @@ class TestGroupSearch(TestMilvusClientV2Base):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
             search_param = {
-                "data": cf.gen_vectors(ct.default_nq, dim=dim,
-                                       vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                         field)),
+                "data": cf.gen_vectors(
+                    ct.default_nq, dim=dim, vector_data_type=cf.get_field_dtype_by_field_name(collection_info, field)
+                ),
                 "anns_field": field,
                 "param": {"metric_type": metric},
                 "limit": ct.default_limit,
-                "expr": f"{self.primary_field} < 0"}  # make sure return empty results
+                "expr": f"{self.primary_field} < 0",
+            }  # make sure return empty results
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
         # 4. hybrid search group by empty results
-        self.hybrid_search(client, self.collection_name, reqs=req_list, ranker=WeightedRanker(0.1, 0.9, 0.3),
-                           limit=ct.default_limit, group_by_field=DataType.VARCHAR.name,
-                           output_fields=[DataType.VARCHAR.name],
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"nq": ct.default_nq, "limit": 0})
+        self.hybrid_search(
+            client,
+            self.collection_name,
+            reqs=req_list,
+            ranker=WeightedRanker(0.1, 0.9, 0.3),
+            limit=ct.default_limit,
+            group_by_field=DataType.VARCHAR.name,
+            output_fields=[DataType.VARCHAR.name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq, "limit": 0},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_group_by_supported_binary_vector(self):
@@ -393,21 +552,28 @@ class TestGroupSearch(TestMilvusClientV2Base):
         verify search group by works with supported binary vector
         """
         client = self._client()
-        search_vectors = cf.gen_vectors(1, dim=self.binary_vector_dim,
-                                        vector_data_type=DataType.BINARY_VECTOR)
+        search_vectors = cf.gen_vectors(1, dim=self.binary_vector_dim, vector_data_type=DataType.BINARY_VECTOR)
         search_params = {"metric_type": self.binary_vector_metric}
         limit = 1
-        error = {ct.err_code: 999,
-                 ct.err_msg: "not support search_group_by operation based on binary vector"}
-        self.search(client, self.collection_name, data=search_vectors, anns_field=self.binary_vector_field_name,
-                    search_params=search_params, limit=limit, group_by_field=DataType.VARCHAR.name,
-                    output_fields=[DataType.VARCHAR.name],
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "not support search_group_by operation based on binary vector"}
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=self.binary_vector_field_name,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=DataType.VARCHAR.name,
+            output_fields=[DataType.VARCHAR.name],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("support_field", [DataType.INT8.name, DataType.INT64.name,
-                                               DataType.BOOL.name, DataType.VARCHAR.name,
-                                               DataType.TIMESTAMPTZ.name])
+    @pytest.mark.parametrize(
+        "support_field",
+        [DataType.INT8.name, DataType.INT64.name, DataType.BOOL.name, DataType.VARCHAR.name, DataType.TIMESTAMPTZ.name],
+    )
     def test_search_group_by_supported_scalars(self, support_field):
         """
         verify search group by works with supported scalar fields
@@ -419,15 +585,21 @@ class TestGroupSearch(TestMilvusClientV2Base):
         for field, dim, idx_type, metric in zip(self.vector_fields, self.dims, self.index_types, self.metric_types):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
-            search_vectors = cf.gen_vectors(nq, dim=dim,
-                                            vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                              field))
+            search_vectors = cf.gen_vectors(
+                nq, dim=dim, vector_data_type=cf.get_field_dtype_by_field_name(collection_info, field)
+            )
             search_params = {"params": cf.get_search_params_params(idx_type), "metric_type": metric}
-            res1 = self.search(client, self.collection_name, data=search_vectors, anns_field=field,
-                               search_params=search_params, limit=limit,
-                               filter=f"{support_field} is not null",
-                               group_by_field=support_field,
-                               output_fields=[support_field])[0]
+            res1 = self.search(
+                client,
+                self.collection_name,
+                data=search_vectors,
+                anns_field=field,
+                search_params=search_params,
+                limit=limit,
+                filter=f"{support_field} is not null",
+                group_by_field=support_field,
+                output_fields=[support_field],
+            )[0]
             for i in range(nq):
                 grpby_values = []
                 mismatch = 0
@@ -445,17 +617,25 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     if support_field == DataType.TIMESTAMPTZ.name:
                         filter_expr = f"{support_field}== ISO '{top1_grpby_value}'"
                     grpby_values.append(top1_grpby_value)
-                    res_tmp = self.search(client, self.collection_name, data=[search_vectors[i]],
-                                          anns_field=field,
-                                          search_params=search_params, limit=1, filter=filter_expr,
-                                          output_fields=[support_field])[0]
+                    res_tmp = self.search(
+                        client,
+                        self.collection_name,
+                        data=[search_vectors[i]],
+                        anns_field=field,
+                        search_params=search_params,
+                        limit=1,
+                        filter=filter_expr,
+                        output_fields=[support_field],
+                    )[0]
                     top1_expr_pk = res_tmp[0][0].id
                     if top1_grpby_pk != top1_expr_pk:
                         mismatch += 1
                         log.info(
-                            f"{support_field} on {field} mismatch_item, top1_grpby_dis: {top1.distance}, top1_expr_dis: {res_tmp[0][0].distance}")
+                            f"{support_field} on {field} mismatch_item, top1_grpby_dis: {top1.distance}, top1_expr_dis: {res_tmp[0][0].distance}"
+                        )
                 log.info(
-                    f"{support_field} on {field}  top1_mismatch_num: {mismatch}, results_num: {results_num}, mismatch_rate: {mismatch / results_num}")
+                    f"{support_field} on {field}  top1_mismatch_num: {mismatch}, results_num: {results_num}, mismatch_rate: {mismatch / results_num}"
+                )
                 baseline = 1 if support_field == DataType.BOOL.name else 0.2  # skip baseline check for boolean
                 assert results_num > 0, "results_num should be greater than 0"
                 assert mismatch / results_num <= baseline
@@ -463,9 +643,10 @@ class TestGroupSearch(TestMilvusClientV2Base):
                 assert len(grpby_values) == len(set(grpby_values))
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("grpby_unsupported_field", [DataType.FLOAT.name, DataType.DOUBLE.name,
-                                                         DataType.GEOMETRY.name,
-                                                         ct.default_float_vec_field_name])
+    @pytest.mark.parametrize(
+        "grpby_unsupported_field",
+        [DataType.FLOAT.name, DataType.DOUBLE.name, DataType.GEOMETRY.name, ct.default_float_vec_field_name],
+    )
     def test_search_group_by_unsupported_field(self, grpby_unsupported_field):
         """
         target: test search group by with the unsupported field
@@ -475,19 +656,24 @@ class TestGroupSearch(TestMilvusClientV2Base):
                 verify: the error code and msg
         """
         client = self._client()
-        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim,
-                                        vector_data_type=DataType.FLOAT_VECTOR)
+        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
         limit = 1
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"unsupported data type {grpby_unsupported_field} for group by operator"}
+        error = {ct.err_code: 999, ct.err_msg: f"unsupported data type {grpby_unsupported_field} for group by operator"}
         if grpby_unsupported_field == ct.default_float_vec_field_name:
-            error = {ct.err_code: 999,
-                     ct.err_msg: f"unsupported data type VECTOR_FLOAT for group by operator"}
-        self.search(client, self.collection_name, data=search_vectors, anns_field=self.float_vector_field_name,
-                    search_params=search_params, limit=limit, group_by_field=grpby_unsupported_field,
-                    output_fields=[grpby_unsupported_field],
-                    check_task=CheckTasks.err_res, check_items=error)
+            error = {ct.err_code: 999, ct.err_msg: "unsupported data type VECTOR_FLOAT for group by operator"}
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=grpby_unsupported_field,
+            output_fields=[grpby_unsupported_field],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_pagination_group_by(self):
@@ -502,32 +688,47 @@ class TestGroupSearch(TestMilvusClientV2Base):
         default_search_exp = f"{self.primary_field} >= 0"
         grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
-        search_vectors = cf.gen_vectors(1, dim=self.dims[1],
-                                        vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                          self.vector_fields[1]))
+        search_vectors = cf.gen_vectors(
+            1,
+            dim=self.dims[1],
+            vector_data_type=cf.get_field_dtype_by_field_name(collection_info, self.vector_fields[1]),
+        )
         all_pages_ids = []
         all_pages_grpby_field_values = []
         for r in range(page_rounds):
-            page_res = self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
-                                   search_params=search_param, limit=limit, offset=limit * r,
-                                   filter=default_search_exp, group_by_field=grpby_field,
-                                   output_fields=[grpby_field],
-                                   check_task=CheckTasks.check_search_results,
-                                   check_items={"nq": 1, "limit": limit},
-                                   )[0]
+            page_res = self.search(
+                client,
+                self.collection_name,
+                data=search_vectors,
+                anns_field=default_search_field,
+                search_params=search_param,
+                limit=limit,
+                offset=limit * r,
+                filter=default_search_exp,
+                group_by_field=grpby_field,
+                output_fields=[grpby_field],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": limit},
+            )[0]
             for j in range(limit):
                 all_pages_grpby_field_values.append(page_res[0][j].get(grpby_field))
             all_pages_ids += page_res[0].ids
         hit_rate = round(len(set(all_pages_grpby_field_values)) / len(all_pages_grpby_field_values), 3)
         assert hit_rate >= 0.8
 
-        total_res = self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
-                                search_params=search_param, limit=limit * page_rounds,
-                                filter=default_search_exp, group_by_field=grpby_field,
-                                output_fields=[grpby_field],
-                                check_task=CheckTasks.check_search_results,
-                                check_items={"nq": 1, "limit": limit * page_rounds}
-                                )[0]
+        total_res = self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=default_search_field,
+            search_params=search_param,
+            limit=limit * page_rounds,
+            filter=default_search_exp,
+            group_by_field=grpby_field,
+            output_fields=[grpby_field],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": limit * page_rounds},
+        )[0]
         hit_num = len(set(total_res[0].ids).intersection(set(all_pages_ids)))
         hit_rate = round(hit_num / (limit * page_rounds), 3)
         assert hit_rate >= 0.8
@@ -553,9 +754,11 @@ class TestGroupSearch(TestMilvusClientV2Base):
         grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
         ids_to_search = None
-        search_vectors = cf.gen_vectors(1, dim=self.dims[1],
-                                        vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                          self.vector_fields[1]))
+        search_vectors = cf.gen_vectors(
+            1,
+            dim=self.dims[1],
+            vector_data_type=cf.get_field_dtype_by_field_name(collection_info, self.vector_fields[1]),
+        )
         if search_by_pk is True:
             query_res = self.query(client, self.collection_name, limit=1, output_fields=[self.primary_field])[0]
             ids_to_search = [query_res[0].get(self.primary_field)]
@@ -564,42 +767,53 @@ class TestGroupSearch(TestMilvusClientV2Base):
         all_pages_grpby_field_values = []
         res_count = limit * group_size
         for r in range(page_rounds):
-            page_res = self.search(client, self.collection_name,
-                                   data=search_vectors,
-                                   ids=ids_to_search,
-                                   anns_field=default_search_field,
-                                   search_params=search_param, limit=limit, offset=limit * r,
-                                   filter=default_search_exp,
-                                   group_by_field=grpby_field, group_size=group_size,
-                                   strict_group_size=True,
-                                   output_fields=[grpby_field],
-                                   check_task=CheckTasks.check_search_results,
-                                   check_items={"nq": 1, "limit": res_count},
-                                   )[0]
+            page_res = self.search(
+                client,
+                self.collection_name,
+                data=search_vectors,
+                ids=ids_to_search,
+                anns_field=default_search_field,
+                search_params=search_param,
+                limit=limit,
+                offset=limit * r,
+                filter=default_search_exp,
+                group_by_field=grpby_field,
+                group_size=group_size,
+                strict_group_size=True,
+                output_fields=[grpby_field],
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": res_count},
+            )[0]
             for j in range(res_count):
                 all_pages_grpby_field_values.append(page_res[0][j].get(grpby_field))
             all_pages_ids += page_res[0].ids
 
         hit_rate = round(len(set(all_pages_grpby_field_values)) / len(all_pages_grpby_field_values), 3)
         expect_hit_rate = round(1 / group_size, 3) * 0.7
-        log.info(f"expect_hit_rate :{expect_hit_rate}, hit_rate:{hit_rate}, "
-                 f"unique_group_by_value_count:{len(set(all_pages_grpby_field_values))},"
-                 f"total_group_by_value_count:{len(all_pages_grpby_field_values)}")
+        log.info(
+            f"expect_hit_rate :{expect_hit_rate}, hit_rate:{hit_rate}, "
+            f"unique_group_by_value_count:{len(set(all_pages_grpby_field_values))},"
+            f"total_group_by_value_count:{len(all_pages_grpby_field_values)}"
+        )
         assert hit_rate >= expect_hit_rate
 
         total_count = limit * group_size * page_rounds
-        total_res = self.search(client, self.collection_name,
-                                data=search_vectors,
-                                ids=ids_to_search,
-                                anns_field=default_search_field,
-                                search_params=search_param, limit=limit * page_rounds,
-                                filter=default_search_exp,
-                                group_by_field=grpby_field, group_size=group_size,
-                                strict_group_size=True,
-                                output_fields=[grpby_field],
-                                check_task=CheckTasks.check_search_results,
-                                check_items={"nq": 1, "limit": total_count}
-                                )[0]
+        total_res = self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            ids=ids_to_search,
+            anns_field=default_search_field,
+            search_params=search_param,
+            limit=limit * page_rounds,
+            filter=default_search_exp,
+            group_by_field=grpby_field,
+            group_size=group_size,
+            strict_group_size=True,
+            output_fields=[grpby_field],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": total_count},
+        )[0]
         hit_num = len(set(total_res[0].ids).intersection(set(all_pages_ids)))
         hit_rate = round(hit_num / (limit * page_rounds), 3)
         assert hit_rate >= 0.8
@@ -619,53 +833,92 @@ class TestGroupSearch(TestMilvusClientV2Base):
         collection_info = self.describe_collection(client, self.collection_name)[0]
         group_by_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
-        search_vectors = cf.gen_vectors(1, dim=self.dims[1],
-                                        vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
-                                                                                          self.vector_fields[1]))
+        search_vectors = cf.gen_vectors(
+            1,
+            dim=self.dims[1],
+            vector_data_type=cf.get_field_dtype_by_field_name(collection_info, self.vector_fields[1]),
+        )
         search_params = {"metric_type": self.bf16_vector_metric}
         limit = 10
         max_group_size = 10
-        self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
-                    search_params=search_params, limit=limit,
-                    group_by_field=group_by_field,
-                    group_size=max_group_size, strict_group_size=True,
-                    output_fields=[group_by_field])
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=default_search_field,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=group_by_field,
+            group_size=max_group_size,
+            strict_group_size=True,
+            output_fields=[group_by_field],
+        )
         exceed_max_group_size = max_group_size + 1
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"input group size:{exceed_max_group_size} exceeds configured max "
-                             f"group size:{max_group_size}"}
-        self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
-                    search_params=search_params, limit=limit,
-                    group_by_field=group_by_field,
-                    group_size=exceed_max_group_size, strict_group_size=True,
-                    output_fields=[group_by_field],
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"input group size:{exceed_max_group_size} exceeds configured max group size:{max_group_size}",
+        }
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=default_search_field,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=group_by_field,
+            group_size=exceed_max_group_size,
+            strict_group_size=True,
+            output_fields=[group_by_field],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         min_group_size = 1
-        self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
-                    search_params=search_params, limit=limit,
-                    group_by_field=group_by_field,
-                    group_size=max_group_size, strict_group_size=True,
-                    output_fields=[group_by_field])
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=default_search_field,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=group_by_field,
+            group_size=max_group_size,
+            strict_group_size=True,
+            output_fields=[group_by_field],
+        )
         below_min_group_size = min_group_size - 1
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"input group size:{below_min_group_size} is negative"}
-        self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
-                    search_params=search_params, limit=limit,
-                    group_by_field=group_by_field,
-                    group_size=below_min_group_size, strict_group_size=True,
-                    output_fields=[group_by_field],
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: f"input group size:{below_min_group_size} is negative"}
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=default_search_field,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=group_by_field,
+            group_size=below_min_group_size,
+            strict_group_size=True,
+            output_fields=[group_by_field],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         below_min_group_size = min_group_size - 10
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"input group size:{below_min_group_size} is negative"}
-        self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
-                    search_params=search_params, limit=limit,
-                    group_by_field=group_by_field,
-                    group_size=below_min_group_size, strict_group_size=True,
-                    output_fields=[group_by_field],
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: f"input group size:{below_min_group_size} is negative"}
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=default_search_field,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=group_by_field,
+            group_size=below_min_group_size,
+            strict_group_size=True,
+            output_fields=[group_by_field],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_iterator_not_support_group_by(self):
@@ -678,17 +931,22 @@ class TestGroupSearch(TestMilvusClientV2Base):
                 verify: error code and msg
         """
         client = self._client()
-        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim,
-                                        vector_data_type=DataType.FLOAT_VECTOR)
+        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
         grpby_field = DataType.VARCHAR.name
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "Not allowed to do groupBy when doing iteration"}
-        self.search_iterator(client, self.collection_name, data=search_vectors,
-                             anns_field=self.float_vector_field_name,
-                             search_params=search_params, batch_size=10, limit=100,
-                             group_by_field=grpby_field,
-                             check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: "Not allowed to do groupBy when doing iteration"}
+        self.search_iterator(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            batch_size=10,
+            limit=100,
+            group_by_field=grpby_field,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_not_support_group_by(self):
@@ -700,17 +958,21 @@ class TestGroupSearch(TestMilvusClientV2Base):
                 verify: the error code and msg
         """
         client = self._client()
-        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim,
-                                        vector_data_type=DataType.FLOAT_VECTOR)
+        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         grpby_field = DataType.VARCHAR.name
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "Not allowed to do range-search when doing search-group-by"}
+        error = {ct.err_code: 1100, ct.err_msg: "Not allowed to do range-search when doing search-group-by"}
         range_search_params = {"metric_type": "COSINE", "params": {"radius": 0.1, "range_filter": 0.5}}
-        self.search(client, self.collection_name, data=search_vectors,
-                    anns_field=self.float_vector_field_name,
-                    search_params=range_search_params, limit=5,
-                    group_by_field=grpby_field,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=self.float_vector_field_name,
+            search_params=range_search_params,
+            limit=5,
+            group_by_field=grpby_field,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_group_by_nonexistent_field_on_dynamic_enabled_collection(self):
@@ -722,15 +984,19 @@ class TestGroupSearch(TestMilvusClientV2Base):
         """
         client = self._client()
         nq = 2
-        search_vectors = cf.gen_vectors(nq, dim=self.float_vector_dim,
-                                        vector_data_type=DataType.FLOAT_VECTOR)
+        search_vectors = cf.gen_vectors(nq, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
-        self.search(client, self.collection_name, data=search_vectors,
-                    anns_field=self.float_vector_field_name,
-                    search_params=search_params, limit=100,
-                    group_by_field="nonexist_field",
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": nq, "limit": 1})
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            limit=100,
+            group_by_field="nonexist_field",
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "limit": 1},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_group_by_invalid_field_type(self):
@@ -740,16 +1006,20 @@ class TestGroupSearch(TestMilvusClientV2Base):
         verify: server returns error
         """
         client = self._client()
-        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim,
-                                        vector_data_type=DataType.FLOAT_VECTOR)
+        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "cannot parse identifier"}
-        self.search(client, self.collection_name, data=search_vectors,
-                    anns_field=self.float_vector_field_name,
-                    search_params=search_params, limit=100,
-                    group_by_field=21,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 65535, ct.err_msg: "cannot parse identifier"}
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            limit=100,
+            group_by_field=21,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
 
 @pytest.mark.xdist_group("TestGroupSearchInvalid")
@@ -761,6 +1031,7 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
     Data: 2000 rows
     Index: FLAT/L2, HNSW/COSINE
     """
+
     def setup_class(self):
         super().setup_class(self)
         self.collection_name = "TestGroupSearchInvalid" + cf.gen_unique_str("group_by")
@@ -789,7 +1060,8 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
         fields = []
         fields.append(FieldSchema(name=self.primary_field, dtype=DataType.INT64, is_primary=True, auto_id=True))
         fields.append(
-            FieldSchema(name=self.float_vector_field_name, dtype=DataType.FLOAT_VECTOR, dim=self.float_vector_dim))
+            FieldSchema(name=self.float_vector_field_name, dtype=DataType.FLOAT_VECTOR, dim=self.float_vector_dim)
+        )
 
         for data_type in ct.all_scalar_data_types:
             fields.append(cf.gen_scalar_field(data_type, name=data_type.name, nullable=True))
@@ -811,12 +1083,16 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
 
         # Create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=self.float_vector_field_name,
-                               metric_type=self.float_vector_metric,
-                               index_type=self.float_vector_index)
-        index_params.add_index(field_name=self.int8_vector_field_name,
-                               metric_type=self.int8_vector_metric,
-                               index_type=self.int8_vector_index)
+        index_params.add_index(
+            field_name=self.float_vector_field_name,
+            metric_type=self.float_vector_metric,
+            index_type=self.float_vector_index,
+        )
+        index_params.add_index(
+            field_name=self.int8_vector_field_name,
+            metric_type=self.int8_vector_metric,
+            index_type=self.int8_vector_index,
+        )
         self.create_index(client, self.collection_name, index_params=index_params)
         self.wait_for_index_ready(client, self.collection_name, index_name=self.float_vector_field_name)
         self.wait_for_index_ready(client, self.collection_name, index_name=self.int8_vector_field_name)
@@ -840,17 +1116,21 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         search_params = {"metric_type": self.float_vector_metric}
-        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim,
-                                        vector_data_type=DataType.FLOAT_VECTOR)
+        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         # verify
-        error = {ct.err_code: 1700,
-                 ct.err_msg: f"groupBy field not found in schema"}
-        self.search(client, self.collection_name, data=search_vectors,
-                    anns_field=self.float_vector_field_name,
-                    search_params=search_params, limit=10,
-                    group_by_field=[DataType.VARCHAR.name, DataType.INT32.name],
-                    output_fields=[DataType.VARCHAR.name, DataType.INT32.name],
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1700, ct.err_msg: "groupBy field not found in schema"}
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            limit=10,
+            group_by_field=[DataType.VARCHAR.name, DataType.INT32.name],
+            output_fields=[DataType.VARCHAR.name, DataType.INT32.name],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("grpby_nonexist_field", ["nonexist_field", 21])
@@ -863,20 +1143,90 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
                 verify: the error code and msg
         """
         client = self._client()
-        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim,
-                                        vector_data_type=DataType.FLOAT_VECTOR)
+        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
         limit = 1
-        error = {ct.err_code: 1700,
-                 ct.err_msg: f"groupBy field not found in schema: field not found[field={grpby_nonexist_field}]"}
-        self.search(client, self.collection_name, data=search_vectors,
-                    anns_field=self.float_vector_field_name,
-                    search_params=search_params, limit=limit,
-                    group_by_field=grpby_nonexist_field,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1700,
+            ct.err_msg: f"groupBy field not found in schema: field not found[field={grpby_nonexist_field}]",
+        }
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=grpby_nonexist_field,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
 
 class TestSearchGroupByIndependent(TestMilvusClientV2Base):
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_group_by_nullable_vector(self):
+        """
+        target: test group-by search on an indexed nullable vector field
+        method: create collection with nullable FLOAT_VECTOR, insert mixed null/non-null vectors,
+                build IVF_FLAT index, search with INT8 group-by and is-not-null scalar filter
+        expected: search returns grouped results from non-null scalar groups
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 36
+        nb = 10000
+        vector_field = ct.default_float_vec_field_name
+        group_by_field = DataType.INT8.name
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(field_name=ct.default_primary_field_name, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name=vector_field, datatype=DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field(field_name=group_by_field, datatype=DataType.INT8, nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+
+        vectors = cf.gen_vectors(nb, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows = [
+            {
+                ct.default_primary_field_name: i,
+                vector_field: None if i % 10 == 9 else vectors[i],
+                group_by_field: None if i % 5 == 0 else i % 100,
+            }
+            for i in range(nb)
+        ]
+        self.insert(client, collection_name, data=rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=vector_field, metric_type="COSINE", index_type="IVF_FLAT", params={"nlist": 128}
+        )
+        self.create_index(client, collection_name, index_params=index_params)
+        self.wait_for_index_ready(client, collection_name, index_name=vector_field)
+        self.load_collection(client, collection_name)
+
+        nq = 2
+        limit = 15
+        search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
+        search_params = {"params": {"nprobe": 32}, "metric_type": "COSINE"}
+        res = self.search(
+            client,
+            collection_name,
+            data=search_vectors,
+            anns_field=vector_field,
+            search_params=search_params,
+            limit=limit,
+            filter=f"{group_by_field} is not null",
+            group_by_field=group_by_field,
+            output_fields=[group_by_field],
+        )[0]
+
+        for hits in res:
+            group_values = [hit.get(group_by_field) for hit in hits]
+            assert len(group_values) == limit
+            assert None not in group_values
+            assert len(group_values) == len(set(group_values))
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("metric", ["L2", "IP", "COSINE"])
     def test_search_group_by_flat_index_correctness(self, metric):
@@ -904,11 +1254,14 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
 
         for _ in range(10):
             all_vectors = cf.gen_vectors(ct.default_nb, dim=ct.default_dim)
-            rows = [{
-                ct.default_primary_field_name: i,
-                ct.default_float_vec_field_name: all_vectors[i],
-                ct.default_int32_field_name: i,
-            } for i in range(ct.default_nb)]
+            rows = [
+                {
+                    ct.default_primary_field_name: i,
+                    ct.default_float_vec_field_name: all_vectors[i],
+                    ct.default_int32_field_name: i,
+                }
+                for i in range(ct.default_nb)
+            ]
             self.insert(client, collection_name, data=rows)
         self.flush(client, collection_name)
 
@@ -920,18 +1273,28 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
         search_params = {"metric_type": metric}
 
         # normal search to get the best result
-        normal_res = self.search(client, collection_name, data=search_vectors,
-                                 search_params=search_params, limit=limit,
-                                 output_fields=[grpby_field],
-                                 check_task=CheckTasks.check_search_results,
-                                 check_items={"nq": nq, "limit": limit})[0]
+        normal_res = self.search(
+            client,
+            collection_name,
+            data=search_vectors,
+            search_params=search_params,
+            limit=limit,
+            output_fields=[grpby_field],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "limit": limit},
+        )[0]
         # group_by search
-        groupby_res = self.search(client, collection_name, data=search_vectors,
-                                  search_params=search_params, limit=limit,
-                                  group_by_field=grpby_field,
-                                  output_fields=[grpby_field],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq, "limit": limit})[0]
+        groupby_res = self.search(
+            client,
+            collection_name,
+            data=search_vectors,
+            search_params=search_params,
+            limit=limit,
+            group_by_field=grpby_field,
+            output_fields=[grpby_field],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "limit": limit},
+        )[0]
         # verify that the top result from group_by search matches the normal search
         # for the same group value, group_by should return the best (closest) result
         normal_top_distance = normal_res[0][0].distance
@@ -946,9 +1309,11 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
         # because group_by returns the best result per group
         if metric == "L2":
             # For L2, smaller is better
-            assert groupby_top_distance <= normal_top_distance + epsilon, \
-                f"GroupBy search should return result with distance <= normal search for L2 metric"
+            assert groupby_top_distance <= normal_top_distance + epsilon, (
+                "GroupBy search should return result with distance <= normal search for L2 metric"
+            )
         else:
             # For IP/COSINE, larger is better
-            assert groupby_top_distance >= normal_top_distance - epsilon, \
+            assert groupby_top_distance >= normal_top_distance - epsilon, (
                 f"GroupBy search should return result with distance >= normal search for {metric} metric"
+            )

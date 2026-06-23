@@ -150,15 +150,14 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 		}
 		return nil
 	case commonpb.MsgType_ManualFlush:
-		// Handle ManualFlush message for TEXT collections
-		// This triggers immediate flush of Growing Segment data
+		// ManualFlush is handled by StreamingNode WAL flusher (fence + persist).
+		// QueryNode only consumes the barrier so the pipeline advances.
 		manualFlushMsg := msg.(*adaptor.ManualFlushMessageBody)
 		header := manualFlushMsg.ManualFlushMessage.Header()
 		if header.GetCollectionId() != fNode.collectionID {
 			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
 		}
-		// Trigger flush via delegator
-		return fNode.delegator.ProcessManualFlush(context.Background(), header.GetFlushTs())
+		return nil
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

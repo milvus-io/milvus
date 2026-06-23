@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -26,6 +27,7 @@ import (
 const (
 	StreamingVersion260 = 1 // streaming version that since 2.6.0, the streaming based WAL is available.
 	StreamingVersion265 = 2 // streaming version that since 2.6.5, the WAL based DDL is available.
+	StreamingVersion300 = 3 // streaming version that since 3.0.0, schema-drop DDL is available.
 )
 
 var ErrChannelNotExist = errors.New("channel not exist")
@@ -121,7 +123,7 @@ func recoverCChannelMeta(ctx context.Context, incomingChannel ...string) (*strea
 	}
 	if cchannelMeta == nil {
 		if len(incomingChannel) == 0 {
-			return nil, errors.New("no incoming channel while no control channel meta found")
+			return nil, status.NewInner("no incoming channel while no control channel meta found")
 		}
 		cchannelMeta = &streamingpb.CChannelMeta{
 			Pchannel: incomingChannel[0],
@@ -251,12 +253,12 @@ func (cm *ChannelManager) WaitUntilStreamingEnabled(ctx context.Context) error {
 	return nil
 }
 
-// IsWALBasedDDLEnabled returns true if the WAL based DDL is enabled.
-func (cm *ChannelManager) IsWALBasedDDLEnabled() bool {
+// IsStreamingVersionAtLeast returns true if the persisted streaming version is at least version.
+func (cm *ChannelManager) IsStreamingVersionAtLeast(version int64) bool {
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
-	return cm.streamingVersion != nil && cm.streamingVersion.Version >= StreamingVersion265
+	return cm.streamingVersion != nil && cm.streamingVersion.Version >= version
 }
 
 // ReplicateRole returns the replicate role of the channel manager.
@@ -356,17 +358,18 @@ func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
 	return nil
 }
 
-func (cm *ChannelManager) MarkWALBasedDDLEnabled(ctx context.Context) error {
+// MarkStreamingVersion persists the streaming version after the related cluster-version gate passes.
+func (cm *ChannelManager) MarkStreamingVersion(ctx context.Context, version int64) error {
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
 	if cm.streamingVersion == nil {
-		return errors.New("streaming service is not enabled, cannot mark WAL based DDL enabled")
+		return status.NewInner("streaming service is not enabled, cannot mark streaming version")
 	}
-	if cm.streamingVersion.Version >= StreamingVersion265 {
+	if cm.streamingVersion.Version >= version {
 		return nil
 	}
-	cm.streamingVersion.Version = StreamingVersion265
+	cm.streamingVersion.Version = version
 	if err := resource.Resource().StreamingCatalog().SaveVersion(ctx, cm.streamingVersion); err != nil {
 		cm.Logger().Error("failed to save streaming version", zap.Error(err))
 		return err
@@ -394,7 +397,7 @@ func (cm *ChannelManager) AllocVirtualChannels(ctx context.Context, param AllocV
 
 	availableChannels := cm.sortAvailableChannelsByVChannelCount()
 	if len(availableChannels) < param.Num {
-		return nil, errors.Errorf("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(availableChannels))
+		return nil, status.NewInner("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(availableChannels))
 	}
 
 	vchannels := make([]string, 0, param.Num)

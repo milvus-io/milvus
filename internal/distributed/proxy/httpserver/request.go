@@ -68,26 +68,29 @@ type SingleInsertReq struct {
 }
 
 type UpsertReq struct {
-	DbName         string                   `json:"dbName"`
-	CollectionName string                   `json:"collectionName" validate:"required"`
-	Data           []map[string]interface{} `json:"data" validate:"required"`
-	PartialUpdate  bool                     `json:"partialUpdate"`
+	DbName         string                    `json:"dbName"`
+	CollectionName string                    `json:"collectionName" validate:"required"`
+	Data           []map[string]interface{}  `json:"data" validate:"required"`
+	PartialUpdate  bool                      `json:"partialUpdate"`
+	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
 }
 
 type SingleUpsertReq struct {
-	DbName         string                 `json:"dbName"`
-	CollectionName string                 `json:"collectionName" validate:"required"`
-	Data           map[string]interface{} `json:"data" validate:"required"`
-	PartialUpdate  bool                   `json:"partialUpdate"`
+	DbName         string                    `json:"dbName"`
+	CollectionName string                    `json:"collectionName" validate:"required"`
+	Data           map[string]interface{}    `json:"data" validate:"required"`
+	PartialUpdate  bool                      `json:"partialUpdate"`
+	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
 }
 
 type SearchReq struct {
-	DbName         string             `json:"dbName"`
-	CollectionName string             `json:"collectionName" validate:"required"`
-	Filter         string             `json:"filter"`
-	Limit          int32              `json:"limit"`
-	Offset         int32              `json:"offset"`
-	OutputFields   []string           `json:"outputFields"`
-	Vector         []float32          `json:"vector"`
-	Params         map[string]float64 `json:"params"`
+	DbName            string                `json:"dbName"`
+	CollectionName    string                `json:"collectionName" validate:"required"`
+	Filter            string                `json:"filter"`
+	Limit             int32                 `json:"limit"`
+	Offset            int32                 `json:"offset"`
+	OutputFields      []string              `json:"outputFields"`
+	Vector            []float32             `json:"vector"`
+	Params            map[string]float64    `json:"params"`
+	SearchAggregation *SearchAggregationReq `json:"searchAggregation"`
 }

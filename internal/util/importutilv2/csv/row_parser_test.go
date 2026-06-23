@@ -678,6 +678,103 @@ func (suite *RowParserSuite) TestValid() {
 	suite.runValid(&testCase{name: "_ valid parse", content: suite.genAllTypesRowData("x", "2")})
 }
 
+func (suite *RowParserSuite) TestNullableStructArrayNullKey() {
+	suite.nullKey = "NULL"
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+	structArray.Nullable = true
+	for _, subField := range structArray.GetFields() {
+		subField.Nullable = true
+	}
+
+	content := suite.genAllTypesRowData("x", "2")
+	content[structArray.GetName()] = suite.nullKey
+	header, rowContent := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+
+	row, err := parser.Parse(rowContent)
+	suite.NoError(err)
+	for _, subField := range structArray.GetFields() {
+		value, ok := row[subField.GetFieldID()]
+		suite.True(ok)
+		suite.Nil(value)
+	}
+}
+
+func (suite *RowParserSuite) TestNonNullableStructArrayNullKey() {
+	suite.nullKey = "NULL"
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+
+	content := suite.genAllTypesRowData("x", "2")
+	content[structArray.GetName()] = suite.nullKey
+	header, rowContent := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+
+	_, err = parser.Parse(rowContent)
+	suite.Error(err)
+}
+
+func (suite *RowParserSuite) TestNullableStructArrayJSONNull() {
+	suite.nullKey = "NULL"
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+	structArray.Nullable = true
+	for _, subField := range structArray.GetFields() {
+		subField.Nullable = true
+	}
+
+	content := suite.genAllTypesRowData("x", "2")
+	content[structArray.GetName()] = "null"
+	header, rowContent := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+
+	row, err := parser.Parse(rowContent)
+	suite.NoError(err)
+	for _, subField := range structArray.GetFields() {
+		value, ok := row[subField.GetFieldID()]
+		suite.True(ok)
+		suite.Nil(value)
+	}
+}
+
+func (suite *RowParserSuite) TestNonNullableStructArrayJSONNull() {
+	suite.nullKey = "NULL"
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+
+	content := suite.genAllTypesRowData("x", "2")
+	content[structArray.GetName()] = "null"
+	header, rowContent := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+
+	_, err = parser.Parse(rowContent)
+	suite.Error(err)
+}
+
+func (suite *RowParserSuite) TestMissingStructArrayColumn() {
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+
+	content := suite.genAllTypesRowData("x", "2", structArray.GetName())
+	header, _ := suite.genRowContent(schema, content)
+	parser, err := NewRowParser(schema, header, suite.nullKey)
+	suite.Error(err)
+	suite.Nil(parser)
+
+	structArray.Nullable = true
+	for _, subField := range structArray.GetFields() {
+		subField.Nullable = true
+	}
+	parser, err = NewRowParser(schema, header, suite.nullKey)
+	suite.NoError(err)
+	suite.NotNil(parser)
+}
+
 func (suite *RowParserSuite) runParseError(c *testCase) {
 	t := suite.T()
 	t.Helper()

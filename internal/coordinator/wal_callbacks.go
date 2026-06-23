@@ -19,12 +19,12 @@ package coordinator
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -66,7 +66,7 @@ func (c *WALCallback) alterWALV2AckCallback(
 	targetWALName := result.Message.Header().TargetWalName
 	mqTypeValue := message.WALName(targetWALName).String()
 	if mqTypeValue == "unknown" {
-		return errors.Errorf("invalid target WAL name: %v", targetWALName)
+		return merr.WrapErrServiceInternalMsg("invalid target WAL name: %v", targetWALName)
 	}
 
 	// Get etcd source to update configuration
@@ -74,7 +74,7 @@ func (c *WALCallback) alterWALV2AckCallback(
 	etcdSource, ok := paramMgr.GetEtcdSource()
 	if !ok {
 		logger.Warn("failed to update mq.type config, etcd source not enabled")
-		return errors.New("etcd source is not enabled, cannot update mq.type configuration")
+		return merr.WrapErrServiceInternalMsg("etcd source is not enabled, cannot update mq.type configuration")
 	}
 
 	// Update mq.type configuration in etcd
@@ -84,7 +84,7 @@ func (c *WALCallback) alterWALV2AckCallback(
 			zap.String("configKey", configKey),
 			zap.String("mqTypeValue", mqTypeValue),
 			zap.Error(err))
-		return errors.Wrap(err, "failed to update mq.type configuration in etcd")
+		return merr.Wrap(err, "failed to update mq.type configuration in etcd")
 	}
 
 	logger.Info("successfully updated mq.type configuration in etcd",

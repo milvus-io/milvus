@@ -289,7 +289,7 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 }
 
 func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
-	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeStatsUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
+	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeReopen, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
 	t, err := task.NewSegmentTask(
 		ctx,
 		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),

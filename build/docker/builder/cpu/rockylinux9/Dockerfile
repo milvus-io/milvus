@@ -14,22 +14,21 @@ FROM rockylinux/rockylinux:9
 ARG TARGETARCH
 
 # Rocky 9 ships with GCC 11 and Python 3.9 by default.
-# Enable CRB (CodeReady Builder) repo for openblas-devel, texinfo, etc.
+# Enable CRB (CodeReady Builder) repo for texinfo and related build tools.
 RUN dnf install -y dnf-plugins-core epel-release && \
     dnf config-manager --set-enabled crb && \
     dnf install -y \
-        wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
+        wget g++ gcc gcc-gfortran gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
         autoconf automake python3 python3-pip perl-FindBin texinfo ccache \
         pkg-config libuuid-devel libaio libaio-devel perl-IPC-Cmd perl-Digest-SHA \
-        libasan openblas-devel tzdata libtool && \
-    rm -rf /var/cache/dnf/* && \
-    for f in /usr/include/openblas/*.h; do ln -sf "$f" /usr/include/$(basename "$f"); done
+        libasan tzdata libtool && \
+    rm -rf /var/cache/dnf/*
 
 ENV GOPATH /go
 ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.25.9.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.4.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <memory>
 #include <utility>
@@ -24,9 +25,10 @@
 
 #include <oneapi/tbb/concurrent_queue.h>
 
-#include "common/FieldDataInterface.h"
-#include "common/Channel.h"
 #include "common/ArrowDataWrapper.h"
+#include "common/Channel.h"
+#include "common/FastMem.h"
+#include "common/FieldDataInterface.h"
 
 namespace milvus {
 
@@ -58,6 +60,12 @@ class FieldData<std::string> : public FieldDataStringImpl {
                        int64_t buffered_num_rows = 0)
         : FieldDataStringImpl(data_type, nullable, buffered_num_rows) {
     }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       FixedVector<std::string>&& inner_data)
+        : FieldDataStringImpl(data_type, nullable, std::move(inner_data)) {
+    }
 };
 
 template <>
@@ -68,6 +76,12 @@ class FieldData<Json> : public FieldDataJsonImpl {
                        bool nullable,
                        int64_t buffered_num_rows = 0)
         : FieldDataJsonImpl(data_type, nullable, buffered_num_rows) {
+    }
+
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       FixedVector<Json>&& inner_data)
+        : FieldDataJsonImpl(data_type, nullable, std::move(inner_data)) {
     }
 };
 
@@ -98,8 +112,10 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
  public:
     explicit FieldData(int64_t dim,
                        DataType element_type,
+                       bool nullable = false,
                        int64_t buffered_num_rows = 0)
-        : FieldDataVectorArrayImpl(DataType::VECTOR_ARRAY, buffered_num_rows),
+        : FieldDataVectorArrayImpl(
+              DataType::VECTOR_ARRAY, nullable, buffered_num_rows),
           dim_(dim),
           element_type_(element_type) {
         AssertInfo(element_type != DataType::NONE,
@@ -123,9 +139,7 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
 
     const VectorArray*
     value_at(ssize_t offset) const {
-        AssertInfo(offset < get_num_rows(),
-                   "field data subscript out of range");
-        AssertInfo(offset < length(),
+        AssertInfo(offset < get_valid_rows(),
                    "subscript position don't has valid value");
         return &data_[offset];
     }
@@ -445,6 +459,9 @@ using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows);
+
+FieldDataPtr
+InitScalarFieldDataWithLength(const DataType& type, int64_t length);
 
 void
 ResizeScalarFieldData(const DataType& type,

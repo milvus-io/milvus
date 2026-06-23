@@ -4,6 +4,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -12,12 +13,13 @@ import (
 
 // AssignSegmentRequest is a request to allocate segment.
 type AssignSegmentRequest struct {
-	CollectionID    int64
-	PartitionID     int64
-	ModifiedMetrics stats.ModifiedMetrics
-	TimeTick        uint64
-	TxnSession      TxnSession
-	SchemaVersion   int32
+	CollectionID          int64
+	PartitionID           int64
+	ModifiedMetrics       stats.ModifiedMetrics
+	TimeTick              uint64
+	TxnSession            TxnSession
+	SchemaVersion         int32
+	UseGrowingSourceFlush bool
 }
 
 // AssignSegmentResult is a result of segment allocation.
@@ -141,6 +143,7 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	// single place that resolves and stamps it before forwarding to partitionManager.
 	if info := m.collections[req.CollectionID]; info != nil {
 		req.SchemaVersion = info.SchemaVersion()
+		req.UseGrowingSourceFlush = info.UseGrowingSourceFlush()
 	}
 
 	result, err := pm.AssignSegment(req)
@@ -156,7 +159,9 @@ func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.metrics.ObserveDelete(msg.Header().GetRows())
+	rows := msg.Header().GetRows()
+	m.metrics.ObserveDelete(rows)
+	resource.Resource().SegmentStatsManager().RecordDelete(m.pchannel.Name, msg.VChannel(), msg.TimeTick(), rows, uint64(msg.EstimateSize()))
 	return nil
 }
 

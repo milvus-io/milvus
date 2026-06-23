@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -42,14 +41,14 @@ type dropCollectionTask struct {
 func (t *dropCollectionTask) validate(ctx context.Context) error {
 	// Critical promise here, also see comment of startBroadcastWithCollectionLock.
 	if t.meta.IsAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName()) {
-		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
+		return merr.WrapErrParameterInvalidMsg("cannot drop the collection via alias = %s", t.Req.CollectionName)
 	}
 
 	// use max ts to check if latest collection exists.
 	// we cannot handle case that
 	// dropping collection with `ts1` but a collection exists in catalog with newer ts which is bigger than `ts1`.
 	// fortunately, if ddls are promised to execute in sequence, then everything is OK. The `ts1` will always be latest.
-	collMeta, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	collMeta, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
 			return errIgnoredDropCollection
@@ -62,7 +61,7 @@ func (t *dropCollectionTask) validate(ctx context.Context) error {
 
 	// Check if all aliases have been dropped.
 	if len(aliases) > 0 {
-		err = fmt.Errorf("unable to drop the collection [%s] because it has associated aliases %v, please remove all aliases before dropping the collection", t.Req.GetCollectionName(), aliases)
+		err = merr.WrapErrParameterInvalidMsg("unable to drop the collection [%s] because it has associated aliases %v, please remove all aliases before dropping the collection", t.Req.GetCollectionName(), aliases)
 		log.Ctx(ctx).Warn("drop collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err))
 		return err
 	}

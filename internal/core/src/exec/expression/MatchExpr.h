@@ -57,6 +57,9 @@ class PhyMatchFilterExpr : public Expr {
                     ? active_count_ - current_pos_
                     : batch_size_;
             current_pos_ += real_batch_size;
+            for (auto& input : inputs_) {
+                input->MoveCursor();
+            }
         }
     }
 

@@ -18,7 +18,6 @@ package syncmgr
 
 import (
 	"context"
-	"fmt"
 	"path"
 
 	"go.uber.org/zap"
@@ -57,14 +56,14 @@ func NewBulkPackWriter(metaCache metacache.MetaCache,
 	schema *schemapb.CollectionSchema,
 	chunkManager storage.ChunkManager,
 	allocator allocator.Interface, writeRetryOpts ...retry.Option,
-) *BulkPackWriter {
+) (*BulkPackWriter, error) {
 	return &BulkPackWriter{
 		metaCache:      metaCache,
 		schema:         schema,
 		chunkManager:   chunkManager,
 		allocator:      allocator,
 		writeRetryOpts: writeRetryOpts,
-	}
+	}, nil
 }
 
 func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
@@ -97,12 +96,9 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	return
 }
 
-func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
-	root, p string, pack *SyncPack,
-) (*datapb.Binlog, error) {
-	key := path.Join(bw.chunkManager.RootPath(), root, p)
-	err := retry.Handle(ctx, func() (bool, error) {
-		err := bw.chunkManager.Write(ctx, key, blob.Value)
+func (bw *BulkPackWriter) writeBlob(ctx context.Context, key string, blob []byte) error {
+	return retry.Handle(ctx, func() (bool, error) {
+		err := bw.chunkManager.Write(ctx, key, blob)
 		if err == nil {
 			return false, nil
 		}
@@ -112,7 +108,13 @@ func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
 		}
 		return true, err
 	}, bw.writeRetryOpts...)
-	if err != nil {
+}
+
+func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
+	root, p string, pack *SyncPack,
+) (*datapb.Binlog, error) {
+	key := path.Join(bw.chunkManager.RootPath(), root, p)
+	if err := bw.writeBlob(ctx, key, blob.Value); err != nil {
 		return nil, err
 	}
 	size := int64(len(blob.GetValue()))
@@ -285,7 +287,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(bw.schema)
 	if err != nil {
-		return nil, fmt.Errorf("primary key field not found: %w", err)
+		return nil, merr.Wrap(err, "primary key field not found")
 	}
 
 	logID, err := bw.allocator.AllocOne()
@@ -299,9 +301,9 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 	writer, err := storage.NewDeltalogWriter(
 		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, deltaPath,
 		storage.WithVersion(storage.StorageV1),
-		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+		storage.WithUploader(func(_ context.Context, kvs map[string][]byte) error {
 			for k, blob := range kvs {
-				return bw.chunkManager.Write(ctx, k, blob)
+				return bw.writeBlob(ctx, k, blob)
 			}
 			return nil
 		}),

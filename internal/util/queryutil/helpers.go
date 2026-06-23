@@ -14,15 +14,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The merge/slice helpers in this file consume RetrieveResults produced by
+// segcore (and merged across query nodes), never raw user input, so every
+// data-shape assertion below classifies as ServiceInternal: a violation means
+// a segcore/Milvus bug, and must not be attributed to the user (fail_input)
+// or suppress cross-replica failover the way an InputError would.
+
 package queryutil
 
 import (
-	"fmt"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -73,7 +78,7 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 	for _, ref := range selectedRows {
 		refFields := len(results[ref.resultIdx].GetFieldsData())
 		if refFields != numFields {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrServiceInternalMsg(
 				"FieldsData count mismatch: result[%d] has %d fields, expected %d",
 				ref.resultIdx, refFields, numFields)
 		}
@@ -87,8 +92,9 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 	// Build field schema lookup map (fieldID → *FieldSchema).
 	var fieldSchemaMap map[int64]*schemapb.FieldSchema
 	if schema != nil {
-		fieldSchemaMap = make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
-		for _, f := range schema.GetFields() {
+		allFields := typeutil.GetAllFieldSchemas(schema)
+		fieldSchemaMap = make(map[int64]*schemapb.FieldSchema, len(allFields))
+		for _, f := range allFields {
 			fieldSchemaMap[f.GetFieldID()] = f
 		}
 	}
@@ -146,7 +152,7 @@ func validateElementLevelConsistency(results []*internalpb.RetrieveResults, _ []
 
 	for i, r := range results {
 		if r.GetElementLevel() != isElementLevel {
-			return fmt.Errorf(
+			return merr.WrapErrServiceInternalMsg(
 				"inconsistent element-level flag: result[%d] has ElementLevel=%v, expected %v",
 				i, r.GetElementLevel(), isElementLevel)
 		}
@@ -154,7 +160,7 @@ func validateElementLevelConsistency(results []*internalpb.RetrieveResults, _ []
 			idsLen := typeutil.GetSizeOfIDs(r.GetIds())
 			indicesLen := len(r.GetElementIndices())
 			if indicesLen != idsLen {
-				return fmt.Errorf(
+				return merr.WrapErrServiceInternalMsg(
 					"element_indices length (%d) does not match ids length (%d) in result[%d]",
 					indicesLen, idsLen, i)
 			}
@@ -427,32 +433,56 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 		// but that path is unreachable for merge inputs (HasRawData gate + empty IDs filtering).
 		// Therefore empty ValidData here is always a segcore bug, not a legitimate state.
 		if len(vd) == 0 {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrServiceInternalMsg(
 				"buildCompactIndices: nullable vector field fid=%d name=%q has empty ValidData but numRows=%d in result[%d]; "+
 					"segcore must always provide ValidData for nullable fields with rows",
 				fd.GetFieldId(), fd.GetFieldName(), numRows, ri)
 		}
 
 		if len(vd) != numRows {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrServiceInternalMsg(
 				"buildCompactIndices: nullable vector field fid=%d name=%q has len(ValidData)=%d but numRows=%d in result[%d]; "+
 					"segcore violated the nullable contract (len(ValidData) must equal numRows)",
 				fd.GetFieldId(), fd.GetFieldName(), len(vd), numRows, ri)
 		}
 
-		idx := make([]int, numRows)
-		dataIdx := 0
-		for i := 0; i < numRows; i++ {
-			if vd[i] {
-				idx[i] = dataIdx
-				dataIdx++
-			} else {
-				idx[i] = -1
-			}
-		}
+		idx, _ := typeutil.BuildNullableVectorDataIndices(vd)
 		indices[ri] = idx
 	}
 	return indices, nil
+}
+
+func arrayOfVectorRowValid(fd *schemapb.FieldData, rowIdx int64, isNullable bool, numRows int, resultIdx int) (bool, error) {
+	if rowIdx < 0 {
+		return false, merr.WrapErrServiceInternalMsg(
+			"arrayOfVectorRowValid: field fid=%d name=%q in result[%d] has invalid rowIdx=%d",
+			fd.GetFieldId(), fd.GetFieldName(), resultIdx, rowIdx)
+	}
+
+	validData := fd.GetValidData()
+	if len(validData) == 0 {
+		if isNullable {
+			return false, merr.WrapErrServiceInternalMsg(
+				"arrayOfVectorRowValid: nullable ArrayOfVector field fid=%d name=%q has empty ValidData but numRows=%d in result[%d]; "+
+					"segcore must always provide ValidData for nullable fields with rows",
+				fd.GetFieldId(), fd.GetFieldName(), numRows, resultIdx)
+		}
+		return true, nil
+	}
+
+	if int(rowIdx) >= len(validData) {
+		return false, merr.WrapErrServiceInternalMsg(
+			"arrayOfVectorRowValid: ArrayOfVector field fid=%d name=%q in result[%d] has rowIdx=%d outside ValidData bounds len(ValidData)=%d",
+			fd.GetFieldId(), fd.GetFieldName(), resultIdx, rowIdx, len(validData))
+	}
+	if isNullable && numRows > 0 && len(validData) != numRows {
+		return false, merr.WrapErrServiceInternalMsg(
+			"arrayOfVectorRowValid: nullable ArrayOfVector field fid=%d name=%q has len(ValidData)=%d but numRows=%d in result[%d]; "+
+				"segcore violated the nullable contract (len(ValidData) must equal numRows)",
+			fd.GetFieldId(), fd.GetFieldName(), len(validData), numRows, resultIdx)
+	}
+
+	return validData[rowIdx], nil
 }
 
 // getVecDataIdx returns the compact data index for a vector row.
@@ -473,10 +503,18 @@ func getVecDataIdx(compactIndices [][]int, ref rowRef) int {
 }
 
 // buildMergedVectorField builds merged vector field from selected rows.
-// For nullable vector fields, segcore uses compact mode: the data array only
-// contains entries for valid (non-null) rows, and ValidData bitmap marks which
-// logical rows are null. Null rows don't occupy space in the data array.
-// buildCompactIndices/getVecDataIdx handle the logical→data index mapping.
+// For nullable primitive vector fields, segcore uses compact mode: the data
+// array only contains entries for valid (non-null) rows, and ValidData bitmap
+// marks which logical rows are null. Null rows don't occupy space in the data
+// array. buildCompactIndices/getVecDataIdx handle the logical→data index
+// mapping. ArrayOfVector is row-dense in merged output: null rows are represented
+// by empty per-row placeholders, so it keeps logical row indexes.
+//
+// Keep the ArrayOfVector row-dense contract aligned with the rest of the stack:
+// internal/proxy/validate_util.go:408 validates that ArrayOfVector Data length
+// equals numRows after null filling, and pkg/util/typeutil/schema.go:894 makes
+// FieldDataIdxComputer index ArrayOfVector by logical row instead of compact
+// vector data index.
 //
 // fieldSchema drives the type switch (DataType) and dim, avoiding the previous
 // bug where template.GetData().(type) was used: when the template result had
@@ -521,7 +559,7 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 				case *schemapb.VectorField_SparseFloatVector:
 					dataType = schemapb.DataType_SparseFloatVector
 				case *schemapb.VectorField_VectorArray:
-					dataType = schemapb.DataType_Array
+					dataType = schemapb.DataType_ArrayOfVector
 				}
 				break
 			}
@@ -529,16 +567,21 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 	}
 
 	newVf := &schemapb.VectorField{Dim: dim}
-	compactIdx, err := buildCompactIndices(results, fieldIdx, isNullable)
-	if err != nil {
-		return nil, err
+	useCompactVectorIndex := isNullable && dataType != schemapb.DataType_ArrayOfVector
+	var compactIdx [][]int
+	if dataType != schemapb.DataType_ArrayOfVector {
+		var err error
+		compactIdx, err = buildCompactIndices(results, fieldIdx, useCompactVectorIndex)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// vecDataOOB builds a descriptive error for vector data out-of-bounds access.
 	// This indicates segcore returned truncated/malformed vector data.
 	vecDataOOB := func(ref rowRef, di int, dataLen int) error {
 		fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
-		return fmt.Errorf(
+		return merr.WrapErrServiceInternalMsg(
 			"buildMergedVectorField: vector data too short for %s field fid=%d name=%q in result[%d]: "+
 				"dataIdx=%d requires offset beyond data length %d (dim=%d, numRows=%d); segcore returned truncated data",
 			dataType, fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
@@ -641,7 +684,7 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			sparse := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetSparseFloatVector()
 			if sparse == nil || di >= len(sparse.GetContents()) {
 				fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
-				return nil, fmt.Errorf(
+				return nil, merr.WrapErrServiceInternalMsg(
 					"buildMergedVectorField: sparse vector data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but SparseFloatArray is nil or has only %d contents (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
@@ -660,37 +703,69 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 		}
 		newVf.Dim = maxDim
 
-	default:
-		// VectorArray or unknown — scan for first non-nil VectorArray to get metadata.
+	case schemapb.DataType_ArrayOfVector:
+		elementType := schemapb.DataType_None
+		if fieldSchema != nil {
+			elementType = fieldSchema.GetElementType()
+		}
 		for _, ref := range selectedRows {
 			va := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetVectorArray()
 			if va != nil {
-				data := make([]*schemapb.VectorField, 0, len(selectedRows))
-				for _, ref2 := range selectedRows {
-					di := getVecDataIdx(compactIdx, ref2)
-					if di < 0 {
-						continue
-					}
-					va2 := results[ref2.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetVectorArray()
-					if va2 == nil || di >= len(va2.GetData()) {
-						fd := results[ref2.resultIdx].GetFieldsData()[fieldIdx]
-						return nil, fmt.Errorf(
-							"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
-								"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
-							fd.GetFieldId(), fd.GetFieldName(), ref2.resultIdx,
-							di, len(va2.GetData()), typeutil.GetSizeOfIDs(results[ref2.resultIdx].GetIds()))
-					}
-					data = append(data, va2.GetData()[di])
+				if dim == 0 && va.GetDim() != 0 {
+					dim = va.GetDim()
 				}
-				newVf.Data = &schemapb.VectorField_VectorArray{
-					VectorArray: &schemapb.VectorArray{
-						Dim:         va.GetDim(),
-						Data:        data,
-						ElementType: va.GetElementType(),
-					},
+				if elementType == schemapb.DataType_None && va.GetElementType() != schemapb.DataType_None {
+					elementType = va.GetElementType()
 				}
-				break
+				if dim != 0 && elementType != schemapb.DataType_None {
+					break
+				}
 			}
+		}
+		// ArrayOfVector must stay row-dense even for nullable all-null output.
+		// Do not use len(Data)==0 as an all-null signal: ValidData carries nullness,
+		// while Data keeps one placeholder per logical row.
+		data := make([]*schemapb.VectorField, 0, len(selectedRows))
+		for _, ref := range selectedRows {
+			fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
+			numRows := typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds())
+			rowValid, err := arrayOfVectorRowValid(fd, ref.rowIdx, isNullable, numRows, ref.resultIdx)
+			if err != nil {
+				return nil, err
+			}
+
+			di := getVecDataIdx(compactIdx, ref)
+			if di < 0 || !rowValid {
+				emptyRow, err := typeutil.NewEmptyArrayOfVectorRow(dim, elementType)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, emptyRow)
+				continue
+			}
+			va := fd.GetVectors().GetVectorArray()
+			if va == nil || len(va.GetData()) == 0 {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
+						"dataIdx=%d but VectorArray is nil or has no entries (numRows=%d); segcore returned truncated data",
+					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
+					di, typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
+			}
+			if di >= len(va.GetData()) {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
+						"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
+					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
+					di, len(va.GetData()), typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
+			}
+			data = append(data, va.GetData()[di])
+		}
+		newVf.Data = &schemapb.VectorField_VectorArray{
+			VectorArray: &schemapb.VectorArray{
+				Dim:         dim,
+				Data:        data,
+				ElementType: elementType,
+			},
 		}
 	}
 
@@ -700,9 +775,9 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 // rangeSliceRetrieveResults extracts a contiguous range [start, end) from a RetrieveResult.
 // This is more efficient than sliceRetrieveResults for contiguous ranges since it uses
 // direct sub-slicing instead of element-by-element copying.
-func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end int) *internalpb.RetrieveResults {
+func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end int) (*internalpb.RetrieveResults, error) {
 	if start >= end {
-		return &internalpb.RetrieveResults{}
+		return &internalpb.RetrieveResults{}, nil
 	}
 
 	newResult := &internalpb.RetrieveResults{
@@ -711,7 +786,11 @@ func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end in
 	}
 
 	for i, fd := range result.GetFieldsData() {
-		newResult.FieldsData[i] = rangeSliceFieldData(fd, start, end)
+		sliced, err := rangeSliceFieldData(fd, start, end)
+		if err != nil {
+			return nil, err
+		}
+		newResult.FieldsData[i] = sliced
 	}
 
 	// Propagate element-level metadata
@@ -720,7 +799,7 @@ func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end in
 		newResult.ElementIndices = result.GetElementIndices()[start:end]
 	}
 
-	return newResult
+	return newResult, nil
 }
 
 // rangeSliceIDs extracts a contiguous range [start, end) from IDs.
@@ -742,9 +821,9 @@ func rangeSliceIDs(ids *schemapb.IDs, start, end int) *schemapb.IDs {
 }
 
 // rangeSliceFieldData extracts a contiguous range [start, end) from field data.
-func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) *schemapb.FieldData {
+func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) (*schemapb.FieldData, error) {
 	if fd == nil {
-		return nil
+		return nil, nil
 	}
 
 	newFd := &schemapb.FieldData{
@@ -760,8 +839,12 @@ func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) *schemapb.Field
 			Scalars: rangeSliceScalarField(fd.GetScalars(), start, end),
 		}
 	case *schemapb.FieldData_Vectors:
+		vectors, err := rangeSliceVectorField(fd.GetVectors(), start, end, fd.GetValidData())
+		if err != nil {
+			return nil, err
+		}
 		newFd.Field = &schemapb.FieldData_Vectors{
-			Vectors: rangeSliceVectorField(fd.GetVectors(), start, end, fd.GetValidData()),
+			Vectors: vectors,
 		}
 	}
 
@@ -769,19 +852,23 @@ func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) *schemapb.Field
 		newFd.ValidData = fd.GetValidData()[start:end]
 	}
 
-	return newFd
+	return newFd, nil
 }
 
 // rangeSliceStructArrayField extracts a contiguous range [start, end) from each sub-field.
-func rangeSliceStructArrayField(sa *schemapb.StructArrayField, start, end int) *schemapb.StructArrayField {
+func rangeSliceStructArrayField(sa *schemapb.StructArrayField, start, end int) (*schemapb.StructArrayField, error) {
 	if sa == nil {
-		return nil
+		return nil, nil
 	}
 	newFields := make([]*schemapb.FieldData, len(sa.GetFields()))
 	for i, subFd := range sa.GetFields() {
-		newFields[i] = rangeSliceFieldData(subFd, start, end)
+		sliced, err := rangeSliceFieldData(subFd, start, end)
+		if err != nil {
+			return nil, err
+		}
+		newFields[i] = sliced
 	}
-	return &schemapb.StructArrayField{Fields: newFields}
+	return &schemapb.StructArrayField{Fields: newFields}, nil
 }
 
 // rangeSliceScalarField extracts a contiguous range [start, end) from scalar data.
@@ -824,15 +911,14 @@ func rangeSliceScalarField(sf *schemapb.ScalarField, start, end int) *schemapb.S
 }
 
 // rangeSliceVectorField extracts a contiguous range [start, end) from vector data.
-// validData is the field's ValidData bitmap. For nullable vectors in compact mode,
-// data indices must be computed by counting valid rows, not using logical row indices.
-func rangeSliceVectorField(vf *schemapb.VectorField, start, end int, validData []bool) *schemapb.VectorField {
+// Supported nullable vectors use compact payload data, so logical rows must be
+// mapped to physical vector rows through ValidData.
+func rangeSliceVectorField(vf *schemapb.VectorField, start, end int, validData []bool) (*schemapb.VectorField, error) {
 	dim := int(vf.GetDim())
 	newVf := &schemapb.VectorField{Dim: vf.GetDim()}
 
-	// For compact mode: convert logical [start, end) to data [dataStart, dataEnd).
 	dataStart, dataEnd := start, end
-	if len(validData) > 0 {
+	if usesCompactNullableVectorData(vf, validData) {
 		dataStart = 0
 		for i := 0; i < start; i++ {
 			if validData[i] {
@@ -877,16 +963,33 @@ func rangeSliceVectorField(vf *schemapb.VectorField, start, end int, validData [
 		}
 	case *schemapb.VectorField_VectorArray:
 		data := vf.GetVectorArray().GetData()
+		var newData []*schemapb.VectorField
+		if len(validData) > 0 {
+			newData = make([]*schemapb.VectorField, 0, end-start)
+			for i := start; i < end; i++ {
+				if !validData[i] {
+					emptyRow, err := typeutil.NewEmptyArrayOfVectorRow(vf.GetVectorArray().GetDim(), vf.GetVectorArray().GetElementType())
+					if err != nil {
+						return nil, err
+					}
+					newData = append(newData, emptyRow)
+					continue
+				}
+				newData = append(newData, data[i])
+			}
+		} else {
+			newData = data[dataStart:dataEnd]
+		}
 		newVf.Data = &schemapb.VectorField_VectorArray{
 			VectorArray: &schemapb.VectorArray{
 				Dim:         vf.GetVectorArray().GetDim(),
-				Data:        data[dataStart:dataEnd],
+				Data:        newData,
 				ElementType: vf.GetVectorArray().GetElementType(),
 			},
 		}
 	}
 
-	return newVf
+	return newVf, nil
 }
 
 // sliceIDs extracts IDs at the given indices.
@@ -917,9 +1020,9 @@ func sliceIDs(ids *schemapb.IDs, indices []int) *schemapb.IDs {
 }
 
 // sliceFieldData extracts field data at the given indices.
-func sliceFieldData(fd *schemapb.FieldData, indices []int) *schemapb.FieldData {
+func sliceFieldData(fd *schemapb.FieldData, indices []int) (*schemapb.FieldData, error) {
 	if fd == nil || len(indices) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	newFd := &schemapb.FieldData{
@@ -935,8 +1038,12 @@ func sliceFieldData(fd *schemapb.FieldData, indices []int) *schemapb.FieldData {
 			Scalars: sliceScalarField(fd.GetScalars(), indices),
 		}
 	case *schemapb.FieldData_Vectors:
+		vectors, err := sliceVectorField(fd.GetVectors(), indices, fd.GetValidData())
+		if err != nil {
+			return nil, err
+		}
 		newFd.Field = &schemapb.FieldData_Vectors{
-			Vectors: sliceVectorField(fd.GetVectors(), indices, fd.GetValidData()),
+			Vectors: vectors,
 		}
 	}
 
@@ -950,20 +1057,24 @@ func sliceFieldData(fd *schemapb.FieldData, indices []int) *schemapb.FieldData {
 		newFd.ValidData = newValidData
 	}
 
-	return newFd
+	return newFd, nil
 }
 
 // sliceScalarField extracts scalar data at the given indices.
 // sliceStructArrayField extracts struct array sub-fields at the given indices.
-func sliceStructArrayField(sa *schemapb.StructArrayField, indices []int) *schemapb.StructArrayField {
+func sliceStructArrayField(sa *schemapb.StructArrayField, indices []int) (*schemapb.StructArrayField, error) {
 	if sa == nil {
-		return nil
+		return nil, nil
 	}
 	newFields := make([]*schemapb.FieldData, len(sa.GetFields()))
 	for i, subFd := range sa.GetFields() {
-		newFields[i] = sliceFieldData(subFd, indices)
+		sliced, err := sliceFieldData(subFd, indices)
+		if err != nil {
+			return nil, err
+		}
+		newFields[i] = sliced
 	}
-	return &schemapb.StructArrayField{Fields: newFields}
+	return &schemapb.StructArrayField{Fields: newFields}, nil
 }
 
 func sliceScalarField(sf *schemapb.ScalarField, indices []int) *schemapb.ScalarField {
@@ -1082,27 +1193,16 @@ func sliceScalarField(sf *schemapb.ScalarField, indices []int) *schemapb.ScalarF
 }
 
 // sliceVectorField extracts vector data at the given logical indices.
-// validData is the field's ValidData bitmap for compact mode handling.
-func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool) *schemapb.VectorField {
+// Supported nullable vectors use compact payload data, so logical rows must be
+// mapped to physical vector rows through ValidData.
+func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool) (*schemapb.VectorField, error) {
 	dim := int(vf.GetDim())
 	newVf := &schemapb.VectorField{Dim: vf.GetDim()}
 
-	// Pre-compute compact index mapping if nullable.
-	// compactIdx[logicalRow] = data index, or -1 if null.
 	var compactIdx []int
-	if len(validData) > 0 {
-		compactIdx = make([]int, len(validData))
-		di := 0
-		for i, v := range validData {
-			if v {
-				compactIdx[i] = di
-				di++
-			} else {
-				compactIdx[i] = -1
-			}
-		}
+	if usesCompactNullableVectorData(vf, validData) {
+		compactIdx, _ = typeutil.BuildNullableVectorDataIndices(validData)
 	}
-	// toDataIdx converts logical index to data index, skipping null rows.
 	toDataIdx := func(logicalIdx int) int {
 		if compactIdx == nil {
 			return logicalIdx
@@ -1203,10 +1303,18 @@ func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool)
 
 	case *schemapb.VectorField_VectorArray:
 		srcData := vf.GetVectorArray().GetData()
-		newData := make([]*schemapb.VectorField, 0, validCount)
+		newData := make([]*schemapb.VectorField, 0, len(indices))
 		for _, idx := range indices {
 			di := toDataIdx(idx)
 			if di < 0 {
+				continue
+			}
+			if len(validData) > 0 && !validData[idx] {
+				emptyRow, err := typeutil.NewEmptyArrayOfVectorRow(vf.GetVectorArray().GetDim(), vf.GetVectorArray().GetElementType())
+				if err != nil {
+					return nil, err
+				}
+				newData = append(newData, emptyRow)
 				continue
 			}
 			newData = append(newData, srcData[di])
@@ -1220,7 +1328,24 @@ func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool)
 		}
 	}
 
-	return newVf
+	return newVf, nil
+}
+
+func usesCompactNullableVectorData(vf *schemapb.VectorField, validData []bool) bool {
+	if len(validData) == 0 {
+		return false
+	}
+	switch vf.GetData().(type) {
+	case *schemapb.VectorField_FloatVector,
+		*schemapb.VectorField_BinaryVector,
+		*schemapb.VectorField_Float16Vector,
+		*schemapb.VectorField_Bfloat16Vector,
+		*schemapb.VectorField_Int8Vector,
+		*schemapb.VectorField_SparseFloatVector:
+		return true
+	default:
+		return false
+	}
 }
 
 // calcRowSize computes the size in bytes of a single row in a RetrieveResult
@@ -1228,17 +1353,51 @@ func sliceVectorField(vf *schemapb.VectorField, indices []int, validData []bool)
 // merge selection phase (Phase 1) to track accumulated output size before
 // the actual memory-copy phase (Phase 2), enabling early termination
 // when maxOutputSize would be exceeded.
-func calcRowSize(result *internalpb.RetrieveResults, rowIdx int64) int64 {
+type rowSizeCalculator struct {
+	result         *internalpb.RetrieveResults
+	compactIndices [][]int
+}
+
+func newRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator {
+	fieldsData := result.GetFieldsData()
+	c := &rowSizeCalculator{
+		result:         result,
+		compactIndices: make([][]int, len(fieldsData)),
+	}
+	for fieldIdx, fd := range fieldsData {
+		if typeutil.IsCompactNullableVectorFieldData(fd) {
+			indices, _ := typeutil.BuildNullableVectorDataIndices(fd.GetValidData())
+			c.compactIndices[fieldIdx] = indices
+		}
+	}
+	return c
+}
+
+func (c *rowSizeCalculator) rowSize(rowIdx int64) int64 {
 	var size int64
-	for _, fd := range result.GetFieldsData() {
-		size += calcFieldElementSize(fd, int(rowIdx))
+	for fieldIdx, fd := range c.result.GetFieldsData() {
+		size += calcFieldElementSizeWithCompactIndex(fd, int(rowIdx), c.compactIndices[fieldIdx])
 	}
 	return size
+}
+
+// calcRowSize is a convenience wrapper for one-off checks. Hot merge loops
+// should create one rowSizeCalculator per result and reuse it.
+func calcRowSize(result *internalpb.RetrieveResults, rowIdx int64) int64 {
+	return newRowSizeCalculator(result).rowSize(rowIdx)
 }
 
 // calcFieldElementSize returns the byte size of a single
 // element at rowIdx within a FieldData.
 func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
+	var compactIdx []int
+	if typeutil.IsCompactNullableVectorFieldData(fd) {
+		compactIdx, _ = typeutil.BuildNullableVectorDataIndices(fd.GetValidData())
+	}
+	return calcFieldElementSizeWithCompactIndex(fd, rowIdx, compactIdx)
+}
+
+func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, compactIdx []int) int64 {
 	if scalars := fd.GetScalars(); scalars != nil {
 		switch data := scalars.GetData().(type) {
 		case *schemapb.ScalarField_BoolData:
@@ -1298,6 +1457,11 @@ func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 		}
 	}
 	if vectors := fd.GetVectors(); vectors != nil {
+		if compactIdx != nil {
+			if rowIdx < 0 || rowIdx >= len(compactIdx) || compactIdx[rowIdx] < 0 {
+				return 0
+			}
+		}
 		dim := int(vectors.GetDim())
 		switch vectors.GetData().(type) {
 		case *schemapb.VectorField_FloatVector:
@@ -1311,9 +1475,13 @@ func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 		case *schemapb.VectorField_Int8Vector:
 			return int64(dim)
 		case *schemapb.VectorField_SparseFloatVector:
+			dataIdx := rowIdx
+			if compactIdx != nil {
+				dataIdx = compactIdx[rowIdx]
+			}
 			contents := vectors.GetSparseFloatVector().GetContents()
-			if rowIdx < len(contents) {
-				return int64(len(contents[rowIdx]))
+			if dataIdx < len(contents) {
+				return int64(len(contents[dataIdx]))
 			}
 			return 0
 		case *schemapb.VectorField_VectorArray:
@@ -1401,6 +1569,9 @@ func getRowCount(result *internalpb.RetrieveResults) int {
 	}
 
 	fd := result.GetFieldsData()[0]
+	if len(fd.GetValidData()) > 0 {
+		return len(fd.GetValidData())
+	}
 	if fd.GetScalars() != nil {
 		switch data := fd.GetScalars().GetData().(type) {
 		case *schemapb.ScalarField_BoolData:

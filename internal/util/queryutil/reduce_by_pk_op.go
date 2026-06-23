@@ -18,7 +18,6 @@ package queryutil
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -123,7 +123,7 @@ func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, h
 			seenPKs[pk] = struct{}{}
 			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: cursors[sel]})
 		} else {
-			return nil, fmt.Errorf("duplicate PK %v found across shards, possible data integrity issue", pk)
+			return nil, merr.WrapErrDataIntegrityMsg("duplicate PK %v found across shards", pk)
 		}
 		cursors[sel]++
 	}
@@ -225,6 +225,10 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 // When duplicate PK found with higher timestamp, replaces the previous entry.
 func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*timestampedResult, hasMoreResult bool) (*internalpb.RetrieveResults, error) {
 	cursors := make([]int64, len(results))
+	rowSizeCalculators := make([]*rowSizeCalculator, len(results))
+	for i, result := range results {
+		rowSizeCalculators[i] = newRowSizeCalculator(result.result)
+	}
 
 	// Track PK -> (selectedRowIndex, timestamp) for replacement on higher timestamp
 	type pkEntry struct {
@@ -252,7 +256,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 
 		pk := typeutil.GetPK(results[sel].result.GetIds(), cursors[sel])
 		ts := results[sel].getTimestamp(cursors[sel])
-		rowSize := calcRowSize(results[sel].result, cursors[sel])
+		rowSize := rowSizeCalculators[sel].rowSize(cursors[sel])
 
 		// Compute element count for this row
 		var elemCount int64 = 1
@@ -274,7 +278,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 			if ts != 0 && ts > entry.ts {
 				// Replace existing entry — swap row sizes and element counts
 				oldRef := selectedRows[entry.rowIndex]
-				oldSize := calcRowSize(results[oldRef.resultIdx].result, oldRef.rowIdx)
+				oldSize := rowSizeCalculators[oldRef.resultIdx].rowSize(oldRef.rowIdx)
 				retSize = retSize - oldSize + rowSize
 				// Adjust element count for replacement
 				if isElementLevel {
@@ -290,7 +294,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 		}
 
 		if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
 		}
 
 		// Early termination when limit reached

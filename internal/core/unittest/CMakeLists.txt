@@ -16,7 +16,6 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
-    ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
@@ -59,7 +58,9 @@ set(MILVUS_TEST_FILES
         test_query_group_by.cpp
         test_minhash.cpp
         test_async_warmup.cpp
+        test_boost_score_c.cpp
         test_sort_buffer.cpp
+        test_row_container.cpp
         test_query_order_by.cpp
         test_determine_use_index.cpp
         test_virtual_pk.cpp
@@ -67,6 +68,9 @@ set(MILVUS_TEST_FILES
         test_external_take.cpp
         test_arrow_canonicalize.cpp
         TextLobSpilloverTest.cpp
+        test_commit_timestamp.cpp
+        test_schema_reopen.cpp
+        test_growing_concurrent_reopen.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
@@ -121,6 +125,16 @@ add_compile_definitions(
         MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output"
         MILVUS_UNIT_TEST)
 
+if (LINUX)
+    # milvus-storage's Rust bridge (librust_bridge.a) statically embeds xxhash
+    # and re-exports its XXH* symbols globally. These collide with the conan
+    # xxhash that milvus_core links for BloomFilter/MinHash, so linking the
+    # unit-test binaries fails with "multiple definition of `XXH...'". Tell the
+    # GNU linker to keep the first definition instead of erroring on the
+    # duplicate. Applies to every test target declared below (and subdirs).
+    add_link_options("LINKER:--allow-multiple-definition")
+endif()
+
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
         )
@@ -132,7 +146,6 @@ target_link_libraries(all_tests
         milvus_conan_deps
         knowhere
         milvus-storage
-        milvus-common
         )
 
 # Link plan parser library using full path and set RPATH
@@ -180,7 +193,7 @@ endif()
 install(TARGETS bitset_test DESTINATION unittest)
 
 add_executable(test_json_uint64 ${CMAKE_HOME_DIRECTORY}/src/exec/expression/ExprJsonUint64Test.cpp)
-target_link_libraries(test_json_uint64 GTest::gtest GTest::gtest_main milvus_core milvus_conan_deps knowhere milvus-storage milvus-common)
+target_link_libraries(test_json_uint64 GTest::gtest GTest::gtest_main milvus_core milvus_conan_deps knowhere milvus-storage)
 target_link_options(test_json_uint64 PRIVATE "-L${PLANPARSER_LIB_DIR}")
 target_link_libraries(test_json_uint64 milvus-planparser-cpp)
 set_target_properties(test_json_uint64 PROPERTIES BUILD_RPATH "${PLANPARSER_LIB_DIR}" INSTALL_RPATH "${PLANPARSER_LIB_DIR}")

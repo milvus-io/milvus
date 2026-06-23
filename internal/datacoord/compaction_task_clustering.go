@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
@@ -186,6 +186,11 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
 			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			return
+		}
+
+		if err = binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
+			log.Warn("compress compaction result binlogs failed", zap.Error(err))
 			return
 		}
 
@@ -387,6 +392,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 	}
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
@@ -622,7 +628,7 @@ func (t *clusteringCompactionTask) processAnalyzing() error {
 		}
 	case indexpb.JobState_JobStateFailed:
 		log.Warn("analyze task fail", zap.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
-		return errors.New(analyzeTask.FailReason)
+		return merr.WrapErrServiceInternalMsg(analyzeTask.FailReason)
 	default:
 	}
 	return nil
@@ -767,7 +773,7 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 		log.Warn("Failed to BuildCompactionRequest", zap.Error(err))
 		return err
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan())
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn("Failed to notify compaction tasks to DataNode",

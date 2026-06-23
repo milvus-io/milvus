@@ -656,6 +656,43 @@ func (suite *RowParserSuite) TestValid() {
 	suite.runValid(&testCase{name: "_ valid parse 2", content: suite.genAllTypesRowData("x", 2, "function_sparse_vector")})
 }
 
+func (suite *RowParserSuite) TestNullableStructArrayNullRow() {
+	suite.setSchema(true, true, true)
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+	structArray.Nullable = true
+	for _, subField := range structArray.GetFields() {
+		subField.Nullable = true
+	}
+
+	parser, err := NewRowParser(schema)
+	suite.NoError(err)
+
+	row, err := parser.Parse(map[string]any{
+		structArray.GetName(): nil,
+	})
+	suite.NoError(err)
+	for _, subField := range structArray.GetFields() {
+		value, ok := row[subField.GetFieldID()]
+		suite.True(ok)
+		suite.Nil(value)
+	}
+}
+
+func (suite *RowParserSuite) TestNonNullableStructArrayNullRow() {
+	suite.setSchema(true, true, true)
+	schema := suite.createAllTypesSchema()
+	structArray := schema.GetStructArrayFields()[0]
+
+	parser, err := NewRowParser(schema)
+	suite.NoError(err)
+
+	_, err = parser.Parse(map[string]any{
+		structArray.GetName(): nil,
+	})
+	suite.Error(err)
+}
+
 func (suite *RowParserSuite) runParseError(c *testCase) {
 	t := suite.T()
 	t.Helper()

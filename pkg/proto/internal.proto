@@ -21,6 +21,28 @@ message NodeInfo {
   string role = 2;
 }
 
+message ClearReadTaskQueueRequest {
+  common.MsgBase base = 1;
+  string task_type = 2;
+  string reason = 3;
+}
+
+message ClearReadTaskQueueComponentResult {
+  common.Status status = 1;
+  string role = 2;
+  int64 nodeID = 3;
+  int64 queued_cleared = 4;
+  int64 queued_nq_cleared = 5;
+}
+
+message ClearReadTaskQueueResponse {
+  common.Status status = 1;
+  int64 proxy_queued_cleared = 2;
+  int64 querynode_queued_cleared = 3;
+  int64 queued_nq_cleared = 4;
+  repeated ClearReadTaskQueueComponentResult results = 5;
+}
+
 message InitParams {
   int64 nodeID = 1;
   repeated common.KeyValuePair start_params = 2;
@@ -307,6 +329,7 @@ message CredentialInfo {
   // encrypted by sha256 (for good performance in cache mapping)
   string sha256_password = 5; // not save in metadata.
   uint64 time_tick = 6; // the timetick in wal which the credential updates
+  optional string description = 7;
 }
 
 message ListPolicyRequest {
@@ -368,6 +391,8 @@ enum ImportJobState {
   Completed = 5;
   IndexBuilding = 6;
   Sorting = 7;
+  Uncommitted = 8;
+  Committing  = 9;
 }
 
 message ImportFile {

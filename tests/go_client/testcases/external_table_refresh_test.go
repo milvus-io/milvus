@@ -3,10 +3,9 @@ package testcases
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
-	"math"
-	"math/rand"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -17,7 +16,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	miniogo "github.com/minio/minio-go/v7"
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
@@ -37,7 +35,64 @@ func envOrDefault(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+	switch key {
+	case "MINIO_ADDRESS":
+		if address, _, ok := inferGoSDKMinIOConfig(); ok {
+			return address
+		}
+	case "MINIO_BUCKET":
+		if _, bucket, ok := inferGoSDKMinIOConfig(); ok {
+			return bucket
+		}
+	case "MINIO_ROOT_PATH":
+		if _, _, ok := inferGoSDKMinIOConfig(); ok {
+			// The go-sdk Helm deployment writes Milvus object data under
+			// minio.rootPath=file. Keep the inferred MinIO config complete so
+			// tests that inspect persisted objects use the same prefix.
+			return "file"
+		}
+	}
 	return defaultVal
+}
+
+func inferGoSDKMinIOConfig() (string, string, bool) {
+	return inferGoSDKMinIOConfigFromAddr(hp.GetAddr())
+}
+
+func inferGoSDKMinIOConfigFromAddr(addr string) (string, string, bool) {
+	host := hostFromMilvusAddr(addr)
+	serviceName, namespaceSuffix, _ := strings.Cut(host, ".")
+	if !strings.HasPrefix(serviceName, "gosdk-") || !strings.HasSuffix(serviceName, "-milvus") {
+		return "", "", false
+	}
+	minioServiceName := strings.TrimSuffix(serviceName, "-milvus") + "-minio"
+	minioHost := minioServiceName
+	if namespaceSuffix != "" {
+		minioHost += "." + namespaceSuffix
+	}
+	return net.JoinHostPort(minioHost, "9000"), "milvus-bucket", true
+}
+
+func hostFromMilvusAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if u, err := url.Parse(addr); err == nil && u.Host != "" {
+		return u.Hostname()
+	}
+
+	addr = strings.TrimPrefix(addr, "//")
+	if idx := strings.IndexByte(addr, '/'); idx >= 0 {
+		addr = addr[:idx]
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return strings.Trim(host, "[]")
+	}
+	if idx := strings.LastIndexByte(addr, ':'); idx >= 0 {
+		addr = addr[:idx]
+	}
+	return strings.Trim(addr, "[]")
 }
 
 type minioConfig struct {
@@ -65,25 +120,19 @@ func newMinIOClient(cfg minioConfig) (*miniogo.Client, error) {
 	})
 }
 
-// extTestURI wraps a MinIO-relative object path into a full Milvus-form URI
-// pointing at the configured bucket. External-table tests that used to pass
-// bare relative paths (e.g. "external-e2e-test/foo") must now construct a
-// fully qualified URI because the new validator rejects bare paths — extfs
-// is isolated from the fs.* baseline, so the endpoint+bucket must appear in
-// the URI or explicitly in spec.extfs. This helper keeps the test call-site
-// succinct while staying close to the original dataPath variable.
+// extTestURI wraps a MinIO-relative object path into a full MinIO URI pointing
+// at the configured bucket. The minio:// scheme is unambiguous, so tests do
+// not need to carry AWS-family region or provider fields just to disambiguate
+// s3:// from AWS S3.
 func extTestURI(cfg minioConfig, relPath string) string {
-	return fmt.Sprintf("s3://%s/%s/%s", cfg.address, cfg.bucket, relPath)
+	return fmt.Sprintf("minio://%s/%s/%s", cfg.address, cfg.bucket, relPath)
 }
 
 // extTestSpec returns an ExternalSpec JSON fragment for external-table tests
-// that target Milvus's own MinIO. It carries the real MinIO credentials and
-// region (required by ValidateExtfsComplete for s3-family schemes). No
-// cloud_provider: MinIO is not AWS, and cloud_provider=aws would trigger
-// Tier-2 endpoint derivation that redirects the URI at AWS S3.
+// that target Milvus's own MinIO.
 func extTestSpec(cfg minioConfig, format string) string {
 	return fmt.Sprintf(
-		`{"format":%q,"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}}`,
+		`{"format":%q,"extfs":{"cloud_provider":"minio","access_key_id":%q,"access_key_value":%q}}`,
 		format, cfg.accessKey, cfg.secretKey)
 }
 
@@ -116,66 +165,111 @@ const (
 	perfTestVecDim = 128
 )
 
-// generateParquetBytes creates a Parquet file in memory with columns:
-//   - id (Int64)
-//   - value (Float32)
-//   - embedding (FixedSizeList[Float32, testVecDim])
-func generateParquetBytes(numRows int64, startID int64) ([]byte, error) {
-	arrowSchema := arrow.NewSchema(
-		[]arrow.Field{
-			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "value", Type: arrow.PrimitiveTypes.Float32},
-			{Name: "embedding", Type: arrow.FixedSizeListOf(testVecDim, arrow.PrimitiveTypes.Float32)},
-		},
-		nil,
-	)
+const (
+	externalDataSchemaBasic           = "basic"
+	externalDataSchemaMulti           = "multi"
+	externalDataSchemaLarge           = "large"
+	externalDataSchemaNullableVector  = "nullable_vector"
+	externalDataSchemaSnapshotRestore = "snapshot_restore"
+)
 
-	var buf bytes.Buffer
-	writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
-	if err != nil {
-		return nil, fmt.Errorf("create parquet writer: %w", err)
+func generateParquetBytes(schema string, numRows, startID int64, dim int) ([]byte, error) {
+	switch schema {
+	case externalDataSchemaBasic, externalDataSchemaMulti,
+		externalDataSchemaLarge, externalDataSchemaNullableVector,
+		externalDataSchemaSnapshotRestore:
+		return generateParquetBytesWithCompression(schema, numRows, startID, dim, "")
+	default:
+		return nil, fmt.Errorf("unknown parquet data schema: %s", schema)
 	}
-
-	pool := memory.NewGoAllocator()
-	builder := array.NewRecordBuilder(pool, arrowSchema)
-	defer builder.Release()
-
-	idBuilder := builder.Field(0).(*array.Int64Builder)
-	valueBuilder := builder.Field(1).(*array.Float32Builder)
-	embeddingBuilder := builder.Field(2).(*array.FixedSizeListBuilder)
-	vecValueBuilder := embeddingBuilder.ValueBuilder().(*array.Float32Builder)
-
-	for i := int64(0); i < numRows; i++ {
-		idBuilder.Append(startID + i)
-		valueBuilder.Append(float32(startID+i) * 1.5)
-		embeddingBuilder.Append(true)
-		for d := 0; d < testVecDim; d++ {
-			vecValueBuilder.Append(float32(startID+i)*0.1 + float32(d))
-		}
-	}
-
-	record := builder.NewRecord()
-	defer record.Release()
-
-	if err := writer.Write(record); err != nil {
-		return nil, fmt.Errorf("write record: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("close writer: %w", err)
-	}
-
-	return buf.Bytes(), nil
 }
 
-// generateNullableFloatVectorParquetBytes creates a Parquet file with rows:
-//   - id=0, embedding=[0,1,2,3]
-//   - id=1, embedding=null
-//   - id=2, embedding=[8,9,10,11]
-func generateNullableFloatVectorParquetBytes() ([]byte, error) {
+// generateSnapshotRestoreParquetBytes creates a compact Parquet file for the
+// snapshot restore e2e. It stores float vectors as FixedSizeBinary so the test
+// focuses on the snapshot restore path instead of list-vector decoding.
+func generateSnapshotRestoreParquetBytes(numRows int64, startID int64) ([]byte, error) {
+	return generateParquetBytes(
+		externalDataSchemaSnapshotRestore, numRows, startID, testVecDim)
+}
+
+func generateParquetBytesWithCompression(schema string, numRows, startID int64, dim int, compression string) ([]byte, error) {
+	tmp, err := os.CreateTemp("", "external-table-*.parquet")
+	if err != nil {
+		return nil, fmt.Errorf("create temp parquet file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("close temp parquet file: %w", err)
+	}
+	defer os.Remove(tmpPath)
+
+	args := []string{
+		"generate_parquet_data.py",
+		"--schema", schema,
+		tmpPath,
+		strconv.FormatInt(numRows, 10),
+		"--start-id", strconv.FormatInt(startID, 10),
+		"--vec-dim", strconv.Itoa(dim),
+		"--bin-vec-dim", strconv.Itoa(testBinVecDim),
+	}
+	if compression != "" {
+		args = append(args, "--compression", compression)
+	}
+
+	output, err := exec.Command("python3", args...).CombinedOutput() // #nosec G204
+	if err != nil {
+		return nil, fmt.Errorf("generate parquet data via python: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	data, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, fmt.Errorf("read generated parquet file: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("generated empty parquet file: %s", strings.TrimSpace(string(output)))
+	}
+
+	return data, nil
+}
+
+func externalTakeDenseBytes(row int64, byteWidth int, seed int64) []byte {
+	data := make([]byte, byteWidth)
+	for i := range data {
+		data[i] = byte((seed + row*int64(byteWidth) + int64(i)) % 251)
+	}
+	return data
+}
+
+func externalTakeInt8Vector(row int64) []int8 {
+	data := make([]int8, testVecDim)
+	for i := range data {
+		data[i] = int8((row*3 + int64(i)) % 127)
+	}
+	return data
+}
+
+func externalTakeInt8VectorBytes(row int64) []byte {
+	values := externalTakeInt8Vector(row)
+	data := make([]byte, len(values))
+	for i, value := range values {
+		data[i] = byte(value)
+	}
+	return data
+}
+
+func generateExternalTakeVectorParquetBytes(numRows int64) ([]byte, error) {
+	const binVecDim = 16
+	binVecByteWidth := binVecDim / 8
+	fp16ByteWidth := testVecDim * 2
+	bf16ByteWidth := testVecDim * 2
+
 	arrowSchema := arrow.NewSchema(
 		[]arrow.Field{
 			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "embedding", Type: &arrow.FixedSizeBinaryType{ByteWidth: testVecDim * 4}, Nullable: true},
+			{Name: "bin_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: binVecByteWidth}},
+			{Name: "fp16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: fp16ByteWidth}},
+			{Name: "bf16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bf16ByteWidth}},
+			{Name: "int8_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: testVecDim}},
 		},
 		nil,
 	)
@@ -191,22 +285,18 @@ func generateNullableFloatVectorParquetBytes() ([]byte, error) {
 	defer builder.Release()
 
 	idBuilder := builder.Field(0).(*array.Int64Builder)
-	embeddingBuilder := builder.Field(1).(*array.FixedSizeBinaryBuilder)
+	binBuilder := builder.Field(1).(*array.FixedSizeBinaryBuilder)
+	fp16Builder := builder.Field(2).(*array.FixedSizeBinaryBuilder)
+	bf16Builder := builder.Field(3).(*array.FixedSizeBinaryBuilder)
+	int8Builder := builder.Field(4).(*array.FixedSizeBinaryBuilder)
 
-	appendVector := func(values []float32) {
-		raw := make([]byte, testVecDim*4)
-		for i, value := range values {
-			binary.LittleEndian.PutUint32(raw[i*4:(i+1)*4], math.Float32bits(value))
-		}
-		embeddingBuilder.Append(raw)
+	for row := int64(0); row < numRows; row++ {
+		idBuilder.Append(row)
+		binBuilder.Append(externalTakeDenseBytes(row, binVecByteWidth, 11))
+		fp16Builder.Append(externalTakeDenseBytes(row, fp16ByteWidth, 31))
+		bf16Builder.Append(externalTakeDenseBytes(row, bf16ByteWidth, 51))
+		int8Builder.Append(externalTakeInt8VectorBytes(row))
 	}
-
-	idBuilder.Append(0)
-	appendVector([]float32{0, 1, 2, 3})
-	idBuilder.Append(1)
-	embeddingBuilder.AppendNull()
-	idBuilder.Append(2)
-	appendVector([]float32{8, 9, 10, 11})
 
 	record := builder.NewRecord()
 	defer record.Release()
@@ -233,152 +323,6 @@ func generateNullableFloatVectorParquetBytes() ([]byte, error) {
 //	bool_val = (i is even), int8_val = i%100, int16_val = i*10,
 //	int32_val = i*100, float_val = i*1.5, double_val = i*0.01
 const testBinVecDim = 8 // BinaryVector dimension must be multiple of 8
-
-func generateMultiTypeParquetBytes(numRows int64, startID int64) ([]byte, error) {
-	binVecByteWidth := testBinVecDim / 8
-	fp16ByteWidth := testVecDim * 2
-	bf16ByteWidth := testVecDim * 2
-	int8VecByteWidth := testVecDim
-
-	tsType := &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
-
-	arrowSchema := arrow.NewSchema(
-		[]arrow.Field{
-			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "bool_val", Type: arrow.FixedWidthTypes.Boolean},
-			{Name: "int8_val", Type: arrow.PrimitiveTypes.Int8},
-			{Name: "int16_val", Type: arrow.PrimitiveTypes.Int16},
-			{Name: "int32_val", Type: arrow.PrimitiveTypes.Int32},
-			{Name: "float_val", Type: arrow.PrimitiveTypes.Float32},
-			{Name: "double_val", Type: arrow.PrimitiveTypes.Float64},
-			{Name: "varchar_val", Type: arrow.BinaryTypes.String},
-			{Name: "json_val", Type: arrow.BinaryTypes.String},
-			{Name: "array_int", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
-			{Name: "array_str", Type: arrow.ListOf(arrow.BinaryTypes.String)},
-			{Name: "ts_val", Type: tsType},
-			{Name: "geo_val", Type: arrow.BinaryTypes.String},
-			{Name: "embedding", Type: arrow.FixedSizeListOf(testVecDim, arrow.PrimitiveTypes.Float32)},
-			{Name: "bin_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: binVecByteWidth}},
-			{Name: "fp16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: fp16ByteWidth}},
-			{Name: "bf16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bf16ByteWidth}},
-			{Name: "int8_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: int8VecByteWidth}},
-		},
-		nil,
-	)
-
-	var buf bytes.Buffer
-	writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
-	if err != nil {
-		return nil, fmt.Errorf("create parquet writer: %w", err)
-	}
-
-	pool := memory.NewGoAllocator()
-	builder := array.NewRecordBuilder(pool, arrowSchema)
-	defer builder.Release()
-
-	idBuilder := builder.Field(0).(*array.Int64Builder)
-	boolBuilder := builder.Field(1).(*array.BooleanBuilder)
-	int8Builder := builder.Field(2).(*array.Int8Builder)
-	int16Builder := builder.Field(3).(*array.Int16Builder)
-	int32Builder := builder.Field(4).(*array.Int32Builder)
-	floatBuilder := builder.Field(5).(*array.Float32Builder)
-	doubleBuilder := builder.Field(6).(*array.Float64Builder)
-	varcharBuilder := builder.Field(7).(*array.StringBuilder)
-	jsonBuilder := builder.Field(8).(*array.StringBuilder)
-	arrayIntBuilder := builder.Field(9).(*array.ListBuilder)
-	arrayIntValueBuilder := arrayIntBuilder.ValueBuilder().(*array.Int32Builder)
-	arrayStrBuilder := builder.Field(10).(*array.ListBuilder)
-	arrayStrValueBuilder := arrayStrBuilder.ValueBuilder().(*array.StringBuilder)
-	tsBuilder := builder.Field(11).(*array.TimestampBuilder)
-	geoBuilder := builder.Field(12).(*array.StringBuilder)
-	embeddingBuilder := builder.Field(13).(*array.FixedSizeListBuilder)
-	vecValueBuilder := embeddingBuilder.ValueBuilder().(*array.Float32Builder)
-	binVecBuilder := builder.Field(14).(*array.FixedSizeBinaryBuilder)
-	fp16VecBuilder := builder.Field(15).(*array.FixedSizeBinaryBuilder)
-	bf16VecBuilder := builder.Field(16).(*array.FixedSizeBinaryBuilder)
-	int8VecBuilder := builder.Field(17).(*array.FixedSizeBinaryBuilder)
-
-	for i := int64(0); i < numRows; i++ {
-		idx := startID + i
-		idBuilder.Append(idx)
-		boolBuilder.Append(idx%2 == 0)
-		int8Builder.Append(int8(idx % 100))
-		int16Builder.Append(int16(idx * 10))
-		int32Builder.Append(int32(idx * 100))
-		floatBuilder.Append(float32(idx) * 1.5)
-		doubleBuilder.Append(float64(idx) * 0.01)
-		varcharBuilder.Append(fmt.Sprintf("str_%04d", idx))
-
-		// JSON: {"key": <idx>, "name": "item_<idx>"}
-		jsonBuilder.Append(fmt.Sprintf(`{"key":%d,"name":"item_%d"}`, idx, idx))
-
-		// Array[Int32]: [idx*1, idx*2, idx*3]
-		arrayIntBuilder.Append(true)
-		arrayIntValueBuilder.Append(int32(idx * 1))
-		arrayIntValueBuilder.Append(int32(idx * 2))
-		arrayIntValueBuilder.Append(int32(idx * 3))
-
-		// Array[VarChar]: ["tag_<idx>_a", "tag_<idx>_b"] — exact shape from
-		// issue #48619 reproduction (List<String> from Parquet).
-		arrayStrBuilder.Append(true)
-		arrayStrValueBuilder.Append(fmt.Sprintf("tag_%d_a", idx))
-		arrayStrValueBuilder.Append(fmt.Sprintf("tag_%d_b", idx))
-
-		// Timestamptz: base time + idx hours (microseconds since epoch)
-		// 2025-01-01T00:00:00Z = 1735689600 seconds = 1735689600000000 microseconds
-		baseMicro := arrow.Timestamp(1735689600000000 + idx*3600000000)
-		tsBuilder.Append(baseMicro)
-
-		// Geometry: WKT point — POINT(<idx> <idx*0.1>)
-		geoBuilder.Append(fmt.Sprintf("POINT(%d %.1f)", idx, float64(idx)*0.1))
-
-		// FloatVector
-		embeddingBuilder.Append(true)
-		for d := 0; d < testVecDim; d++ {
-			vecValueBuilder.Append(float32(idx)*0.1 + float32(d))
-		}
-
-		// BinaryVector: fill with deterministic bytes
-		binBytes := make([]byte, binVecByteWidth)
-		for b := range binBytes {
-			binBytes[b] = byte((idx + int64(b)) % 256)
-		}
-		binVecBuilder.Append(binBytes)
-
-		// Float16Vector: fill with deterministic bytes (2 bytes per dim)
-		fp16Bytes := make([]byte, fp16ByteWidth)
-		for b := range fp16Bytes {
-			fp16Bytes[b] = byte((idx + int64(b)) % 256)
-		}
-		fp16VecBuilder.Append(fp16Bytes)
-
-		// BFloat16Vector: fill with deterministic bytes (2 bytes per dim)
-		bf16Bytes := make([]byte, bf16ByteWidth)
-		for b := range bf16Bytes {
-			bf16Bytes[b] = byte((idx*2 + int64(b)) % 256)
-		}
-		bf16VecBuilder.Append(bf16Bytes)
-
-		// Int8Vector: fill with deterministic bytes (1 byte per dim)
-		int8VecBytes := make([]byte, int8VecByteWidth)
-		for b := range int8VecBytes {
-			int8VecBytes[b] = byte((idx*3 + int64(b)) % 256)
-		}
-		int8VecBuilder.Append(int8VecBytes)
-	}
-
-	record := builder.NewRecord()
-	defer record.Release()
-
-	if err := writer.Write(record); err != nil {
-		return nil, fmt.Errorf("write record: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("close writer: %w", err)
-	}
-
-	return buf.Bytes(), nil
-}
 
 // --- Helpers ---
 
@@ -503,6 +447,104 @@ func indexAndLoadCollectionWithScalarAndVector(ctx context.Context, t *testing.T
 
 // --- E2E Tests ---
 
+func TestExternalCollectionSnapshotRestoreAndAccess(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString("ext_snapshot_restore", 6)
+	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	snapshotName := fmt.Sprintf("snapshot_%s", common.GenRandomString("ext", 6))
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+	collectionsToClean := []string{collName, restoredCollName}
+
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, collName))
+		for _, name := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(name))
+		}
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, fmt.Sprintf("%s/", extPath))
+	})
+
+	const numRows = int64(100)
+	data, err := generateSnapshotRestoreParquetBytes(numRows, 0)
+	require.NoError(t, err)
+	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, objectKey, data)
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithExternalField("id")).
+		WithField(entity.NewField().
+			WithName("value").
+			WithDataType(entity.FieldTypeFloat).
+			WithExternalField("value")).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).
+			WithExternalField("embedding"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
+
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("external collection snapshot restore e2e"))
+	common.CheckErr(t, err, true)
+
+	jobID, err := mc.RestoreSnapshot(ctx, client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName))
+	common.CheckErr(t, err, true)
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 3*time.Minute)
+	common.CheckErr(t, err, true)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, numRows, count)
+
+	filterRes, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 10").
+		WithOutputFields("id", "value"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 10, filterRes.GetColumn("id").Len())
+
+	vec := make([]float32, testVecDim)
+	for i := range vec {
+		vec[i] = float32(i) * 0.1
+	}
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(restoredCollName, 5,
+		[]entity.Vector{entity.FloatVector(vec)}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField("embedding").
+		WithOutputFields("id", "value"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, len(searchRes))
+	require.Greater(t, searchRes[0].ResultCount, 0)
+}
+
 // TestRefreshExternalCollectionAndVerifySegments tests the full external collection workflow:
 //  1. Upload parquet test data to MinIO
 //  2. Create an external collection with matching schema
@@ -537,7 +579,7 @@ func TestRefreshExternalCollectionAndVerifySegments(t *testing.T) {
 	totalExpectedRows := int64(numFiles) * rowsPerFile
 
 	for i := 0; i < numFiles; i++ {
-		data, err := generateParquetBytes(rowsPerFile, int64(i)*rowsPerFile)
+		data, err := generateParquetBytes(externalDataSchemaBasic, rowsPerFile, int64(i)*rowsPerFile, testVecDim)
 		require.NoError(t, err, "generate parquet file %d", i)
 
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
@@ -693,39 +735,6 @@ verify:
 	t.Logf("Verified issue #48626: explore temp prefix %q is clean", exploreTempPrefix)
 }
 
-// generateCompressedParquetViaPython shells out to python3 + pyarrow to emit
-// a parquet file with the requested compression codec. Used by the codec
-// regression tests because the Go arrow library does not support writing
-// LZ4-compressed parquet in a format that the Arrow C++ reader can consume.
-func generateCompressedParquetViaPython(t *testing.T, codec string, numRows int) []byte {
-	t.Helper()
-	tmp, err := os.CreateTemp("", "codec-*.parquet")
-	require.NoError(t, err)
-	tmp.Close()
-	defer os.Remove(tmp.Name())
-
-	script := `
-import sys, pyarrow as pa, pyarrow.parquet as pq
-codec, num, out = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-ids = pa.array(range(num), type=pa.int64())
-values = pa.array([float(i)*1.5 for i in range(num)], type=pa.float32())
-emb = pa.array([[float(i)*0.1 + j for j in range(4)] for i in range(num)],
-               type=pa.list_(pa.float32(), 4))
-table = pa.Table.from_arrays([ids, values, emb], names=['id','value','embedding'])
-pq.write_table(table, out, compression=codec)
-`
-	cmd := exec.Command("python3", "-c", script, codec, strconv.Itoa(numRows), tmp.Name()) // #nosec G204
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		t.Skipf("python3 + pyarrow unavailable (codec=%s): %v", codec, err)
-	}
-
-	data, err := os.ReadFile(tmp.Name())
-	require.NoError(t, err)
-	require.NotEmpty(t, data, "python generated empty parquet for codec %s", codec)
-	return data
-}
-
 // TestExternalCollectionParquetCompressionCodecs is the regression test for
 // issue #48869. Part 8 added `arrow:with_snappy=True` and `arrow:with_lz4=True`
 // to the conan recipe; if either gets dropped or the bundled Arrow is rebuilt
@@ -750,13 +759,14 @@ func TestExternalCollectionParquetCompressionCodecs(t *testing.T) {
 	for _, codec := range []string{"snappy", "lz4"} {
 		codec := codec
 		t.Run(codec, func(t *testing.T) {
-			data := generateCompressedParquetViaPython(t, codec, numRows)
+			data, err := generateParquetBytesWithCompression(externalDataSchemaBasic, numRows, 0, testVecDim, codec)
+			require.NoError(t, err, "generate %s-compressed parquet", codec)
 
 			collName := common.GenRandomString("ext_codec_"+codec, 6)
 			extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 			objectKey := fmt.Sprintf("%s/data.parquet", extPath)
 
-			_, err := minioClient.PutObject(ctx, minioCfg.bucket, objectKey,
+			_, err = minioClient.PutObject(ctx, minioCfg.bucket, objectKey,
 				bytes.NewReader(data), int64(len(data)),
 				miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
 			require.NoError(t, err, "upload %s-compressed parquet", codec)
@@ -853,7 +863,7 @@ func TestExternalCollectionLoadAndQuery(t *testing.T) {
 	totalExpectedRows := int64(numFiles) * rowsPerFile
 
 	for i := 0; i < numFiles; i++ {
-		data, err := generateParquetBytes(rowsPerFile, int64(i)*rowsPerFile)
+		data, err := generateParquetBytes(externalDataSchemaBasic, rowsPerFile, int64(i)*rowsPerFile, testVecDim)
 		require.NoError(t, err, "generate parquet file %d", i)
 
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
@@ -1089,7 +1099,7 @@ func TestExternalCollectionNullableFloatVectorTakeOutput(t *testing.T) {
 	collName := common.GenRandomString("ext_nullable_vec", 6)
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
-	data, err := generateNullableFloatVectorParquetBytes()
+	data, err := generateParquetBytes(externalDataSchemaNullableVector, 3, 0, testVecDim)
 	require.NoError(t, err, "generate nullable vector parquet")
 
 	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
@@ -1170,6 +1180,149 @@ func TestExternalCollectionNullableFloatVectorTakeOutput(t *testing.T) {
 	assertVector(2, []float32{8, 9, 10, 11})
 }
 
+func TestExternalCollectionAdditionalVectorTakeOutput(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible (exists=%v, err=%v), skipping",
+			minioCfg.bucket, exists, err)
+	}
+
+	collName := common.GenRandomString("ext_take_vec", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	const numRows = int64(8)
+	data, err := generateExternalTakeVectorParquetBytes(numRows)
+	require.NoError(t, err, "generate vector take parquet")
+
+	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, objectKey, data)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("bin_vec").WithDataType(entity.FieldTypeBinaryVector).
+			WithDim(16).WithExternalField("bin_vec")).
+		WithField(entity.NewField().WithName("fp16_vec").WithDataType(entity.FieldTypeFloat16Vector).
+			WithDim(testVecDim).WithExternalField("fp16_vec")).
+		WithField(entity.NewField().WithName("bf16_vec").WithDataType(entity.FieldTypeBFloat16Vector).
+			WithDim(testVecDim).WithExternalField("bf16_vec")).
+		WithField(entity.NewField().WithName("int8_vec").WithDataType(entity.FieldTypeInt8Vector).
+			WithDim(testVecDim).WithExternalField("int8_vec"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+
+	indexes := map[string]index.Index{
+		"bin_vec":  index.NewBinFlatIndex(entity.HAMMING),
+		"fp16_vec": index.NewFlatIndex(entity.L2),
+		"bf16_vec": index.NewFlatIndex(entity.L2),
+		"int8_vec": index.NewGenericIndex("int8_hnsw", map[string]string{
+			index.MetricTypeKey: string(entity.COSINE),
+			index.IndexTypeKey:  "HNSW",
+			"M":                 "8",
+			"efConstruction":    "64",
+		}),
+	}
+	for fieldName, idx := range indexes {
+		idxTask, idxErr := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, fieldName, idx))
+		common.CheckErr(t, idxErr, true)
+		require.NoError(t, idxTask.Await(ctx), "create index on %s", fieldName)
+	}
+
+	loadTask, loadErr := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, loadErr, true)
+	require.NoError(t, loadTask.Await(ctx))
+
+	assertVectorRows := func(result client.ResultSet, context string) {
+		t.Helper()
+		idCol := result.GetColumn("id")
+		require.NotNil(t, idCol, "%s id column", context)
+		for _, fieldName := range []string{"bin_vec", "fp16_vec", "bf16_vec", "int8_vec"} {
+			require.NotNil(t, result.GetColumn(fieldName), "%s %s column", context, fieldName)
+		}
+		for i := 0; i < result.ResultCount; i++ {
+			id, err := idCol.GetAsInt64(i)
+			require.NoError(t, err)
+
+			rawBin, err := result.GetColumn("bin_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, 2, 11), []byte(rawBin.(entity.BinaryVector)),
+				"%s bin_vec row id=%d", context, id)
+
+			rawFP16, err := result.GetColumn("fp16_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, testVecDim*2, 31), []byte(rawFP16.(entity.Float16Vector)),
+				"%s fp16_vec row id=%d", context, id)
+
+			rawBF16, err := result.GetColumn("bf16_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, testVecDim*2, 51), []byte(rawBF16.(entity.BFloat16Vector)),
+				"%s bf16_vec row id=%d", context, id)
+
+			rawInt8, err := result.GetColumn("int8_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeInt8Vector(id), []int8(rawInt8.(entity.Int8Vector)),
+				"%s int8_vec row id=%d", context, id)
+		}
+	}
+
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id in [1, 3, 5]").
+		WithOutputFields("id", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 3, queryRes.ResultCount)
+	assertVectorRows(queryRes, "query output")
+
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 3,
+		[]entity.Vector{entity.Int8Vector(externalTakeInt8Vector(3))}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField("int8_vec").
+		WithOutputFields("id", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, len(searchRes))
+	require.Greater(t, searchRes[0].ResultCount, 0)
+	assertVectorRows(searchRes[0], "int8 search output")
+}
+
+func TestExternalCollectionSparseVectorCurrentlyRejected(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	collName := common.GenRandomString("ext_sparse_reject", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("sparse_vec").WithDataType(entity.FieldTypeSparseVector).
+			WithExternalField("sparse_vec"))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not support field type SparseFloatVector")
+}
+
 // TestExternalCollectionIncrementalRefresh tests that refreshing an external collection
 // after modifying the underlying parquet files correctly updates segments:
 //  1. Initial files: data0 (ids 0-499) + data1 (ids 500-999) → 1000 rows
@@ -1201,9 +1354,9 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Phase 1: Upload initial data files
 	// ---------------------------------------------------------------
-	data0, err := generateParquetBytes(500, 0) // ids 0-499
+	data0, err := generateParquetBytes(externalDataSchemaBasic, 500, 0, testVecDim) // ids 0-499
 	require.NoError(t, err)
-	data1, err := generateParquetBytes(500, 500) // ids 500-999
+	data1, err := generateParquetBytes(externalDataSchemaBasic, 500, 500, testVecDim) // ids 500-999
 	require.NoError(t, err)
 
 	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data0.parquet", data0)
@@ -1260,7 +1413,7 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	t.Log("Removed data1.parquet from MinIO")
 
 	// Upload data2.parquet (ids 2000-2299, 300 rows)
-	data2, err := generateParquetBytes(300, 2000)
+	data2, err := generateParquetBytes(externalDataSchemaBasic, 300, 2000, testVecDim)
 	require.NoError(t, err)
 	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data2.parquet", data2)
 
@@ -1333,6 +1486,153 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	t.Log("Phase 3: all verifications passed — incremental refresh works correctly")
 }
 
+// TestRefreshExternalCollectionAfterAddColumnReturnsCorrectData verifies that
+// adding an external field to an already refreshed external collection patches
+// existing same-fragment segments and returns correct values for the new field.
+func TestRefreshExternalCollectionAfterAddColumnReturnsCorrectData(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*600)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString("ext_add_col", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	const rowsPerFile = int64(25)
+	totalExpectedRows := rowsPerFile * 2
+	for _, file := range []struct {
+		name    string
+		startID int64
+	}{
+		{name: "data0.parquet", startID: 0},
+		{name: "data1.parquet", startID: 100},
+	} {
+		data, genErr := generateParquetBytes(externalDataSchemaLarge, rowsPerFile, file.startID, testVecDim)
+		require.NoError(t, genErr)
+		uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/"+file.name, data)
+	}
+
+	// Create the collection without the parquet "score" column. The first
+	// refresh creates external segments whose manifests and fake binlogs cover
+	// only id, value, and embedding.
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
+	common.CheckErr(t, err, true)
+	rowCount, err := strconv.ParseInt(stats["row_count"], 10, 64)
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedRows, rowCount)
+
+	scoreField := entity.NewField().
+		WithName("score").
+		WithDataType(entity.FieldTypeDouble).
+		WithNullable(true).
+		WithExternalField("score")
+	err = mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collName, scoreField))
+	common.CheckErr(t, err, true)
+
+	described, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	hasScore := false
+	for _, field := range described.Schema.Fields {
+		if field.Name == "score" {
+			hasScore = true
+			require.Equal(t, entity.FieldTypeDouble, field.DataType)
+			require.Equal(t, "score", field.ExternalField)
+			require.True(t, field.Nullable)
+		}
+	}
+	require.True(t, hasScore, "DescribeCollection should include the added external score field")
+
+	refreshAndWait(ctx, t, mc, collName)
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedRows, count)
+
+	lowIDRows, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 5").
+		WithOutputFields("id", "score"))
+	common.CheckErr(t, err, true)
+	assertExternalScoreRows(t, lowIDRows, map[int64]float64{
+		0: 0.00,
+		1: 0.01,
+		2: 0.02,
+		3: 0.03,
+		4: 0.04,
+	})
+
+	scoreFilterRows, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("score >= 1.0 && score < 1.05").
+		WithOutputFields("id", "score"))
+	common.CheckErr(t, err, true)
+	assertExternalScoreRows(t, scoreFilterRows, map[int64]float64{
+		100: 1.00,
+		101: 1.01,
+		102: 1.02,
+		103: 1.03,
+		104: 1.04,
+	})
+}
+
+func assertExternalScoreRows(t *testing.T, result client.ResultSet, expected map[int64]float64) {
+	t.Helper()
+
+	idCol := result.GetColumn("id")
+	scoreCol := result.GetColumn("score")
+	require.NotNil(t, idCol, "query result should contain id")
+	require.NotNil(t, scoreCol, "query result should contain score")
+	require.Equal(t, len(expected), idCol.Len())
+	require.Equal(t, len(expected), scoreCol.Len())
+
+	actual := make(map[int64]float64, idCol.Len())
+	for i := 0; i < idCol.Len(); i++ {
+		id, err := idCol.GetAsInt64(i)
+		require.NoError(t, err)
+		isNull, err := scoreCol.IsNull(i)
+		require.NoError(t, err)
+		require.False(t, isNull, "score should be non-null for id %d", id)
+		score, err := scoreCol.GetAsDouble(i)
+		require.NoError(t, err)
+		actual[id] = score
+	}
+
+	require.Len(t, actual, len(expected))
+	for id, expectedScore := range expected {
+		score, ok := actual[id]
+		require.True(t, ok, "missing row for id %d in result %v", id, actual)
+		require.InDelta(t, expectedScore, score, 1e-9, "unexpected score for id %d", id)
+	}
+}
+
 // TestExternalCollectionMultipleDataTypes tests external collections with various data types:
 // Bool, Int8, Int16, Int32, Int64, Float, Double, VarChar, FloatVector
 func TestExternalCollectionMultipleDataTypes(t *testing.T) {
@@ -1362,7 +1662,7 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 	// Step 1: Generate and upload multi-type parquet data
 	// ---------------------------------------------------------------
 	const numRows = int64(100)
-	data, err := generateMultiTypeParquetBytes(numRows, 0)
+	data, err := generateParquetBytes(externalDataSchemaMulti, numRows, 0, testVecDim)
 	require.NoError(t, err)
 	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data.parquet", data)
 
@@ -1385,12 +1685,14 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 // load -> exhaustive query/search verification). Shared between the parquet
 // and vortex multi-type tests so the same schema + verification plan covers
 // both formats.  Assumes the dataset shape produced by
-// generateMultiTypeParquetBytes / generate_multi_type_vortex_data.py with
+// generateParquetBytes(..., externalDataSchemaMulti, ...) /
+// generate_vortex_data.py --schema multi with
 // the given numRows.
 func runMultiTypeRefreshIndexLoadVerify(ctx context.Context, t *testing.T,
 	mc *base.MilvusClient, collName string, numRows int64,
 ) {
-	runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx, t, mc, collName, numRows, "", "")
+	runMultiTypeRefreshIndexLoadVerifyWithVectorFields(ctx, t, mc, collName, numRows, "", "",
+		[]string{"embedding", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"})
 }
 
 // runMultiTypeRefreshIndexLoadVerifyWithSourceSpec accepts optional refresh
@@ -1398,6 +1700,13 @@ func runMultiTypeRefreshIndexLoadVerify(ctx context.Context, t *testing.T,
 // refresh; proxy now enforces both-or-neither).
 func runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx context.Context, t *testing.T,
 	mc *base.MilvusClient, collName string, numRows int64, refreshSource, refreshSpec string,
+) {
+	runMultiTypeRefreshIndexLoadVerifyWithVectorFields(ctx, t, mc, collName, numRows, refreshSource, refreshSpec,
+		[]string{"embedding", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"})
+}
+
+func runMultiTypeRefreshIndexLoadVerifyWithVectorFields(ctx context.Context, t *testing.T,
+	mc *base.MilvusClient, collName string, numRows int64, refreshSource, refreshSpec string, vectorFields []string,
 ) {
 	// ---------------------------------------------------------------
 	// Step 3: Refresh + index all vector fields + load
@@ -1415,7 +1724,7 @@ func runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx context.Context, t *te
 	}
 
 	// Create index on all vector fields
-	for _, vecField := range []string{"embedding", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"} {
+	for _, vecField := range vectorFields {
 		var metricType entity.MetricType
 		switch vecField {
 		case "bin_vec":
@@ -1705,9 +2014,19 @@ func runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx context.Context, t *te
 // generateLanceDataOnMinIO uses the Python lance library to write a Lance dataset
 // directly to MinIO/S3. This is necessary because lance format writing requires the
 // Rust-based lance library, which is not accessible from Go directly.
-func generateLanceDataOnMinIO(t *testing.T, s3URI string, numRows, startID int) {
+func generateLanceDataOnMinIO(t *testing.T, s3URI, schema string, numRows, startID int) {
 	t.Helper()
 	minioCfg := getMinIOConfig()
+	args := []string{
+		"--schema", schema,
+		s3URI,
+		strconv.Itoa(numRows),
+		"--start-id", strconv.Itoa(startID),
+		"--vec-dim", strconv.Itoa(testVecDim),
+	}
+	if schema == externalDataSchemaMulti {
+		args = append(args, "--bin-vec-dim", strconv.Itoa(testBinVecDim))
+	}
 
 	// Secrets go through the child process environment, not argv, so
 	// `ps -ef` and CI logs don't expose them — see runPythonScript.
@@ -1717,7 +2036,7 @@ func generateLanceDataOnMinIO(t *testing.T, s3URI string, numRows, startID int) 
 			"MINIO_ACCESS_KEY": minioCfg.accessKey,
 			"MINIO_SECRET_KEY": minioCfg.secretKey,
 		},
-		s3URI, strconv.Itoa(numRows), strconv.Itoa(startID))
+		args...)
 	require.NoError(t, err, "generate lance data: %s", out)
 	require.Contains(t, out, "OK", "lance data generation should succeed")
 	t.Logf("Generated lance data: %s", out)
@@ -1748,49 +2067,6 @@ func mapToEnvSlice(m map[string]string) []string {
 	return out
 }
 
-// checkPythonDeps verifies that the given python interpreter and packages are available.
-// Returns nil if all dependencies are importable, or an error describing what's missing.
-func checkPythonDeps(pythonBin string, packages ...string) error {
-	if _, err := exec.LookPath(pythonBin); err != nil {
-		return fmt.Errorf("%s not found in PATH: %w", pythonBin, err)
-	}
-	for _, pkg := range packages {
-		cmd := exec.Command(pythonBin, "-c", fmt.Sprintf("import %s", pkg)) // #nosec G204
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("python package %q not importable via %s: %s (%w)", pkg, pythonBin, string(out), err)
-		}
-	}
-	return nil
-}
-
-// findPython3ForVortex returns a python3 interpreter that is >= 3.11, which is
-// required by vortex-data >= 0.56.0. It tries "python3" first (works in Docker
-// where python3 is 3.13+), then falls back to "python3.11" (works on dev machines
-// where the default python3 may be 3.10).
-func findPython3ForVortex() (string, error) {
-	for _, bin := range []string{"python3", "python3.11"} {
-		path, err := exec.LookPath(bin)
-		if err != nil {
-			continue
-		}
-		out, err := exec.Command(path, "-c", // #nosec G204
-			"import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Output()
-		if err != nil {
-			continue
-		}
-		ver := strings.TrimSpace(string(out))
-		parts := strings.SplitN(ver, ".", 2)
-		if len(parts) == 2 {
-			major, _ := strconv.Atoi(parts[0])
-			minor, _ := strconv.Atoi(parts[1])
-			if major > 3 || (major == 3 && minor >= 11) {
-				return bin, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("no python3 >= 3.11 found (tried python3, python3.11)")
-}
-
 // TestExternalCollectionLanceFormat tests external collections with lance-table format:
 //  1. Generate Lance dataset on MinIO using Python
 //  2. Create external collection with lance-table format
@@ -1815,10 +2091,6 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
 	}
 
-	if err := checkPythonDeps("python3", "pyarrow", "lance"); err != nil {
-		t.Skipf("Python deps for Lance unavailable, skipping: %v", err)
-	}
-
 	collName := common.GenRandomString("ext_lance", 6)
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
@@ -1827,7 +2099,7 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	const totalRows = 100000
 	s3URI := fmt.Sprintf("s3://%s/%s", minioCfg.bucket, extPath)
-	generateLanceDataOnMinIO(t, s3URI, totalRows, 0)
+	generateLanceDataOnMinIO(t, s3URI, externalDataSchemaBasic, totalRows, 0)
 
 	t.Cleanup(func() {
 		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
@@ -2011,46 +2283,32 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 }
 
 // generateVortexDataOnMinIO uses the Python vortex library to write a Vortex
-// dataset directly to MinIO/S3. This mirrors the Lance test pattern where a
-// Python script handles format-specific data generation.
-func generateVortexDataOnMinIO(t *testing.T, pythonBin, outputPath string, numRows, dim int) {
+// dataset directly to a MinIO/S3 bucket. This mirrors the Lance test pattern
+// where a Python script handles format-specific data generation.
+func generateVortexDataOnMinIO(t *testing.T, outputPath, schema string, numRows int, bucket string) {
 	t.Helper()
 	minioCfg := getMinIOConfig()
+	args := []string{
+		"--schema", schema,
+		outputPath,
+		strconv.Itoa(numRows),
+		"--vec-dim", strconv.Itoa(testVecDim),
+	}
+	if schema == externalDataSchemaMulti {
+		args = append(args, "--bin-vec-dim", strconv.Itoa(testBinVecDim))
+	}
 
-	out, err := runPythonScript(t, pythonBin, "generate_vortex_data.py",
+	out, err := runPythonScript(t, "python3", "generate_vortex_data.py",
 		map[string]string{
 			"MINIO_ADDRESS":    minioCfg.address,
 			"MINIO_ACCESS_KEY": minioCfg.accessKey,
 			"MINIO_SECRET_KEY": minioCfg.secretKey,
-			"MINIO_BUCKET":     minioCfg.bucket,
+			"MINIO_BUCKET":     bucket,
 		},
-		outputPath, strconv.Itoa(numRows), strconv.Itoa(dim))
+		args...)
 	require.NoError(t, err, "generate vortex data: %s", out)
 	require.Contains(t, out, "OK", "vortex data generation should succeed")
 	t.Logf("Generated vortex data: %s", out)
-}
-
-// generateMultiTypeVortexDataOnMinIO mirrors generateMultiTypeParquetBytes but
-// writes a vortex file. Used by TestExternalCollectionMultipleDataTypesVortex
-// to exercise the full schema (Bool/Int*/Float*/VarChar/JSON/Array/Timestamp/
-// Geometry + all vector dtypes) against vortex format. Vortex Python writer
-// doesn't support FixedSizeBinary, so binary-flavored vectors are stored as
-// FixedSizeList<UInt8> (milvus normalizes both to its internal layout).
-func generateMultiTypeVortexDataOnMinIO(t *testing.T, pythonBin, outputPath string, numRows, vecDim, binVecDim int) {
-	t.Helper()
-	minioCfg := getMinIOConfig()
-
-	out, err := runPythonScript(t, pythonBin, "generate_multi_type_vortex_data.py",
-		map[string]string{
-			"MINIO_ADDRESS":    minioCfg.address,
-			"MINIO_ACCESS_KEY": minioCfg.accessKey,
-			"MINIO_SECRET_KEY": minioCfg.secretKey,
-			"MINIO_BUCKET":     minioCfg.bucket,
-		},
-		outputPath, strconv.Itoa(numRows), strconv.Itoa(vecDim), strconv.Itoa(binVecDim))
-	require.NoError(t, err, "generate multi-type vortex data: %s", out)
-	require.Contains(t, out, "OK", "multi-type vortex data generation should succeed")
-	t.Logf("Generated multi-type vortex data: %s", out)
 }
 
 // buildMultiTypeExternalSchema constructs the schema mirroring the one used
@@ -2082,6 +2340,27 @@ func buildMultiTypeExternalSchema(collName, externalSource, externalSpec string)
 		WithField(entity.NewField().WithName("int8_vec").WithDataType(entity.FieldTypeInt8Vector).WithDim(testVecDim).WithExternalField("int8_vec"))
 }
 
+func buildVortexMultiTypeExternalSchema(collName, externalSource, externalSpec string) *entity.Schema {
+	return entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(externalSource).
+		WithExternalSpec(externalSpec).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("bool_val").WithDataType(entity.FieldTypeBool).WithExternalField("bool_val")).
+		WithField(entity.NewField().WithName("int8_val").WithDataType(entity.FieldTypeInt8).WithExternalField("int8_val")).
+		WithField(entity.NewField().WithName("int16_val").WithDataType(entity.FieldTypeInt16).WithExternalField("int16_val")).
+		WithField(entity.NewField().WithName("int32_val").WithDataType(entity.FieldTypeInt32).WithExternalField("int32_val")).
+		WithField(entity.NewField().WithName("float_val").WithDataType(entity.FieldTypeFloat).WithExternalField("float_val")).
+		WithField(entity.NewField().WithName("double_val").WithDataType(entity.FieldTypeDouble).WithExternalField("double_val")).
+		WithField(entity.NewField().WithName("varchar_val").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64).WithExternalField("varchar_val")).
+		WithField(entity.NewField().WithName("json_val").WithDataType(entity.FieldTypeJSON).WithExternalField("json_val")).
+		WithField(entity.NewField().WithName("array_int").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt32).WithMaxCapacity(16).WithExternalField("array_int")).
+		WithField(entity.NewField().WithName("array_str").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeVarChar).WithMaxLength(64).WithMaxCapacity(16).WithExternalField("array_str")).
+		WithField(entity.NewField().WithName("ts_val").WithDataType(entity.FieldTypeTimestamptz).WithExternalField("ts_val")).
+		WithField(entity.NewField().WithName("geo_val").WithDataType(entity.FieldTypeGeometry).WithExternalField("geo_val")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithExternalField("embedding"))
+}
+
 // TestExternalCollectionVortexFormat tests external collections with vortex format:
 //  1. Generate vortex dataset on MinIO using the generate_vortex_data tool
 //  2. Create external collection with vortex format
@@ -2105,15 +2384,6 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
 	}
 
-	// vortex-data >= 0.56.0 requires Python >= 3.11
-	pythonBin, err := findPython3ForVortex()
-	if err != nil {
-		t.Skipf("Python >= 3.11 not found for Vortex, skipping: %v", err)
-	}
-	if err := checkPythonDeps(pythonBin, "pyarrow", "vortex", "obstore"); err != nil {
-		t.Skipf("Python deps for Vortex unavailable, skipping: %v", err)
-	}
-
 	collName := common.GenRandomString("ext_vortex", 6)
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
@@ -2121,7 +2391,7 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	// Step 1: Generate vortex dataset on MinIO
 	// ---------------------------------------------------------------
 	const totalRows = 100000
-	generateVortexDataOnMinIO(t, pythonBin, extPath, totalRows, testVecDim)
+	generateVortexDataOnMinIO(t, extPath, externalDataSchemaBasic, totalRows, minioCfg.bucket)
 
 	t.Cleanup(func() {
 		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
@@ -2322,12 +2592,10 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	t.Log("Vortex format external collection test passed!")
 }
 
-// TestExternalCollectionMultipleDataTypesVortex mirrors
-// TestExternalCollectionMultipleDataTypes but writes the dataset in vortex
-// format. It exercises the same multi-type schema (Bool/Int*/Float*/VarChar/
-// JSON/Array/Timestamp/Geometry + all vector dtypes) and the same
-// refresh/index/load/query/search verification plan, ensuring vortex matches
-// parquet behavior across the entire type matrix.
+// TestExternalCollectionMultipleDataTypesVortex mirrors the scalar/array/json/
+// geometry/timestamp coverage from TestExternalCollectionMultipleDataTypes.
+// Vortex 0.56.0 cannot write Arrow FixedSizeBinary, so binary/half/int8 vector
+// fields remain covered by the parquet and lance multi-type tests.
 func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
 	t.Parallel()
 
@@ -2343,15 +2611,6 @@ func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
 		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
 	}
 
-	// vortex-data >= 0.56.0 requires Python >= 3.11
-	pythonBin, err := findPython3ForVortex()
-	if err != nil {
-		t.Skipf("Python >= 3.11 not found for Vortex, skipping: %v", err)
-	}
-	if err := checkPythonDeps(pythonBin, "pyarrow", "vortex", "obstore"); err != nil {
-		t.Skipf("Python deps for Vortex unavailable, skipping: %v", err)
-	}
-
 	collName := common.GenRandomString("ext_multi_vortex", 6)
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
@@ -2362,10 +2621,10 @@ func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
 
 	// Step 1: Generate multi-type vortex dataset on MinIO
 	const numRows = int64(100)
-	generateMultiTypeVortexDataOnMinIO(t, pythonBin, extPath, int(numRows), testVecDim, testBinVecDim)
+	generateVortexDataOnMinIO(t, extPath, externalDataSchemaMulti, int(numRows), minioCfg.bucket)
 
-	// Step 2: Create external collection with shared multi-type schema
-	schema := buildMultiTypeExternalSchema(collName,
+	// Step 2: Create external collection with Vortex-compatible multi-type schema
+	schema := buildVortexMultiTypeExternalSchema(collName,
 		extTestURI(minioCfg, extPath),
 		extTestSpec(minioCfg, "vortex"))
 
@@ -2374,26 +2633,7 @@ func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
 	t.Logf("Created multi-type vortex external collection: %s", collName)
 
 	// Step 3 onwards: shared refresh + index + load + verify
-	runMultiTypeRefreshIndexLoadVerify(ctx, t, mc, collName, numRows)
-}
-
-// generateMultiTypeLanceDataOnMinIO writes a Lance dataset on MinIO using the
-// shared 18-column multi-type schema. Used by
-// TestExternalCollectionMultipleDataTypesLance.
-func generateMultiTypeLanceDataOnMinIO(t *testing.T, s3URI string, numRows, vecDim, binVecDim int) {
-	t.Helper()
-	minioCfg := getMinIOConfig()
-
-	out, err := runPythonScript(t, "python3", "generate_multi_type_lance_data.py",
-		map[string]string{
-			"MINIO_ADDRESS":    minioCfg.address,
-			"MINIO_ACCESS_KEY": minioCfg.accessKey,
-			"MINIO_SECRET_KEY": minioCfg.secretKey,
-		},
-		s3URI, strconv.Itoa(numRows), strconv.Itoa(vecDim), strconv.Itoa(binVecDim))
-	require.NoError(t, err, "generate multi-type lance data: %s", out)
-	require.Contains(t, out, "OK", "multi-type lance data generation should succeed")
-	t.Logf("Generated multi-type lance data: %s", out)
+	runMultiTypeRefreshIndexLoadVerifyWithVectorFields(ctx, t, mc, collName, numRows, "", "", []string{"embedding"})
 }
 
 // TestExternalCollectionMultipleDataTypesLance mirrors
@@ -2415,10 +2655,6 @@ func TestExternalCollectionMultipleDataTypesLance(t *testing.T) {
 		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
 	}
 
-	if err := checkPythonDeps("python3", "pyarrow", "lance"); err != nil {
-		t.Skipf("Python deps for Lance unavailable, skipping: %v", err)
-	}
-
 	collName := common.GenRandomString("ext_multi_lance", 6)
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
@@ -2430,7 +2666,7 @@ func TestExternalCollectionMultipleDataTypesLance(t *testing.T) {
 	const numRows = int64(100)
 	// Lance writer takes a full s3:// URI (different from vortex's relative path).
 	s3URI := fmt.Sprintf("s3://%s/%s", minioCfg.bucket, extPath)
-	generateMultiTypeLanceDataOnMinIO(t, s3URI, int(numRows), testVecDim, testBinVecDim)
+	generateLanceDataOnMinIO(t, s3URI, externalDataSchemaMulti, int(numRows), 0)
 
 	schema := buildMultiTypeExternalSchema(collName,
 		extTestURI(minioCfg, extPath),
@@ -2479,7 +2715,7 @@ func TestExternalCollectionFloat32ListVector(t *testing.T) {
 			specJSON: extTestSpec(minioCfg, "parquet"),
 			setupData: func(t *testing.T, extPath string) {
 				t.Helper()
-				data, genErr := generateParquetBytes(numRows, 0)
+				data, genErr := generateParquetBytes(externalDataSchemaBasic, numRows, 0, testVecDim)
 				require.NoError(t, genErr, "generate parquet")
 				objectKey := fmt.Sprintf("%s/data.parquet", extPath)
 				_, putErr := minioClient.PutObject(ctx, minioCfg.bucket, objectKey,
@@ -2654,7 +2890,7 @@ func TestExternalCollectionDifferentBucket(t *testing.T) {
 	totalExpectedRows := int64(numFiles) * rowsPerFile
 
 	for i := 0; i < numFiles; i++ {
-		data, err := generateParquetBytes(rowsPerFile, int64(i)*rowsPerFile)
+		data, err := generateParquetBytes(externalDataSchemaBasic, rowsPerFile, int64(i)*rowsPerFile, testVecDim)
 		require.NoError(t, err, "generate parquet file %d", i)
 
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
@@ -2667,14 +2903,14 @@ func TestExternalCollectionDifferentBucket(t *testing.T) {
 	})
 
 	// ---------------------------------------------------------------
-	// Step 2: Create external collection with s3://external-bucket/path URI
+	// Step 2: Create external collection with minio://external-bucket/path URI
 	// ---------------------------------------------------------------
-	// The key difference: ExternalSource uses a full s3:// URI pointing to
+	// The key difference: ExternalSource uses a full minio:// URI pointing to
 	// a different bucket than Milvus's own bucket (a-bucket).
-	// URI format: s3://host:port/bucket/path — post-refactor validator
+	// URI format: minio://host:port/bucket/path — post-refactor validator
 	// requires explicit non-empty scheme + host. Empty-host shorthand
 	// (s3:///bucket/path) was dropped.
-	externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, externalBucket, extPath)
+	externalSource := fmt.Sprintf("minio://%s/%s/%s", minioCfg.address, externalBucket, extPath)
 	t.Logf("ExternalSource: %s (Milvus bucket: %s)", externalSource, minioCfg.bucket)
 
 	schema := entity.NewSchema().
@@ -2799,7 +3035,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 		{relV1, 0},
 		{relV2, 1000},
 	} {
-		data, genErr := generateParquetBytes(rowsPerFile, p.startID)
+		data, genErr := generateParquetBytes(externalDataSchemaBasic, rowsPerFile, p.startID, testVecDim)
 		require.NoError(t, genErr)
 		objectKey := fmt.Sprintf("%s/data.parquet", p.path)
 		_, putErr := minioClient.PutObject(ctx, minioCfg.bucket, objectKey,
@@ -2843,7 +3079,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	require.Contains(t, coll.Schema.ExternalSpec, `"format":"parquet"`)
 	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_id":"***"`)
 	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_value":"***"`)
-	require.Contains(t, coll.Schema.ExternalSpec, `"region":"us-east-1"`)
+	require.NotContains(t, coll.Schema.ExternalSpec, `"region":`)
 
 	// ---------------------------------------------------------------
 	// Step 2: First refresh (with default source/spec) — establishes baseline
@@ -2881,7 +3117,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	require.Contains(t, coll2.Schema.ExternalSpec, `"format":"parquet"`)
 	require.Contains(t, coll2.Schema.ExternalSpec, `"access_key_id":"***"`)
 	require.Contains(t, coll2.Schema.ExternalSpec, `"access_key_value":"***"`)
-	require.Contains(t, coll2.Schema.ExternalSpec, `"region":"us-east-1"`)
+	require.NotContains(t, coll2.Schema.ExternalSpec, `"region":`)
 	t.Logf("Verified: schema updated — source=%s, spec=%s", coll2.Schema.ExternalSource, coll2.Schema.ExternalSpec)
 	_ = specV2 // value used to drive the refresh; final spec compared structurally above.
 }
@@ -2914,26 +3150,13 @@ func TestExternalSourceFormats(t *testing.T) {
 		require.NoError(t, minioClient.MakeBucket(ctx, externalBucket, miniogo.MakeBucketOptions{}))
 	}
 
-	// Check Python deps once (skip lance/vortex subtests if unavailable)
-	hasLance := checkPythonDeps("python3", "pyarrow", "lance") == nil
-	vortexPython, vortexErr := findPython3ForVortex()
-	hasVortex := vortexErr == nil && checkPythonDeps(vortexPython, "vortex") == nil
-
 	const rowsPerFile = int64(100)
 	const numRows = 100
 
-	// Build extfs credentials JSON fragment once — all subtests share the
-	// same MinIO credentials and region. Required by ValidateExtfsComplete.
-	//
-	// Deliberately do NOT set cloud_provider: MinIO is not AWS. Setting
-	// cloud_provider=aws would activate Tier-2 derivation and point
-	// effectiveAddr at `https://s3.us-east-1.amazonaws.com`, which then
-	// causes NormalizeExternalSource to rewrite the localhost MinIO URI
-	// into an AWS S3 URI with localhost:9000 as a path segment. Region is
-	// still required by ValidateExtfsComplete for s3-family schemes, but
-	// the endpoint must come from the URI host (Milvus form).
+	// Build extfs credentials JSON fragment once. The minio:// external source
+	// carries the endpoint and bucket, so tests only need credentials here.
 	extfsFragment := fmt.Sprintf(
-		`"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}`,
+		`"extfs":{"access_key_id":%q,"access_key_value":%q}`,
 		minioCfg.accessKey, minioCfg.secretKey)
 
 	type testCase struct {
@@ -2950,34 +3173,26 @@ func TestExternalSourceFormats(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			// Check format-specific deps
-			if tc.format == "lance-table" && !hasLance {
-				t.Skip("Python lance deps unavailable")
-			}
-			if tc.format == "vortex" && !hasVortex {
-				t.Skip("Python vortex deps unavailable")
-			}
-
 			collName := common.GenRandomString("ext_fmt", 6)
 			dataPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
 			// Fully qualified URI (scheme://endpoint/bucket/key) targeting
 			// the dedicated external bucket.
 			targetBucket := externalBucket
-			externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, externalBucket, dataPath)
+			externalSource := fmt.Sprintf("minio://%s/%s/%s", minioCfg.address, externalBucket, dataPath)
 
 			// Generate and upload test data
 			switch tc.format {
 			case "parquet":
-				data, genErr := generateParquetBytes(rowsPerFile, 0)
+				data, genErr := generateParquetBytes(externalDataSchemaBasic, rowsPerFile, 0, testVecDim)
 				require.NoError(t, genErr)
 				objectKey := fmt.Sprintf("%s/data.parquet", dataPath)
 				uploadParquetToMinIO(ctx, t, minioClient, targetBucket, objectKey, data)
 			case "lance-table":
 				s3URI := fmt.Sprintf("s3://%s/%s", targetBucket, dataPath)
-				generateLanceDataOnMinIO(t, s3URI, numRows, 0)
+				generateLanceDataOnMinIO(t, s3URI, externalDataSchemaBasic, numRows, 0)
 			case "vortex":
-				generateVortexDataOnMinIOWithBucket(t, vortexPython, dataPath, numRows, testVecDim, targetBucket)
+				generateVortexDataOnMinIO(t, dataPath, externalDataSchemaBasic, numRows, targetBucket)
 			}
 
 			t.Cleanup(func() {
@@ -3040,24 +3255,6 @@ func TestExternalSourceFormats(t *testing.T) {
 	}
 }
 
-// generateVortexDataOnMinIOWithBucket generates vortex data to a specified bucket.
-func generateVortexDataOnMinIOWithBucket(t *testing.T, pythonBin, outputPath string, numRows, dim int, bucket string) {
-	t.Helper()
-	minioCfg := getMinIOConfig()
-
-	out, err := runPythonScript(t, pythonBin, "generate_vortex_data.py",
-		map[string]string{
-			"MINIO_ADDRESS":    minioCfg.address,
-			"MINIO_ACCESS_KEY": minioCfg.accessKey,
-			"MINIO_SECRET_KEY": minioCfg.secretKey,
-			"MINIO_BUCKET":     bucket,
-		},
-		outputPath, strconv.Itoa(numRows), strconv.Itoa(dim))
-	require.NoError(t, err, "generate vortex data: %s", out)
-	require.Contains(t, out, "OK", "vortex data generation should succeed")
-	t.Logf("Generated vortex data: %s", out)
-}
-
 // waitRefreshComplete polls refresh job progress until it reaches Completed or fails with timeout.
 func waitRefreshComplete(t *testing.T, ctx context.Context, mc *base.MilvusClient, jobID int64, timeout time.Duration) {
 	t.Helper()
@@ -3085,83 +3282,13 @@ func waitRefreshComplete(t *testing.T, ctx context.Context, mc *base.MilvusClien
 	}
 }
 
-// generateLargeParquetBytes creates a parquet file with:
-//   - id (Int64), score (Float64), label (Int32), tag (String), value (Float32)
-//   - embedding (FixedSizeList[Float32, dim])
-//
-// Uses row groups of 100K rows for efficient parquet layout.
-func generateLargeParquetBytes(numRows int64, startID int64, dim int) ([]byte, error) {
-	arrowSchema := arrow.NewSchema(
-		[]arrow.Field{
-			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "score", Type: arrow.PrimitiveTypes.Float64},
-			{Name: "label", Type: arrow.PrimitiveTypes.Int32},
-			{Name: "tag", Type: arrow.BinaryTypes.String},
-			{Name: "value", Type: arrow.PrimitiveTypes.Float32},
-			{Name: "embedding", Type: arrow.FixedSizeListOf(int32(dim), arrow.PrimitiveTypes.Float32)},
-		},
-		nil,
-	)
-
-	var buf bytes.Buffer
-	writerProps := parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows))
-	writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, writerProps, pqarrow.DefaultWriterProps())
-	if err != nil {
-		return nil, fmt.Errorf("create parquet writer: %w", err)
-	}
-
-	const batchSize = 50000
-	pool := memory.NewGoAllocator()
-
-	for offset := int64(0); offset < numRows; offset += batchSize {
-		batchRows := int64(batchSize)
-		if offset+batchRows > numRows {
-			batchRows = numRows - offset
-		}
-
-		builder := array.NewRecordBuilder(pool, arrowSchema)
-		idBuilder := builder.Field(0).(*array.Int64Builder)
-		scoreBuilder := builder.Field(1).(*array.Float64Builder)
-		labelBuilder := builder.Field(2).(*array.Int32Builder)
-		tagBuilder := builder.Field(3).(*array.StringBuilder)
-		valueBuilder := builder.Field(4).(*array.Float32Builder)
-		embeddingBuilder := builder.Field(5).(*array.FixedSizeListBuilder)
-		vecValueBuilder := embeddingBuilder.ValueBuilder().(*array.Float32Builder)
-
-		rng := rand.New(rand.NewSource(startID + offset))
-		for i := int64(0); i < batchRows; i++ {
-			id := startID + offset + i
-			idBuilder.Append(id)
-			scoreBuilder.Append(float64(id) * 0.01)
-			labelBuilder.Append(int32(id % 100))
-			tagBuilder.Append(fmt.Sprintf("item_%d_category_%d", id, id%50))
-			valueBuilder.Append(float32(id) * 0.001)
-			embeddingBuilder.Append(true)
-			for d := 0; d < dim; d++ {
-				vecValueBuilder.Append(rng.Float32())
-			}
-		}
-
-		record := builder.NewRecord()
-		if err := writer.Write(record); err != nil {
-			record.Release()
-			builder.Release()
-			return nil, fmt.Errorf("write batch at offset %d: %w", offset, err)
-		}
-		record.Release()
-		builder.Release()
-	}
-
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("close writer: %w", err)
-	}
-
-	return buf.Bytes(), nil
-}
-
 // TestExternalCollectionLoadPerfProfile writes 500K rows with 768d vectors + scalar fields,
 // triggers refresh + index + load, and measures load performance with timing logs.
 func TestExternalCollectionLoadPerfProfile(t *testing.T) {
+	if !isTruthyEnv("GO_CLIENT_ENABLE_EXTERNAL_TABLE_PERF_PROFILE") {
+		t.Skip("set GO_CLIENT_ENABLE_EXTERNAL_TABLE_PERF_PROFILE=1 to run the external table perf profile")
+	}
+
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -3172,13 +3299,16 @@ func TestExternalCollectionLoadPerfProfile(t *testing.T) {
 
 	collName := common.GenRandomString("ext_perf_profile", 6)
 	extPath := "external-e2e-test/" + collName
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+	})
 
 	const totalRows = 500000
 	const vecDim = 128
 
 	t.Logf("Generating %d rows with %d-dim vectors + scalars...", totalRows, vecDim)
 	genStart := time.Now()
-	data, err := generateLargeParquetBytes(totalRows, 0, vecDim)
+	data, err := generateParquetBytes(externalDataSchemaLarge, totalRows, 0, vecDim)
 	require.NoError(t, err)
 	t.Logf("Generated %d bytes (%.1f MB) in %v", len(data), float64(len(data))/1048576.0, time.Since(genStart))
 
@@ -3199,6 +3329,9 @@ func TestExternalCollectionLoadPerfProfile(t *testing.T) {
 
 	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	t.Log("Starting refresh...")
 	refreshStart := time.Now()
@@ -3260,7 +3393,7 @@ func TestRefreshExternalCollectionZeroRowParquet(t *testing.T) {
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
 	// Upload a single well-formed parquet file with zero rows.
-	data, err := generateParquetBytes(0, 0)
+	data, err := generateParquetBytes(externalDataSchemaBasic, 0, 0, testVecDim)
 	require.NoError(t, err, "generate zero-row parquet")
 	require.NotEmpty(t, data, "zero-row parquet must still be a valid file with header/footer")
 
@@ -3355,7 +3488,7 @@ func TestRefreshExternalCollectionWrongExternalField(t *testing.T) {
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
 	// Well-formed parquet with real columns id/value/embedding.
-	data, err := generateParquetBytes(8, 0)
+	data, err := generateParquetBytes(externalDataSchemaBasic, 8, 0, testVecDim)
 	require.NoError(t, err)
 	_, err = minioClient.PutObject(ctx, minioCfg.bucket,
 		fmt.Sprintf("%s/data.parquet", extPath),
@@ -3441,7 +3574,7 @@ func TestDescribeExternalCollectionRedactsCredentials(t *testing.T) {
 	// Embed secret credentials in extfs; they are persisted into etcd and
 	// must NOT flow back out unredacted through DescribeCollection.
 	rawSpec := fmt.Sprintf(
-		`{"format":"parquet","extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}}`,
+		`{"format":"parquet","extfs":{"access_key_id":%q,"access_key_value":%q}}`,
 		"AKIAEXAMPLELEAKME", "supersecretvaluemustnotleak")
 
 	schema := entity.NewSchema().
@@ -3473,8 +3606,8 @@ func TestDescribeExternalCollectionRedactsCredentials(t *testing.T) {
 	require.Contains(t, returnedSpec, `"access_key_value":"***"`,
 		"access_key_value must be redacted to ***")
 	// Non-secret values remain visible for operator troubleshooting.
-	require.Contains(t, returnedSpec, `"region":"us-east-1"`,
-		"non-secret extfs values must remain readable")
+	require.Contains(t, returnedSpec, `"format":"parquet"`,
+		"non-secret spec values must remain readable")
 }
 
 // Regression for issue #49335: a refresh_external_collection call carrying
@@ -3506,9 +3639,9 @@ func TestRefreshExternalCollectionOverridePersistsNewSource(t *testing.T) {
 	pathB := fmt.Sprintf("external-e2e-test/%s/b", collName)
 
 	// Upload distinct parquet payloads to bucket/A and bucket/B.
-	dataA, err := generateParquetBytes(8, 0)
+	dataA, err := generateParquetBytes(externalDataSchemaBasic, 8, 0, testVecDim)
 	require.NoError(t, err)
-	dataB, err := generateParquetBytes(8, 1000)
+	dataB, err := generateParquetBytes(externalDataSchemaBasic, 8, 1000, testVecDim)
 	require.NoError(t, err)
 	for _, p := range []struct {
 		path  string
@@ -3618,7 +3751,7 @@ func TestRefreshExternalCollectionFiltersNonParquetStrays(t *testing.T) {
 	const rowsPerShard = int64(8)
 	const numShards = 3
 	for i := 0; i < numShards; i++ {
-		data, err := generateParquetBytes(rowsPerShard, int64(i)*rowsPerShard)
+		data, err := generateParquetBytes(externalDataSchemaBasic, rowsPerShard, int64(i)*rowsPerShard, testVecDim)
 		require.NoError(t, err)
 		_, err = minioClient.PutObject(ctx, minioCfg.bucket,
 			fmt.Sprintf("%s/part-%05d.parquet", extPath, i),

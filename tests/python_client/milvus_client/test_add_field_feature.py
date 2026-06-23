@@ -71,8 +71,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
             is_clustering_key=True,
             mmap_enabled=True,
         )
-        # Wait for previous schema bump's backfill segment-version propagation tick to fire.
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client,
             collection_name,
             field_name="field_new_var",
@@ -189,7 +188,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # search on the new added null vector field fails for no reloading for it yet
         error = {
             ct.err_code: 999,
-            ct.err_msg: f"field {new_vec_field_name} is not loaded, please reload the collection",
+            ct.err_msg: f"field index of the field: {new_vec_field_name} is not loaded, please reload the collection",
         }
         self.search(
             client,
@@ -351,11 +350,8 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=new_collection_info, start=ct.default_nb)
         self.insert(client, collection_name, rows)
         # 4. add one more vector field and index data
-        # Wait for the previous add_collection_field's backfill segment-version
-        # propagation tick to fire before the second schema change — otherwise
-        # the consistency gate at Proxy / RootCoord rejects this call.
         new_vec_field_name_2 = "embeddings_2"
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client,
             collection_name,
             field_name=new_vec_field_name_2,
@@ -1233,7 +1229,10 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # 5. verify search on new field fails before indexing (field not loaded)
         search_vecs = cf.gen_vectors(ct.default_nq, search_dim, vector_data_type=vector_type)
         # err_code 999 = gRPC unknown; Milvus uses it for "field not loaded" and "no index" errors
-        error = {ct.err_code: 999, ct.err_msg: f"field {new_vec_field} is not loaded, please reload the collection"}
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"field index of the field: {new_vec_field} is not loaded, please reload the collection",
+        }
         self.search(
             client,
             collection_name,
@@ -1701,10 +1700,8 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        # Each loop iteration bumps the schema version; wait for the previous bump's
-        # backfill segment-version propagation tick to fire before the next call.
         for i in range(62):
-            self.add_collection_field_wait_schema_version_consistency(
+            self.add_collection_field(
                 client,
                 collection_name,
                 field_name=f"{field_name}_{i}",
@@ -1712,9 +1709,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
                 nullable=True,
                 max_length=64,
             )
-        # Final err_res call: the gate must be passed BEFORE this call so the error
-        # returned is the intended "max fields exceeded" error, not a consistency error.
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client,
             collection_name,
             field_name=field_name,
@@ -1743,10 +1738,8 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        # Each loop iteration bumps the schema version; wait for the previous bump's
-        # backfill segment-version propagation tick to fire before the next call.
         for i in range(ct.max_vector_field_num - 1):
-            self.add_collection_field_wait_schema_version_consistency(
+            self.add_collection_field(
                 client,
                 collection_name,
                 field_name=f"{field_name}_{i}",
@@ -1754,9 +1747,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
                 dim=dim,
                 nullable=True,
             )
-        # Final err_res call: wait for consistency so the error we assert is the
-        # real "max vector fields exceeded" error, not a spurious consistency error.
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client,
             collection_name,
             field_name=field_name,

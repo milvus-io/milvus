@@ -38,7 +38,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -77,6 +76,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -147,7 +147,7 @@ type QueryNode struct {
 
 	metricsRequest *metricsinfo.MetricsRequest
 
-	// binlogSaver for TEXT collection growing segment flush
+	// binlogSaver for growing-source segment flush
 	binlogSaver segments.BinlogSaver
 }
 
@@ -176,7 +176,7 @@ func (node *QueryNode) initSession() error {
 			common.MaximumScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
 	node.session.Init(typeutil.QueryNodeRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
@@ -276,24 +276,7 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
-	arrowIOThreadHandler := func(key string) func(evt *config.Event) {
-		return func(evt *config.Event) {
-			if !evt.HasUpdated {
-				return
-			}
-			newThreads := initcore.ResolveArrowIOThreadPoolCapacity()
-			initcore.UpdateArrowIOThreadPoolCapacity(newThreads)
-			log.Info("arrow io thread pool capacity updated",
-				zap.String("trigger", key),
-				zap.Int("threads", newThreads))
-		}
-	}
-	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
-		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
-			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)))
-	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
-		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
-			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
+	initcore.RegisterArrowIOThreadPoolWatchers(pt, "querynode")
 	pt.Watch(pt.QueryNodeCfg.StorageV2CellTargetSizeBytes.Key,
 		config.NewHandler("queryNode.segcore.storageV2.cellTargetSizeBytes", func(evt *config.Event) {
 			if !evt.HasUpdated {
@@ -304,6 +287,7 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 			log.Info("queryNode.segcore.storageV2.cellTargetSizeBytes updated",
 				zap.Int64("bytes", newBytes))
 		}))
+	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
 }
 
 func getIndexEngineVersion() (minimal, current, maximum int32) {
@@ -585,7 +569,7 @@ func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
 }
 
-// SetBinlogSaver sets the BinlogSaver for TEXT collection growing segment flush.
+// SetBinlogSaver sets the BinlogSaver for growing-source segment flush.
 func (node *QueryNode) SetBinlogSaver(saver segments.BinlogSaver) {
 	node.binlogSaver = saver
 }
@@ -602,7 +586,7 @@ func (node *QueryNode) SetAddress(address string) {
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 	if path == "" {
-		return errors.New("fail to set the plugin path")
+		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
 	}
 
 	hoo, err := hookutil.LoadPlugin[optimizers.QueryHook](path, "QueryNodePlugin")
@@ -611,10 +595,10 @@ func (node *QueryNode) initHook() error {
 	}
 
 	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
-		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
+		return merr.Wrap(err, "fail to init configs for the hook")
 	}
 	if err = hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
-		return fmt.Errorf("fail to init tuning configs for the hook, error: %s", err.Error())
+		return merr.Wrap(err, "fail to init tuning configs for the hook")
 	}
 
 	node.queryHook = hoo

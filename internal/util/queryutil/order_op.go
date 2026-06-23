@@ -19,7 +19,6 @@ package queryutil
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"sort"
 
 	"go.opentelemetry.io/otel"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -96,7 +96,7 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 				}
 			}
 			if op.fieldPositions[i] < 0 {
-				return nil, fmt.Errorf("ORDER BY field '%s' (ID=%d) not found in result FieldsData", f.FieldName, f.FieldID)
+				return nil, merr.WrapErrParameterInvalidMsg("ORDER BY field '%s' (ID=%d) not found in result FieldsData", f.FieldName, f.FieldID)
 			}
 		}
 	}
@@ -111,7 +111,10 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 		// Partial sort: use max-heap to select top-K indices, then sort them.
 		// O(N log K) instead of O(N log N).
 		indices := op.partialSort(result, rowCount, k)
-		sorted := op.reorderResult(result, indices)
+		sorted, err := op.reorderResult(result, indices)
+		if err != nil {
+			return nil, err
+		}
 		return []any{sorted}, nil
 	}
 
@@ -125,7 +128,10 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 		return op.compareRowsAt(result, indices[i], indices[j]) < 0
 	})
 
-	sorted := op.reorderResult(result, indices)
+	sorted, err := op.reorderResult(result, indices)
+	if err != nil {
+		return nil, err
+	}
 	return []any{sorted}, nil
 }
 
@@ -254,7 +260,7 @@ func (op *OrderByLimitOperator) compareFieldValuesAt(fd *schemapb.FieldData, idx
 }
 
 // reorderResult reorders result rows by given indices.
-func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults, indices []int) *internalpb.RetrieveResults {
+func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults, indices []int) (*internalpb.RetrieveResults, error) {
 	newResult := &internalpb.RetrieveResults{
 		FieldsData: make([]*schemapb.FieldData, len(result.GetFieldsData())),
 	}
@@ -264,7 +270,11 @@ func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults
 	}
 
 	for i, fd := range result.GetFieldsData() {
-		newResult.FieldsData[i] = sliceFieldData(fd, indices)
+		sliced, err := sliceFieldData(fd, indices)
+		if err != nil {
+			return nil, err
+		}
+		newResult.FieldsData[i] = sliced
 	}
 
 	// Propagate element-level metadata (defensive: ORDER BY and element-level
@@ -279,5 +289,5 @@ func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults
 		newResult.ElementIndices = newElemIndices
 	}
 
-	return newResult
+	return newResult, nil
 }

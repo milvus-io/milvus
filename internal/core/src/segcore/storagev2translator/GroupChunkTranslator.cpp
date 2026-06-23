@@ -465,11 +465,14 @@ GroupChunkTranslator::load_group_chunk(
             continue;
         }
         auto it = field_metas_.find(fid);
-        AssertInfo(
-            it != field_metas_.end(),
-            "[StorageV2] translator {} field id {} not found in field_metas",
-            key_,
-            fid.get());
+        if (it == field_metas_.end()) {
+            // Skip fields not in field_metas (e.g., dropped fields)
+            LOG_INFO(
+                "[StorageV2] translator {} skips field {} not in field_metas",
+                key_,
+                fid.get());
+            continue;
+        }
         const auto& field_meta = it->second;
 
         // Merge array vectors from all tables for this field

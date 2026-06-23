@@ -1,4 +1,4 @@
-FROM golang:1.25.8 as builder
+FROM golang:1.26.4 as builder
 
 # Define a build argument with an empty default value
 ARG CUSTOM_GOPROXY=""
@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 # Required packages for external table tests (must succeed)
 RUN pip3 install --no-cache-dir --break-system-packages \
-    pyarrow==23.0.1 lance==1.2.1 obstore==0.9.1 'pyiceberg[sql-sqlite]==0.8.1'
+    pyarrow==23.0.1 pylance==0.35.0 obstore==0.9.1 substrait==0.26.0 \
+    'pyiceberg[sql-sqlite]==0.8.1'
 # Optional: vortex-data has Rust native deps that may not build on all platforms.
 # Version must match the Rust vortex crate version in milvus-storage.
 RUN pip3 install --no-cache-dir --break-system-packages \

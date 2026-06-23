@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -30,7 +31,6 @@ import (
 	validator "github.com/go-playground/validator/v10"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -48,7 +48,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -93,6 +95,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 
 	"/v2/vectordb/collections/fields/alter_properties": "AlterCollectionField",
 	"/v2/vectordb/collections/fields/add":              "AddCollectionField",
+	"/v2/vectordb/collections/struct_fields/add":       "AddCollectionStructField",
 
 	"/v2/vectordb/databases/create":           "CreateDatabase",
 	"/v2/vectordb/databases/drop":             "DropDatabase",
@@ -130,6 +133,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/roles/list":                "SelectRole",
 	"/v2/vectordb/roles/describe":            "SelectGrant",
 	"/v2/vectordb/roles/create":              "CreateRole",
+	"/v2/vectordb/roles/alter":               "AlterRole",
 	"/v2/vectordb/roles/drop":                "DropRole",
 	"/v2/vectordb/roles/grant_privilege":     "OperatePrivilege",
 	"/v2/vectordb/roles/revoke_privilege":    "OperatePrivilege",
@@ -159,6 +163,8 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/jobs/import/create":                "Import",
 	"/v2/vectordb/jobs/import/get_progress":          "GetImportProgress",
 	"/v2/vectordb/jobs/import/describe":              "GetImportProgress",
+	"/v2/vectordb/jobs/import/commit":                "CommitImport",
+	"/v2/vectordb/jobs/import/abort":                 "AbortImport",
 	"/v2/vectordb/jobs/external_collection/refresh":  "RefreshExternalCollection",
 	"/v2/vectordb/jobs/external_collection/describe": "GetRefreshExternalCollectionProgress",
 	"/v2/vectordb/jobs/external_collection/list":     "ListRefreshExternalCollectionJobs",
@@ -203,6 +209,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	// /collections/fields/add
 	router.POST(CollectionFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionField))))
+	router.POST(CollectionStructFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionStructField))))
 
 	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
 	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.dropDatabase))))
@@ -277,6 +284,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(RoleCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.describeRole))))
 
 	router.POST(RoleCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.createRole))))
+	router.POST(RoleCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.alterRole))))
 	router.POST(RoleCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &RoleReq{} }, wrapperTraceLog(h.dropRole))))
 	router.POST(RoleCategory+GrantPrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.addPrivilegeToRole))))
 	router.POST(RoleCategory+RevokePrivilegeAction, timeoutMiddleware(wrapperPost(func() any { return &GrantReq{} }, wrapperTraceLog(h.removePrivilegeFromRole))))
@@ -310,6 +318,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.createImportJob))))
 	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
 	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
+	router.POST(ImportJobCategory+CommitAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.commitImportJob))))
+	router.POST(ImportJobCategory+AbortAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.abortImportJob))))
 	router.POST(ExternalCollectionJobCategory+RefreshAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionReq{} }, wrapperTraceLog(h.refreshExternalCollection))))
 	router.POST(ExternalCollectionJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionProgressReq{} }, wrapperTraceLog(h.getRefreshExternalCollectionProgress))))
 	router.POST(ExternalCollectionJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRefreshExternalCollectionJobs))))
@@ -375,14 +385,9 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				collectionName = getter.GetCollectionName()
 			}
 		}
-		innerCtx := gCtx.Request.Context()
-		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(innerCtx, gCtx.Request.URL.Path)
-		defer span.End()
+		ctx := gCtx.Request.Context()
 		username, _ := gCtx.Get(ContextUsername)
 		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
-		traceID := span.SpanContext().TraceID().String()
-		ctx = log.WithTraceID(ctx, traceID)
-		gCtx.Set("traceID", traceID)
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
 			zap.Any("url", gCtx.Request.URL.Path))
 
@@ -407,13 +412,42 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			dbName,
 			collectionName,
 		).Inc()
+
+		// Mirror the fail_input/fail_system metric split into the logs so a
+		// failed REST request can be filtered by error_type. System failures are
+		// logged at Warn (actionable); input failures at Info (expected user
+		// mistakes — keeping them at Warn would spam the logs).
+		if label == metrics.FailSystemLabel || label == metrics.FailInputLabel {
+			var status *commonpb.Status
+			switch r := resp.(type) {
+			case interface{ GetStatus() *commonpb.Status }:
+				status = r.GetStatus()
+			case *commonpb.Status:
+				status = r
+			}
+			errType := merr.SystemError
+			if label == metrics.FailInputLabel {
+				errType = merr.InputError
+			}
+			logger := log.Ctx(ctx).With(
+				zap.String("method", methodTag),
+				zap.String("error_type", errType.String()),
+				zap.Int32("code", status.GetCode()),
+				zap.String("reason", status.GetReason()),
+			)
+			if errType == merr.InputError {
+				logger.Info("restful request returned an input error")
+			} else {
+				logger.Warn("restful request returned a system error")
+			}
+		}
 	}
 }
 
 // restfulSizeMiddleware is the middleware fetchs metrics stats from gin struct.
 func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		h := metrics.WrapRestfulContext(ctx, ctx.Request.ContentLength)
+		h := metrics.WrapRestfulContext(ctx.Request.Context(), ctx.Request.ContentLength)
 		ctx.Request = ctx.Request.WithContext(h)
 		handler(ctx)
 		metrics.RecordRestfulMetrics(h, int64(ctx.Writer.Size()), observeOutbound)
@@ -540,6 +574,9 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 	}
 
 	if err != nil {
+		// Expose the exact classification (incl. boundary InputError marks) to
+		// the REST access log; key must match accesslog/info.ContextErrorType.
+		ginCtx.Set("error_type", merr.GetErrorType(err).String())
 		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -668,6 +705,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		HTTPReturnDescription: coll.Schema.Description,
 		HTTPReturnFieldAutoID: autoID,
 		"fields":              printFieldsV2(coll.Schema.Fields),
+		"structFields":        printStructArrayFieldsV2(coll.Schema.StructArrayFields),
 		"functions":           printFunctionDetails(coll.Schema.Functions),
 		"aliases":             aliases,
 		"indexes":             indexDesc,
@@ -1007,9 +1045,46 @@ func (h *HandlersV2) flush(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		return h.proxy.Flush(reqCtx, req.(*milvuspb.FlushRequest))
 	})
 	if err == nil {
+		err = h.waitForFlush(ctx, dbName, httpReq.CollectionName, resp.(*milvuspb.FlushResponse))
+		if err != nil {
+			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return resp, err
+		}
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
+}
+
+func (h *HandlersV2) waitForFlush(ctx context.Context, dbName string, collectionName string, flushResp *milvuspb.FlushResponse) error {
+	segmentIDs := flushResp.GetCollSegIDs()[collectionName].GetData()
+	flushTs, ok := flushResp.GetCollFlushTs()[collectionName]
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("failed to get flush timestamp for collection %s", collectionName)
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		stateResp, err := h.proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			SegmentIDs:     segmentIDs,
+			FlushTs:        flushTs,
+		})
+		if err := merr.CheckRPCCall(stateResp, err); err != nil {
+			return err
+		}
+		if stateResp.GetFlushed() {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (h *HandlersV2) alterCollectionFieldProperties(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1038,6 +1113,12 @@ func (h *HandlersV2) alterCollectionFieldProperties(ctx context.Context, c *gin.
 func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionFieldReqWithSchema)
 
+	if httpReq.Schema.IsStructArrayField() {
+		err := merr.WrapErrParameterInvalidMsg("StructArray field must be added through /v2/vectordb/collections/struct_fields/add")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
 	schemaProto, err := httpReq.Schema.GetProto(ctx)
 	if err != nil {
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -1058,6 +1139,32 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AddCollectionField(reqCtx, req.(*milvuspb.AddCollectionFieldRequest))
+	})
+
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) addCollectionStructField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionFieldReqWithSchema)
+
+	schemaProto, err := httpReq.Schema.GetStructArrayProto(ctx)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	req := &milvuspb.AddCollectionStructFieldRequest{
+		DbName:                 dbName,
+		CollectionName:         httpReq.CollectionName,
+		StructArrayFieldSchema: schemaProto,
+	}
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionStructField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AddCollectionStructField(reqCtx, req.(*milvuspb.AddCollectionStructFieldRequest))
 	})
 
 	if err == nil {
@@ -1329,6 +1436,15 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartialUpdate:  httpReq.PartialUpdate,
 		// PartitionName:  "_default",
 	}
+	fieldOps, err := buildFieldPartialUpdateOps(httpReq.FieldOps)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.FieldOps = fieldOps
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
@@ -1439,7 +1555,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 					fieldName = field.Name
 					vectorField = field
 				} else {
-					return nil, errors.New("search without annsField, but already found multiple vector fields: [" + fieldName + ", " + field.Name + ",,,]")
+					return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", fieldName, field.Name)
 				}
 			}
 		}
@@ -1450,9 +1566,22 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 				break
 			}
 		}
+		if vectorField == nil {
+			for _, sf := range collSchema.GetStructArrayFields() {
+				for _, sub := range sf.GetFields() {
+					if sub.GetName() == fieldName && typeutil.IsVectorType(sub.GetDataType()) {
+						vectorField = sub
+						break
+					}
+				}
+				if vectorField != nil {
+					break
+				}
+			}
+		}
 	}
 	if vectorField == nil {
-		return nil, errors.New("cannot find a vector field named: " + fieldName)
+		return nil, merr.WrapErrFieldNotFound(fieldName, "cannot find a vector field")
 	}
 	dim := int64(0)
 	if !typeutil.IsSparseFloatVectorType(vectorField.DataType) {
@@ -1472,7 +1601,16 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 		}
 	}
 
-	phv, err := convertQueries2Placeholder(body, dataType, dim)
+	var phv *commonpb.PlaceholderValue
+	if vectorField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		if isEmbeddingListData(body) {
+			phv, err = convertEmbListQueries2Placeholder(body, vectorField.GetElementType(), dim)
+		} else {
+			phv, err = convertQueries2Placeholder(body, vectorField.GetElementType(), dim)
+		}
+	} else {
+		phv, err = convertQueries2Placeholder(body, dataType, dim)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1531,6 +1669,40 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturnMessage: "either 'ids' (for primary key search) or 'data' (for vector search) must be provided",
 		})
 		return nil, merr.ErrMissingRequiredParameters
+	}
+
+	if httpReq.SearchAggregation != nil {
+		if hasIDs {
+			err := merr.WrapErrParameterInvalidMsg("ids and searchAggregation cannot be used simultaneously")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if httpReq.Offset != 0 {
+			err := merr.WrapErrParameterInvalidMsg("offset is not supported with searchAggregation")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if searchParamsContainAny(httpReq.SearchParams, proxy.OffsetKey) {
+			err := merr.WrapErrParameterInvalidMsg("searchParams.offset is not supported with searchAggregation")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if httpReq.GroupByField != "" || httpReq.GroupSize != 0 || httpReq.StrictGroupSize {
+			err := merr.WrapErrParameterInvalidMsg("groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		if searchParamsContainAny(httpReq.SearchParams, proxy.GroupByFieldKey, proxy.GroupByFieldsKey) {
+			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+		req.SearchAggregation, err = convertSearchAggregationReq(httpReq.SearchAggregation)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, convert SearchAggregation failed", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
 	}
 
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
@@ -1615,7 +1787,33 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		searchResp := resp.(*milvuspb.SearchResults)
 		cost := proxy.GetCostValue(searchResp.GetStatus())
 		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(searchResp.GetStatus())
-		if searchResp.Results.TopK == int64(0) {
+		if hasSearchAggregationResult(searchResp.Results) {
+			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
+			outputData, err := buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
+			if err != nil {
+				log.Ctx(ctx).Warn("high level restful api, fail to deal with search aggregation result", zap.Any("result", searchResp.Results), zap.Error(err))
+				HTTPReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
+					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+				})
+			} else {
+				respBody := gin.H{
+					HTTPReturnCode:     merr.Code(nil),
+					HTTPReturnData:     outputData,
+					HTTPReturnCost:     cost,
+					HTTPReturnAggTopks: searchResp.Results.GetAggTopks(),
+				}
+				if len(searchResp.Results.Recalls) > 0 {
+					respBody[HTTPReturnRecalls] = searchResp.Results.Recalls
+				}
+				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
+					respBody[HTTPReturnScannedRemoteBytes] = scannedRemoteBytes
+					respBody[HTTPReturnScannedTotalBytes] = scannedTotalBytes
+					respBody[HTTPReturnCacheHitRatio] = cacheHitRatio
+				}
+				HTTPReturnStream(c, http.StatusOK, respBody)
+			}
+		} else if searchResp.Results.TopK == int64(0) {
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
@@ -1679,6 +1877,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		PartitionNames: httpReq.PartitionNames,
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
 	}
@@ -1693,6 +1892,19 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		return nil, err
 	}
 	c.Set(ContextRequest, req)
+
+	if httpReq.SearchAggregation != nil {
+		err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	for _, subReq := range httpReq.Search {
+		if subReq.SearchAggregation != nil {
+			err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
@@ -1922,6 +2134,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Name:               httpReq.CollectionName,
 			AutoID:             httpReq.Schema.AutoId,
 			Fields:             []*schemapb.FieldSchema{},
+			StructArrayFields:  []*schemapb.StructArrayFieldSchema{},
 			Functions:          []*schemapb.FunctionSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
 			Description:        httpReq.Description,
@@ -2009,6 +2222,34 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			collSchema.Fields = append(collSchema.Fields, &fieldSchema)
 			fieldNames[field.FieldName] = true
+		}
+		for i := range httpReq.Schema.StructFields {
+			structField := httpReq.Schema.StructFields[i]
+			if _, dup := fieldNames[structField.FieldName]; dup {
+				err := merr.WrapErrParameterInvalidMsg("duplicated field name: %s", structField.FieldName)
+				log.Ctx(ctx).Warn("high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+			structProto, err := structField.GetProto(ctx)
+			if err != nil {
+				log.Ctx(ctx).Warn("high level restful api, convert struct array field fail",
+					zap.String("structField", structField.FieldName), zap.Error(err))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+			collSchema.StructArrayFields = append(collSchema.StructArrayFields, structProto)
+			fieldNames[structField.FieldName] = true
+			for _, sub := range structProto.GetFields() {
+				qualified := typeutil.ConcatStructFieldName(structField.FieldName, sub.GetName())
+				fieldNames[qualified] = true
+			}
 		}
 		schema, err = proto.Marshal(&collSchema)
 	}
@@ -2425,14 +2666,18 @@ func (h *HandlersV2) describeUser(ctx context.Context, c *gin.Context, anyReq an
 	})
 	if err == nil {
 		roleNames := []string{}
+		description := ""
 		for _, userRole := range resp.(*milvuspb.SelectUserResponse).Results {
 			if userRole.User.Name == userName {
+				description = userRole.GetDescription()
 				for _, role := range userRole.Roles {
 					roleNames = append(roleNames, role.Name)
 				}
 			}
 		}
-		HTTPReturn(c, http.StatusOK, wrapperReturnList(roleNames))
+		result := wrapperReturnList(roleNames)
+		result[HTTPReturnDescription] = description
+		HTTPReturn(c, http.StatusOK, result)
 	}
 	return resp, err
 }
@@ -2440,8 +2685,9 @@ func (h *HandlersV2) describeUser(ctx context.Context, c *gin.Context, anyReq an
 func (h *HandlersV2) createUser(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*PasswordReq)
 	req := &milvuspb.CreateCredentialRequest{
-		Username: httpReq.UserName,
-		Password: crypto.Base64Encode(httpReq.Password),
+		Username:    httpReq.UserName,
+		Password:    crypto.Base64Encode(httpReq.Password),
+		Description: httpReq.Description,
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateCredential", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateCredential(reqCtx, req.(*milvuspb.CreateCredentialRequest))
@@ -2456,8 +2702,11 @@ func (h *HandlersV2) updateUser(ctx context.Context, c *gin.Context, anyReq any,
 	httpReq := anyReq.(*NewPasswordReq)
 	req := &milvuspb.UpdateCredentialRequest{
 		Username:    httpReq.UserName,
-		OldPassword: crypto.Base64Encode(httpReq.Password),
-		NewPassword: crypto.Base64Encode(httpReq.NewPassword),
+		Description: httpReq.Description,
+	}
+	if httpReq.NewPassword != "" {
+		req.OldPassword = crypto.Base64Encode(httpReq.Password)
+		req.NewPassword = crypto.Base64Encode(httpReq.NewPassword)
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/UpdateCredential", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.UpdateCredential(reqCtx, req.(*milvuspb.UpdateCredentialRequest))
@@ -2522,6 +2771,19 @@ func (h *HandlersV2) listRoles(ctx context.Context, c *gin.Context, anyReq any, 
 
 func (h *HandlersV2) describeRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	getter, _ := anyReq.(RoleNameGetter)
+	roleReq := &milvuspb.SelectRoleRequest{
+		Role: &milvuspb.RoleEntity{Name: getter.GetRoleName()},
+	}
+	roleResp, err := wrapperProxy(ctx, c, roleReq, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/SelectRole", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.SelectRole(reqCtx, req.(*milvuspb.SelectRoleRequest))
+	})
+	if err != nil {
+		return roleResp, err
+	}
+	description := ""
+	if results := roleResp.(*milvuspb.SelectRoleResponse).GetResults(); len(results) > 0 {
+		description = results[0].GetRole().GetDescription()
+	}
 	req := &milvuspb.SelectGrantRequest{
 		Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: getter.GetRoleName()}, DbName: dbName},
 	}
@@ -2540,18 +2802,33 @@ func (h *HandlersV2) describeRole(ctx context.Context, c *gin.Context, anyReq an
 			}
 			privileges = append(privileges, privilege)
 		}
-		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: privileges})
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: privileges, HTTPReturnDescription: description})
 	}
 	return resp, err
 }
 
 func (h *HandlersV2) createRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	getter, _ := anyReq.(RoleNameGetter)
+	httpReq := anyReq.(*RoleReq)
 	req := &milvuspb.CreateRoleRequest{
-		Entity: &milvuspb.RoleEntity{Name: getter.GetRoleName()},
+		Entity: &milvuspb.RoleEntity{Name: httpReq.GetRoleName(), Description: httpReq.GetDescription()},
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateRole", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateRole(reqCtx, req.(*milvuspb.CreateRoleRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) alterRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RoleReq)
+	req := &milvuspb.AlterRoleRequest{
+		RoleName:    httpReq.GetRoleName(),
+		Description: httpReq.GetDescription(),
+	}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterRole", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterRole(reqCtx, req.(*milvuspb.AlterRoleRequest))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -3171,6 +3448,32 @@ func (h *HandlersV2) refreshExternalCollection(ctx context.Context, c *gin.Conte
 	return resp, err
 }
 
+func (h *HandlersV2) commitImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	jobIDGetter := anyReq.(JobIDGetter)
+	jobID, err := strconv.ParseInt(jobIDGetter.GetJobID(), 10, 64)
+	if err != nil {
+		paramErr := merr.WrapErrParameterInvalid("int64 jobId", jobIDGetter.GetJobID(), err.Error())
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		return nil, paramErr
+	}
+	req := &datapb.CommitImportRequest{
+		Base:  commonpbutil.NewMsgBase(),
+		JobId: jobID,
+	}
+	c.Set(ContextRequest, req)
+	// Internal DataCoord-only RPC; not exposed on MilvusService. Use the real
+	// proto package in the trace/metric label so it reflects the actual method.
+	resp, err := wrapperProxy(ctx, c, req, false, false,
+		"/milvus.proto.data.DataCoord/CommitImport",
+		func(reqCtx context.Context, req any) (interface{}, error) {
+			return h.proxy.CommitImport(reqCtx, req.(*datapb.CommitImportRequest))
+		})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}})
+	}
+	return resp, err
+}
+
 func (h *HandlersV2) getRefreshExternalCollectionProgress(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*RefreshExternalCollectionProgressReq)
 	req := &milvuspb.GetRefreshExternalCollectionProgressRequest{
@@ -3184,6 +3487,31 @@ func (h *HandlersV2) getRefreshExternalCollectionProgress(ctx context.Context, c
 	if err == nil {
 		jobInfo := resp.(*milvuspb.GetRefreshExternalCollectionProgressResponse).GetJobInfo()
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: refreshExternalCollectionJobInfoToMap(jobInfo)})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) abortImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	jobIDGetter := anyReq.(JobIDGetter)
+	jobID, err := strconv.ParseInt(jobIDGetter.GetJobID(), 10, 64)
+	if err != nil {
+		paramErr := merr.WrapErrParameterInvalid("int64 jobId", jobIDGetter.GetJobID(), err.Error())
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		return nil, paramErr
+	}
+	req := &datapb.AbortImportRequest{
+		Base:  commonpbutil.NewMsgBase(),
+		JobId: jobID,
+	}
+	c.Set(ContextRequest, req)
+	// Internal DataCoord-only RPC; not exposed on MilvusService.
+	resp, err := wrapperProxy(ctx, c, req, false, false,
+		"/milvus.proto.data.DataCoord/AbortImport",
+		func(reqCtx context.Context, req any) (interface{}, error) {
+			return h.proxy.AbortImport(reqCtx, req.(*datapb.AbortImportRequest))
+		})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}})
 	}
 	return resp, err
 }

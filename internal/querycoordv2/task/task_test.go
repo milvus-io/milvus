@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -179,6 +180,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestUnsubscribeChannelTask",
 		"TestLoadSegmentTask",
 		"TestLoadSegmentTaskNotIndex",
+		"TestSegmentTaskWaitsDistAfterLoadRPC",
 		"TestLoadSegmentTaskFailed",
 		"TestTaskCanceled",
 		"TestMoveSegmentTask",
@@ -779,6 +781,7 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
 	// Process tasks done
+	suite.dist.SegmentDistManager.Update(targetNode)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -828,6 +831,185 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())
 	}
+}
+
+func (suite *TaskSuite) TestSegmentTaskWaitsDistAfterLoadRPC() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	partition := int64(100)
+	segmentID := suite.loadSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestSegmentTaskWaitsDistAfterLoadRPC",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		}, nil
+	})
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  suite.collection,
+			PartitionID:   partition,
+			InsertChannel: channel.ChannelName,
+		},
+	}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segmentID).Return(nil, nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil).Once()
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	task, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segmentID),
+	)
+	suite.NoError(err)
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, []*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  suite.collection,
+			PartitionID:   partition,
+			InsertChannel: channel.ChannelName,
+		},
+	}, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	suite.NoError(suite.scheduler.Add(task))
+	suite.AssertTaskNum(0, 1, 0, 1)
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, partition, segmentID, targetNode, 1, channel.ChannelName))
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
+}
+
+func (suite *TaskSuite) TestSegmentTaskWaitsDistAfterReleaseRPC() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	partition := int64(100)
+	segmentID := suite.releaseSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil).Once()
+
+	task, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReduce, channel.GetChannelName(), segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(task))
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, partition, segmentID, targetNode, 1, channel.ChannelName))
+	suite.AssertTaskNum(0, 1, 0, 1)
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+
+	suite.dist.SegmentDistManager.Update(targetNode)
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
+}
+
+func (suite *TaskSuite) TestSegmentTaskChecksTimeoutWhileWaitingDist() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+
+	action := NewSegmentAction(3, ActionTypeGrow, "test-channel", suite.loadSegments[0])
+	action.rpcReturned.Store(true)
+	task, err := NewSegmentTask(
+		ctx,
+		time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		action,
+	)
+	suite.NoError(err)
+	time.Sleep(time.Millisecond)
+
+	shouldProcess := suite.scheduler.preProcess(task)
+	suite.False(shouldProcess)
+	suite.Equal(TaskStatusCanceled, task.Status())
+	suite.ErrorIs(task.Err(), context.DeadlineExceeded)
+}
+
+func (suite *TaskSuite) TestStreamingReduceWaitsForGrowingSegmentDist() {
+	nodeID := int64(3)
+	channelName := "test-channel"
+	segmentID := suite.growingSegments["sub-0"]
+	suite.dist.ChannelDistManager.Update(nodeID, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channelName,
+		},
+		Node:    nodeID,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           nodeID,
+			CollectionID: suite.collection,
+			Channel:      channelName,
+			GrowingSegments: map[int64]*meta.Segment{
+				segmentID: utils.CreateTestSegment(suite.collection, 1, segmentID, nodeID, 1, channelName),
+			},
+		},
+	})
+
+	action := NewSegmentActionWithScope(nodeID, ActionTypeReduce, channelName, segmentID, querypb.DataScope_Streaming, 0)
+	action.rpcReturned.Store(true)
+	suite.False(action.IsFinished(suite.dist))
+
+	suite.dist.ChannelDistManager.Update(nodeID)
+	suite.True(action.IsFinished(suite.dist))
 }
 
 func (suite *TaskSuite) TestMoveSegmentTask() {
@@ -955,6 +1137,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	// First action done, execute the second action
 	suite.dispatchAndWait(sourceNode)
+	suite.dist.SegmentDistManager.Update(sourceNode)
 	// Check second action
 	suite.dispatchAndWait(sourceNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
@@ -1804,37 +1987,42 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	err = scheduler.Add(task4)
 	suite.NoError(err)
 
+	snapshot := scheduler.GetSegmentTaskDeltaSnapshot([]int64{nodeID, nodeID2}, coll)
+	snapshot2 := scheduler.GetSegmentTaskDeltaSnapshot([]int64{nodeID, nodeID2}, coll2)
+
 	// check task delta with collectionID and nodeID
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID, coll))
+	suite.Equal(100, snapshot.GetByNodeInCollection(nodeID))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID, coll))
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
+	suite.Equal(100, snapshot2.GetByNodeInCollection(nodeID2))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 
 	// check task delta with collectionID=-1
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID, -1))
+	suite.Equal(100, snapshot.GetByNode(nodeID))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID, -1))
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID2, -1))
+	suite.Equal(100, snapshot.GetByNode(nodeID2))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID2, -1))
 
 	// check task delta with nodeID=-1
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(-1, coll))
+	suite.Equal(100, snapshot.GetByNodeInCollection(nodeID)+snapshot.GetByNodeInCollection(nodeID2))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, coll))
-	suite.Equal(100, scheduler.GetSegmentTaskDelta(-1, coll))
+	suite.Equal(100, snapshot.GetByNodeInCollection(nodeID)+snapshot.GetByNodeInCollection(nodeID2))
 	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, coll))
 
 	// check task delta with nodeID=-1 and collectionID=-1
-	suite.Equal(200, scheduler.GetSegmentTaskDelta(-1, -1))
+	suite.Equal(200, snapshot.GetByNode(nodeID)+snapshot.GetByNode(nodeID2))
 	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
-	suite.Equal(200, scheduler.GetSegmentTaskDelta(-1, -1))
+	suite.Equal(200, snapshot.GetByNode(nodeID)+snapshot.GetByNode(nodeID2))
 	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
 
 	scheduler.remove(task1)
 	scheduler.remove(task2)
 	scheduler.remove(task3)
 	scheduler.remove(task4)
-	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID, coll))
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{nodeID, nodeID2}, coll)
+	snapshot2 = scheduler.GetSegmentTaskDeltaSnapshot([]int64{nodeID, nodeID2}, coll2)
+	suite.Equal(0, snapshot.GetByNodeInCollection(nodeID))
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID, coll))
-	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
+	suite.Equal(0, snapshot2.GetByNodeInCollection(nodeID2))
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 
 	task5, err := NewChannelTask(
@@ -1853,8 +2041,86 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 }
 
-func (suite *TaskSuite) TestTaskDeltaCache() {
-	etd := NewExecutingTaskDelta()
+func (suite *TaskSuite) TestSegmentTaskDeltaWithDistFilter() {
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+
+	coll := int64(1001)
+	partition := int64(100)
+	channel := "channel-1"
+	sourceNode := int64(1)
+	targetNode := int64(2)
+	growSegmentID := int64(101)
+	reduceSegmentID := int64(102)
+	rowCount := 100
+
+	growTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(targetNode, ActionTypeGrow, "", growSegmentID, querypb.DataScope_Historical, rowCount),
+	)
+	suite.NoError(err)
+	growTask.SetID(1)
+	scheduler.incExecutingTaskDelta(growTask)
+
+	snapshot := scheduler.GetSegmentTaskDeltaSnapshot([]int64{targetNode}, coll)
+	suite.Equal(rowCount, snapshot.GetByNode(targetNode))
+	suite.Equal(rowCount, snapshot.GetByNodeInCollection(targetNode))
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{targetNode + 1}, coll)
+	suite.Equal(0, snapshot.GetByNode(targetNode))
+
+	suite.dist.SegmentDistManager.Update(targetNode,
+		utils.CreateTestSegment(coll, partition, growSegmentID, targetNode, 1, channel))
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{targetNode}, coll)
+	suite.Equal(0, snapshot.GetByNode(targetNode))
+	suite.Equal(0, snapshot.GetByNodeInCollection(targetNode))
+
+	scheduler.decExecutingTaskDelta(growTask)
+
+	suite.dist.SegmentDistManager.Update(sourceNode,
+		utils.CreateTestSegment(coll, partition, reduceSegmentID, sourceNode, 1, channel))
+	reduceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(sourceNode, ActionTypeReduce, "", reduceSegmentID, querypb.DataScope_Historical, rowCount),
+	)
+	suite.NoError(err)
+	reduceTask.SetID(2)
+	scheduler.incExecutingTaskDelta(reduceTask)
+
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode}, coll)
+	suite.Equal(-rowCount, snapshot.GetByNode(sourceNode))
+	suite.Equal(-rowCount, snapshot.GetByNodeInCollection(sourceNode))
+
+	suite.dist.SegmentDistManager.Update(sourceNode)
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode}, coll)
+	suite.Equal(0, snapshot.GetByNode(sourceNode))
+	suite.Equal(0, snapshot.GetByNodeInCollection(sourceNode))
+
+	channelTask, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		NewChannelAction(targetNode, ActionTypeGrow, channel),
+	)
+	suite.NoError(err)
+	channelTask.SetID(3)
+	scheduler.incExecutingTaskDelta(channelTask)
+	suite.Equal(1, scheduler.GetChannelTaskDelta(targetNode, coll))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaCache() {
+	delta := NewChannelTaskDelta()
 
 	taskDelta := []int{1, 2, 3, 4, 5, -6, -7, -8, -9, -10}
 
@@ -1877,16 +2143,16 @@ func (suite *TaskSuite) TestTaskDeltaCache() {
 
 	tasks = lo.Shuffle(tasks)
 	for i := 0; i < len(taskDelta); i++ {
-		etd.Add(tasks[i])
+		delta.Add(tasks[i].(*ChannelTask))
 	}
 
 	tasks = lo.Shuffle(tasks)
 	for i := 0; i < len(taskDelta); i++ {
-		etd.Sub(tasks[i])
+		delta.Sub(tasks[i].(*ChannelTask))
 	}
-	suite.Equal(0, etd.Get(nodeID, collectionID))
-	suite.Equal(0, etd.Get(nodeID, -1))
-	suite.Equal(0, etd.Get(-1, -1))
+	suite.Equal(0, delta.Get(nodeID, collectionID))
+	suite.Equal(0, delta.Get(nodeID, -1))
+	suite.Equal(0, delta.Get(-1, -1))
 }
 
 func (suite *TaskSuite) TestRemoveTaskWithError() {
@@ -1943,6 +2209,137 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
+}
+
+func TestSegmentActionFinishStates(t *testing.T) {
+	dist := meta.NewDistributionManager(nil)
+	action := NewSegmentActionWithScope(1, ActionTypeGrow, "ch", 10, querypb.DataScope_Historical, 100)
+
+	assert.False(t, action.IsFinished(dist))
+
+	action.rpcReturned.Store(true)
+	assert.False(t, action.IsFinished(dist))
+
+	dist.SegmentDistManager.Update(1, utils.CreateTestSegment(100, 1, 10, 1, 1, "ch"))
+	assert.True(t, action.IsFinished(dist))
+
+	updateAction := NewSegmentActionWithScope(1, ActionTypeUpdate, "ch", 10, querypb.DataScope_Historical, 0)
+	updateAction.rpcReturned.Store(true)
+	assert.True(t, updateAction.IsFinished(dist))
+}
+
+func TestSegmentTaskDeltaSnapshotDefaults(t *testing.T) {
+	snapshot := NewSegmentTaskDeltaSnapshot(nil, nil)
+	assert.Equal(t, 0, snapshot.GetByNode(1))
+	assert.Equal(t, 0, snapshot.GetByNodeInCollection(1))
+
+	var nilSnapshot *SegmentTaskDeltaSnapshot
+	assert.Equal(t, 0, nilSnapshot.GetByNode(1))
+	assert.Equal(t, 0, nilSnapshot.GetByNodeInCollection(1))
+}
+
+func TestSegmentTaskDeltaDefensiveBranches(t *testing.T) {
+	replica := newReplicaDefaultRG(10)
+	segmentTask, err := NewSegmentTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(1, ActionTypeGrow, "ch", 10, querypb.DataScope_Historical, 100),
+	)
+	assert.NoError(t, err)
+	segmentTask.SetID(1)
+
+	delta := NewSegmentTaskDelta()
+	delta.Add(segmentTask)
+	delta.printDetailInfos()
+	delta.Add(segmentTask)
+	assert.Len(t, delta.records[segmentTask.ID()], 1)
+
+	delta.Sub(segmentTask)
+	delta.Sub(segmentTask)
+	assert.Empty(t, delta.records)
+
+	base := newBaseTask(context.Background(), WrapIDSource(0), 100, replica, "ch", "MalformedSegmentTask")
+	base.SetID(2)
+	base.actions = []Action{NewChannelAction(1, ActionTypeGrow, "ch")}
+	malformedTask := &SegmentTask{baseTask: base, segmentID: 10}
+
+	delta.Add(malformedTask)
+	assert.Empty(t, delta.records[malformedTask.ID()])
+
+	dist := meta.NewDistributionManager(nil)
+	assert.False(t, segmentDeltaRecord{segmentID: 0}.isSegmentDistMatched(dist))
+	assert.True(t, segmentDeltaRecord{nodeID: 1, segmentID: 10, actionType: ActionTypeUpdate}.isSegmentDistMatched(dist))
+}
+
+func TestChannelTaskDeltaDefensiveBranches(t *testing.T) {
+	replica := newReplicaDefaultRG(10)
+	channelTask, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		replica,
+		NewChannelAction(1, ActionTypeGrow, "ch"),
+	)
+	assert.NoError(t, err)
+	channelTask.SetID(1)
+
+	delta := NewChannelTaskDelta()
+	delta.Add(channelTask)
+	delta.printDetailInfos()
+	delta.Add(channelTask)
+	assert.Equal(t, 1, delta.Get(1, 100))
+
+	delta.Sub(channelTask)
+	delta.Sub(channelTask)
+	assert.Equal(t, 0, delta.Get(1, 100))
+
+	delta.taskIDRecords.Insert(channelTask.ID())
+	delete(delta.data, int64(1))
+	delta.Sub(channelTask)
+	assert.Equal(t, -1, delta.Get(1, 100))
+}
+
+func TestMockSchedulerGetSegmentTaskDeltaSnapshot(t *testing.T) {
+	nodes := []int64{1, 2}
+	expected := NewSegmentTaskDeltaSnapshot(map[int64]int{1: 10}, map[int64]int{1: 5})
+
+	mockScheduler := NewMockScheduler(t)
+	mockScheduler.EXPECT().
+		GetSegmentTaskDeltaSnapshot(nodes, int64(100)).
+		Run(func(nodeIDs []int64, collectionID int64) {
+			assert.Equal(t, nodes, nodeIDs)
+			assert.Equal(t, int64(100), collectionID)
+		}).
+		Return(expected).
+		Once()
+	assert.Same(t, expected, mockScheduler.GetSegmentTaskDeltaSnapshot(nodes, 100))
+
+	mockScheduler.EXPECT().
+		GetSegmentTaskDeltaSnapshot(mock.Anything, int64(101)).
+		RunAndReturn(func(nodeIDs []int64, collectionID int64) *SegmentTaskDeltaSnapshot {
+			assert.Equal(t, nodes, nodeIDs)
+			assert.Equal(t, int64(101), collectionID)
+			return NewSegmentTaskDeltaSnapshot(map[int64]int{2: 20}, map[int64]int{2: 15})
+		}).
+		Once()
+
+	snapshot := mockScheduler.GetSegmentTaskDeltaSnapshot(nodes, 101)
+	assert.Equal(t, 20, snapshot.GetByNode(2))
+	assert.Equal(t, 15, snapshot.GetByNodeInCollection(2))
+}
+
+func TestMockSchedulerGetSegmentTaskDeltaSnapshotPanicsWithoutReturn(t *testing.T) {
+	mockScheduler := NewMockScheduler(t)
+	mockScheduler.On("GetSegmentTaskDeltaSnapshot", mock.Anything, int64(100))
+
+	assert.Panics(t, func() {
+		mockScheduler.GetSegmentTaskDeltaSnapshot([]int64{1}, 100)
+	})
 }
 
 func newReplicaDefaultRG(replicaID int64) *meta.Replica {
@@ -2102,17 +2499,21 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 		suite.broker,
 		suite.target,
 		suite.cluster,
-		suite.nodeMgr)
+		suite.nodeMgr,
+	)
 
 	// Verify shard leader ID was set for load action in move task
 	executor.executeSegmentAction(moveTask, 0)
 	suite.Equal(targetNode, moveTask.ShardLeaderID())
 	suite.NoError(moveTask.Err())
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, 1, segmentID, targetNode, 1, channel.ChannelName))
+	suite.True(moveTask.actions[0].IsFinished(suite.dist))
 
 	// expect release action will execute successfully
 	executor.executeSegmentAction(moveTask, 1)
 	suite.Equal(targetNode, moveTask.ShardLeaderID())
-	suite.True(moveTask.actions[0].IsFinished(suite.dist))
+	suite.dist.SegmentDistManager.Update(sourceNode)
+	suite.True(moveTask.actions[1].IsFinished(suite.dist))
 	suite.NoError(moveTask.Err())
 
 	// test shard leader change before release action

@@ -18,8 +18,10 @@ package compactor
 
 import (
 	"context"
+	"path"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -33,9 +35,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -52,6 +56,20 @@ type LevelZeroCompactionTaskSuite struct {
 	task         *LevelZeroCompactionTask
 
 	dData *storage.DeleteData
+}
+
+type l0TestRecordWriter struct{}
+
+func (w *l0TestRecordWriter) Write(storage.Record) error {
+	return nil
+}
+
+func (w *l0TestRecordWriter) GetWrittenUncompressed() uint64 {
+	return 128
+}
+
+func (w *l0TestRecordWriter) Close() error {
+	return nil
 }
 
 func (s *LevelZeroCompactionTaskSuite) SetupTest() {
@@ -524,6 +542,47 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
 
 	// Segment 102 should have PK 3 with its timestamp
 	assertDeltalog(102, []int64{3}, []uint64{20002})
+}
+
+func (s *LevelZeroCompactionTaskSuite) TestSplitAndWriteV3ReturnsDeltaSummaryWithoutManifestCommit() {
+	basePath := path.Join(s.T().TempDir(), "insert_log/1/10/100")
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{{
+		SegmentID:    100,
+		CollectionID: 1,
+		PartitionID:  10,
+		Level:        datapb.SegmentLevel_L1,
+		Manifest:     oldManifest,
+	}}
+
+	bf := pkoracle.NewBloomFilterSetWithBatchSize(100)
+	bf.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 3}})
+
+	patchWriter := mockey.Mock(storage.NewDeltalogWriter).To(
+		func(ctx context.Context, collectionID, partitionID, segmentID, logID typeutil.UniqueID, pkType schemapb.DataType, deltalogPath string, option ...storage.RwOption) (storage.RecordWriter, error) {
+			s.Equal(path.Join(basePath, "_delta", "200"), deltalogPath)
+			return &l0TestRecordWriter{}, nil
+		},
+	).Build()
+	defer patchWriter.UnPatch()
+
+	patchManifest := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			return "", errors.New("DataNode must not commit V3 L0 manifest")
+		},
+	).Build()
+	defer patchManifest.UnPatch()
+
+	segments, err := s.task.splitAndWrite(context.Background(), s.dData, map[int64]*pkoracle.BloomFilterSet{100: bf})
+	s.NoError(err)
+	s.Require().Len(segments, 1)
+	s.Empty(segments[0].GetManifest())
+	s.Require().Len(segments[0].GetDeltalogs(), 1)
+	s.Require().Len(segments[0].GetDeltalogs()[0].GetBinlogs(), 1)
+	s.NotZero(segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
+	s.EqualValues(2, segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetEntriesNum())
+	s.Equal(path.Join(basePath, "_delta", "200"), segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {

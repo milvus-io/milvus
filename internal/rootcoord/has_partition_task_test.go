@@ -59,7 +59,7 @@ func Test_hasPartitionTask_Prepare(t *testing.T) {
 func Test_hasPartitionTask_Execute(t *testing.T) {
 	t.Run("fail to get collection", func(t *testing.T) {
 		metaTable := mockrootcoord.NewIMetaTable(t)
-		metaTable.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, "test coll", mock.Anything).Return(nil, merr.WrapErrCollectionNotFound("test coll"))
+		metaTable.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, "test coll", mock.Anything, mock.Anything).Return(nil, merr.WrapErrCollectionNotFound("test coll"))
 		core := newTestCore(withMeta(metaTable))
 		task := &hasPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),
@@ -81,6 +81,7 @@ func Test_hasPartitionTask_Execute(t *testing.T) {
 	t.Run("failed", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -114,6 +115,7 @@ func Test_hasPartitionTask_Execute(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,

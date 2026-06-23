@@ -1,21 +1,19 @@
 module github.com/milvus-io/milvus/client/v2
 
-go 1.25.9
+go 1.26.4
 
 require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260506064405-f5b77584c710
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260612100615-43795e8f8f6e
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.17.1
-	go.opentelemetry.io/otel v1.43.0
 	go.uber.org/atomic v1.11.0
-	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 )
@@ -29,8 +27,8 @@ require (
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
-	github.com/coreos/go-semver v0.3.0 // indirect
-	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
+	github.com/coreos/go-semver v0.3.1 // indirect
+	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -95,6 +93,7 @@ require (
 	go.etcd.io/etcd/server/v3 v3.5.23 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0 // indirect
+	go.opentelemetry.io/otel v1.43.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.42.0 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
@@ -104,11 +103,12 @@ require (
 	go.uber.org/automaxprocs v1.5.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
-	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.10.0 // indirect
 	google.golang.org/genproto v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect

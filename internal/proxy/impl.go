@@ -34,6 +34,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -51,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -183,11 +185,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 				log.Warn("invalidate collection meta cache failed. partitionName is empty")
 				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 			}
-			// drop all the alias as well
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
-			}
-			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
+			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName(), request.GetBase().GetTimestamp())
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
@@ -260,6 +258,34 @@ func (node *Proxy) InvalidateShardLeaderCache(ctx context.Context, request *prox
 	log.Info("complete to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
 
 	return merr.Success(), nil
+}
+
+func (node *Proxy) ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	resp := &internalpb.ClearReadTaskQueueResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	ctx = logutil.WithModule(ctx, moduleName)
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ClearReadTaskQueue")
+	defer sp.End()
+
+	result := node.sched.clearDQLQueue(request.GetTaskType(), request.GetReason())
+	resp.ProxyQueuedCleared = result.queuedCleared
+	resp.Results = append(resp.Results, &internalpb.ClearReadTaskQueueComponentResult{
+		Status:        merr.Success(),
+		Role:          typeutil.ProxyRole,
+		NodeID:        paramtable.GetNodeID(),
+		QueuedCleared: result.queuedCleared,
+	})
+	log.Ctx(ctx).Info("cleared proxy read task queue",
+		zap.String("taskType", request.GetTaskType()),
+		zap.String("reason", request.GetReason()),
+		zap.Int64("queuedCleared", result.queuedCleared))
+	return resp, nil
 }
 
 func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
@@ -931,7 +957,7 @@ func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvusp
 	collectionNames := request.GetCollectionName()
 	if len(collectionNames) == 0 {
 		return &milvuspb.BatchDescribeCollectionResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection names cannot be empty")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names cannot be empty")),
 		}, nil
 	}
 
@@ -975,31 +1001,6 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 		return merr.Status(err), nil
 	}
 
-	// Check for external collection - add field is not supported
-	if typeutil.IsExternalCollection(dresp.GetSchema()) {
-		return merr.Status(merr.WrapErrParameterInvalidMsg(
-			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
-	}
-
-	// Prevent concurrent schema-change requests (AddCollectionField / AlterCollectionSchema)
-	// on the same collection from racing past the schema version consistency gate.
-	collKey := request.GetDbName() + "/" + request.GetCollectionName()
-	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
-		return merr.Status(merr.WrapErrParameterInvalidMsg(
-			"another schema-change request is already in progress for collection %s", request.GetCollectionName())), nil
-	}
-	defer node.alterSchemaInFlight.Delete(collKey)
-
-	// TEMP: SDKs do not consistently retry retryable DDL errors yet.
-	// Retry the schema consistency gate in Proxy first to hide short backfill
-	// convergence windows from clients until SDK retry handling is fixed.
-	if err := retry.Handle(ctx, func() (bool, error) {
-		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
-		return merr.IsRetryableErr(err), err
-	}); err != nil {
-		return merr.Status(err), nil
-	}
-
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
@@ -1009,6 +1010,75 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	}
 
 	method := "AddCollectionField"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+// AddCollectionStructField add a struct field to collection
+func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionStructField")
+	defer sp.End()
+
+	dresp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: request.DbName, CollectionName: request.CollectionName})
+	if err := merr.CheckRPCCall(dresp, err); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			"add struct field operation is not supported for external collection %s", request.GetCollectionName())), nil
+	}
+
+	task := &addCollectionStructFieldTask{
+		ctx:                             ctx,
+		Condition:                       NewTaskCondition(ctx),
+		AddCollectionStructFieldRequest: request,
+		mixCoord:                        node.mixCoord,
+		oldSchema:                       dresp.GetSchema(),
+	}
+
+	method := "AddCollectionStructField"
 	tr := timerecord.NewTimeRecorder(method)
 
 	log := log.Ctx(ctx).With(
@@ -1074,30 +1144,6 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	// Prevent concurrent AlterCollectionSchema requests on the same collection from
-	// racing past the schema version consistency gate. Only one request per collection
-	// is allowed to proceed at a time; others are rejected immediately.
-	collKey := request.GetDbName() + "/" + request.GetCollectionName()
-	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"another AlterCollectionSchema request is already in progress for collection %s", request.GetCollectionName())),
-		}, nil
-	}
-	defer node.alterSchemaInFlight.Delete(collKey)
-
-	// TEMP: SDKs do not consistently retry retryable DDL errors yet.
-	// Retry the schema consistency gate in Proxy first to hide short backfill
-	// convergence windows from clients until SDK retry handling is fixed.
-	if err := retry.Handle(ctx, func() (bool, error) {
-		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
-		return merr.IsRetryableErr(err), err
-	}); err != nil {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(err),
-		}, nil
-	}
-
 	task := &alterCollectionSchemaTask{
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
@@ -1147,95 +1193,6 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return task.AlterCollectionSchemaResponse, nil
-}
-
-// checkSchemaVersionConsistency checks if all segments have consistent schema version
-// Returns error if schema version consistency proportion is less than 100%.
-//
-// NOTE: this is a Proxy-local fast-path check only. The `alterSchemaInFlight` map
-// on the Proxy is per-instance, so in a multi-Proxy deployment two concurrent
-// schema-change requests routed to different Proxy instances each see their own
-// empty local map and both pass this check before either has bumped the schema
-// version, allowing the race through. The authoritative cluster-wide consistency
-// gate lives at RootCoord and is enforced after acquiring the collection resource
-// key lock — see checkSchemaVersionConsistencyAtRootCoord in rootcoord, added by
-// companion PR #48989. This Proxy-side check remains as a cheap early reject to
-// avoid unnecessary RootCoord round-trips on the common single-Proxy path.
-func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, collectionName string) error {
-	log := log.Ctx(ctx).With(
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", dbName),
-		zap.String("collection", collectionName))
-
-	// Get collection statistics to check schema version consistency
-	statsResp, err := node.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
-		Base:           commonpbutil.NewMsgBase(),
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	if err := merr.CheckRPCCall(statsResp, err); err != nil {
-		log.Warn("failed to get collection statistics for schema version consistency check", zap.Error(err))
-		return err
-	}
-
-	// Find schema_version_consistent_segments and schema_version_total_segments from Stats.
-	// DataCoord emits these two integer keys only when the collection's schema version > 0
-	// (i.e. AlterCollectionSchema has been called at least once).  Absent keys mean the
-	// schema version is still 0 — no function field has ever been added — so there is no
-	// in-flight backfill and no DDL can be racing with one.  This does NOT open a window
-	// for concurrent DDL to slip through: RootCoord serializes all schema-change DDLs through
-	// a single DDL queue, so a second AlterCollectionSchema call can only enter this check
-	// after the first has already bumped the schema version and DataCoord has started reporting
-	// the count keys.
-	//
-	// Integer counts are used instead of a floating-point proportion to avoid the rounding
-	// hazard where e.g. 99999/100000 = 99.999% would format as "100.00" with "%.2f" and
-	// falsely satisfy the 100% gate check.
-	consistentSegments := -1
-	totalSegments := -1
-	for _, stat := range statsResp.GetStats() {
-		switch stat.GetKey() {
-		case common.SchemaVersionConsistentSegmentsKey:
-			v, err := strconv.Atoi(stat.GetValue())
-			if err != nil || v < 0 {
-				log.Warn("failed to parse schema_version_consistent_segments",
-					zap.String("value", stat.GetValue()), zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg(
-					"invalid schema_version_consistent_segments value: %s", stat.GetValue())
-			}
-			consistentSegments = v
-		case common.SchemaVersionTotalSegmentsKey:
-			v, err := strconv.Atoi(stat.GetValue())
-			if err != nil || v < 0 {
-				log.Warn("failed to parse schema_version_total_segments",
-					zap.String("value", stat.GetValue()), zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg(
-					"invalid schema_version_total_segments value: %s", stat.GetValue())
-			}
-			totalSegments = v
-		}
-	}
-
-	log.Info("checked schema version consistency",
-		zap.Int("consistentSegments", consistentSegments),
-		zap.Int("totalSegments", totalSegments))
-
-	if consistentSegments < 0 && totalSegments < 0 {
-		// Both keys absent: schema version is 0, no backfill has ever been triggered.
-		return nil
-	}
-	if consistentSegments < 0 || totalSegments < 0 {
-		// Exactly one key present — should never happen since DataCoord emits both atomically.
-		// Treat as a data corruption signal and block the DDL rather than silently passing.
-		log.Warn("incomplete schema version consistency stats, blocking DDL",
-			zap.Int("consistentSegments", consistentSegments),
-			zap.Int("totalSegments", totalSegments))
-		return merr.WrapErrParameterInvalidMsg("incomplete schema version consistency stats from DataCoord")
-	}
-	if consistentSegments < totalSegments {
-		return merr.WrapErrCollectionSchemaVersionNotReady(collectionName, consistentSegments, totalSegments)
-	}
-	return nil
 }
 
 // GetStatistics get the statistics, such as `num_rows`.
@@ -1438,6 +1395,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollection")
 	defer sp.End()
+
 	method := "AlterCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -1667,10 +1625,6 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
 		return merr.Status(err), nil
 	}
-
-	// TODO(#48808): gate AlterCollectionField against in-progress backfill once segment schema-version
-	// propagation for DoPhysicalBackfill=false DDLs is synchronous.  Same timing issue as
-	// AddCollectionField — backfill tick may not have fired before the next DDL arrives.
 
 	act := &alterCollectionFieldTask{
 		ctx:                         ctx,
@@ -2864,7 +2818,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {
 		log.Warn("Failed to enqueue insert task: " + err.Error())
-		return constructFailedResponse(merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)), nil
+		return constructFailedResponse(err), nil
 	}
 
 	log.Debug("Detail of insert request in Proxy")
@@ -3806,7 +3760,9 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 
 	annField := typeutil.GetFieldByName(collectionInfo.schema.CollectionSchema, annsFieldName)
 	if annField == nil {
-		return nil, merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema")
+		// annsFieldName comes from the user's search request; a missing field is
+		// the user's input error.
+		return nil, merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema"))
 	}
 
 	if annField.GetDataType() == schemapb.DataType_ArrayOfVector {
@@ -3827,7 +3783,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	} else {
 		// Vector search: validate and fetch the vector field
 		if !typeutil.IsVectorType(annField.GetDataType()) {
-			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
+			return nil, merr.WrapErrParameterInvalidMsg("field (%s) to search is not of vector data type", annsFieldName)
 		}
 		fieldToFetch = annsFieldName
 	}
@@ -5527,11 +5483,14 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	if err := ValidateUsername(username); err != nil {
 		return merr.Status(err), nil
 	}
+	if err := ValidateUserDescription(req.GetDescription()); err != nil {
+		return merr.Status(err), nil
+	}
 	rawPassword, err := crypto.Base64Decode(req.Password)
 	if err != nil {
 		log.Error("decode password fail",
 			zap.Error(err))
-		err = errors.Wrap(err, "decode password fail")
+		err = merr.WrapErrParameterInvalidErr(err, "decode password fail")
 		return merr.Status(err), nil
 	}
 	if err = ValidatePassword(rawPassword); err != nil {
@@ -5543,7 +5502,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	if err != nil {
 		log.Error("encrypt password fail",
 			zap.Error(err))
-		err = errors.Wrap(err, "encrypt password failed")
+		err = merr.WrapErrServiceInternalErr(err, "encrypt password failed")
 		return merr.Status(err), nil
 	}
 	if req.Base == nil {
@@ -5555,6 +5514,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 		Username:          req.Username,
 		EncryptedPassword: encryptedPassword,
 		Sha256Password:    crypto.SHA256(rawPassword, req.Username),
+		Description:       req.Description,
 	}
 	result, err := node.mixCoord.CreateCredential(ctx, credInfo)
 	if err != nil { // for error like conntext timeout etc.
@@ -5577,57 +5537,69 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
-	if err != nil {
-		log.Error("decode old password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "decode old password failed")
+	if err := ValidateUserDescription(req.GetDescription()); err != nil {
 		return merr.Status(err), nil
 	}
-	rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
-	if err != nil {
-		log.Error("decode password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "decode password failed")
-		return merr.Status(err), nil
-	}
-	// valid new password
-	if err = ValidatePassword(rawNewPassword); err != nil {
-		log.Error("illegal password",
-			zap.Error(err))
+	if req.GetNewPassword() == "" && req.Description == nil {
+		err := merr.WrapErrParameterInvalidMsg("must update either password or description")
 		return merr.Status(err), nil
 	}
 
-	skipPasswordVerify := false
-	if currentUser, _ := GetCurUserFromContext(ctx); currentUser != "" {
-		for _, s := range Params.CommonCfg.SuperUsers.GetAsStrings() {
-			if s == currentUser {
-				skipPasswordVerify = true
+	updateCredReq := &internalpb.CredentialInfo{
+		Username:    req.Username,
+		Description: req.Description,
+	}
+
+	if req.GetNewPassword() != "" {
+		rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
+		if err != nil {
+			log.Error("decode old password fail",
+				zap.Error(err))
+			err = merr.WrapErrParameterInvalidErr(err, "decode old password failed")
+			return merr.Status(err), nil
+		}
+		rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
+		if err != nil {
+			log.Error("decode password fail",
+				zap.Error(err))
+			err = merr.WrapErrParameterInvalidErr(err, "decode password failed")
+			return merr.Status(err), nil
+		}
+		// valid new password
+		if err = ValidatePassword(rawNewPassword); err != nil {
+			log.Error("illegal password",
+				zap.Error(err))
+			return merr.Status(err), nil
+		}
+
+		skipPasswordVerify := false
+		if currentUser, _ := GetCurUserFromContext(ctx); currentUser != "" {
+			for _, s := range Params.CommonCfg.SuperUsers.GetAsStrings() {
+				if s == currentUser {
+					skipPasswordVerify = true
+				}
 			}
 		}
-	}
 
-	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
-		err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
-		return merr.Status(err), nil
-	}
-	// update meta data
-	encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
-	if err != nil {
-		log.Error("encrypt password fail",
-			zap.Error(err))
-		err = errors.Wrap(err, "encrypt password failed")
-		return merr.Status(err), nil
+		if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
+			err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
+			return merr.Status(err), nil
+		}
+		// update meta data
+		encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
+		if err != nil {
+			log.Error("encrypt password fail",
+				zap.Error(err))
+			err = merr.WrapErrServiceInternalErr(err, "encrypt password failed")
+			return merr.Status(err), nil
+		}
+		updateCredReq.Sha256Password = crypto.SHA256(rawNewPassword, req.Username)
+		updateCredReq.EncryptedPassword = encryptedPassword
 	}
 	if req.Base == nil {
 		req.Base = &commonpb.MsgBase{}
 	}
 	req.Base.MsgType = commonpb.MsgType_UpdateCredential
-	updateCredReq := &internalpb.CredentialInfo{
-		Username:          req.Username,
-		Sha256Password:    crypto.SHA256(rawNewPassword, req.Username),
-		EncryptedPassword: encryptedPassword,
-	}
 	result, err := node.mixCoord.UpdateCredential(ctx, updateCredReq)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("update credential fail",
@@ -5711,10 +5683,15 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	}
 
 	var roleName string
+	var description string
 	if req.Entity != nil {
 		roleName = req.Entity.Name
+		description = req.Entity.GetDescription()
 	}
 	if err := ValidateRoleName(roleName); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleDescription(description); err != nil {
 		return merr.Status(err), nil
 	}
 	if req.Base == nil {
@@ -5725,6 +5702,39 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	result, err := node.mixCoord.CreateRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to create role", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	return result, nil
+}
+
+func (node *Proxy) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterRole")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	log.Info("AlterRole", zap.Stringer("req", req))
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleName(req.GetRoleName()); err != nil {
+		return merr.Status(err), nil
+	}
+	if err := ValidateRoleDescription(req.GetDescription()); err != nil {
+		return merr.Status(err), nil
+	}
+	if IsDefaultRole(req.GetRoleName()) {
+		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be altered", req.GetRoleName())
+		return merr.Status(err), nil
+	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_AlterRole
+
+	result, err := node.mixCoord.AlterRole(ctx, req)
+	if err != nil {
+		log.Warn("fail to alter role", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return result, nil
@@ -5860,19 +5870,19 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 
 func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) error {
 	if req.Entity == nil {
-		return errors.New("the entity in the request is nil")
+		return merr.WrapErrParameterInvalidMsg("the entity in the request is nil")
 	}
 	if req.Entity.Grantor == nil {
-		return errors.New("the grantor entity in the grant entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the grantor entity in the grant entity is nil")
 	}
 	if req.Entity.Grantor.Privilege == nil {
-		return errors.New("the privilege entity in the grantor entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the privilege entity in the grantor entity is nil")
 	}
 	if err := ValidatePrivilege(req.Entity.Grantor.Privilege.Name); err != nil {
 		return err
 	}
 	if req.Entity.Object == nil {
-		return errors.New("the resource entity in the grant entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the resource entity in the grant entity is nil")
 	}
 	if err := ValidateObjectType(req.Entity.Object.Name); err != nil {
 		return err
@@ -5881,7 +5891,7 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 		return err
 	}
 	if req.Entity.Role == nil {
-		return errors.New("the object entity in the grant entity is nil")
+		return merr.WrapErrParameterInvalidMsg("the object entity in the grant entity is nil")
 	}
 	if err := ValidateRoleName(req.Entity.Role.Name); err != nil {
 		return err
@@ -6152,8 +6162,14 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.RBACMeta == nil {
+	meta := req.GetRBACMeta()
+	if meta == nil {
 		return merr.Success(), nil
+	}
+	for _, role := range meta.GetRoles() {
+		if err := ValidateRoleDescription(role.GetDescription()); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	result, err := node.mixCoord.RestoreRBAC(ctx, req)
@@ -6744,8 +6760,11 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 
 	if !funcutil.SliceContain(resp.GetDbNames(), db) {
 		log.Info("connect failed, target database not exist")
+		// db is the caller-supplied database name; this Connect handshake builds
+		// the not-found directly (it does not go through GetDatabaseInfo's marking
+		// chokepoint), so stamp InputError here.
 		return &milvuspb.ConnectResponse{
-			Status: merr.Status(merr.WrapErrDatabaseNotFound(db)),
+			Status: merr.Status(merr.WrapErrAsInputError(merr.WrapErrDatabaseNotFound(db))),
 		}, nil
 	}
 
@@ -6949,6 +6968,20 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, nil
+}
+
+func (node *Proxy) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	return node.mixCoord.CommitImport(ctx, req)
+}
+
+func (node *Proxy) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	return node.mixCoord.AbortImport(ctx, req)
 }
 
 // DeregisterSubLabel must add the sub-labels here if using other labels for the sub-labels
@@ -7401,17 +7434,35 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		}
 	}()
 
+	var checkpointProto *commonpb.ReplicateCheckpoint
 	checkpoint, err := streaming.WAL().Replicate().GetReplicateCheckpoint(ctx, req.GetTargetPchannel())
 	if err != nil {
-		return nil, err
+		// On a standalone-primary cluster (e.g. after force_promote) the WAL is no
+		// longer a secondary, so the live replicate checkpoint is unavailable. That
+		// must not hide the salvage checkpoint, which is exactly what callers need
+		// after a force_promote. Other errors are still fatal.
+		if !status.AsStreamingError(err).IsReplicateViolation() {
+			return nil, err
+		}
+		logger.Info("not a secondary cluster, live replicate checkpoint unavailable; continue to salvage checkpoint")
+	} else {
+		checkpointProto = checkpoint.IntoProto()
 	}
 
 	// Get the salvage checkpoint for the specified source cluster.
 	// Returns nil if source_cluster_id is not provided or no checkpoint exists for that cluster.
+	// GetSalvageCheckpoint is only meaningful after a force-promote on the local streaming node.
+	// During rolling upgrade, old streaming nodes may not implement this RPC yet; treat only
+	// that compatibility case as "no salvage checkpoint".
 	var salvageCheckpointProto *commonpb.ReplicateCheckpoint
 	salvageCheckpoints, err := streaming.WAL().Replicate().GetSalvageCheckpoint(ctx, req.GetTargetPchannel())
 	if err != nil {
-		return nil, err
+		if errors.Is(err, merr.ErrServiceUnimplemented) || funcutil.IsGrpcErr(err, codes.Unimplemented) {
+			logger.Info("GetSalvageCheckpoint is not implemented, treating as no salvage checkpoint", zap.Error(err))
+			err = nil
+		} else {
+			return nil, err
+		}
 	}
 	for _, cp := range salvageCheckpoints {
 		if cp.ClusterID == req.GetSourceClusterId() {
@@ -7421,7 +7472,7 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 	}
 
 	return &milvuspb.GetReplicateInfoResponse{
-		Checkpoint:        checkpoint.IntoProto(),
+		Checkpoint:        checkpointProto,
 		SalvageCheckpoint: salvageCheckpointProto,
 	}, nil
 }
@@ -7491,7 +7542,13 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		return merr.WrapErrParameterMissing("start_message_id")
 	}
 
-	startMsgID := message.MustUnmarshalMessageID(req.GetStartMessageId())
+	// Unmarshal the message id without panicking: the id bytes are
+	// client-controlled, so a malformed value must be rejected as an invalid
+	// parameter rather than crashing the process.
+	startMsgID, err := message.UnmarshalMessageID(req.GetStartMessageId())
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid start_message_id: %s", err.Error())
+	}
 
 	// Use exclusive start position (dump messages AFTER start_message_id)
 	// This is appropriate for salvage scenarios where start_message_id is the last synced message
@@ -7838,7 +7895,7 @@ func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req
 	// Validate job ID
 	if req.GetJobId() == 0 {
 		return &milvuspb.GetRefreshExternalCollectionProgressResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("job_id is required")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("job_id is required")),
 		}, nil
 	}
 

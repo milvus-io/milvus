@@ -18,6 +18,7 @@ package assign
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -57,9 +58,14 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 	nodes []int64,
 	forceAssign bool,
 ) []SegmentAssignPlan {
+	balanceBatchSize := math.MaxInt64
+
 	// Filter nodes
-	filter := newCommonSegmentNodeFilter(p.nodeManager)
-	nodes = filter.FilterNodes(ctx, nodes, forceAssign)
+	if !forceAssign {
+		filter := newCommonSegmentNodeFilter(p.nodeManager)
+		nodes = filter.FilterNodes(ctx, nodes, forceAssign)
+		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
+	}
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -70,7 +76,7 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 	nodes = nodesCopy
 
 	// Sort nodes by current segment load (ascending)
-	// Consider: segment count + growing rows + scheduler task delta
+	// Consider: segment count only.
 	sort.Slice(nodes, func(i, j int) bool {
 		load1 := p.calculateSegmentLoad(nodes[i])
 		load2 := p.calculateSegmentLoad(nodes[j])
@@ -81,8 +87,6 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 		return nodes[i] < nodes[j]
 	})
 
-	// Apply batch size limit
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	ret := make([]SegmentAssignPlan, 0, len(segments))
 
 	// Assign segments in round-robin fashion
@@ -161,7 +165,7 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 }
 
 // calculateSegmentLoad calculates the total segment load for a node
-// Load = segment count + scheduler task delta
+// Load = segment count
 func (p *RoundRobinAssignPolicy) calculateSegmentLoad(nodeID int64) int {
 	load := 0
 
@@ -169,9 +173,6 @@ func (p *RoundRobinAssignPolicy) calculateSegmentLoad(nodeID int64) int {
 	if nodeInfo != nil {
 		load += nodeInfo.SegmentCnt()
 	}
-
-	// Add scheduler task delta (pending segment tasks)
-	load += p.scheduler.GetSegmentTaskDelta(nodeID, -1)
 
 	return load
 }

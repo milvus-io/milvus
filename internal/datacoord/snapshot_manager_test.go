@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1813,6 +1814,67 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 	assert.Equal(t, int64(200), captured.GetCollectionId())
 	assert.Equal(t, "snap1", captured.GetSnapshotName())
 	assert.Equal(t, int64(100), captured.GetSourceCollectionId())
+}
+
+func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Collection:   &datapb.CollectionDescription{},
+		Segments: []*datapb.SegmentDescription{{
+			SegmentId:      11,
+			PartitionId:    10,
+			SegmentLevel:   datapb.SegmentLevel_L1,
+			ChannelName:    "src-ch",
+			NumOfRows:      123,
+			StorageVersion: 3,
+			IsSorted:       true,
+		}},
+	}
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg *datapb.SegmentInfo) error {
+		assert.Equal(t, int64(2001), seg.GetID())
+		assert.Equal(t, int64(200), seg.GetCollectionID())
+		assert.Equal(t, int64(20), seg.GetPartitionID())
+		assert.Equal(t, "dst-ch", seg.GetInsertChannel())
+		assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
+		assert.True(t, seg.GetIsImporting())
+		assert.Equal(t, int64(3), seg.GetStorageVersion())
+		return nil
+	}).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
+
+	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11}))
+
+	var err error
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocN(int64(1)).Return(int64(2001), int64(2002), nil)
+
+	mockHandler := NewNMockHandler(t)
+	mockHandler.EXPECT().GetCollection(mock.Anything, int64(200)).Return(&collectionInfo{StartPositions: []*commonpb.KeyDataPair{{Key: "dst-ch", Data: []byte{1}}}}, nil)
+
+	addJobCalled := false
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
+		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob) error {
+			addJobCalled = true
+			return nil
+		}).Build()
+	defer mAddJob.UnPatch()
+
+	sm := &snapshotManager{
+		meta:            mt,
+		allocator:       mockAlloc,
+		handler:         mockHandler,
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7))
+	require.NoError(t, err)
+	assert.True(t, addJobCalled)
 }
 
 // TestSnapshotManager_HasActivePins_Delegation verifies the manager-layer wrapper

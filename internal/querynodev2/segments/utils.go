@@ -3,11 +3,9 @@ package segments
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -25,8 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-var errLazyLoadTimeout = merr.WrapErrServiceInternal("lazy load time out")
 
 func GetPkField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
 	for _, field := range schema.GetFields() {
@@ -72,7 +68,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 4
 					break
@@ -83,7 +79,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim / 8
 					break
@@ -94,7 +90,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 2
 					break
@@ -105,14 +101,14 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 2
 					break
 				}
 			}
 		case schemapb.DataType_SparseFloatVector:
-			return nil, errors.New("SparseFloatVector not support in row based message")
+			return nil, merr.WrapErrParameterInvalidMsg("SparseFloatVector not support in row based message")
 		}
 	}
 
@@ -253,7 +249,7 @@ func getFieldSchema(schema *schemapb.CollectionSchema, fieldID int64) (*schemapb
 			}
 		}
 	}
-	return nil, fmt.Errorf("field %d not found in schema", fieldID)
+	return nil, merr.WrapErrFieldNotFound(fieldID, "not in schema")
 }
 
 func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {

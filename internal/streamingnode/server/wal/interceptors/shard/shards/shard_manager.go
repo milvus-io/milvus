@@ -18,7 +18,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -120,8 +122,8 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	// recover the segment infos from the streaming node segment assignment meta storage
 	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
 	growingBelongs := make(map[int64]stats.SegmentBelongs)
+	seenSegments := make(map[int64]struct{}, len(recoverInfos.SegmentAssignments))
 	for _, rawMeta := range recoverInfos.SegmentAssignments {
-		m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
 		coll, ok := collections[rawMeta.GetCollectionId()]
 		if !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, collection not found, %d", rawMeta.GetCollectionId()))
@@ -129,24 +131,33 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 		if _, ok := coll.PartitionIDs[rawMeta.GetPartitionId()]; !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, partition not found, partition not found, %d", rawMeta.GetPartitionId()))
 		}
-		if _, ok := growingBelongs[rawMeta.GetSegmentId()]; ok {
+		if _, ok := seenSegments[rawMeta.GetSegmentId()]; ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, segment repeated, %d", rawMeta.GetSegmentId()))
 		}
-		growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
-			PChannel:     pchannel.Name,
-			VChannel:     m.GetVChannel(),
-			CollectionID: rawMeta.GetCollectionId(),
-			PartitionID:  rawMeta.GetPartitionId(),
-			SegmentID:    m.GetSegmentID(),
-		}
+		seenSegments[rawMeta.GetSegmentId()] = struct{}{}
 		uniqueKey := PartitionUniqueKey{
 			CollectionID: rawMeta.GetCollectionId(),
 			PartitionID:  rawMeta.GetPartitionId(),
 		}
-		if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
-			partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+		switch rawMeta.GetState() {
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
+			m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
+			growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
+				PChannel:     pchannel.Name,
+				VChannel:     m.GetVChannel(),
+				CollectionID: rawMeta.GetCollectionId(),
+				PartitionID:  rawMeta.GetPartitionId(),
+				SegmentID:    m.GetSegmentID(),
+			}
+			if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
+				partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+			}
+			partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
+			continue
+		default:
+			panic(fmt.Sprintf("segment assignment meta has unknown state, segment %d state %s", rawMeta.GetSegmentId(), rawMeta.GetState()))
 		}
-		partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
 	}
 	return partitionToSegmentManagers, growingBelongs
 }
@@ -210,6 +221,22 @@ func (c *CollectionInfo) SchemaVersion() int32 {
 		return 0
 	}
 	return s.GetVersion()
+}
+
+func (c *CollectionInfo) UseGrowingSourceFlush() bool {
+	if c == nil || c.Schema == nil {
+		return false
+	}
+	return typeutil.UseGrowingSourceFlush(c.Schema.GetSchema(),
+		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
+}
+
+func (c *CollectionInfo) HasTextField() bool {
+	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil {
+		return false
+	}
+	return typeutil.HasTextField(c.Schema.GetSchema())
 }
 
 func (m *shardManagerImpl) Channel() types.PChannelInfo {

@@ -2,7 +2,8 @@
 # Requires Python >= 3.11 (for vortex-data >= 0.56.0).
 # Install: pip install -r requirements.txt
 pyarrow==23.0.1
-lance==1.2.1
+pylance==0.35.0
 vortex-data==0.56.0
+substrait==0.26.0
 obstore==0.9.1
 pyiceberg[sql-sqlite]==0.8.1

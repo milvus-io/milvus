@@ -18,7 +18,7 @@ import (
 )
 
 // asyncAllocSegment allocates a new growing segment asynchronously.
-func (m *partitionManager) asyncAllocSegment(schemaVersion int32) {
+func (m *partitionManager) asyncAllocSegment(schemaVersion int32, useGrowingSourceFlush bool) {
 	if m.onAllocating != nil {
 		m.Logger().Debug("segment alloc worker is already on allocating")
 		// manager is already on allocating.
@@ -27,12 +27,13 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32) {
 	// Create a notifier to notify the waiter when the allocation is done.
 	m.onAllocating = make(chan struct{})
 	w := &segmentAllocWorker{
-		ctx:           m.ctx,
-		collectionID:  m.collectionID,
-		partitionID:   m.partitionID,
-		vchannel:      m.vchannel,
-		wal:           m.wal.Get(),
-		schemaVersion: schemaVersion,
+		ctx:                   m.ctx,
+		collectionID:          m.collectionID,
+		partitionID:           m.partitionID,
+		vchannel:              m.vchannel,
+		wal:                   m.wal.Get(),
+		schemaVersion:         schemaVersion,
+		useGrowingSourceFlush: useGrowingSourceFlush,
 	}
 	w.SetLogger(m.Logger())
 	// It should always done asynchronously.
@@ -50,10 +51,11 @@ type segmentAllocWorker struct {
 	wal          wal.WAL
 	// The following fields are preserved across retries to ensure the same segment
 	// configuration is used when rebuilding the message after a failed append.
-	segmentID      uint64            // allocated segment ID
-	storageVersion int64             // storage version determined at first attempt
-	limitation     segmentLimitation // segment limitation determined at first attempt
-	schemaVersion  int32
+	segmentID             uint64            // allocated segment ID
+	storageVersion        int64             // storage version determined at first attempt
+	limitation            segmentLimitation // segment limitation determined at first attempt
+	schemaVersion         int32
+	useGrowingSourceFlush bool
 }
 
 // do is the main loop of the segment allocation worker.

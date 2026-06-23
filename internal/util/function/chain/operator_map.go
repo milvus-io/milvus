@@ -21,6 +21,8 @@ package chain
 import (
 	"fmt"
 
+	"github.com/apache/arrow/go/v17/arrow"
+
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -46,8 +48,8 @@ func NewMapOp(function types.FunctionExpr, inputCols, outputCols []string) (*Map
 	// Skip validation if OutputDataTypes() returns nil (dynamic output types)
 	outputTypes := function.OutputDataTypes()
 	if outputTypes != nil && len(outputCols) != len(outputTypes) {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("map_op: output columns count (%d) must match function output types count (%d)",
-			len(outputCols), len(outputTypes)))
+		return nil, merr.WrapErrServiceInternalMsg("map_op: output columns count (%d) must match function output types count (%d)",
+			len(outputCols), len(outputTypes))
 	}
 
 	return &MapOp{
@@ -90,10 +92,14 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 				out.Release()
 			}
 		}
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("map_op: function returned %d outputs, expected %d",
-			len(outputs), len(o.outputs)))
+		return nil, merr.WrapErrServiceInternalMsg("map_op: function returned %d outputs, expected %d",
+			len(outputs), len(o.outputs))
 	}
 
+	return o.buildOutputDataFrame(input, outputs)
+}
+
+func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked) (*DataFrame, error) {
 	// 4. Create builder
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
@@ -124,7 +130,7 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 
 	// 6. Add all output columns at once
 	if err := builder.AddColumns(o.outputs, outputs); err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("map_op: %v", err))
+		return nil, merr.WrapErrServiceInternalMsg("map_op: %v", err)
 	}
 
 	return builder.Build(), nil
@@ -144,7 +150,7 @@ func NewMapOpFromRepr(repr *OperatorRepr) (Operator, error) {
 	}
 	fn, err := FunctionFromRepr(repr.Function)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("map function: %v", err))
+		return nil, merr.WrapErrParameterInvalidMsg("map function: %v", err)
 	}
 	if len(repr.Inputs) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("map operator requires inputs")

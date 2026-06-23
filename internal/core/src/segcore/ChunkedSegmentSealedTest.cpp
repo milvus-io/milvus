@@ -211,6 +211,92 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     }
 }
 
+TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+
+    auto segment = segcore::CreateSealedSegment(old_schema);
+
+    constexpr int64_t row_count = 5;
+    std::vector<int64_t> pk_values(row_count);
+    std::iota(pk_values.begin(), pk_values.end(), 0);
+
+    auto field_data =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    field_data->FillFieldData(pk_values.data(), row_count);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, pk.get(), {field_data}, cm);
+    segment->LoadFieldData(load_info);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    auto sparse = FieldId(pk.get() + 1);
+    new_schema->AddField(FieldName("sparse_out"),
+                         sparse,
+                         DataType::VECTOR_SPARSE_U32_F32,
+                         0,
+                         std::nullopt,
+                         false);
+    new_schema->add_function_output_field_id(sparse);
+
+    segment->Reopen(new_schema);
+    EXPECT_FALSE(segment->FieldAccessible(sparse));
+}
+
+TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+
+    auto segment = segcore::CreateSealedSegment(old_schema);
+
+    constexpr int64_t row_count = 5;
+    std::vector<int64_t> pk_values(row_count);
+    std::iota(pk_values.begin(), pk_values.end(), 0);
+
+    auto field_data =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    field_data->FillFieldData(pk_values.data(), row_count);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, pk.get(), {field_data}, cm);
+    segment->LoadFieldData(load_info);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    auto label = FieldId(pk.get() + 1);
+    new_schema->AddField(FieldName("chunks[label]"),
+                         label,
+                         DataType::ARRAY,
+                         DataType::VARCHAR,
+                         true);
+    segment->Reopen(new_schema);
+
+    auto offsets = segment->GetArrayOffsets(label);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), row_count);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+    for (int64_t i = 0; i <= row_count; ++i) {
+        auto [start, end] = offsets->ElementIDRangeOfRow(i);
+        EXPECT_EQ(start, 0);
+        EXPECT_EQ(end, 0);
+    }
+}
+
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
     int dim = 16;
     int chunk_num = 2;
@@ -601,10 +687,8 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     // 50% valid: 50 per chunk * 2 chunks = 100
     ASSERT_EQ(offset_mapping.GetValidCount(), total_valid);
 
-    const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
-    ASSERT_EQ(valid_count_per_chunk.size(), chunk_num);
     for (int i = 0; i < chunk_num; i++) {
-        ASSERT_EQ(valid_count_per_chunk[i], valid_per_chunk);
+        ASSERT_EQ(column->GetValidCountInChunk(i), valid_per_chunk);
     }
 
     SearchInfo search_info;

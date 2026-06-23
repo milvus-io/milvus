@@ -27,11 +27,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -42,6 +45,35 @@ import (
 
 func TestFunctionExecutor(t *testing.T) {
 	suite.Run(t, new(FunctionExecutorSuite))
+}
+
+func TestRunAllExecutesFunctionRunnersInOrder(t *testing.T) {
+	calls := make([]string, 0, 3)
+	schema := &schemapb.CollectionSchema{}
+	data := &storage.InsertData{}
+
+	textMock := mockey.Mock(RunTextEmbedding).
+		To(func(context.Context, *schemapb.CollectionSchema, *storage.InsertData, RunOptions) error {
+			calls = append(calls, "text_embedding")
+			return nil
+		}).Build()
+	defer textMock.UnPatch()
+	bm25Mock := mockey.Mock(RunBM25).
+		To(func(*schemapb.CollectionSchema, *storage.InsertData) error {
+			calls = append(calls, "bm25")
+			return nil
+		}).Build()
+	defer bm25Mock.UnPatch()
+	minHashMock := mockey.Mock(RunMinHash).
+		To(func(*schemapb.CollectionSchema, *storage.InsertData) error {
+			calls = append(calls, "minhash")
+			return nil
+		}).Build()
+	defer minHashMock.UnPatch()
+
+	err := RunAll(context.Background(), schema, data, RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"text_embedding", "bm25", "minhash"}, calls)
 }
 
 type FunctionExecutorSuite struct {

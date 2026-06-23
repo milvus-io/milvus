@@ -3,7 +3,6 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -28,7 +27,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	defer broadcaster.Close()
 
 	// check if the collection is created.
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -36,10 +35,13 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	// check if the field schema is illegal.
 	fieldSchema := &schemapb.FieldSchema{}
 	if err = proto.Unmarshal(req.Schema, fieldSchema); err != nil {
-		return errors.Wrap(err, "failed to unmarshal field schema")
+		return merr.Wrap(err, "failed to unmarshal field schema")
+	}
+	if fieldSchema.GetDataType() == schemapb.DataType_Text && fieldSchema.GetDefaultValue() != nil {
+		return merr.WrapErrParameterInvalidMsg("default value is not supported when adding TEXT field, field name = %s", fieldSchema.GetName())
 	}
 	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
-		return errors.Wrap(err, "failed to check field schema")
+		return merr.Wrap(err, "failed to check field schema")
 	}
 	if fieldSchema.GetDataType() == schemapb.DataType_Timestamptz {
 		timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, coll.Properties)
@@ -47,24 +49,40 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 			timezone = common.DefaultTimezone
 		}
 		if err := timestamptz.CheckAndRewriteTimestampTzDefaultValueForFieldSchema(fieldSchema, timezone); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid default value of field, name: %s, err: %w", fieldSchema.Name, err)
+			return merr.WrapErrParameterInvalidErr(err, "invalid default value of field, name: %s", fieldSchema.Name)
 		}
 	}
-
 	// check if the field already exists
+	fieldNames := typeutil.NewSet[string]()
 	for _, field := range coll.Fields {
-		if field.Name == fieldSchema.Name {
-			// TODO: idempotency check here.
-			return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", fieldSchema.Name)
+		fieldNames.Insert(field.Name)
+	}
+	for _, structField := range coll.StructArrayFields {
+		fieldNames.Insert(structField.Name)
+		for _, field := range structField.Fields {
+			fieldNames.Insert(field.Name)
+			fieldNames.Insert(storedRootStructSubFieldName(structField.Name, field.Name))
 		}
 	}
+	if fieldNames.Contain(fieldSchema.Name) {
+		// TODO: idempotency check here.
+		return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", fieldSchema.Name)
+	}
 
-	// assign a new field id.
-	fieldSchema.FieldID = nextFieldID(coll)
 	// build new collection schema.
 	schema := coll.ToCollectionSchemaPB()
+	// assign a new field id.
+	fieldSchema.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
 	schema.Version = coll.SchemaVersion + 1
 	schema.Fields = append(schema.Fields, fieldSchema)
+	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
+	schema.Properties = properties
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
+		return err
+	}
+	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -80,13 +98,14 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
 			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema},
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema: schema,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).

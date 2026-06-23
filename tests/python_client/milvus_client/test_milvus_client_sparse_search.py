@@ -1,8 +1,8 @@
 import pytest
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
 from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 
 default_nb = ct.default_nb
 default_nq = ct.default_nq
@@ -177,7 +177,7 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
         expected: search returns exactly nq groups of results with correct limit and IP ordering
         """
         client = self._client(alias=self.shared_alias)
-        search_vectors = cf.gen_sparse_vectors(nq)
+        search_vectors = cf.gen_sparse_vectors(nq, dim=ct.default_dim)
         self.search(client, self.collection_name,
                     data=search_vectors,
                     anns_field=ct.default_sparse_vec_field_name,

@@ -17,12 +17,11 @@
 package queryutil
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // BuildQueryReducePipeline builds a pipeline for QN/Delegator query reduction.
@@ -129,7 +128,7 @@ func ComputeGroupByOrderPositions(
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("ORDER BY field '%s' (ID=%d) not found in GROUP BY columns or aggregates", obf.FieldName, obf.FieldID)
+			return nil, merr.WrapErrParameterInvalidMsg("ORDER BY field '%s' (ID=%d) not found in GROUP BY columns or aggregates", obf.FieldName, obf.FieldID)
 		}
 	}
 	return positions, nil

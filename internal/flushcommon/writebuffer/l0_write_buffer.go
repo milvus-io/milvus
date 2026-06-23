@@ -63,16 +63,19 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
 
-	// For TEXT collections, skip Insert buffer here.
-	// Insert data will be flushed by QueryNode's Growing Segment (via GrowingFlushManager).
-	// This avoids duplicate flush paths for TEXT data.
-	if !wb.hasTextFields {
-		// buffer insert data and add segment if not exists
-		for _, inData := range insertData {
-			err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
-			if err != nil {
-				return err
+	for _, inData := range insertData {
+		if wb.useGrowingSourceFlush {
+			targetOffset := wb.growingSourceTargetOffset(inData.segmentID, inData.rowNum)
+			decision := wb.decideGrowingFlushSource(inData.segmentID, targetOffset, endPos)
+			if decision.sourceType == metacache.FlushSourceGrowing {
+				wb.recordGrowingSourceProgress(inData, startPos, endPos, schemaVersion, targetOffset)
+				continue
 			}
+		}
+
+		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -82,6 +85,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
+	wb.updateProcessedTsLocked(endPos.GetTimestamp())
 
 	segmentsSync := wb.triggerSync()
 	for _, segment := range segmentsSync {

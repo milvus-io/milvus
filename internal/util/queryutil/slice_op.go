@@ -66,24 +66,28 @@ func (op *SliceOperator) Run(ctx context.Context, span trace.Span, inputs ...any
 	}
 
 	var sliced *internalpb.RetrieveResults
+	var err error
 	if result.GetElementLevel() {
-		sliced = op.applyElementLevelSlice(result)
+		sliced, err = op.applyElementLevelSlice(result)
 	} else {
-		sliced = op.applySlice(result)
+		sliced, err = op.applySlice(result)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return []any{sliced}, nil
 }
 
 // applySlice applies doc-level offset and limit to the result.
-func (op *SliceOperator) applySlice(result *internalpb.RetrieveResults) *internalpb.RetrieveResults {
+func (op *SliceOperator) applySlice(result *internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
 	size := getRowCount(result)
 	if size == 0 {
-		return result
+		return result, nil
 	}
 
 	start := int(op.offset)
 	if start >= size {
-		return &internalpb.RetrieveResults{}
+		return &internalpb.RetrieveResults{}, nil
 	}
 
 	end := size
@@ -92,7 +96,7 @@ func (op *SliceOperator) applySlice(result *internalpb.RetrieveResults) *interna
 	}
 
 	if start == 0 && end == size {
-		return result
+		return result, nil
 	}
 
 	return rangeSliceRetrieveResults(result, start, end)
@@ -101,11 +105,11 @@ func (op *SliceOperator) applySlice(result *internalpb.RetrieveResults) *interna
 // applyElementLevelSlice applies element-level offset and limit.
 // Offset and limit count individual array elements, not documents.
 // When a boundary falls mid-document, the document's ElementIndices are trimmed.
-func (op *SliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResults) *internalpb.RetrieveResults {
+func (op *SliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
 	docCount := getRowCount(result)
 	elemIndices := result.GetElementIndices()
 	if docCount == 0 || len(elemIndices) == 0 {
-		return result
+		return result, nil
 	}
 
 	// Phase 1: Apply offset by skipping elements
@@ -127,7 +131,7 @@ func (op *SliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResul
 			startDoc++
 		}
 		if startDoc >= docCount {
-			return &internalpb.RetrieveResults{ElementLevel: true}
+			return &internalpb.RetrieveResults{ElementLevel: true}, nil
 		}
 	}
 
@@ -163,11 +167,14 @@ func (op *SliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResul
 	}
 
 	if startDoc >= endDoc {
-		return &internalpb.RetrieveResults{ElementLevel: true}
+		return &internalpb.RetrieveResults{ElementLevel: true}, nil
 	}
 
 	// Phase 3: Slice field data at document granularity [startDoc, endDoc)
-	sliced := rangeSliceRetrieveResults(result, startDoc, endDoc)
+	sliced, err := rangeSliceRetrieveResults(result, startDoc, endDoc)
+	if err != nil {
+		return nil, err
+	}
 
 	// Phase 4: Apply element-level trims to ElementIndices
 	if startTrimCount > 0 && endTrimCount > 0 && startDoc+1 == endDoc {
@@ -192,5 +199,5 @@ func (op *SliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResul
 		}
 	}
 
-	return sliced
+	return sliced, nil
 }

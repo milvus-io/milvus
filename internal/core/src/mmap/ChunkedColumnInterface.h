@@ -15,6 +15,7 @@
 // limitations under the License.
 #pragma once
 
+#include <atomic>
 #include <mutex>
 
 #include "cachinglayer/CacheSlot.h"
@@ -139,6 +140,43 @@ class ChunkedColumnInterface {
     virtual std::vector<PinWrapper<Chunk*>>
     GetAllChunks(milvus::OpContext* op_ctx) const = 0;
 
+    virtual void
+    ApplyValidDataInChunk(milvus::OpContext* op_ctx,
+                          int64_t chunk_id,
+                          int64_t offset,
+                          int64_t size,
+                          TargetBitmapView valid_result) const {
+        if (!IsNullable() || size == 0) {
+            return;
+        }
+        AssertInfo(offset >= 0 && size >= 0,
+                   "Invalid valid-data range, offset: {}, size: {}",
+                   offset,
+                   size);
+        auto pw = GetChunk(op_ctx, chunk_id);
+        auto chunk = pw.get();
+        AssertInfo(offset + size <= chunk->RowNums(),
+                   "Valid-data range out of chunk bounds, offset: {}, size: "
+                   "{}, chunk rows: {}",
+                   offset,
+                   size,
+                   chunk->RowNums());
+        auto& valid_data = chunk->Valid();
+        AssertInfo(
+            offset + size <= static_cast<int64_t>(valid_data.size()),
+            "Valid-data range out of valid-data bounds, offset: {}, size: {}, "
+            "valid-data size: {}",
+            offset,
+            size,
+            valid_data.size());
+        auto valid_data_ptr = valid_data.data() + offset;
+        for (int64_t i = 0; i < size; ++i) {
+            if (!valid_data_ptr[i]) {
+                valid_result[i] = false;
+            }
+        }
+    }
+
     // Get number of rows before a specific chunk
     virtual int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const = 0;
@@ -147,25 +185,25 @@ class ChunkedColumnInterface {
     virtual const std::vector<int64_t>&
     GetNumRowsUntilChunk() const = 0;
 
-    // Get vector of valid (non-null) row counts before each chunk
-    // For nullable columns, this tracks cumulative physical offsets
-    // For non-nullable columns, this equals GetNumRowsUntilChunk()
-    const std::vector<int64_t>&
-    GetNumValidRowsUntilChunk() const {
-        if (!num_valid_rows_until_chunk_.empty()) {
-            return num_valid_rows_until_chunk_;
-        }
-        return GetNumRowsUntilChunk();
-    }
-
     const FixedVector<bool>&
     GetValidData() const {
         return valid_data_;
     }
 
-    const std::vector<int64_t>&
-    GetValidCountPerChunk() const {
-        return valid_count_per_chunk_;
+    int64_t
+    GetValidCountInChunk(int64_t chunk_id) const {
+        if (!IsNullable()) {
+            return chunk_row_nums(chunk_id);
+        }
+        AssertInfo(!valid_count_per_chunk_.empty(),
+                   "Valid row mapping is not built for nullable column");
+        AssertInfo(
+            chunk_id >= 0 &&
+                chunk_id < static_cast<int64_t>(valid_count_per_chunk_.size()),
+            "Chunk id {} out of range, valid count chunks {}",
+            chunk_id,
+            valid_count_per_chunk_.size());
+        return valid_count_per_chunk_[chunk_id];
     }
 
     const OffsetMapping&
@@ -176,6 +214,13 @@ class ChunkedColumnInterface {
     virtual void
     BuildValidRowIds(milvus::OpContext* op_ctx) {
         if (!IsNullable()) {
+            return;
+        }
+        if (valid_row_ids_built_.load(std::memory_order_acquire)) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(offset_mapping_build_mutex_);
+        if (valid_row_ids_built_.load(std::memory_order_relaxed)) {
             return;
         }
         const auto total_chunks = num_chunks();
@@ -206,107 +251,8 @@ class ChunkedColumnInterface {
             num_valid_rows_until_chunk_.push_back(
                 num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
         }
-        if (chunk_build_flags_.empty()) {
-            BuildOffsetMapping();
-        }
-    }
-
-    // Returns false if stats can't be aligned to chunks; caller falls back to eager.
-    template <typename GetRgRows, typename GetRgNulls>
-    bool
-    TryInitValidRowIdsFromRowGroups(size_t num_row_groups,
-                                    GetRgRows&& rg_rows,
-                                    GetRgNulls&& rg_nulls) {
-        const auto num_chunks = static_cast<int64_t>(this->num_chunks());
-        if (num_chunks == 0) {
-            return false;
-        }
-        const auto& chunk_bounds = GetNumRowsUntilChunk();
-        if (static_cast<int64_t>(chunk_bounds.size()) != num_chunks + 1) {
-            return false;
-        }
-        std::vector<int64_t> counts(num_chunks, 0);
-        int64_t chunk_idx = 0;
-        int64_t accumulated_rows = 0;
-        for (size_t i = 0; i < num_row_groups; ++i) {
-            const int64_t rows = rg_rows(i);
-            const int64_t nulls = rg_nulls(i);
-            if (rows < 0 || nulls < 0 || nulls > rows) {
-                return false;
-            }
-            if (chunk_idx >= num_chunks) {
-                return false;
-            }
-            counts[chunk_idx] += rows - nulls;
-            accumulated_rows += rows;
-            if (chunk_idx + 1 < num_chunks &&
-                accumulated_rows >= chunk_bounds[chunk_idx + 1]) {
-                if (accumulated_rows != chunk_bounds[chunk_idx + 1]) {
-                    return false;
-                }
-                chunk_idx++;
-            }
-        }
-        if (accumulated_rows != chunk_bounds[num_chunks]) {
-            return false;
-        }
-        InitValidRowIds(counts);
-        return true;
-    }
-
-    // Lazy counterpart of BuildValidRowIds: populates counts from metadata
-    // without pinning any chunk.
-    void
-    InitValidRowIds(const std::vector<int64_t>& valid_count_per_chunk) {
-        if (!IsNullable()) {
-            return;
-        }
-        valid_count_per_chunk_ = valid_count_per_chunk;
-        num_valid_rows_until_chunk_.clear();
-        num_valid_rows_until_chunk_.reserve(valid_count_per_chunk.size() + 1);
-        num_valid_rows_until_chunk_.push_back(0);
-        int64_t total_valid = 0;
-        for (auto c : valid_count_per_chunk) {
-            total_valid += c;
-            num_valid_rows_until_chunk_.push_back(total_valid);
-        }
-        offset_mapping_.Reserve(static_cast<int64_t>(NumRows()),
-                                total_valid,
-                                valid_count_per_chunk.size());
-        chunk_build_flags_ =
-            std::vector<std::once_flag>(valid_count_per_chunk.size());
-    }
-
-    void
-    EnsureChunkOffsetMapping(int64_t chunk_id, milvus::OpContext* op_ctx) {
-        if (!IsNullable() || chunk_build_flags_.empty()) {
-            return;
-        }
-        if (chunk_id < 0 ||
-            chunk_id >= static_cast<int64_t>(chunk_build_flags_.size())) {
-            return;
-        }
-        if (offset_mapping_.IsChunkSet(chunk_id)) {
-            return;
-        }
-        std::call_once(chunk_build_flags_[chunk_id], [&]() {
-            auto pw = GetChunk(op_ctx, chunk_id);
-            auto chunk = pw.get();
-            const int64_t rows = chunk_row_nums(chunk_id);
-            std::vector<uint8_t> valid_bytes(rows);
-            for (int64_t j = 0; j < rows; ++j) {
-                valid_bytes[j] = chunk->isValid(j) ? 1 : 0;
-            }
-            const int64_t start_logical = GetNumRowsUntilChunk()[chunk_id];
-            const int64_t start_physical =
-                num_valid_rows_until_chunk_[chunk_id];
-            offset_mapping_.SetChunk(
-                chunk_id,
-                start_logical,
-                start_physical,
-                reinterpret_cast<const bool*>(valid_bytes.data()),
-                rows);
-        });
+        BuildOffsetMapping();
+        valid_row_ids_built_.store(true, std::memory_order_release);
     }
 
     // Build offset mapping from valid_data
@@ -427,8 +373,9 @@ class ChunkedColumnInterface {
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
-    OffsetMapping offset_mapping_;
-    std::vector<std::once_flag> chunk_build_flags_;
+    SealedOffsetMapping offset_mapping_;
+    std::atomic<bool> valid_row_ids_built_{false};
+    std::mutex offset_mapping_build_mutex_;
 
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
@@ -457,35 +404,6 @@ class ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offsets[i]);
             cids.push_back(chunk_id);
-            offsets_in_chunk.push_back(offset_in_chunk);
-        }
-        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
-    }
-
-    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
-    ToChunkIdAndOffsetByPhysical(const int64_t* physical_offsets,
-                                 int64_t count) const {
-        AssertInfo(physical_offsets != nullptr,
-                   "Physical offsets cannot be nullptr");
-        const auto& num_valid_rows_until_chunk = GetNumValidRowsUntilChunk();
-        std::vector<milvus::cachinglayer::cid_t> cids;
-        cids.reserve(count);
-        std::vector<int64_t> offsets_in_chunk;
-        offsets_in_chunk.reserve(count);
-
-        for (int64_t i = 0; i < count; i++) {
-            auto offset = physical_offsets[i];
-            auto iter = std::upper_bound(num_valid_rows_until_chunk.begin(),
-                                         num_valid_rows_until_chunk.end(),
-                                         offset);
-            AssertInfo(iter != num_valid_rows_until_chunk.begin(),
-                       "Physical offset {} is invalid",
-                       offset);
-            size_t chunk_idx =
-                std::distance(num_valid_rows_until_chunk.begin(), iter) - 1;
-            int64_t offset_in_chunk =
-                offset - num_valid_rows_until_chunk[chunk_idx];
-            cids.push_back(chunk_idx);
             offsets_in_chunk.push_back(offset_in_chunk);
         }
         return std::make_pair(std::move(cids), std::move(offsets_in_chunk));

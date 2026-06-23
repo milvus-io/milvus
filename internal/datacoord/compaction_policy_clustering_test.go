@@ -361,38 +361,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 	s.Equal(testLabel, view[0].GetGroupLabel())
 }
 
-func (s *ClusteringCompactionPolicySuite) TestCheckGroupSchemaVersionInternallyConsistent() {
-	// empty group is trivially consistent
-	s.True(s.clusteringCompactionPolicy.checkGroupSchemaVersionInternallyConsistent(
-		&chanPartSegments{segments: nil},
-	))
-
-	// single segment is trivially consistent
-	s.True(s.clusteringCompactionPolicy.checkGroupSchemaVersionInternallyConsistent(
-		&chanPartSegments{segments: []*SegmentInfo{
-			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 3}},
-		}},
-	))
-
-	// all segments with the same schema version → consistent
-	s.True(s.clusteringCompactionPolicy.checkGroupSchemaVersionInternallyConsistent(
-		&chanPartSegments{segments: []*SegmentInfo{
-			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
-			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
-			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
-		}},
-	))
-
-	// segments with different schema versions → inconsistent
-	s.False(s.clusteringCompactionPolicy.checkGroupSchemaVersionInternallyConsistent(
-		&chanPartSegments{segments: []*SegmentInfo{
-			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
-			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 6}},
-		}},
-	))
-}
-
-func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionSkipsInconsistentSchemaGroup() {
+func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSchemaVersionGroup() {
 	paramtable.Get().Save(Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.Key, "0")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.Key)
 
@@ -408,7 +377,6 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionSkipsInconsist
 	})
 
 	segments := genSegmentsForMeta(testLabel)
-	// Force all segments to have mixed schema versions so the group is internally inconsistent
 	versionCounter := int32(0)
 	for id, segment := range segments {
 		versionCounter++
@@ -427,10 +395,10 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionSkipsInconsist
 		return nil, nil
 	})
 
-	// Because the group has mixed schema versions, triggerOneCollection should skip it
 	view, _, err := s.clusteringCompactionPolicy.triggerOneCollection(context.TODO(), 1, false)
 	s.NoError(err)
-	s.Equal(0, len(view))
+	s.Len(view, 1)
+	s.Equal(testLabel, view[0].GetGroupLabel())
 }
 
 func (s *ClusteringCompactionPolicySuite) TestGetExpectedSegmentSize() {

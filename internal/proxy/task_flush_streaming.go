@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -49,20 +48,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(t.ctx, t.DbName, collName)
 		if err != nil {
-			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
-		}
-
-		// Check if collection has TEXT fields — TEXT collections use deferred flush via WAL.
-		schemaInfo, err := globalMetaCache.GetCollectionSchema(ctx, t.DbName, collName)
-		if err != nil {
 			return err
-		}
-		hasTextFields := false
-		for _, field := range schemaInfo.GetFields() {
-			if field.GetDataType() == schemapb.DataType_Text {
-				hasTextFields = true
-				break
-			}
 		}
 
 		vchannels, err := t.chMgr.getVChannels(collID)
@@ -77,9 +63,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if !hasTextFields {
-				onFlushSegmentIDs = append(onFlushSegmentIDs, segmentIDs...)
-			}
+			onFlushSegmentIDs = append(onFlushSegmentIDs, segmentIDs...)
 		}
 
 		// Ask datacoord to get flushed segment infos.
@@ -92,7 +76,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		}
 		resp, err := t.mixCoord.Flush(ctx, flushReq)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
+			return merr.Wrap(err, "failed to call flush to data coordinator")
 		}
 
 		// Remove the flushed segments from onFlushSegmentIDs
@@ -108,11 +92,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		coll2Segments[collName] = &schemapb.LongArray{Data: onFlushSegmentIDs}
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
 		coll2SealTimes[collName] = timeOfSeal.Unix()
-		if hasTextFields {
-			coll2FlushTs[collName] = 0
-		} else {
-			coll2FlushTs[collName] = flushTs
-		}
+		coll2FlushTs[collName] = flushTs
 		channelCps = resp.GetChannelCps()
 	}
 	t.result = &milvuspb.FlushResponse{

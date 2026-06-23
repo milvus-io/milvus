@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func Test_flattenedBinaryVectorsToByteVectors(t *testing.T) {
@@ -56,4 +58,23 @@ func Test_flattenedInt8VectorsToByteVectors(t *testing.T) {
 	}
 
 	assert.Equal(t, expected, actual)
+}
+
+func TestFieldDataToPlaceholderGroupBytesWithCount_AllNullSparseVector(t *testing.T) {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_SparseFloatVector,
+		FieldName: "sparse_vec",
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{},
+				},
+			},
+		},
+		ValidData: []bool{false, false, false},
+	}
+
+	_, valueCount, err := FieldDataToPlaceholderGroupBytesWithCount(fieldData)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, valueCount)
 }

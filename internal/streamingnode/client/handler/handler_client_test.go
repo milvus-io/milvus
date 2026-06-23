@@ -194,6 +194,75 @@ func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
 	assert.Nil(t, cps)
 }
 
+func TestHandlerClient_PrepareReleaseManualFlush(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+	vchannel := "pchannel_100v0"
+	releaseSegmentIDs := []int64{1001}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	service.EXPECT().Close().Return()
+
+	rb := mock_resolver.NewMockBuilder(t)
+	rb.EXPECT().Close().Run(func() {})
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+	w.EXPECT().Close().Run(func() {})
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		service:  service,
+		rb:       rb,
+		watcher:  w,
+	}
+
+	prepared, err := handler.PrepareReleaseManualFlush(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.NoError(t, err)
+	assert.False(t, prepared)
+
+	handler.Close()
+	prepared, err = handler.PrepareReleaseManualFlush(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.ErrorIs(t, err, ErrClientClosed)
+	assert.False(t, prepared)
+}
+
+func TestHandlerClient_GetReplicateCheckpointReplicateViolation(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	handlerServiceClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
+	// Remote WAL reports a replicate violation: the target is no longer a secondary
+	// cluster (e.g. after force_promote). This is unrecoverable for the current WAL
+	// role, so it must be returned immediately rather than retried to the deadline.
+	handlerServiceClient.EXPECT().GetReplicateCheckpoint(mock.Anything, mock.Anything).Return(
+		nil, status.NewReplicateViolation("wal is not a secondary cluster in replicating topology"))
+	service.EXPECT().GetService(mock.Anything).Return(handlerServiceClient, nil)
+
+	w := mock_assignment.NewMockWatcher(t)
+	// Always return the assignment so the create func is invoked.
+	w.EXPECT().Get(mock.Anything, mock.Anything).Return(assignment)
+	// Watch is intentionally NOT expected: an immediate return must not enter the
+	// backoff retry loop. If it did, the mock would fail on an unexpected Watch call.
+	rebalanceTrigger := mock_types.NewMockAssignmentRebalanceTrigger(t)
+
+	handler := &handlerClientImpl{
+		lifetime:         typeutil.NewLifetime(),
+		service:          service,
+		watcher:          w,
+		rebalanceTrigger: rebalanceTrigger,
+	}
+
+	cp, err := handler.GetReplicateCheckpoint(context.Background(), "pchannel")
+	assert.Error(t, err)
+	assert.Nil(t, cp)
+	assert.True(t, status.AsStreamingError(err).IsReplicateViolation())
+}
+
 func TestDial(t *testing.T) {
 	paramtable.Init()
 

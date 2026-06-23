@@ -4794,7 +4794,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", status=\"fail\"}[2m])/120) by(function_name, pod, node_id)",
+              "expr": "sum(increase(milvus_proxy_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", status=~\"fail_.*\"}[2m])/120) by(function_name, pod, node_id)",
               "interval": "",
               "legendFormat": "{{function_name}}-{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
@@ -14361,7 +14361,7 @@
           "datasource": {
             "uid": "${datasource}"
           },
-          "description": "Number of OS threads created.",
+          "description": "Process OS thread count and approximate active named C++ thread groups.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -14399,12 +14399,21 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "go_threads{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\"}",
+              "expr": "milvus_thread_num{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{pod}}",
+              "legendFormat": "os_threads {{pod}}",
               "queryType": "randomWalk",
               "refId": "A"
+            },
+            {
+              "exemplar": true,
+              "expr": "sum(milvus_thread_cpu_active_num_by_pool{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}) by (pod, thread_pool)",
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "active {{thread_pool}} {{pod}}",
+              "queryType": "randomWalk",
+              "refId": "B"
             }
           ],
           "thresholds": [],

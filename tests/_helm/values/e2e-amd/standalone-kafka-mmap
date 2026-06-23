@@ -25,11 +25,11 @@ standalone:
     enabled: true
   resources:
     limits:
-      cpu: "6"
-      memory: 12Gi
+      cpu: "8"
+      memory: 16Gi
     requests:
-      cpu: "2"
-      memory: 4Gi
+      cpu: "3"
+      memory: 8Gi
 log:
   level: debug
 extraConfigFiles:
@@ -37,7 +37,10 @@ extraConfigFiles:
     common:
       storage:
         enablev2: true
+        # enable storage v3
+        useLoonFFI: true
     dataCoord:
+      targetVecIndexVersion: 10
       gc:
         interval: 1800
         missingTolerance: 1800

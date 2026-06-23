@@ -57,6 +57,9 @@ type Balancer interface {
 	// WaitUntilWALbasedDDLReady waits until the WAL based DDL is ready.
 	WaitUntilWALbasedDDLReady(ctx context.Context) error
 
+	// WaitUntilSchemaDropReady waits until schema-drop DDL can be accepted.
+	WaitUntilSchemaDropReady(ctx context.Context) error
+
 	// RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 	// If the error is returned, the balancer is closed.
 	// Otherwise, the following rules are applied:

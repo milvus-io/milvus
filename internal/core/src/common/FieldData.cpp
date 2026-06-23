@@ -15,12 +15,15 @@
 // limitations under the License.
 
 #include "common/FieldData.h"
+#include "common/FastMem.h"
 
 #include <simdjson.h>
 #include <string.h>
+#include <algorithm>
 #include <cstdint>
 #include <iosfwd>
 #include <optional>
+#include <type_traits>
 
 #include "arrow/api.h"
 #include "arrow/array/array_base.h"
@@ -54,9 +57,15 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(const void* source,
     if (length_ + element_count > get_num_rows()) {
         resize_field_data(length_ + element_count);
     }
-    std::copy_n(static_cast<const Type*>(source),
-                element_count * dim_,
-                data_.data() + length_ * dim_);
+    auto source_data = static_cast<const Type*>(source);
+    auto target_data = data_.data() + length_ * dim_;
+    auto count = element_count * dim_;
+    if constexpr (std::is_trivially_copyable_v<Type>) {
+        milvus::fastmem::FastMemcpy(
+            target_data, source_data, count * sizeof(Type));
+    } else {
+        std::copy_n(source_data, count, target_data);
+    }
     length_ += element_count;
 }
 
@@ -78,9 +87,15 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     if (length_ + element_count > get_num_rows()) {
         resize_field_data(length_ + element_count);
     }
-    std::copy_n(static_cast<const Type*>(field_data),
-                element_count * dim_,
-                data_.data() + length_ * dim_);
+    auto source_data = static_cast<const Type*>(field_data);
+    auto target_data = data_.data() + length_ * dim_;
+    auto count = element_count * dim_;
+    if constexpr (std::is_trivially_copyable_v<Type>) {
+        milvus::fastmem::FastMemcpy(
+            target_data, source_data, count * sizeof(Type));
+    } else {
+        std::copy_n(source_data, count, target_data);
+    }
 
     // Note: if 'nullable == true` and valid_data is nullptr
     // means null_count == 0, will fill it with 0xFF
@@ -128,7 +143,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     if (element_count == 0) {
         return;
     }
-    null_count_ = array->null_count();
+    if (!(nullable_ && IsVectorDataType(data_type_))) {
+        null_count_ += array->null_count();
+    }
     switch (data_type_) {
         case DataType::BOOL: {
             AssertInfo(array->type()->id() == arrow::Type::type::BOOL,
@@ -295,17 +312,23 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             AssertInfo(geometry_array != nullptr,
                        "null geometry arrow binary array");
-            std::vector<uint8_t> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] = *geometry_array->GetValue(index, 0);
+            if constexpr (std::is_same_v<Type, std::string>) {
+                std::vector<std::string> values(element_count);
+                for (size_t index = 0; index < element_count; ++index) {
+                    auto sv = geometry_array->GetView(index);
+                    values[index].assign(sv.data(), sv.size());
+                }
+                if (nullable_) {
+                    return FillFieldData(values.data(),
+                                         array->null_bitmap_data(),
+                                         element_count,
+                                         array->offset());
+                }
+                return FillFieldData(values.data(), element_count);
             }
-            if (nullable_) {
-                return FillFieldData(values.data(),
-                                     array->null_bitmap_data(),
-                                     element_count,
-                                     array->offset());
-            }
-            return FillFieldData(values.data(), element_count);
+            ThrowInfo(DataTypeInvalid,
+                      "GEOMETRY arrow data must be filled into string-backed "
+                      "FieldData");
         }
         case DataType::ARRAY: {
             auto array_array =
@@ -400,7 +423,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "Element type not set for VECTOR_ARRAY");
 
             auto values_array = list_array->values();
-            std::vector<VectorArray> values(element_count);
+            std::vector<VectorArray> values;
+            values.reserve(nullable_ ? element_count - list_array->null_count()
+                                     : element_count);
 
             switch (element_type) {
                 case DataType::VECTOR_FLOAT:
@@ -421,22 +446,29 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                         milvus::vector_bytes_per_element(element_type, dim);
 
                     for (size_t index = 0; index < element_count; ++index) {
+                        if (nullable_ && list_array->IsNull(index)) {
+                            continue;
+                        }
                         int64_t start_offset = list_array->value_offset(index);
                         int64_t end_offset =
                             list_array->value_offset(index + 1);
                         int64_t num_vectors = end_offset - start_offset;
 
                         auto data_size = num_vectors * bytes_per_vec;
-                        auto data_ptr = std::make_unique<uint8_t[]>(data_size);
+                        auto data_ptr =
+                            data_size > 0
+                                ? std::make_unique<uint8_t[]>(data_size)
+                                : nullptr;
 
                         for (int64_t i = 0; i < num_vectors; i++) {
                             const uint8_t* binary_data =
                                 binary_array->GetValue(start_offset + i);
                             uint8_t* dest = data_ptr.get() + i * bytes_per_vec;
-                            std::memcpy(dest, binary_data, bytes_per_vec);
+                            milvus::fastmem::FastMemcpy(
+                                dest, binary_data, bytes_per_vec);
                         }
 
-                        values[index] = VectorArray(
+                        values.emplace_back(
                             static_cast<const void*>(data_ptr.get()),
                             num_vectors,
                             dim,
@@ -448,6 +480,12 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                     ThrowInfo(DataTypeInvalid,
                               "Unsupported element type {} in VectorArray",
                               GetDataTypeName(element_type));
+            }
+            if (nullable_) {
+                return FillFieldData(values.data(),
+                                     list_array->null_bitmap_data(),
+                                     element_count,
+                                     list_array->offset());
             }
             return FillFieldData(values.data(), element_count);
         }
@@ -687,6 +725,9 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
             this->valid_data_.data(),
             this->length_,
             total_element_count);
+    } else {
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
+            this->valid_data_.data(), this->length_, total_element_count, true);
     }
 
     // update logical to physical offset mapping
@@ -697,13 +738,19 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
                        valid_count);
 
     if (valid_count > 0) {
-        std::copy_n(static_cast<const Type*>(field_data),
-                    valid_count * this->dim_,
-                    this->data_.data() + this->valid_count_ * this->dim_);
+        auto source_data = static_cast<const Type*>(field_data);
+        auto target_data = this->data_.data() + this->valid_count_ * this->dim_;
+        auto count = valid_count * this->dim_;
+        if constexpr (std::is_trivially_copyable_v<Type>) {
+            milvus::fastmem::FastMemcpy(
+                target_data, source_data, count * sizeof(Type));
+        } else {
+            std::copy_n(source_data, count, target_data);
+        }
         this->valid_count_ += valid_count;
     }
 
-    this->null_count_ = total_element_count - valid_count;
+    this->null_count_ += total_element_count - valid_count;
     this->length_ += total_element_count;
 }
 
@@ -715,6 +762,17 @@ template class FieldDataVectorImpl<float16, false>;
 template class FieldDataVectorImpl<bfloat16, false>;
 template class FieldDataVectorImpl<knowhere::sparse::SparseRow<SparseValueType>,
                                    true>;
+
+namespace {
+
+template <typename T>
+FieldDataPtr
+InitScalarFieldDataWithLengthImpl(const DataType& type, int64_t length) {
+    FixedVector<T> values(length);
+    return std::make_shared<FieldData<T>>(type, false, std::move(values));
+}
+
+}  // namespace
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
@@ -754,6 +812,38 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         default:
             ThrowInfo(DataTypeInvalid,
                       "InitScalarFieldData not support data type {}",
+                      GetDataTypeName(type));
+    }
+}
+
+FieldDataPtr
+InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
+    switch (type) {
+        case DataType::BOOL:
+            return InitScalarFieldDataWithLengthImpl<bool>(type, length);
+        case DataType::INT8:
+            return InitScalarFieldDataWithLengthImpl<int8_t>(type, length);
+        case DataType::INT16:
+            return InitScalarFieldDataWithLengthImpl<int16_t>(type, length);
+        case DataType::INT32:
+            return InitScalarFieldDataWithLengthImpl<int32_t>(type, length);
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            return InitScalarFieldDataWithLengthImpl<int64_t>(type, length);
+        case DataType::FLOAT:
+            return InitScalarFieldDataWithLengthImpl<float>(type, length);
+        case DataType::DOUBLE:
+            return InitScalarFieldDataWithLengthImpl<double>(type, length);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+        case DataType::GEOMETRY:
+            return InitScalarFieldDataWithLengthImpl<std::string>(type, length);
+        case DataType::JSON:
+            return InitScalarFieldDataWithLengthImpl<Json>(type, length);
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "InitScalarFieldDataWithLength not support data type {}",
                       GetDataTypeName(type));
     }
 }

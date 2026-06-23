@@ -149,6 +149,32 @@ TYPED_TEST_P(TypedScalarIndexTest, HasRawData) {
     }
 }
 
+TEST(ScalarIndexPlannerPolicy, PatternOpsRequireString) {
+    milvus::index::BitmapIndex<int64_t> int_index;
+    EXPECT_FALSE(int_index.ShouldUseOp(milvus::proto::plan::OpType::Match));
+    EXPECT_FALSE(
+        int_index.ShouldUseOp(milvus::proto::plan::OpType::PrefixMatch));
+    EXPECT_FALSE(
+        int_index.ShouldUseOp(milvus::proto::plan::OpType::PostfixMatch));
+    EXPECT_FALSE(
+        int_index.ShouldUseOp(milvus::proto::plan::OpType::InnerMatch));
+    EXPECT_FALSE(
+        int_index.ShouldUseOp(milvus::proto::plan::OpType::RegexMatch));
+    EXPECT_TRUE(int_index.ShouldUseOp(milvus::proto::plan::OpType::Equal));
+
+    milvus::index::BitmapIndex<std::string> string_index;
+    EXPECT_TRUE(string_index.ShouldUseOp(milvus::proto::plan::OpType::Match));
+    EXPECT_TRUE(
+        string_index.ShouldUseOp(milvus::proto::plan::OpType::PrefixMatch));
+    EXPECT_TRUE(
+        string_index.ShouldUseOp(milvus::proto::plan::OpType::PostfixMatch));
+    EXPECT_TRUE(
+        string_index.ShouldUseOp(milvus::proto::plan::OpType::InnerMatch));
+    EXPECT_TRUE(
+        string_index.ShouldUseOp(milvus::proto::plan::OpType::RegexMatch));
+    EXPECT_TRUE(string_index.ShouldUseOp(milvus::proto::plan::OpType::Equal));
+}
+
 TYPED_TEST_P(TypedScalarIndexTest, In) {
     using T = TypeParam;
     auto dtype = milvus::GetDType<T>();

@@ -73,8 +73,6 @@ func TestCompactionExecutor(t *testing.T) {
 	})
 
 	t.Run("Test_Enqueue_DefaultSlotUsage", func(t *testing.T) {
-		ex := NewExecutor()
-
 		testCases := []struct {
 			name              string
 			compactionType    datapb.CompactionType
@@ -95,10 +93,16 @@ func TestCompactionExecutor(t *testing.T) {
 				compactionType:    datapb.CompactionType_ClusteringCompaction,
 				expectedSlotUsage: paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 			},
+			{
+				name:              "BumpSchemaVersionCompaction",
+				compactionType:    datapb.CompactionType_BumpSchemaVersionCompaction,
+				expectedSlotUsage: paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64(),
+			},
 		}
 
 		for i, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
+				ex := NewExecutor()
 				mockC := NewMockCompactor(t)
 				mockC.EXPECT().GetPlanID().Return(int64(i + 10))
 				mockC.EXPECT().GetSlotUsage().Return(int64(0)).Times(2)
@@ -107,6 +111,7 @@ func TestCompactionExecutor(t *testing.T) {
 				succeed, err := ex.Enqueue(mockC)
 				assert.True(t, succeed)
 				assert.NoError(t, err)
+				assert.Equal(t, tc.expectedSlotUsage, ex.Slots())
 			})
 		}
 	})

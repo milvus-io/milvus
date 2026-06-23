@@ -17,9 +17,11 @@ expr:
 	| '[' expr (',' expr)* ','? ']'                                                                         # Array
 	| EmptyArray                                                                                            # EmptyArray
 	| EXISTS expr                                                                                           # Exists
-	| expr LIKE StringLiteral                                                                               # Like
-	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'                                    # TextMatch
-	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
+	| expr LIKE expr                                                                                        # Like
+	| expr REGEXMATCH expr                                                                                  # RegexMatch
+	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
+	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
+	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
 	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
@@ -34,8 +36,8 @@ expr:
 	| (JSONContains | ArrayContains)'('expr',' expr')'                                                      # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                                                # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                                                # JSONContainsAny
-	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' StringLiteral ')'  # SpatialBinary
-	| STDWithin'('Identifier','StringLiteral',' expr')'                                                     # STDWithin
+	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' expr ')'  # SpatialBinary
+	| STDWithin'('Identifier',' expr',' expr')'                                                             # STDWithin
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
 	| ArrayLength'('(Identifier | JSONIdentifier | StructFieldIdentifier)')'                                 # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
@@ -78,6 +80,8 @@ INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
 THRESHOLD: 'threshold' | 'THRESHOLD';
+REGEXMATCH: '=~';
+REGEXNOTMATCH: '!~';
 ASSIGN: '=';
 
 ADD: '+';
@@ -188,7 +192,8 @@ fragment EscapeSequence:
 	'\\' ['"?abfnrtv\\]
 	| '\\' OctalDigit OctalDigit? OctalDigit?
 	| '\\x' HexadecimalDigitSequence
-	| UniversalCharacterName;
+	| UniversalCharacterName
+	| '\\' ~[\r\n];
 
 Whitespace: [ \t]+ -> skip;
 

@@ -88,7 +88,7 @@ func TestDDLCallbacksAliasDDL(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
 
-	coll, err := core.meta.GetCollectionByName(context.Background(), "test", "test_alias", typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(context.Background(), "test", "test_alias", typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.NotZero(t, coll.CollectionID)
 	require.Equal(t, "test_collection", coll.Name)

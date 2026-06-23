@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -68,7 +67,7 @@ func (t *createCollectionTask) releaseFileResources() {
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
 	if t.Req == nil {
-		return errors.New("empty requests")
+		return merr.WrapErrServiceInternalMsg("empty requests")
 	}
 	Params := paramtable.Get()
 
@@ -81,12 +80,12 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 		cfgMaxShardNum = Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
 	}
 	if shardsNum > cfgMaxShardNum {
-		return fmt.Errorf("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
+		return merr.WrapErrParameterInvalidMsg("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
 	}
 
 	cfgShardLimit := Params.ProxyCfg.MaxShardNum.GetAsInt32()
 	if shardsNum > cfgShardLimit {
-		return fmt.Errorf("shard num (%d) exceeds system limit (%d)", shardsNum, cfgShardLimit)
+		return merr.WrapErrParameterInvalidMsg("shard num (%d) exceeds system limit (%d)", shardsNum, cfgShardLimit)
 	}
 
 	// 2. check db-collection capacity
@@ -145,7 +144,7 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 		if err != nil {
 			log.Ctx(ctx).Warn("parse value of property fail", zap.String("key", common.DatabaseMaxCollectionsKey),
 				zap.String("value", maxColNumPerDBStr), zap.Error(err))
-			return fmt.Errorf("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr)
+			return merr.WrapErrServiceInternalMsg("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr)
 		}
 		return check(maxColNumPerDB)
 	}
@@ -197,6 +196,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// See NormalizeAndValidateExternalCollectionSchema for the rationale.
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(schema); err != nil {
 		return err
+	}
+	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
 
 	// For external collections, validate the source URL scheme allowlist and
@@ -305,7 +307,7 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		for idx, name := range function.InputFieldNames {
 			fieldId, ok := name2id[name]
 			if !ok {
-				return fmt.Errorf("input field %s of function %s not found", name, function.GetName())
+				return merr.WrapErrParameterInvalidMsg("input field %s of function %s not found", name, function.GetName())
 			}
 			function.InputFieldIds[idx] = fieldId
 		}
@@ -314,7 +316,7 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		for idx, name := range function.OutputFieldNames {
 			fieldId, ok := name2id[name]
 			if !ok {
-				return fmt.Errorf("output field %s of function %s not found", name, function.GetName())
+				return merr.WrapErrParameterInvalidMsg("output field %s of function %s not found", name, function.GetName())
 			}
 			function.OutputFieldIds[idx] = fieldId
 		}
@@ -359,11 +361,32 @@ func (t *createCollectionTask) appendConsistecyLevel() {
 	})
 }
 
+func (t *createCollectionTask) appendNamespaceShardingEnabled() error {
+	if err := common.ValidateNamespaceShardingEnabled(t.Req.Properties...); err != nil {
+		return err
+	}
+	if common.IsNamespaceShardingEnabledKeyExists(t.Req.Properties...) {
+		return nil
+	}
+	t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
+		Key:   common.NamespaceShardingEnabledKey,
+		Value: "false",
+	})
+	return nil
+}
+
 func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	hasIsolation := hasIsolationProperty(t.Req.Properties...)
 	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	hasPartitionKey := err == nil
 	if !schema.GetEnableNamespace() {
+		return nil
+	}
+
+	if common.IsNamespaceModePartition(t.Req.GetProperties()...) {
+		if hasPartitionKey {
+			return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
+		}
 		return nil
 	}
 
@@ -441,7 +464,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		for _, field := range t.body.CollectionSchema.Fields {
 			if field.Name != RowIDFieldName && field.GetFieldID() == 0 {
 				log.Info("field id 0 is not allowed when preserve field ids", zap.String("field", field.Name))
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field id 0 is not allowed when preserve field ids, field: %s", field.Name))
+				return merr.WrapErrParameterInvalidMsg("field id 0 is not allowed when preserve field ids, field: %s", field.Name)
 			}
 
 			if field.GetName() == MetaFieldName {
@@ -465,7 +488,13 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	}
 
 	t.appendConsistecyLevel()
+	if err := t.appendNamespaceShardingEnabled(); err != nil {
+		return err
+	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
+	if err := common.ValidateNamespaceMode(t.Req.GetProperties()...); err != nil {
+		return err
+	}
 	if err := t.handleNamespaceField(ctx, t.body.CollectionSchema); err != nil {
 		return err
 	}
@@ -487,6 +516,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(t.body.CollectionSchema); err != nil {
+		return err
+	}
 
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Req.GetProperties())
@@ -495,7 +527,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	}
 
 	// Set properties for persistent
-	t.body.CollectionSchema.Properties = t.Req.GetProperties()
+	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(t.Req.GetProperties(), maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
 	t.body.CollectionSchema.Version = 0
 	t.appendSysFields(t.body.CollectionSchema)
 	return nil
@@ -519,12 +551,12 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 		partitionNums := t.Req.GetNumPartitions()
 		// double check, default num of physical partitions should be greater than 0
 		if partitionNums <= 0 {
-			return errors.New("the specified partitions should be greater than 0 if partition key is used")
+			return merr.WrapErrParameterInvalidMsg("the specified partitions should be greater than 0 if partition key is used")
 		}
 
 		cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt64()
 		if partitionNums > cfgMaxPartitionNum {
-			return fmt.Errorf("partition number (%d) exceeds max configuration (%d), collection: %s",
+			return merr.WrapErrParameterInvalidMsg("partition number (%d) exceeds max configuration (%d), collection: %s",
 				partitionNums, cfgMaxPartitionNum, t.Req.CollectionName)
 		}
 
@@ -562,7 +594,8 @@ func (t *createCollectionTask) assignChannels(ctx context.Context) error {
 		Num:          int(t.Req.GetShardsNum()),
 	})
 	if err != nil {
-		return err
+		return merr.Wrapf(err, "failed to allocate vchannels for collection %d (shards=%d)",
+			t.header.GetCollectionId(), t.Req.GetShardsNum())
 	}
 
 	for _, vchannel := range vchannels {
@@ -623,17 +656,17 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) error {
 	// Check if the collection name duplicates an alias.
 	if _, err := t.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp); err == nil {
-		err2 := fmt.Errorf("collection name [%s] conflicts with an existing alias, please choose a unique name", t.Req.GetCollectionName())
+		err2 := merr.WrapErrAsInputError(merr.WrapErrAliasCollectionNameConflict(t.Req.GetDbName(), t.Req.GetCollectionName(), "please choose a unique name"))
 		log.Ctx(ctx).Warn("create collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err2))
 		return err2
 	}
 
 	// Check if the collection already exists.
-	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err == nil {
 		newCollInfo := newCollectionModel(t.header, t.body, 0)
 		if equal := existedCollInfo.Equal(*newCollInfo); !equal {
-			return fmt.Errorf("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
+			return merr.WrapErrParameterInvalidMsg("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
 		return errIgnoredCreateCollection
 	}
@@ -652,12 +685,12 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 
 	mfield, ok := m["by_field"]
 	if !ok {
-		return fmt.Errorf("multi analyzer params now must set by_field to specify with field decide analyzer")
+		return merr.WrapErrParameterInvalidMsg("multi analyzer params now must set by_field to specify with field decide analyzer")
 	}
 
 	err = json.Unmarshal(mfield, &mFileName)
 	if err != nil {
-		return fmt.Errorf("multi analyzer params by_field must be string but now: %s", mfield)
+		return merr.WrapErrParameterInvalidMsg("multi analyzer params by_field must be string but now: %s", mfield)
 	}
 
 	// check field exist
@@ -666,7 +699,7 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 		if field.GetName() == mFileName {
 			// only support string field now
 			if field.GetDataType() != schemapb.DataType_VarChar {
-				return fmt.Errorf("multi analyzer params now only support by string field, but field %s is not string", field.GetName())
+				return merr.WrapErrParameterInvalidMsg("multi analyzer params now only support by string field, but field %s is not string", field.GetName())
 			}
 			fieldExist = true
 			break
@@ -674,25 +707,25 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	}
 
 	if !fieldExist {
-		return fmt.Errorf("multi analyzer dependent field %s not exist in collection %s", string(mfield), coll.GetName())
+		return merr.WrapErrParameterInvalidMsg("multi analyzer dependent field %s not exist in collection %s", string(mfield), coll.GetName())
 	}
 
 	if value, ok := m["alias"]; ok {
 		mapping := map[string]string{}
 		err = json.Unmarshal(value, &mapping)
 		if err != nil {
-			return fmt.Errorf("multi analyzer alias must be string map but now: %s", value)
+			return merr.WrapErrParameterInvalidMsg("multi analyzer alias must be string map but now: %s", value)
 		}
 	}
 
 	analyzers, ok := m["analyzers"]
 	if !ok {
-		return fmt.Errorf("multi analyzer params must set analyzers ")
+		return merr.WrapErrParameterInvalidMsg("multi analyzer params must set analyzers ")
 	}
 
 	err = json.Unmarshal(analyzers, &analyzerMap)
 	if err != nil {
-		return fmt.Errorf("unmarshal analyzers failed: %s", err)
+		return merr.WrapErrParameterInvalidMsg("unmarshal analyzers failed: %s", err)
 	}
 
 	hasDefault := false
@@ -708,7 +741,7 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	}
 
 	if !hasDefault {
-		return fmt.Errorf("multi analyzer must set default analyzer for all unknown value")
+		return merr.WrapErrParameterInvalidMsg("multi analyzer must set default analyzer for all unknown value")
 	}
 	return nil
 }
@@ -720,15 +753,15 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 	}
 
 	if !h.EnableAnalyzer() {
-		return fmt.Errorf("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
+		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {
 		if h.EnableMatch() {
-			return fmt.Errorf("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
+			return merr.WrapErrParameterInvalidMsg("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
 		}
 		if h.HasAnalyzerParams() {
-			return fmt.Errorf("field %s analyzer params should be none if has multi analyzer params", fieldSchema.Name)
+			return merr.WrapErrParameterInvalidMsg("field %s analyzer params should be none if has multi analyzer params", fieldSchema.Name)
 		}
 
 		return validateMultiAnalyzerParams(params, collSchema, fieldSchema, analyzerInfos)

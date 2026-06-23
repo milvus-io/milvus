@@ -99,6 +99,10 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<ArrayView>(input);
             break;
         }
+        case DataType::VECTOR_ARRAY: {
+            result = ExecVisitorImpl<VectorArray>(input);
+            break;
+        }
         case DataType::GEOMETRY: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()

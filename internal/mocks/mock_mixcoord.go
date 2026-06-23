@@ -46,6 +46,65 @@ func (_m *MixCoord) EXPECT() *MixCoord_Expecter {
 	return &MixCoord_Expecter{mock: &_m.Mock}
 }
 
+// AbortImport provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) AbortImport(_a0 context.Context, _a1 *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AbortImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AbortImportRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_AbortImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AbortImport'
+type MixCoord_AbortImport_Call struct {
+	*mock.Call
+}
+
+// AbortImport is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.AbortImportRequest
+func (_e *MixCoord_Expecter) AbortImport(_a0 interface{}, _a1 interface{}) *MixCoord_AbortImport_Call {
+	return &MixCoord_AbortImport_Call{Call: _e.mock.On("AbortImport", _a0, _a1)}
+}
+
+func (_c *MixCoord_AbortImport_Call) Run(run func(_a0 context.Context, _a1 *datapb.AbortImportRequest)) *MixCoord_AbortImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.AbortImportRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_AbortImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AbortImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_AbortImport_Call) RunAndReturn(run func(context.Context, *datapb.AbortImportRequest) (*commonpb.Status, error)) *MixCoord_AbortImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ActivateChecker provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ActivateChecker(_a0 context.Context, _a1 *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -219,6 +278,65 @@ func (_c *MixCoord_AddCollectionFunction_Call) Return(_a0 *commonpb.Status, _a1 
 }
 
 func (_c *MixCoord_AddCollectionFunction_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error)) *MixCoord_AddCollectionFunction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AddCollectionStructField provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) AddCollectionStructField(_a0 context.Context, _a1 *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddCollectionStructField")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddCollectionStructFieldRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_AddCollectionStructField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCollectionStructField'
+type MixCoord_AddCollectionStructField_Call struct {
+	*mock.Call
+}
+
+// AddCollectionStructField is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AddCollectionStructFieldRequest
+func (_e *MixCoord_Expecter) AddCollectionStructField(_a0 interface{}, _a1 interface{}) *MixCoord_AddCollectionStructField_Call {
+	return &MixCoord_AddCollectionStructField_Call{Call: _e.mock.On("AddCollectionStructField", _a0, _a1)}
+}
+
+func (_c *MixCoord_AddCollectionStructField_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AddCollectionStructFieldRequest)) *MixCoord_AddCollectionStructField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AddCollectionStructFieldRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_AddCollectionStructField_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AddCollectionStructField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_AddCollectionStructField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error)) *MixCoord_AddCollectionStructField_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -872,6 +990,65 @@ func (_c *MixCoord_AlterIndex_Call) RunAndReturn(run func(context.Context, *inde
 	return _c
 }
 
+// AlterRole provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) AlterRole(_a0 context.Context, _a1 *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterRole")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterRoleRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterRoleRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_AlterRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterRole'
+type MixCoord_AlterRole_Call struct {
+	*mock.Call
+}
+
+// AlterRole is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterRoleRequest
+func (_e *MixCoord_Expecter) AlterRole(_a0 interface{}, _a1 interface{}) *MixCoord_AlterRole_Call {
+	return &MixCoord_AlterRole_Call{Call: _e.mock.On("AlterRole", _a0, _a1)}
+}
+
+func (_c *MixCoord_AlterRole_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterRoleRequest)) *MixCoord_AlterRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterRoleRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_AlterRole_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AlterRole_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_AlterRole_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error)) *MixCoord_AlterRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AssignSegmentID provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) AssignSegmentID(_a0 context.Context, _a1 *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1344,6 +1521,65 @@ func (_c *MixCoord_CheckQueryNodeDistribution_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// ClearReadTaskQueue provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ClearReadTaskQueue(_a0 context.Context, _a1 *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ClearReadTaskQueue")
+	}
+
+	var r0 *internalpb.ClearReadTaskQueueResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ClearReadTaskQueueRequest) *internalpb.ClearReadTaskQueueResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ClearReadTaskQueueResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ClearReadTaskQueueRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ClearReadTaskQueue_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearReadTaskQueue'
+type MixCoord_ClearReadTaskQueue_Call struct {
+	*mock.Call
+}
+
+// ClearReadTaskQueue is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.ClearReadTaskQueueRequest
+func (_e *MixCoord_Expecter) ClearReadTaskQueue(_a0 interface{}, _a1 interface{}) *MixCoord_ClearReadTaskQueue_Call {
+	return &MixCoord_ClearReadTaskQueue_Call{Call: _e.mock.On("ClearReadTaskQueue", _a0, _a1)}
+}
+
+func (_c *MixCoord_ClearReadTaskQueue_Call) Run(run func(_a0 context.Context, _a1 *internalpb.ClearReadTaskQueueRequest)) *MixCoord_ClearReadTaskQueue_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.ClearReadTaskQueueRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ClearReadTaskQueue_Call) Return(_a0 *internalpb.ClearReadTaskQueueResponse, _a1 error) *MixCoord_ClearReadTaskQueue_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ClearReadTaskQueue_Call) RunAndReturn(run func(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)) *MixCoord_ClearReadTaskQueue_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ClientHeartbeat provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ClientHeartbeat(_a0 context.Context, _a1 *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1458,6 +1694,65 @@ func (_c *MixCoord_CommitBackfillResult_Call) Return(_a0 *datapb.CommitBackfillR
 }
 
 func (_c *MixCoord_CommitBackfillResult_Call) RunAndReturn(run func(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error)) *MixCoord_CommitBackfillResult_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CommitImport provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CommitImport(_a0 context.Context, _a1 *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitImportRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CommitImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitImport'
+type MixCoord_CommitImport_Call struct {
+	*mock.Call
+}
+
+// CommitImport is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CommitImportRequest
+func (_e *MixCoord_Expecter) CommitImport(_a0 interface{}, _a1 interface{}) *MixCoord_CommitImport_Call {
+	return &MixCoord_CommitImport_Call{Call: _e.mock.On("CommitImport", _a0, _a1)}
+}
+
+func (_c *MixCoord_CommitImport_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitImportRequest)) *MixCoord_CommitImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CommitImportRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CommitImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_CommitImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CommitImport_Call) RunAndReturn(run func(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)) *MixCoord_CommitImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1871,6 +2166,65 @@ func (_c *MixCoord_CreatePartition_Call) Return(_a0 *commonpb.Status, _a1 error)
 }
 
 func (_c *MixCoord_CreatePartition_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)) *MixCoord_CreatePartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreatePartitionV2 provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CreatePartitionV2(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePartitionV2")
+	}
+
+	var r0 *rootcoordpb.CreatePartitionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) *rootcoordpb.CreatePartitionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.CreatePartitionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreatePartitionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CreatePartitionV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePartitionV2'
+type MixCoord_CreatePartitionV2_Call struct {
+	*mock.Call
+}
+
+// CreatePartitionV2 is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreatePartitionRequest
+func (_e *MixCoord_Expecter) CreatePartitionV2(_a0 interface{}, _a1 interface{}) *MixCoord_CreatePartitionV2_Call {
+	return &MixCoord_CreatePartitionV2_Call{Call: _e.mock.On("CreatePartitionV2", _a0, _a1)}
+}
+
+func (_c *MixCoord_CreatePartitionV2_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest)) *MixCoord_CreatePartitionV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreatePartitionRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CreatePartitionV2_Call) Return(_a0 *rootcoordpb.CreatePartitionResponse, _a1 error) *MixCoord_CreatePartitionV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CreatePartitionV2_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error)) *MixCoord_CreatePartitionV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6023,6 +6377,65 @@ func (_c *MixCoord_GracefulStop_Call) Return() *MixCoord_GracefulStop_Call {
 
 func (_c *MixCoord_GracefulStop_Call) RunAndReturn(run func()) *MixCoord_GracefulStop_Call {
 	_c.Run(run)
+	return _c
+}
+
+// HandleCommitVchannel provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) HandleCommitVchannel(_a0 context.Context, _a1 *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleCommitVchannel")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.HandleCommitVchannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_HandleCommitVchannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleCommitVchannel'
+type MixCoord_HandleCommitVchannel_Call struct {
+	*mock.Call
+}
+
+// HandleCommitVchannel is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.HandleCommitVchannelRequest
+func (_e *MixCoord_Expecter) HandleCommitVchannel(_a0 interface{}, _a1 interface{}) *MixCoord_HandleCommitVchannel_Call {
+	return &MixCoord_HandleCommitVchannel_Call{Call: _e.mock.On("HandleCommitVchannel", _a0, _a1)}
+}
+
+func (_c *MixCoord_HandleCommitVchannel_Call) Run(run func(_a0 context.Context, _a1 *datapb.HandleCommitVchannelRequest)) *MixCoord_HandleCommitVchannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.HandleCommitVchannelRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_HandleCommitVchannel_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_HandleCommitVchannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_HandleCommitVchannel_Call) RunAndReturn(run func(context.Context, *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error)) *MixCoord_HandleCommitVchannel_Call {
+	_c.Call.Return(run)
 	return _c
 }
 
