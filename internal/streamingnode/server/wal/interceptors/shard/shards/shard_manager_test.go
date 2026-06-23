@@ -446,6 +446,11 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int32(1), ver)
 
+	_, err = m.GetCollectionSchema(100, latestCollectionSchemaVersion)
+	assert.NoError(t, err)
+	_, err = m.GetCollectionSchema(100, 0)
+	assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
+
 	// version mismatch should fail
 	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
 		CollectionId:  100,
@@ -544,6 +549,8 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(0), ver)
+	_, err = m.GetCollectionSchema(103, 0)
+	assert.NoError(t, err)
 
 	// Test 4: AlterCollection updates schema version
 	updatedSchema := &schemapb.CollectionSchema{

@@ -208,9 +208,10 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 		m.Logger().Warn(context.TODO(), "collection not found", mlog.Int64("collectionID", collectionID))
 		return -1, ErrCollectionNotFound
 	}
-	// Input schemaVersion 0 means the proxy did not set it (old proxy or old SDK).
-	// Skip the schema presence and version checks for backward compatibility during rolling
-	// upgrades, where a legacy collection may still have Schema == nil when an old proxy writes.
+	// Missing schemaVersion means the proxy did not set it (old proxy or old SDK).
+	// Skip the schema presence and version checks for backward compatibility during
+	// rolling upgrades, where a legacy collection may still have Schema == nil when
+	// an old proxy writes.
 	if header.SchemaVersion == nil {
 		return collectionInfo.SchemaVersion(), nil
 	}
@@ -243,7 +244,7 @@ func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion
 		return nil, ErrCollectionSchemaNotFound
 	}
 	collectionSchemaVersion := collectionInfo.SchemaVersion()
-	if schemaVersion != 0 && collectionSchemaVersion != schemaVersion {
+	if schemaVersion != latestCollectionSchemaVersion && collectionSchemaVersion != schemaVersion {
 		return nil, ErrCollectionSchemaVersionNotMatch
 	}
 
