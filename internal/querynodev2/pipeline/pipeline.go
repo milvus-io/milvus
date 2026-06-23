@@ -69,9 +69,7 @@ func NewPipeLine(
 			channel,
 			replicateConfig,
 			delegator,
-			// The batcher drains only already buffered DML packs, so the flow graph queue length
-			// is a natural upper bound and avoids introducing another QueryNode batch config.
-			base.WithMsgPackBatcher(base.NewDMLMsgPackBatcher(int(pipelineQueueLength))),
+			base.WithMsgPackBatcher(base.NewDMLMsgPackBatcher(paramtable.Get().QueryNodeCfg.DMLMicroBatchMaxMsgNum.GetAsInt)),
 		),
 	}
 
