@@ -30,6 +30,7 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -237,6 +238,331 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		it.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 	})
+}
+
+func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVectors() {
+	const (
+		dim        = 128
+		enoughRows = int64(10000)
+	)
+	elementBytes := int64(dim * 4)
+
+	tests := []struct {
+		name              string
+		metricType        string
+		numRows           int64
+		innerVectorCount  int64
+		expectCreateIndex bool
+		expectedState     indexpb.JobState
+	}{
+		{
+			name:              "maxsim skips when inner vector count is below threshold",
+			metricType:        "MAX_SIM_COSINE",
+			numRows:           enoughRows,
+			innerVectorCount:  0,
+			expectCreateIndex: false,
+			expectedState:     indexpb.JobState_JobStateFinished,
+		},
+		{
+			name:              "maxsim skips when row count is below threshold",
+			metricType:        "MAX_SIM_COSINE",
+			numRows:           1023,
+			innerVectorCount:  2048,
+			expectCreateIndex: false,
+			expectedState:     indexpb.JobState_JobStateFinished,
+		},
+		{
+			name:              "maxsim builds when row count and inner vector count are enough",
+			metricType:        "MAX_SIM_COSINE",
+			numRows:           enoughRows,
+			innerVectorCount:  2048,
+			expectCreateIndex: true,
+			expectedState:     indexpb.JobState_JobStateInProgress,
+		},
+		{
+			name:              "element level metric skips when inner vector count is below threshold",
+			metricType:        "COSINE",
+			numRows:           enoughRows,
+			innerVectorCount:  0,
+			expectCreateIndex: false,
+			expectedState:     indexpb.JobState_JobStateFinished,
+		},
+		{
+			name:              "element level metric builds when inner vector count is enough",
+			metricType:        "COSINE",
+			numRows:           enoughRows,
+			innerVectorCount:  2048,
+			expectCreateIndex: true,
+			expectedState:     indexpb.JobState_JobStateInProgress,
+		},
+		{
+			name:              "element level metric builds when row count is below threshold but inner vector count is enough",
+			metricType:        "COSINE",
+			numRows:           1023,
+			innerVectorCount:  2048,
+			expectCreateIndex: true,
+			expectedState:     indexpb.JobState_JobStateInProgress,
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+			mt := &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						s.segID: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            s.segID,
+								CollectionID:  s.collID,
+								PartitionID:   s.partID,
+								InsertChannel: "ch1",
+								NumOfRows:     tc.numRows,
+								State:         commonpb.SegmentState_Flushed,
+								MaxRowNum:     tc.numRows,
+								Level:         datapb.SegmentLevel_L2,
+								Binlogs: []*datapb.FieldBinlog{{
+									FieldID: s.fieldID,
+									Binlogs: []*datapb.Binlog{{
+										EntriesNum: tc.numRows,
+										MemorySize: tc.numRows*4 + tc.innerVectorCount*elementBytes + 1,
+									}},
+								}},
+							},
+						},
+					},
+				},
+				indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+			}
+			mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+				{Key: common.MetricTypeKey, Value: tc.metricType},
+			}
+			mt.indexMeta.indexes[s.collID][s.indexID].TypeParams = []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+			}
+			segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+			s.True(ok)
+			segIndex.NumRows = tc.numRows
+
+			field := &schemapb.FieldSchema{
+				Name:        "array_vector",
+				FieldID:     s.fieldID,
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+				},
+			}
+			handler := NewNMockHandler(s.T())
+			handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+				ID: s.collID,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{field},
+				},
+				Partitions: []int64{s.partID},
+			}, nil).Maybe()
+
+			cm := mocks.NewChunkManager(s.T())
+			cm.EXPECT().RootPath().Return("root").Maybe()
+
+			it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
+			cluster := session.NewMockCluster(s.T())
+			if tc.expectCreateIndex {
+				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+			}
+
+			it.CreateTaskOnWorker(1, cluster)
+			s.Equal(tc.expectedState, indexpb.JobState(it.IndexState))
+		})
+	}
+}
+
+func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayEstimateFailureMarksFailed() {
+	const (
+		dim        = 128
+		enoughRows = int64(10000)
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+
+	mt := &meta{
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				s.segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            s.segID,
+						CollectionID:  s.collID,
+						PartitionID:   s.partID,
+						InsertChannel: "ch1",
+						NumOfRows:     enoughRows,
+						State:         commonpb.SegmentState_Flushed,
+						MaxRowNum:     enoughRows,
+						Level:         datapb.SegmentLevel_L2,
+					},
+				},
+			},
+		},
+		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+	}
+	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "HNSW"},
+		{Key: common.MetricTypeKey, Value: "MAX_SIM_COSINE"},
+	}
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.True(ok)
+	segIndex.NumRows = enoughRows
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "array_vector",
+					FieldID:     s.fieldID,
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+					},
+				},
+			},
+		},
+		Partitions: []int64{s.partID},
+	}, nil)
+
+	it := newIndexBuildTask(segIndex, 1, mt, handler, nil, newIndexEngineVersionManager())
+	it.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+
+	s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
+	s.Contains(it.FailReason, "failed to estimate vector array element count")
+	s.Contains(it.FailReason, "count is unknown")
+	s.Contains(it.FailReason, "vector array field binlog not found")
+}
+
+func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSchemaFakeFinishes() {
+	const (
+		dim        = 128
+		enoughRows = int64(10000)
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+
+	mt := &meta{
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				s.segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            s.segID,
+						CollectionID:  s.collID,
+						PartitionID:   s.partID,
+						InsertChannel: "ch1",
+						NumOfRows:     enoughRows,
+						State:         commonpb.SegmentState_Flushed,
+						MaxRowNum:     enoughRows,
+						Level:         datapb.SegmentLevel_L2,
+						SchemaVersion: 0,
+					},
+				},
+			},
+		},
+		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+	}
+	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "HNSW"},
+		{Key: common.MetricTypeKey, Value: "MAX_SIM_COSINE"},
+	}
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.True(ok)
+	segIndex.NumRows = enoughRows
+
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID,
+		Schema: &schemapb.CollectionSchema{
+			Version: 1,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "array_vector",
+					FieldID:     s.fieldID,
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					Nullable:    true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+					},
+				},
+			},
+		},
+		Partitions: []int64{s.partID},
+	}, nil)
+
+	it := newIndexBuildTask(segIndex, 1, mt, handler, nil, newIndexEngineVersionManager())
+	it.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+
+	s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
+	s.Equal("fake finished index success", it.FailReason)
+}
+
+func (s *indexTaskSuite) TestMissingVectorArrayFieldOnStaleSchemaOnlyMatchesMissingBinlog() {
+	segment := &datapb.SegmentInfo{SchemaVersion: 0}
+	schema := &schemapb.CollectionSchema{Version: 1}
+	field := &schemapb.FieldSchema{Nullable: true}
+	missingErr := vectorArrayFieldBinlogNotFoundError{fieldID: s.fieldID}
+
+	s.Contains(missingErr.Error(), fmt.Sprintf("fieldID=%d", s.fieldID))
+	s.True(isMissingVectorArrayFieldOnStaleSchema(missingErr, segment, schema, field))
+	s.False(isMissingVectorArrayFieldOnStaleSchema(
+		merr.WrapErrServiceInternal("invalid vector array dim"),
+		segment,
+		schema,
+		field,
+	))
+}
+
+func (s *indexTaskSuite) TestEstimateVectorArrayElementCountErrors() {
+	field := &schemapb.FieldSchema{
+		FieldID:     s.fieldID,
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+	}
+
+	_, err := estimateVectorArrayElementCount(&datapb.SegmentInfo{}, field)
+	s.Error(err)
+	s.Contains(err.Error(), "vector array field binlog not found")
+
+	fieldWithoutDim := &schemapb.FieldSchema{
+		FieldID:     s.fieldID,
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+	}
+	_, err = estimateVectorArrayElementCount(&datapb.SegmentInfo{
+		Binlogs: []*datapb.FieldBinlog{{FieldID: s.fieldID}},
+	}, fieldWithoutDim)
+	s.Error(err)
+	s.Contains(err.Error(), "invalid vector array dim")
+
+	fieldWithUnsupportedElement := &schemapb.FieldSchema{
+		FieldID:     s.fieldID,
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_SparseFloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+	}
+	_, err = estimateVectorArrayElementCount(&datapb.SegmentInfo{
+		Binlogs: []*datapb.FieldBinlog{{FieldID: s.fieldID}},
+	}, fieldWithUnsupportedElement)
+	s.Error(err)
+	s.Contains(err.Error(), "unsupported vector array element type")
 }
 
 func (s *indexTaskSuite) TestQueryTaskOnWorker() {
