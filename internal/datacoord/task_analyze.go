@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -148,7 +149,7 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 			log.Ctx(ctx).Warn("analyze stats task is processing, but segment is nil, delete the task",
 				zap.Int64("taskID", at.GetTaskID()), zap.Int64("segmentID", segID))
 			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
-			return fmt.Errorf("segmentInfo with ID: %d is nil", segID)
+			return merr.WrapErrServiceInternalMsg("segmentInfo with ID: %d is nil", segID)
 		}
 
 		totalSegmentsRows += info.GetNumOfRows()
