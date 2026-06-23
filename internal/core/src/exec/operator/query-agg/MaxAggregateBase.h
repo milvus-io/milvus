@@ -19,6 +19,7 @@
 #include <limits>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 #include <vector>
 
 #include "SimpleNumericAggregate.h"
@@ -61,11 +62,39 @@ class MaxAggregateBase
     }
 
     void
+    addRawInput(
+        char** groups,
+        int numGroups,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes) override {
+        AssertInfo(input_column_idxes.size() == 1,
+                   "max aggregate expects exactly one raw input column");
+        AssertInfo(numGroups == input.selected_count(),
+                   "raw max group count must match selected rows");
+        updateRawInternal<TAccumulator>(groups, input, input_column_idxes[0]);
+    }
+
+    void
     addSingleGroupRawInput(char* group,
                            int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
         BaseAggregate::template updateOneGroup<TAccumulator>(
             group, input[0], &updateSingleValue<TAccumulator>);
+    }
+
+    void
+    addSingleGroupRawInput(
+        char* group,
+        int64_t numRows,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes) override {
+        AssertInfo(input_column_idxes.size() == 1,
+                   "max aggregate expects exactly one raw input column");
+        BaseAggregate::template updateOneRawGroup<TAccumulator>(
+            group,
+            input,
+            input_column_idxes[0],
+            &updateSingleValue<TAccumulator>);
     }
 
     void
@@ -92,6 +121,20 @@ class MaxAggregateBase
         }
     }
 
+    template <typename TData, typename TValue = TInput>
+    void
+    updateRawInternal(char** groups,
+                      const AggRawInput& input,
+                      column_index_t column_idx) {
+        if (BaseAggregate::Aggregate::numNulls_) {
+            BaseAggregate::template updateRawGroups<true, TData, TValue>(
+                groups, input, column_idx, &updateSingleValue<TData>);
+        } else {
+            BaseAggregate::template updateRawGroups<false, TData, TValue>(
+                groups, input, column_idx, &updateSingleValue<TData>);
+        }
+    }
+
  private:
     template <typename TData>
     static void
@@ -110,6 +153,12 @@ class MaxAggregateBase
 class MaxStringAggregate final : public Aggregate {
  public:
     explicit MaxStringAggregate(DataType resultType) : Aggregate(resultType) {
+    }
+
+    ~MaxStringAggregate() override {
+        for (auto* value : owned_values_) {
+            delete value;
+        }
     }
 
     int32_t
@@ -180,6 +229,42 @@ class MaxStringAggregate final : public Aggregate {
     }
 
     void
+    addRawInput(
+        char** groups,
+        int numGroups,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes) override {
+        AssertInfo(input_column_idxes.size() == 1,
+                   "max aggregate expects exactly one raw input column");
+        AssertInfo(numGroups == input.selected_count(),
+                   "raw max group count must match selected rows");
+        const auto& column = input.child(input_column_idxes[0]);
+        for (auto i = 0; i < input.selected_count(); i++) {
+            if (!column.ValidAt(i, input)) {
+                continue;
+            }
+            updateOne(groups[i], column.StringViewAt(i, input));
+        }
+    }
+
+    void
+    addSingleGroupRawInput(
+        char* group,
+        int64_t numRows,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes) override {
+        AssertInfo(input_column_idxes.size() == 1,
+                   "max aggregate expects exactly one raw input column");
+        const auto& column = input.child(input_column_idxes[0]);
+        for (auto i = 0; i < input.selected_count(); i++) {
+            if (!column.ValidAt(i, input)) {
+                continue;
+            }
+            updateOne(group, column.StringViewAt(i, input));
+        }
+    }
+
+    void
     initializeNewGroupsInternal(
         char** groups, folly::Range<const vector_size_t*> indices) override {
         setAllNulls(groups, indices);
@@ -205,6 +290,34 @@ class MaxStringAggregate final : public Aggregate {
             *current = candidate;
         }
     }
+
+    // Stores an owned copy because raw string views are tied to pinned chunk
+    // lifetime, while aggregate state survives until extractValues().
+    inline void
+    updateOne(char* group, std::string_view candidate) {
+        if (isNull(group)) {
+            clearNull(group);
+            *value<const std::string*>(group) = ownOrUpdate(nullptr, candidate);
+            return;
+        }
+        auto& current = *value<const std::string*>(group);
+        if (current == nullptr || candidate > *current) {
+            current = ownOrUpdate(current, candidate);
+        }
+    }
+
+    const std::string*
+    ownOrUpdate(const std::string* current, std::string_view value) {
+        if (current != nullptr && owned_values_.count(current) > 0) {
+            *const_cast<std::string*>(current) = value;
+            return current;
+        }
+        auto* copy = new std::string(value);
+        owned_values_.insert(copy);
+        return copy;
+    }
+
+    std::unordered_set<const std::string*> owned_values_;
 };
 
 void

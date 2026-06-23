@@ -23,6 +23,7 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
+#include "exec/operator/query-agg/AggRawInput.h"
 #include "folly/Range.h"
 
 namespace milvus {
@@ -84,6 +85,19 @@ class Aggregate {
     addRawInput(char** groups,
                 int numGroups,
                 const std::vector<VectorPtr>& input) = 0;
+
+    virtual void
+    addSingleGroupRawInput(
+        char* group,
+        int64_t numRows,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes);
+
+    virtual void
+    addRawInput(char** groups,
+                int numGroups,
+                const AggRawInput& input,
+                const std::vector<column_index_t>& input_column_idxes);
 
     virtual void
     extractValues(char** groups, int32_t numGroups, VectorPtr* result) = 0;

@@ -113,6 +113,28 @@ RowContainer::store(const milvus::ColumnVectorPtr& column_data,
                                  rowColumn.nullMask());
 }
 
+void
+RowContainer::store(const AggRawColumnView& column_data,
+                    const AggRawInput& input,
+                    milvus::vector_size_t index,
+                    char* row,
+                    int32_t column_index) {
+    auto numKeys = keyTypes_.size();
+    bool isKey = column_index < numKeys;
+    AssertInfo(isKey || accumulators_.empty(),
+               "Should only store into rows for key");
+    auto rowColumn = rowColumns_[column_index];
+    MILVUS_DYNAMIC_TYPE_DISPATCH(storeRawWithNull,
+                                 keyTypes_[column_index],
+                                 column_data,
+                                 input,
+                                 index,
+                                 row,
+                                 rowColumn.offset(),
+                                 rowColumn.nullByte(),
+                                 rowColumn.nullMask());
+}
+
 Accumulator::Accumulator(bool isFixedSize, int32_t fixedSize, int32_t alignment)
     : isFixedSize_(isFixedSize), fixedSize_(fixedSize), alignment_(alignment) {
 }

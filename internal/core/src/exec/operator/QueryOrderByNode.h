@@ -20,11 +20,15 @@
 #include <string>
 #include <vector>
 
+#include "common/OpContext.h"
 #include "exec/operator/Operator.h"
 #include "exec/SortBuffer.h"
 #include "plan/PlanNode.h"
 
 namespace milvus {
+namespace segcore {
+class SegmentInternalInterface;
+}
 namespace exec {
 
 /**
@@ -36,10 +40,10 @@ namespace exec {
  * 3. Returns sorted results in batches (GetOutput phase)
  *
  * Pipeline position:
- *   FilterBitsNode → MvccNode → ProjectNode → QueryOrderByNode
+ *   FilterBitsNode → MvccNode → QueryOrderByNode
  *
  * For GROUP BY + ORDER BY:
- *   FilterBitsNode → MvccNode → ProjectNode → AggregationNode → QueryOrderByNode
+ *   FilterBitsNode → MvccNode → AggregationNode → QueryOrderByNode
  *
  * The operator delegates all sorting logic to SortBuffer, keeping the
  * operator itself thin and focused on the Operator interface contract.
@@ -104,11 +108,19 @@ class PhyQueryOrderByNode : public Operator {
     // Sort buffer that handles all sorting logic
     std::unique_ptr<SortBuffer> sort_buffer_;
 
+    void
+    AddRawInput(RowVectorPtr& input);
+
     // Output batch size (max rows per GetOutput call)
     int64_t output_batch_size_;
 
     // Data types of columns in sort buffer
     std::vector<DataType> column_types_;
+
+    bool use_raw_input_{false};
+    const segcore::SegmentInternalInterface* segment_{nullptr};
+    OpContext* op_context_{nullptr};
+    std::vector<FieldId> raw_input_field_ids_;
 };
 
 }  // namespace exec

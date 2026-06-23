@@ -26,6 +26,27 @@ Aggregate::setOffsetsInternal(int32_t offset,
     rowSizeOffset_ = rowSizeOffset;
 }
 
+void
+Aggregate::addSingleGroupRawInput(
+    char* group,
+    int64_t numRows,
+    const AggRawInput& input,
+    const std::vector<column_index_t>& input_column_idxes) {
+    ThrowInfo(Unsupported,
+              "raw chunk aggregation is not supported for result type {}",
+              result_type_);
+}
+
+void
+Aggregate::addRawInput(char** groups,
+                       int numGroups,
+                       const AggRawInput& input,
+                       const std::vector<column_index_t>& input_column_idxes) {
+    ThrowInfo(Unsupported,
+              "raw chunk aggregation is not supported for result type {}",
+              result_type_);
+}
+
 const AggregateFunctionFactory*
 getAggregateFunctionEntry(const std::string& name) {
     // Use the same normalization as registration (lowerString) to ensure

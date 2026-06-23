@@ -394,6 +394,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
                    TargetBitmap& valid_map,
                    bool small_int_raw_type = false) const override;
 
+    void
+    bulk_subscript_null_bitmap(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               const int64_t* seg_offsets,
+                               int64_t count,
+                               TargetBitmap& null_bitmap) const override;
+
     std::unique_ptr<DataArray>
     bulk_subscript(milvus::OpContext* op_ctx,
                    FieldId field_id,

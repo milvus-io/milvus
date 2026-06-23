@@ -63,10 +63,10 @@ struct RetrievePlanNode : PlanNode {
 
     int64_t limit_;
     bool has_order_by_ = false;
-    // Non-sort output fields deferred for late materialization (two-project mode).
-    // Empty means single-project mode (all columns materialized in the first project).
+    // Non-sort output fields deferred for late materialization after ORDER BY.
+    // Empty means no fields need late materialization.
     std::vector<FieldId> deferred_field_ids_;
-    // Field IDs for pipeline columns in the same order as the ProjectNode output.
+    // Field IDs for pipeline columns in the same order as ORDER BY pipeline output.
     // Used by FillOrderByResult to set field_id on DataArrays produced by the pipeline.
     std::vector<FieldId> pipeline_field_ids_;
     std::optional<QueryIteratorCursor> query_iterator_cursor_;

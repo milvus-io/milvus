@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <set>
 #include "test_utils/DataGen.h"
 #include "segcore/SegmentSealed.h"
@@ -22,6 +23,7 @@
 #include "exec/VectorHasher.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
+#include "query/PlanProto.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -75,10 +77,10 @@ class QueryAggTest : public testing::TestWithParam<bool> {
         schema_->set_primary_field_id(str_fid);
 
         num_rows_ = 10;
-        auto raw_data =
+        raw_data_ =
             DataGen(schema_, num_rows_, 42, 0, 2, 10, false, false, false);
 
-        auto segment = CreateSealedWithFieldDataLoaded(schema_, raw_data);
+        auto segment = CreateSealedWithFieldDataLoaded(schema_, raw_data_);
         segment_ = SegmentSealedSPtr(segment.release());
 
         milvus::exec::expression::FunctionFactory& factory =
@@ -95,6 +97,7 @@ class QueryAggTest : public testing::TestWithParam<bool> {
     SegmentSealedSPtr segment_;
     std::shared_ptr<Schema> schema_;
     std::map<std::string, FieldId> field_map_;
+    GeneratedData raw_data_;
 };
 
 INSTANTIATE_TEST_SUITE_P(TaskTestSuite,
@@ -111,6 +114,114 @@ createRetrievePlan(SchemaPtr schema,
     retrieve_plan->plan_node_->plannodes_ = agg_node;
     retrieve_plan->plan_node_->limit_ = limit;
     return retrieve_plan;
+}
+
+int64_t
+countValidRows(const GeneratedData& data, FieldId field_id) {
+    auto valid_data = data.get_col_valid(field_id);
+    return std::count(valid_data.begin(), valid_data.end(), true);
+}
+
+TEST_P(QueryAggTest, ProtoCountFieldUsesRawAggregationInput) {
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(num_rows_);
+    auto double_id = field_map_[double_field];
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(proto::plan::count);
+    aggregate->set_field_id(double_id.get());
+
+    auto retrieve_plan =
+        query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+    auto agg_node = std::dynamic_pointer_cast<plan::AggregationNode>(
+        retrieve_plan->plan_node_->plannodes_);
+    ASSERT_NE(agg_node, nullptr);
+    EXPECT_TRUE(agg_node->UseRawInput());
+    EXPECT_EQ(agg_node->RawInputFieldIds().size(), 1);
+    EXPECT_EQ(agg_node->RawInputFieldIds()[0], double_id);
+}
+
+TEST_P(QueryAggTest, ProtoCountFieldUsesRawValueWhenSharedWithSum) {
+    auto int64_id = field_map_[int64_field];
+    for (int order = 0; order < 2; order++) {
+        auto count_first = order == 0;
+        SCOPED_TRACE(count_first ? "count first" : "sum first");
+        proto::plan::PlanNode plan_node;
+        auto* query = plan_node.mutable_query();
+        query->set_limit(num_rows_);
+        auto add_count = [&]() {
+            auto* aggregate = query->add_aggregates();
+            aggregate->set_op(proto::plan::count);
+            aggregate->set_field_id(int64_id.get());
+        };
+        auto add_sum = [&]() {
+            auto* aggregate = query->add_aggregates();
+            aggregate->set_op(proto::plan::sum);
+            aggregate->set_field_id(int64_id.get());
+        };
+        if (count_first) {
+            add_count();
+            add_sum();
+        } else {
+            add_sum();
+            add_count();
+        }
+
+        auto retrieve_plan =
+            query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+        auto agg_node = std::dynamic_pointer_cast<plan::AggregationNode>(
+            retrieve_plan->plan_node_->plannodes_);
+        ASSERT_NE(agg_node, nullptr);
+        EXPECT_TRUE(agg_node->UseRawInput());
+        EXPECT_EQ(agg_node->RawInputFieldIds().size(), 1);
+        EXPECT_EQ(agg_node->RawInputFieldIds()[0], int64_id);
+        ASSERT_NE(agg_node->input_type(), nullptr);
+        EXPECT_EQ(agg_node->input_type()->column_type(0), DataType::INT64);
+    }
+}
+
+TEST_P(QueryAggTest, ProtoAvgRequiresRawAggregationSupport) {
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(num_rows_);
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(proto::plan::avg);
+    aggregate->set_field_id(field_map_[double_field].get());
+
+    EXPECT_THROW(
+        {
+            try {
+                query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+            } catch (const std::exception& e) {
+                std::string msg = e.what();
+                EXPECT_NE(msg.find("raw aggregation does not support avg"),
+                          std::string::npos)
+                    << "Unexpected error: " << msg;
+                throw;
+            }
+        },
+        std::exception);
+}
+
+TEST_P(QueryAggTest, ProtoVectorGroupByRequiresRawAggregationSupport) {
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(num_rows_);
+    query->add_group_by_field_ids(field_map_[vector_field].get());
+
+    EXPECT_THROW(
+        {
+            try {
+                query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+            } catch (const std::exception& e) {
+                std::string msg = e.what();
+                EXPECT_NE(msg.find("raw aggregation does not support group-by"),
+                          std::string::npos)
+                    << "Unexpected error: " << msg;
+                throw;
+            }
+        },
+        std::exception);
 }
 
 TEST_P(QueryAggTest, GroupFixedLengthType) {
@@ -469,9 +580,9 @@ TEST_P(QueryAggTest, CountAggTest) {
 
 TEST_P(QueryAggTest, GlobalCountAggTest) {
     std::vector<milvus::plan::PlanNodePtr> sources;
-    // MvccNode -> ProjectNode (empty fields) -> AggNode
-    // ProjectNode is always created in production (PlanProto.cpp),
-    // so tests should match that code path.
+    // MvccNode -> ProjectNode (empty fields) -> AggNode.
+    // This keeps legacy materialized count(*) coverage; production planning may
+    // choose the raw aggregation path when the aggregate is raw-compatible.
     PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
         milvus::plan::GetNextPlanNodeId(), sources);
     sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
@@ -515,6 +626,97 @@ TEST_P(QueryAggTest, GlobalCountAggTest) {
     std::cout << "count:" << actual_count << std::endl;
     EXPECT_EQ(num_rows_, actual_count);
     // count(*) will always get all results' count no matter nullable or not
+}
+
+TEST_P(QueryAggTest, GlobalCountFieldUsesValidityOnlyOnSealedSegment) {
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(num_rows_);
+    auto double_id = field_map_[double_field];
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(proto::plan::count);
+    aggregate->set_field_id(double_id.get());
+
+    auto retrieve_plan =
+        query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+    auto retrieve_results = segment_->Retrieve(nullptr,
+                                               retrieve_plan.get(),
+                                               MAX_TIMESTAMP,
+                                               DEFAULT_MAX_OUTPUT_SIZE,
+                                               false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 1);
+    auto& field_data = retrieve_results->fields_data(0);
+    ASSERT_EQ(field_data.scalars().long_data().data_size(), 1);
+    auto expected_count =
+        GetParam() ? countValidRows(raw_data_, double_id) : num_rows_;
+    EXPECT_EQ(field_data.scalars().long_data().data(0), expected_count);
+}
+
+TEST_P(QueryAggTest, GlobalCountFieldUsesValidityOnlyOnGrowingSegment) {
+    auto raw_data =
+        DataGen(schema_, num_rows_, 42, 0, 2, 10, 1, false, false, false);
+    auto segment = CreateGrowingSegment(schema_, empty_index_meta);
+    auto offset = segment->PreInsert(num_rows_);
+    segment->Insert(offset,
+                    num_rows_,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(num_rows_);
+    auto double_id = field_map_[double_field];
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(proto::plan::count);
+    aggregate->set_field_id(double_id.get());
+
+    auto retrieve_plan =
+        query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+    auto retrieve_results = segment->Retrieve(nullptr,
+                                              retrieve_plan.get(),
+                                              MAX_TIMESTAMP,
+                                              DEFAULT_MAX_OUTPUT_SIZE,
+                                              false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 1);
+    auto& field_data = retrieve_results->fields_data(0);
+    ASSERT_EQ(field_data.scalars().long_data().data_size(), 1);
+    auto expected_count =
+        GetParam() ? countValidRows(raw_data, double_id) : num_rows_;
+    EXPECT_EQ(field_data.scalars().long_data().data(0), expected_count);
+}
+
+TEST_P(QueryAggTest, GlobalCountMissingFieldWithValidityOnlyReturnsZero) {
+    if (!GetParam()) {
+        GTEST_SKIP();
+    }
+    auto double_id = field_map_[double_field];
+    auto raw_data =
+        DataGen(schema_, num_rows_, 42, 0, 2, 10, 1, false, false, false);
+    auto segment = CreateSealedWithFieldDataLoaded(
+        schema_, raw_data, false, {double_id.get()});
+
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(num_rows_);
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(proto::plan::count);
+    aggregate->set_field_id(double_id.get());
+
+    auto retrieve_plan =
+        query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+    auto retrieve_results = segment->Retrieve(nullptr,
+                                              retrieve_plan.get(),
+                                              MAX_TIMESTAMP,
+                                              DEFAULT_MAX_OUTPUT_SIZE,
+                                              false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 1);
+    auto& field_data = retrieve_results->fields_data(0);
+    ASSERT_EQ(field_data.scalars().long_data().data_size(), 1);
+    EXPECT_EQ(field_data.scalars().long_data().data(0), 0);
 }
 
 // Test count(*) when activeCount is zero
@@ -1049,6 +1251,54 @@ TEST(CountAggregateTest, NullCountMatchesValidAt) {
                   validAtCount)
             << "Mismatch at size=" << size;
     }
+}
+
+TEST(CountAggregateTest, SingleGroupBitmapInputCountsNonNullRows) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto row = CountAggTestHelper::makeGroupRow();
+    char* group = row.data();
+    const std::vector<milvus::vector_size_t> indices = {0};
+    agg.initializeNewGroups(&group, indices);
+
+    TargetBitmap null_bitmap(65);
+    null_bitmap.set(0);
+    null_bitmap.set(63);
+    null_bitmap.set(64);
+    TargetBitmap valid_bitmap(65, true);
+    auto col = std::make_shared<milvus::ColumnVector>(std::move(null_bitmap),
+                                                      std::move(valid_bitmap));
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addSingleGroupRawInput(group, 65, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(row), 62);
+}
+
+TEST(CountAggregateTest, GroupByBitmapInputCountsNonNullRowsPerGroup) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto g0 = CountAggTestHelper::makeGroupRow();
+    auto g1 = CountAggTestHelper::makeGroupRow();
+    std::vector<char*> groups_vec = {
+        g0.data(), g1.data(), g0.data(), g1.data(), g0.data(), g1.data()};
+    char** groups = groups_vec.data();
+    const std::vector<milvus::vector_size_t> indices = {0, 1};
+    char* init_groups[] = {g0.data(), g1.data()};
+    agg.initializeNewGroups(init_groups, indices);
+
+    TargetBitmap null_bitmap(6);
+    null_bitmap.set(1);
+    null_bitmap.set(4);
+    TargetBitmap valid_bitmap(6, true);
+    auto col = std::make_shared<milvus::ColumnVector>(std::move(null_bitmap),
+                                                      std::move(valid_bitmap));
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addRawInput(groups, 6, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(g0), 2);
+    EXPECT_EQ(CountAggTestHelper::getCount(g1), 2);
 }
 
 // Regression test for #47316: GROUP BY aggregation with empty result set

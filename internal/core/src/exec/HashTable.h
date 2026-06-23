@@ -33,6 +33,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "exec/operator/query-agg/AggRawInput.h"
 #include "exec/operator/query-agg/RowContainer.h"
 #include "folly/CPortability.h"
 #include "segcore/SegcoreConfig.h"
@@ -159,6 +160,9 @@ class BaseHashTable {
     void
     prepareForGroupProbe(HashLookup& lookup, const RowVectorPtr& input);
 
+    void
+    prepareForGroupProbe(HashLookup& lookup, const AggRawInput& input);
+
     /// Finds or creates a group for each key in 'lookup'. The keys are
     /// returned in 'lookup.hits'.
     virtual void
@@ -270,6 +274,12 @@ class HashTable : public BaseHashTable {
     bool
     compareKeys(const char* group, HashLookup& lookup, vector_size_t row);
 
+    bool
+    compareKeys(const char* group,
+                HashLookup& lookup,
+                const AggRawInput& input,
+                vector_size_t row);
+
     char*
     row(int64_t bucketOffset, int32_t slotIndex) const {
         return bucketAt(bucketOffset)->pointerAt(slotIndex);
@@ -289,8 +299,17 @@ class HashTable : public BaseHashTable {
     char*
     insertEntry(HashLookup& lookup, uint64_t index, vector_size_t row);
 
+    char*
+    insertEntry(HashLookup& lookup,
+                const AggRawInput& input,
+                uint64_t index,
+                vector_size_t row);
+
     void
     storeKeys(HashLookup& lookup, vector_size_t row);
+
+    void
+    storeKeys(HashLookup& lookup, const AggRawInput& input, vector_size_t row);
 
     void
     storeRowPointer(uint64_t index, uint64_t hash, char* row);
@@ -302,6 +321,12 @@ class HashTable : public BaseHashTable {
 
     void
     fullProbe(HashLookup& lookup, ProbeState& state);
+
+    void
+    fullProbe(HashLookup& lookup, const AggRawInput& input, ProbeState& state);
+
+    void
+    groupProbe(HashLookup& lookup, const AggRawInput& input);
 
     void
     clear(bool freeTable = false) override;

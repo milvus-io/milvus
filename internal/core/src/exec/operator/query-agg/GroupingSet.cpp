@@ -17,6 +17,7 @@
 #include "GroupingSet.h"
 
 #include <cstddef>
+#include <limits>
 
 #include "common/BitUtil.h"
 #include "common/EasyAssert.h"
@@ -44,6 +45,17 @@ GroupingSet::~GroupingSet() {
 void
 GroupingSet::addInput(const RowVectorPtr& input) {
     auto numRows = input->size();
+    numInputRows_ += numRows;
+    if (isGlobal_) {
+        addGlobalAggregationInput(input);
+        return;
+    }
+    addInputForActiveRows(input);
+}
+
+void
+GroupingSet::addRawInput(const AggRawInput& input) {
+    auto numRows = input.selected_count();
     numInputRows_ += numRows;
     if (isGlobal_) {
         addGlobalAggregationInput(input);
@@ -117,6 +129,18 @@ GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input) {
         function->addSingleGroupRawInput(group, numRows, tempVectors_);
     }
     tempVectors_.clear();
+}
+
+void
+GroupingSet::addGlobalAggregationInput(const AggRawInput& input) {
+    initializeGlobalAggregation();
+    auto* group = lookup_->hits_[0];
+    auto numRows = input.selected_count();
+    for (auto i = 0; i < aggregates_.size(); i++) {
+        auto& aggregate = aggregates_[i];
+        aggregate.function_->addSingleGroupRawInput(
+            group, numRows, input, aggregate.input_column_idxes_);
+    }
 }
 
 bool
@@ -214,6 +238,33 @@ GroupingSet::addInputForActiveRows(const RowVectorPtr& input) {
 }
 
 void
+GroupingSet::addInputForActiveRows(const AggRawInput& input) {
+    AssertInfo(
+        !isGlobal_,
+        "Global aggregations should not reach add input for active rows");
+    if (!hash_table_) {
+        createHashTable();
+    }
+    hash_table_->prepareForGroupProbe(*lookup_, input);
+    auto* raw_hash_table = dynamic_cast<HashTable*>(hash_table_.get());
+    AssertInfo(raw_hash_table != nullptr,
+               "raw aggregation currently requires the generic hash table");
+    raw_hash_table->groupProbe(*lookup_, input);
+    auto& hits = lookup_->hits_;
+    auto* groups = hits.data();
+    auto numGroups = hits.size();
+    const auto& newGroups = lookup_->newGroups_;
+    for (auto i = 0; i < aggregates_.size(); i++) {
+        auto& aggregate = aggregates_[i];
+        if (!newGroups.empty()) {
+            aggregate.function_->initializeNewGroups(groups, newGroups);
+        }
+        aggregate.function_->addRawInput(
+            groups, numGroups, input, aggregate.input_column_idxes_);
+    }
+}
+
+void
 GroupingSet::populateTempVectors(int32_t aggregateIndex,
                                  const milvus::RowVectorPtr& input) {
     const auto& channel_idxes = aggregates_[aggregateIndex].input_column_idxes_;
@@ -225,10 +276,17 @@ GroupingSet::populateTempVectors(int32_t aggregateIndex,
 
 int32_t
 GroupingSet::outputRowCount() const {
-    if (!lookup_) {
+    if (isGlobal_) {
+        return 1;
+    }
+    if (!hash_table_) {
         return 0;
     }
-    return lookup_->newGroups_.size();
+    const auto row_count = hash_table_->rows()->allRows().size();
+    AssertInfo(
+        row_count <= static_cast<size_t>(std::numeric_limits<int32_t>::max()),
+        "aggregation output row count is too large");
+    return static_cast<int32_t>(row_count);
 }
 
 void

@@ -2756,6 +2756,31 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
 }
 
 void
+ChunkedSegmentSealedImpl::bulk_subscript_null_bitmap(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    TargetBitmap& null_bitmap) const {
+    auto column = get_column(field_id);
+    if (column == nullptr) {
+        null_bitmap.set();
+        return;
+    }
+    null_bitmap.reset();
+    if (!column->IsNullable()) {
+        return;
+    }
+    column->BulkIsValid(
+        op_ctx,
+        [&](bool is_valid, size_t offset) {
+            null_bitmap.set(offset, !is_valid);
+        },
+        seg_offsets,
+        count);
+}
+
+void
 ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                          FieldId field_id,
                                          DataType data_type,

@@ -60,7 +60,15 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
             input_column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
             AssertInfo(input_column != nullptr,
                        "input[0] must be ColumnVector for count aggregation");
-            if (input_column->nullCount() == 0) {
+            if (input_column->IsBitmap()) {
+                BitsetTypeView view(input_column->GetRawData(),
+                                    input_column->size());
+                for (auto i = 0; i < input_column->size(); i++) {
+                    if (!view[i]) {
+                        addToGroup(groups[i], 1);
+                    }
+                }
+            } else if (input_column->nullCount() == 0) {
                 for (auto i = 0; i < input_column->size(); i++) {
                     addToGroup(groups[i], 1);
                 }
@@ -80,6 +88,33 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
         }
         for (auto i = 0; i < numGroups; i++) {
             addToGroup(groups[i], 1);
+        }
+    }
+
+    void
+    addRawInput(
+        char** groups,
+        int numGroups,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes) override {
+        AssertInfo(numGroups == input.selected_count(),
+                   "raw count group count must match selected rows");
+        if (input_column_idxes.empty()) {
+            for (auto i = 0; i < numGroups; i++) {
+                addToGroup(groups[i], 1);
+            }
+            return;
+        }
+
+        AssertInfo(input_column_idxes.size() == 1,
+                   fmt::format("input column count for count aggregation "
+                               "must be one , but got:{}",
+                               input_column_idxes.size()));
+        const auto& column = input.child(input_column_idxes[0]);
+        for (auto i = 0; i < numGroups; i++) {
+            if (column.ValidAt(i, input)) {
+                addToGroup(groups[i], 1);
+            }
         }
     }
 
@@ -107,6 +142,31 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
                 group,
                 column->size() - static_cast<int64_t>(column->nullCount()));
         }
+    }
+
+    void
+    addSingleGroupRawInput(
+        char* group,
+        int64_t numRows,
+        const AggRawInput& input,
+        const std::vector<column_index_t>& input_column_idxes) override {
+        if (input_column_idxes.empty()) {
+            addToGroup(group, numRows);
+            return;
+        }
+
+        AssertInfo(input_column_idxes.size() == 1,
+                   fmt::format("input column count for count aggregation "
+                               "must be exactly one for now, but got:{}",
+                               input_column_idxes.size()));
+        const auto& column = input.child(input_column_idxes[0]);
+        int64_t count = 0;
+        for (auto i = 0; i < input.selected_count(); i++) {
+            if (column.ValidAt(i, input)) {
+                ++count;
+            }
+        }
+        addToGroup(group, count);
     }
 
     void

@@ -65,6 +65,24 @@ class SimpleNumericAggregate : public exec::Aggregate {
         }
     }
 
+    template <bool tableHasNulls,
+              typename TData = TResult,
+              typename TValue = TInput,
+              typename UpdateSingle>
+    void
+    updateOneRawGroupAtIndex(char* group,
+                             const AggRawColumnView& column_data,
+                             const AggRawInput& input,
+                             int32_t index,
+                             UpdateSingle updateSingleValue) {
+        if (column_data.ValidAt(index, input)) {
+            updateNonNullValue<tableHasNulls, TData>(
+                group,
+                TData(column_data.ValueAt<TValue>(index, input)),
+                updateSingleValue);
+        }
+    }
+
     template <typename TData = TResult,
               typename TValue = TInput,
               typename UpdateSingle>
@@ -79,6 +97,21 @@ class SimpleNumericAggregate : public exec::Aggregate {
         for (auto i = 0; i < column_data->size(); i++) {
             updateOneGroupAtIndex<true, TData, TValue>(
                 group, column_data, i, updateSingleValue);
+        }
+    }
+
+    template <typename TData = TResult,
+              typename TValue = TInput,
+              typename UpdateSingle>
+    void
+    updateOneRawGroup(char* group,
+                      const AggRawInput& input,
+                      column_index_t column_idx,
+                      UpdateSingle updateSingleValue) {
+        const auto& column_data = input.child(column_idx);
+        for (auto i = 0; i < input.selected_count(); i++) {
+            updateOneRawGroupAtIndex<true, TData, TValue>(
+                group, column_data, input, i, updateSingleValue);
         }
     }
 
@@ -97,6 +130,22 @@ class SimpleNumericAggregate : public exec::Aggregate {
         for (auto i = 0; i < column_data->size(); i++) {
             updateOneGroupAtIndex<tableHasNulls, TData, TValue>(
                 groups[i], column_data, i, updateSingleValue);
+        }
+    }
+
+    template <bool tableHasNulls,
+              typename TData = TResult,
+              typename TValue = TInput,
+              typename UpdateSingleValue>
+    void
+    updateRawGroups(char** groups,
+                    const AggRawInput& input,
+                    column_index_t column_idx,
+                    UpdateSingleValue updateSingleValue) {
+        const auto& column_data = input.child(column_idx);
+        for (auto i = 0; i < input.selected_count(); i++) {
+            updateOneRawGroupAtIndex<tableHasNulls, TData, TValue>(
+                groups[i], column_data, input, i, updateSingleValue);
         }
     }
 

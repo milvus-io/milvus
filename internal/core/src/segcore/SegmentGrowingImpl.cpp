@@ -2013,6 +2013,24 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
 }
 
 void
+SegmentGrowingImpl::bulk_subscript_null_bitmap(
+    milvus::OpContext*,
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    TargetBitmap& null_bitmap) const {
+    auto& field_meta = schema_->operator[](field_id);
+    null_bitmap.reset();
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+    auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    for (auto i = 0; i < count; i++) {
+        null_bitmap.set(i, !valid_vec_ptr->is_valid(seg_offsets[i]));
+    }
+}
+
+void
 SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                    FieldId field_id,
                                    DataType data_type,

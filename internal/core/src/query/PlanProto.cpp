@@ -18,6 +18,7 @@
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <string_view>
 
 #include "segcore/SegcoreConfig.h"
 #include <optional>
@@ -244,27 +245,28 @@ namespace {
 
 // Helper function to process group_by fields
 void
-ProcessGroupByFields(const proto::plan::QueryPlanNode& query,
-                     const SchemaPtr& schema,
-                     std::vector<expr::FieldAccessTypeExprPtr>& groupingKeys,
-                     std::vector<FieldId>& project_id_list,
-                     std::vector<std::string>& project_name_list,
-                     std::vector<milvus::DataType>& project_type_list) {
+ProcessGroupByFields(
+    const proto::plan::QueryPlanNode& query,
+    const SchemaPtr& schema,
+    std::vector<expr::FieldAccessTypeExprPtr>& groupingKeys,
+    std::vector<FieldId>& raw_input_field_ids,
+    std::vector<std::string>& raw_input_field_names,
+    std::vector<milvus::DataType>& raw_input_type_list) {
     auto group_by_field_count = query.group_by_field_ids_size();
     groupingKeys.reserve(group_by_field_count);
-    project_id_list.reserve(group_by_field_count);
-    project_name_list.reserve(group_by_field_count);
-    project_type_list.reserve(group_by_field_count);
+    raw_input_field_ids.reserve(group_by_field_count);
+    raw_input_field_names.reserve(group_by_field_count);
+    raw_input_type_list.reserve(group_by_field_count);
 
-    auto insert_project_field_if_not_exist = [&](FieldId field_id,
-                                                 const std::string& field_name,
-                                                 milvus::DataType field_type) {
-        if (std::count(project_id_list.begin(),
-                       project_id_list.end(),
+    auto insert_raw_input_field_if_not_exist = [&](FieldId field_id,
+                                                   const std::string& field_name,
+                                                   milvus::DataType field_type) {
+        if (std::count(raw_input_field_ids.begin(),
+                       raw_input_field_ids.end(),
                        field_id) == 0) {
-            project_id_list.emplace_back(field_id);
-            project_name_list.emplace_back(field_name);
-            project_type_list.emplace_back(field_type);
+            raw_input_field_ids.emplace_back(field_id);
+            raw_input_field_names.emplace_back(field_name);
+            raw_input_type_list.emplace_back(field_type);
         }
     };
 
@@ -280,33 +282,35 @@ ProcessGroupByFields(const proto::plan::QueryPlanNode& query,
         groupingKeys.emplace_back(
             std::make_shared<const expr::FieldAccessTypeExpr>(
                 field_type, field_name, field_id));
-        insert_project_field_if_not_exist(field_id, field_name, field_type);
+        insert_raw_input_field_if_not_exist(field_id, field_name, field_type);
     }
 }
 
 // Helper function to process aggregates
 void
-ProcessAggregates(const proto::plan::QueryPlanNode& query,
-                  const SchemaPtr& schema,
-                  std::vector<plan::AggregationNode::Aggregate>& aggregates,
-                  std::vector<std::string>& agg_names,
-                  std::vector<FieldId>& project_id_list,
-                  std::vector<std::string>& project_name_list,
-                  std::vector<milvus::DataType>& project_type_list) {
+ProcessAggregates(
+    const proto::plan::QueryPlanNode& query,
+    const SchemaPtr& schema,
+    std::vector<plan::AggregationNode::Aggregate>& aggregates,
+    std::vector<std::string>& agg_names,
+    std::vector<FieldId>& raw_input_field_ids,
+    std::vector<std::string>& raw_input_field_names,
+    std::vector<milvus::DataType>& raw_input_type_list) {
     aggregates.reserve(query.aggregates_size());
     agg_names.reserve(query.aggregates_size());
 
-    auto insert_project_field_if_not_exist = [&](FieldId field_id,
-                                                 const std::string& field_name,
-                                                 milvus::DataType field_type) {
-        if (std::count(project_id_list.begin(),
-                       project_id_list.end(),
-                       field_id) == 0) {
-            project_id_list.emplace_back(field_id);
-            project_name_list.emplace_back(field_name);
-            project_type_list.emplace_back(field_type);
-        }
-    };
+    auto insert_raw_input_field_if_not_exist =
+        [&](FieldId field_id,
+            const std::string& field_name,
+            milvus::DataType field_type) {
+            if (std::find(raw_input_field_ids.begin(),
+                          raw_input_field_ids.end(),
+                          field_id) == raw_input_field_ids.end()) {
+                raw_input_field_ids.emplace_back(field_id);
+                raw_input_field_names.emplace_back(field_name);
+                raw_input_type_list.emplace_back(field_type);
+            }
+        };
 
     for (int i = 0; i < query.aggregates_size(); i++) {
         const auto& aggregate = query.aggregates(i);
@@ -314,7 +318,7 @@ ProcessAggregates(const proto::plan::QueryPlanNode& query,
         agg_names.emplace_back(agg_name);
         auto input_agg_field_id = aggregate.field_id();
         if (input_agg_field_id == 0) {
-            // count(*) do not need input project columns
+            // count(*) does not need input raw columns.
             auto call = std::make_shared<const expr::CallExpr>(
                 agg_name, std::vector<expr::TypedExprPtr>{}, nullptr);
             aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
@@ -336,148 +340,185 @@ ProcessAggregates(const proto::plan::QueryPlanNode& query,
             aggregates.back().rawInputTypes_.emplace_back(field_type);
             aggregates.back().resultType_ =
                 GetAggResultType(agg_name, field_type);
-            insert_project_field_if_not_exist(field_id, field_name, field_type);
+            insert_raw_input_field_if_not_exist(field_id, field_name, field_type);
         }
     }
 }
 
-// Helper function to build ProjectNode and AggregationNode
+bool
+SupportsRawNumericAggregationType(DataType type) {
+    switch (type) {
+        case DataType::BOOL:
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool
+SupportsRawStringAggregationType(DataType type) {
+    return type == DataType::VARCHAR || type == DataType::STRING;
+}
+
+bool
+SupportsRawGroupingType(DataType type) {
+    return SupportsRawNumericAggregationType(type) ||
+           SupportsRawStringAggregationType(type);
+}
+
+bool
+SupportsRawAggregationFunction(std::string_view name,
+                               const std::vector<DataType>& raw_input_types) {
+    if (name == KCount) {
+        return raw_input_types.empty() ||
+               (raw_input_types.size() == 1 &&
+                SupportsRawGroupingType(raw_input_types[0]));
+    }
+    if (raw_input_types.size() != 1) {
+        return false;
+    }
+    const auto input_type = raw_input_types[0];
+    if (name == KSum) {
+        return SupportsRawNumericAggregationType(input_type);
+    }
+    if (name == KMin || name == KMax) {
+        return SupportsRawGroupingType(input_type);
+    }
+    return false;
+}
+
+void
+ValidateRawAggregationSupport(
+    const std::vector<expr::FieldAccessTypeExprPtr>& groupingKeys,
+    const std::vector<std::string>& agg_names,
+    const std::vector<plan::AggregationNode::Aggregate>& aggregates) {
+    for (const auto& key : groupingKeys) {
+        if (!SupportsRawGroupingType(key->type())) {
+            ThrowInfo(Unsupported,
+                      "raw aggregation does not support group-by field {} with "
+                      "type {}",
+                      key->name(),
+                      key->type());
+        }
+    }
+    AssertInfo(agg_names.size() == aggregates.size(),
+               "aggregate names and aggregate calls must have the same size");
+    for (auto i = 0; i < aggregates.size(); ++i) {
+        const auto& raw_input_types = aggregates[i].rawInputTypes_;
+        if (SupportsRawAggregationFunction(agg_names[i], raw_input_types)) {
+            continue;
+        }
+        if (raw_input_types.empty()) {
+            ThrowInfo(Unsupported,
+                      "raw aggregation does not support {}(*)",
+                      agg_names[i]);
+        }
+        if (raw_input_types.size() == 1) {
+            ThrowInfo(Unsupported,
+                      "raw aggregation does not support {} with input type {}",
+                      agg_names[i],
+                      raw_input_types[0]);
+        }
+        ThrowInfo(Unsupported,
+                  "raw aggregation does not support {} with {} input columns",
+                  agg_names[i],
+                  raw_input_types.size());
+    }
+}
+
+// Aggregation is raw-only in the retrieve query planner.  Unsupported new
+// functions/types should add raw support instead of reusing the legacy
+// ProjectNode materialization fallback.
 plan::PlanNodePtr
-BuildProjectAndAggregationNodes(
-    const proto::plan::QueryPlanNode& query,
+BuildRawAggregationNode(
     const std::vector<plan::PlanNodePtr>& sources,
     std::vector<expr::FieldAccessTypeExprPtr> groupingKeys,
     std::vector<std::string> agg_names,
     std::vector<plan::AggregationNode::Aggregate> aggregates,
-    std::vector<FieldId> project_id_list,
-    std::vector<std::string> project_name_list,
-    std::vector<milvus::DataType> project_type_list) {
-    plan::PlanNodePtr plannode = sources.empty() ? nullptr : sources[0];
-
-    // Always build ProjectNode when aggregation is present.
-    // ProjectNode consumes the MVCC bitmap from upstream and materializes
-    // filtered rows, so AggregationNode always receives input where
-    // size() == number of existing rows (needed for count(*)).
-    {
-        auto project_field_id_list = std::vector<FieldId>(
-            project_id_list.begin(), project_id_list.end());
-        plannode = std::make_shared<plan::ProjectNode>(
-            milvus::plan::GetNextPlanNodeId(),
-            std::move(project_field_id_list),
-            std::move(project_name_list),
-            std::move(project_type_list),
-            sources);
-    }
-
-    // Build AggregationNode
-    std::vector<plan::PlanNodePtr> agg_sources =
-        plannode ? std::vector<plan::PlanNodePtr>{plannode} : sources;
+    std::vector<FieldId> raw_input_field_ids,
+    std::vector<std::string> raw_input_field_names,
+    std::vector<milvus::DataType> raw_input_type_list) {
+    ValidateRawAggregationSupport(groupingKeys, agg_names, aggregates);
+    auto input_type = std::make_shared<RowType>(
+        std::move(raw_input_field_names), std::move(raw_input_type_list));
     return std::make_shared<plan::AggregationNode>(
         milvus::plan::GetNextPlanNodeId(),
         std::move(groupingKeys),
         std::move(agg_names),
         std::move(aggregates),
-        agg_sources);
+        sources,
+        std::move(input_type),
+        std::move(raw_input_field_ids),
+        true);
 }
-// Helper function to build ProjectNode for ORDER BY queries.
-// Returns {ProjectNode, deferred_field_ids, pipeline_field_ids}.
-// deferred_field_ids is empty for single-project mode (all columns materialized
-// in the first project), or non-empty for two-project mode (variable-width
-// non-sort output columns deferred until after TopK).
-// pipeline_field_ids mirrors project_ids so FillOrderByResult can stamp
-// the correct field_id on each DataArray produced by the pipeline.
-std::tuple<plan::PlanNodePtr, std::vector<FieldId>, std::vector<FieldId>>
-BuildOrderByProjectNode(const proto::plan::QueryPlanNode& query,
-                        const planpb::PlanNode& plan_node_proto,
-                        const SchemaPtr& schema,
-                        const std::vector<plan::PlanNodePtr>& sources) {
-    std::vector<FieldId> project_ids;
-    std::vector<std::string> project_names;
-    std::vector<milvus::DataType> project_types;
-
-    // Positional layout contract:
-    //   [pk, orderby_fields, non-sort-output-fields]
-    // PK at position 0 for proxy reduce/dedup.
-    // ORDER BY fields at positions 1..N for sorting.
-    // Remaining output fields at positions N+1..M.
+std::tuple<RowTypePtr, std::vector<FieldId>, std::vector<FieldId>>
+BuildRawOrderByInput(const proto::plan::QueryPlanNode& query,
+                     const planpb::PlanNode& plan_node_proto,
+                     const SchemaPtr& schema) {
+    std::vector<FieldId> field_ids;
+    std::vector<std::string> field_names;
+    std::vector<DataType> field_types;
     std::set<int64_t> seen_field_ids;
+
+    auto append_field = [&](FieldId field_id) {
+        if (seen_field_ids.insert(field_id.get()).second) {
+            field_ids.push_back(field_id);
+            field_names.push_back(schema->GetFieldName(field_id));
+            field_types.push_back(schema->GetFieldType(field_id));
+        }
+    };
+
     auto pk_field_id = schema->get_primary_field_id();
     if (pk_field_id.has_value()) {
-        auto pk_fid = pk_field_id.value();
-        seen_field_ids.insert(pk_fid.get());
-        project_ids.push_back(pk_fid);
-        project_names.push_back(schema->GetFieldName(pk_fid));
-        project_types.push_back(schema->GetFieldType(pk_fid));
-    }
-    auto order_by_field_count = query.order_by_fields_size();
-    for (int i = 0; i < order_by_field_count; i++) {
-        auto fid_raw = query.order_by_fields(i).field_id();
-        if (seen_field_ids.insert(fid_raw).second) {
-            auto fid = FieldId(fid_raw);
-            project_ids.push_back(fid);
-            project_names.push_back(schema->GetFieldName(fid));
-            project_types.push_back(schema->GetFieldType(fid));
-        }
+        append_field(pk_field_id.value());
     }
 
-    // Collect non-sort output fields and check for variable-width types.
-    // Skip system fields (RowFieldID, TimestampFieldID) — they are handled
-    // separately in FillTargetEntry and must not enter the pipeline.
-    std::vector<FieldId> non_sort_output_fields;
-    bool has_variable_width = false;
-    for (auto fid_raw : plan_node_proto.output_field_ids()) {
-        if (seen_field_ids.count(fid_raw) == 0) {
-            auto fid = FieldId(fid_raw);
-            if (SystemProperty::Instance().IsSystem(fid)) {
-                continue;
-            }
-            non_sort_output_fields.push_back(fid);
-            if (IsVariableDataType(schema->GetFieldType(fid))) {
-                has_variable_width = true;
-            }
-        }
+    for (int i = 0; i < query.order_by_fields_size(); i++) {
+        auto fid = FieldId(query.order_by_fields(i).field_id());
+        append_field(fid);
     }
 
     std::vector<FieldId> deferred_field_ids;
-    if (has_variable_width) {
-        // Two-project mode: defer ALL non-sort output fields until after TopK.
-        deferred_field_ids = non_sort_output_fields;
-    } else {
-        // Single-project mode: materialize all columns in the first project.
-        for (auto& fid : non_sort_output_fields) {
-            seen_field_ids.insert(fid.get());
-            project_ids.push_back(fid);
-            project_names.push_back(schema->GetFieldName(fid));
-            project_types.push_back(schema->GetFieldType(fid));
+    for (auto fid_raw : plan_node_proto.output_field_ids()) {
+        auto fid = FieldId(fid_raw);
+        if (fid == SegmentOffsetFieldID) {
+            continue;
+        }
+        if (seen_field_ids.count(fid_raw) == 0 &&
+            !SystemProperty::Instance().IsSystem(fid)) {
+            deferred_field_ids.push_back(fid);
         }
     }
 
-    // Always append SegmentOffsetFieldID as the last pipeline column.
-    // FillOrderByResult uses these offsets to populate system fields
-    // (e.g., TimestampField for QN-side pk+ts dedup) and, in two-project
-    // mode, to bulk-fetch deferred fields via late materialization.
-    project_ids.push_back(SegmentOffsetFieldID);
-    project_names.push_back("SegmentOffset");
-    project_types.push_back(DataType::INT64);
+    AssertInfo(seen_field_ids.count(SegmentOffsetFieldID.get()) == 0,
+               "SegmentOffsetFieldID must be reserved for ORDER BY pipeline");
+    field_ids.push_back(SegmentOffsetFieldID);
+    field_names.emplace_back("SegmentOffset");
+    field_types.push_back(DataType::INT64);
 
-    // Save pipeline field IDs before moving project_ids into ProjectNode.
-    auto pipeline_field_ids = project_ids;
-
-    auto plannode =
-        std::make_shared<plan::ProjectNode>(milvus::plan::GetNextPlanNodeId(),
-                                            std::move(project_ids),
-                                            std::move(project_names),
-                                            std::move(project_types),
-                                            sources);
-    return {
-        plannode, std::move(deferred_field_ids), std::move(pipeline_field_ids)};
+    auto input_type = std::make_shared<RowType>(std::move(field_names),
+                                                std::move(field_types));
+    auto pipeline_field_ids = field_ids;
+    return {std::move(input_type),
+            std::move(deferred_field_ids),
+            std::move(pipeline_field_ids)};
 }
 
 // Helper function to build OrderByNode with sorting keys.
 plan::PlanNodePtr
 BuildOrderByNode(const proto::plan::QueryPlanNode& query,
                  const SchemaPtr& schema,
-                 const std::vector<plan::PlanNodePtr>& sources) {
+                 const std::vector<plan::PlanNodePtr>& sources,
+                 RowTypePtr raw_input_type = nullptr,
+                 std::vector<FieldId> raw_input_field_ids = {},
+                 bool use_raw_input = false) {
     auto order_by_field_count = query.order_by_fields_size();
     std::vector<expr::FieldAccessTypeExprPtr> sorting_keys;
     std::vector<plan::SortOrder> sorting_orders;
@@ -507,7 +548,10 @@ BuildOrderByNode(const proto::plan::QueryPlanNode& query,
         std::move(sorting_keys),
         std::move(sorting_orders),
         query.limit(),
-        sources);
+        sources,
+        std::move(raw_input_type),
+        std::move(raw_input_field_ids),
+        use_raw_input);
 }
 }  // namespace
 
@@ -773,13 +817,13 @@ ProtoParser::RetrievePlanNodeFromProto(
             sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
 
-        // 4. Build ProjectNode and AggregationNode if needed
+        // 4. Build raw AggregationNode if needed
         auto group_by_field_count = query.group_by_field_ids_size();
         auto agg_functions_count = query.aggregates_size();
         if (group_by_field_count > 0 || agg_functions_count > 0) {
-            std::vector<FieldId> project_id_list;
-            std::vector<std::string> project_name_list;
-            std::vector<milvus::DataType> project_type_list;
+            std::vector<FieldId> raw_input_field_ids;
+            std::vector<std::string> raw_input_field_names;
+            std::vector<milvus::DataType> raw_input_type_list;
             std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
             std::vector<plan::AggregationNode::Aggregate> aggregates;
             std::vector<std::string> agg_names;
@@ -788,50 +832,48 @@ ProtoParser::RetrievePlanNodeFromProto(
             ProcessGroupByFields(query,
                                  schema,
                                  groupingKeys,
-                                 project_id_list,
-                                 project_name_list,
-                                 project_type_list);
+                                 raw_input_field_ids,
+                                 raw_input_field_names,
+                                 raw_input_type_list);
 
             // Process aggregates
             ProcessAggregates(query,
                               schema,
                               aggregates,
                               agg_names,
-                              project_id_list,
-                              project_name_list,
-                              project_type_list);
+                              raw_input_field_ids,
+                              raw_input_field_names,
+                              raw_input_type_list);
 
-            // Build ProjectNode and AggregationNode
-            plannode =
-                BuildProjectAndAggregationNodes(query,
-                                                sources,
-                                                std::move(groupingKeys),
-                                                std::move(agg_names),
-                                                std::move(aggregates),
-                                                std::move(project_id_list),
-                                                std::move(project_name_list),
-                                                std::move(project_type_list));
+            plannode = BuildRawAggregationNode(sources,
+                                               std::move(groupingKeys),
+                                               std::move(agg_names),
+                                               std::move(aggregates),
+                                               std::move(raw_input_field_ids),
+                                               std::move(raw_input_field_names),
+                                               std::move(raw_input_type_list));
             sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
 
         // 5. Build OrderByNode if needed
         auto order_by_field_count = query.order_by_fields_size();
         if (order_by_field_count > 0) {
-            // Without aggregation, the source is MvccNode which has
-            // no output_type (bitmap-only). Insert a ProjectNode to
-            // materialize column data so OrderByNode can sort it.
             bool has_aggregation =
                 (group_by_field_count > 0 || agg_functions_count > 0);
             if (!has_aggregation) {
-                auto [project, deferred, pipeline_ids] =
-                    BuildOrderByProjectNode(
-                        query, plan_node_proto, schema, sources);
-                plannode = project;
-                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+                auto [raw_input_type, deferred, pipeline_ids] =
+                    BuildRawOrderByInput(query, plan_node_proto, schema);
                 plan_node->deferred_field_ids_ = std::move(deferred);
-                plan_node->pipeline_field_ids_ = std::move(pipeline_ids);
+                plan_node->pipeline_field_ids_ = pipeline_ids;
+                plannode = BuildOrderByNode(query,
+                                            schema,
+                                            sources,
+                                            std::move(raw_input_type),
+                                            std::move(pipeline_ids),
+                                            true);
+            } else {
+                plannode = BuildOrderByNode(query, schema, sources);
             }
-            plannode = BuildOrderByNode(query, schema, sources);
             plan_node->has_order_by_ = true;
         }
         plan_node->plannodes_ = plannode;

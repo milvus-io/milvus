@@ -261,6 +261,87 @@ TEST_P(QueryOrderByTest,
     EXPECT_FALSE(col->ValidAt(num_rows_));
 }
 
+TEST_P(QueryOrderByTest, ProtoOrderByUsesRawInputWithoutProjectNode) {
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(10);
+    auto int64_fid = field_map_[int64_field];
+    auto* order_by = query->add_order_by_fields();
+    order_by->set_field_id(int64_fid.get());
+    order_by->set_ascending(true);
+    order_by->set_nulls_first(false);
+    plan_node.add_output_field_ids(field_map_[string_field].get());
+    plan_node.add_output_field_ids(int64_fid.get());
+    plan_node.add_output_field_ids(field_map_[double_field].get());
+
+    auto retrieve_plan = query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+    auto order_by_node = std::dynamic_pointer_cast<plan::OrderByNode>(
+        retrieve_plan->plan_node_->plannodes_);
+    ASSERT_NE(order_by_node, nullptr);
+    EXPECT_TRUE(order_by_node->UseRawInput());
+    ASSERT_EQ(order_by_node->sources().size(), 1);
+    EXPECT_NE(std::dynamic_pointer_cast<plan::MvccNode>(
+                  order_by_node->sources()[0]),
+              nullptr);
+    EXPECT_EQ(retrieve_plan->plan_node_->pipeline_field_ids_.size(), 3);
+    EXPECT_EQ(retrieve_plan->plan_node_->pipeline_field_ids_[0],
+              field_map_[string_field]);
+    EXPECT_EQ(retrieve_plan->plan_node_->pipeline_field_ids_[1], int64_fid);
+    EXPECT_EQ(retrieve_plan->plan_node_->pipeline_field_ids_[2],
+              SegmentOffsetFieldID);
+    EXPECT_EQ(order_by_node->RawInputFieldIds(),
+              retrieve_plan->plan_node_->pipeline_field_ids_);
+    ASSERT_EQ(retrieve_plan->plan_node_->deferred_field_ids_.size(), 1);
+    EXPECT_EQ(retrieve_plan->plan_node_->deferred_field_ids_[0],
+              field_map_[double_field]);
+
+    auto results = segment_->Retrieve(nullptr,
+                                      retrieve_plan.get(),
+                                      MAX_TIMESTAMP,
+                                      DEFAULT_MAX_OUTPUT_SIZE,
+                                      false);
+    ASSERT_GE(results->fields_data_size(), 3);
+    auto& int64_data = results->fields_data(1);
+    auto count = int64_data.scalars().long_data().data_size();
+    ASSERT_GT(count, 0);
+    ASSERT_LE(count, 10);
+    if (!GetParam()) {
+        for (int i = 1; i < count; i++) {
+            EXPECT_LE(int64_data.scalars().long_data().data(i - 1),
+                      int64_data.scalars().long_data().data(i));
+        }
+    }
+}
+
+TEST_P(QueryOrderByTest, ProtoOrderByDeduplicatesRepeatedSortKeys) {
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(10);
+    auto int64_fid = field_map_[int64_field];
+    for (int i = 0; i < 2; ++i) {
+        auto* order_by = query->add_order_by_fields();
+        order_by->set_field_id(int64_fid.get());
+        order_by->set_ascending(true);
+        order_by->set_nulls_first(false);
+    }
+    plan_node.add_output_field_ids(field_map_[string_field].get());
+    plan_node.add_output_field_ids(int64_fid.get());
+    plan_node.add_output_field_ids(SegmentOffsetFieldID.get());
+
+    auto retrieve_plan = query::ProtoParser(schema_).CreateRetrievePlan(plan_node);
+    auto order_by_node = std::dynamic_pointer_cast<plan::OrderByNode>(
+        retrieve_plan->plan_node_->plannodes_);
+    ASSERT_NE(order_by_node, nullptr);
+    EXPECT_TRUE(order_by_node->UseRawInput());
+    EXPECT_TRUE(retrieve_plan->plan_node_->deferred_field_ids_.empty());
+    ASSERT_EQ(retrieve_plan->plan_node_->pipeline_field_ids_.size(), 3);
+    EXPECT_EQ(retrieve_plan->plan_node_->pipeline_field_ids_[0],
+              field_map_[string_field]);
+    EXPECT_EQ(retrieve_plan->plan_node_->pipeline_field_ids_[1], int64_fid);
+    EXPECT_EQ(retrieve_plan->plan_node_->pipeline_field_ids_[2],
+              SegmentOffsetFieldID);
+}
+
 TEST_P(QueryOrderByTest, OrderBySingleInt64Asc) {
     auto nullable = GetParam();
     std::vector<FieldId> pipeline_ids;
