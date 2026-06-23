@@ -611,8 +611,7 @@ TEST(BitmapIndexArrayNestedTest, UnifiedLoadRestoresNestedBitmapMeta) {
 
     Config config;
     config["index_files"] = create_index_result->GetIndexFiles();
-    config[milvus::LOAD_PRIORITY] =
-        milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
 
     ctx.set_for_loading_index(true);
     auto loaded_index =
@@ -689,8 +688,7 @@ TEST(BitmapIndexArrayNestedTest, UnifiedMmapLoadRestoresNestedBitmapMeta) {
 
     Config config;
     config["index_files"] = create_index_result->GetIndexFiles();
-    config[milvus::LOAD_PRIORITY] =
-        milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     config[milvus::index::MMAP_FILE_PATH] =
         fmt::format("{}/bitmap_index.mmap", root_path);
 
@@ -748,8 +746,7 @@ TEST(BitmapIndexArrayNestedTest, FactoryCreatesNestedBitmapForStructSubField) {
     auto index =
         index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
     ASSERT_TRUE(index->IsNestedIndex());
-    ASSERT_NE(dynamic_cast<index::BitmapIndex<int32_t>*>(index.get()),
-              nullptr);
+    ASSERT_NE(dynamic_cast<index::BitmapIndex<int32_t>*>(index.get()), nullptr);
 
     boost::filesystem::remove_all(root_path);
 }
