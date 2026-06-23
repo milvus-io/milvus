@@ -555,6 +555,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
                              const int64_t* seg_offsets,
                              int64_t count) const;
 
+    void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const override;
+
  protected:
     int64_t
     num_chunk(FieldId field_id) const override;

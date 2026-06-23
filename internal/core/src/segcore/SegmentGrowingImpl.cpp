@@ -995,6 +995,33 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
         get_insert_record().get_span_base(field_id, chunk_id));
 }
 
+void
+SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
+                                        FieldId field_id,
+                                        int64_t chunk_id,
+                                        int64_t offset,
+                                        int64_t size,
+                                        TargetBitmapView valid_result) const {
+    (void)op_ctx;
+    if (size == 0) {
+        return;
+    }
+    auto& field_meta = schema_->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    auto data = insert_record_.get_data_base(field_id);
+    auto row_offset = data->get_size_per_chunk() * chunk_id + offset;
+    auto valid_data = valid_vec_ptr->get_chunk_data(row_offset);
+    for (int64_t i = 0; i < size; ++i) {
+        if (!valid_data[i]) {
+            valid_result[i] = false;
+        }
+    }
+}
+
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
