@@ -300,6 +300,12 @@ GetFieldDatasFromManifest(
     int64_t dim,
     std::optional<DataType> element_type);
 
+std::vector<FieldDataPtr>
+GetTextFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta);
+
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<const uint8_t*>& data_slices,

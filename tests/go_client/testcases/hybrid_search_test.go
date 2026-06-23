@@ -394,7 +394,12 @@ func TestHybridSearchMultiVectorsPagination(t *testing.T) {
 
 	// offset 0, -1 -> 0
 	for _, offset := range []int{0, -1} {
-		searchRes, err := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReqDef).WithOffset(offset).WithConsistencyLevel(entity.ClStrong))
+		var searchRes []client.ResultSet
+		err := common.RetryOnTSafeStalled(ctx, func() error {
+			var err error
+			searchRes, err = mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReqDef).WithOffset(offset).WithConsistencyLevel(entity.ClStrong))
+			return err
+		})
 		common.CheckErr(t, err, true)
 		common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	}

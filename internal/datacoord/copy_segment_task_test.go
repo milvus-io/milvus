@@ -31,7 +31,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore"
+	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -466,6 +468,206 @@ func (s *CopySegmentTaskSuite) TestTaskType() {
 	s.Equal(taskcommon.CopySegment, task.GetTaskType())
 }
 
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NotCompletedKeepsTaskInProgress() {
+	cluster := &struct{ session.Cluster }{}
+	mockQuery := mockey.Mock((*struct{ session.Cluster }).QueryCopySegment).Return(
+		&datapb.QueryCopySegmentResponse{
+			TaskID: 1001,
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		},
+		nil,
+	).Build()
+	defer mockQuery.UnPatch()
+
+	task := &copySegmentTask{
+		tr:    timerecord.NewTimeRecorder("test"),
+		times: taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 100,
+		NodeId:       10,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+	})
+
+	task.QueryTaskOnWorker(cluster)
+
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, task.GetState())
+}
+
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_MarksFailedOnRPCError() {
+	cluster := &struct{ session.Cluster }{}
+	mockQuery := mockey.Mock((*struct{ session.Cluster }).QueryCopySegment).Return(
+		nil,
+		errors.New("rpc failed"),
+	).Build()
+	defer mockQuery.UnPatch()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	task.QueryTaskOnWorker(cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Contains(updatedTask.GetReason(), "rpc failed")
+}
+
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_MarksFailedOnWorkerFailure() {
+	cluster := &struct{ session.Cluster }{}
+	mockQuery := mockey.Mock((*struct{ session.Cluster }).QueryCopySegment).Return(
+		&datapb.QueryCopySegmentResponse{
+			TaskID: 1001,
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+			Reason: "worker failed",
+		},
+		nil,
+	).Build()
+	defer mockQuery.UnPatch()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	task.QueryTaskOnWorker(cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Equal("worker failed", updatedTask.GetReason())
+}
+
+func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_CompletedSyncsTask() {
+	cluster := &struct{ session.Cluster }{}
+	mockQuery := mockey.Mock((*struct{ session.Cluster }).QueryCopySegment).Return(
+		&datapb.QueryCopySegmentResponse{
+			TaskID: 1001,
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			SegmentResults: []*datapb.CopySegmentResult{
+				{
+					SegmentId:    2001,
+					ImportedRows: 100,
+					Binlogs:      makeTestCopySegmentBinlogs(),
+					ManifestPath: "manifest-path",
+				},
+			},
+		},
+		nil,
+	).Build()
+	defer mockQuery.UnPatch()
+
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	err := m.AddSegment(context.Background(), newTestCopySegment(2001))
+	s.NoError(err)
+
+	task.QueryTaskOnWorker(cluster)
+
+	segment := m.GetSegment(context.Background(), 2001)
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.Equal("manifest-path", segment.GetManifestPath())
+
+	updatedTask := copyMeta.GetTask(context.Background(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment() {
+	ctx := context.Background()
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+
+	err := m.AddSegment(ctx, newTestCopySegment(2001))
+	s.NoError(err)
+
+	insertBinlogs := makeTestCopySegmentBinlogs()
+	resp := &datapb.QueryCopySegmentResponse{
+		TaskID: 1001,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{
+			{
+				SegmentId:    2001,
+				ImportedRows: 100,
+				Binlogs:      insertBinlogs,
+				ManifestPath: "manifest-path",
+			},
+		},
+	}
+
+	err = SyncCopySegmentTask(task, resp, copyMeta, m)
+	s.NoError(err)
+
+	segment := m.GetSegment(ctx, 2001)
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.Equal("manifest-path", segment.GetManifestPath())
+	s.Equal(insertBinlogs, segment.GetBinlogs())
+
+	updatedTask := copyMeta.GetTask(ctx, 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
+	s.NotZero(updatedTask.(*copySegmentTask).task.Load().GetCompleteTs())
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_FailedResponseUpdatesTask() {
+	ctx := context.Background()
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	err := SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+		TaskID: 1001,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+		Reason: "worker failed",
+	}, copyMeta, nil)
+	s.NoError(err)
+
+	updatedTask := copyMeta.GetTask(ctx, 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Equal("worker failed", updatedTask.GetReason())
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_DefaultStateNoop() {
+	ctx := context.Background()
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	err := SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+		TaskID: 1001,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+	}, copyMeta, nil)
+	s.NoError(err)
+
+	updatedTask := copyMeta.GetTask(ctx, 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_UpdateSegmentsInfoErrorMarksFailed() {
+	ctx := context.Background()
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	err := m.AddSegment(ctx, newTestCopySegment(2001))
+	s.NoError(err)
+
+	err = SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+		TaskID: 1001,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{
+			{
+				SegmentId: 2001,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 100,
+						Binlogs: []*datapb.Binlog{
+							{LogID: 1, LogPath: "invalid-log-path"},
+						},
+					},
+				},
+			},
+		},
+	}, copyMeta, m)
+	s.Error(err)
+
+	updatedTask := copyMeta.GetTask(ctx, 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Contains(updatedTask.GetReason(), "fieldBinlog no need to store logpath")
+}
+
 // createTestIndexMeta creates an indexMeta with pre-registered index definitions for testing.
 // If catalog is nil, a default mock catalog (CreateSegmentIndex returns nil) is used.
 func createTestIndexMeta(t *testing.T, collectionID int64, indexes map[int64]*model.Index, catalog ...metastore.DataCoordCatalog) *indexMeta {
@@ -505,6 +707,41 @@ func createTestCopyTask(collectionID int64, segmentID int64) CopySegmentTask {
 		},
 	})
 	return task
+}
+
+func newCopySegmentTaskTestMeta(t *testing.T, task *copySegmentTask) (CopySegmentMeta, *meta) {
+	ctx := context.Background()
+	catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := &meta{
+		catalog:  catalog,
+		segments: NewSegmentsInfo(),
+	}
+	copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
+	assert.NoError(t, err)
+	assert.NoError(t, copyMeta.AddTask(ctx, task))
+	return copyMeta, m
+}
+
+func newTestCopySegment(segmentID int64) *SegmentInfo {
+	return NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  100,
+		PartitionID:   10,
+		State:         commonpb.SegmentState_Importing,
+		NumOfRows:     100,
+		InsertChannel: "ch1",
+	})
+}
+
+func makeTestCopySegmentBinlogs() []*datapb.FieldBinlog {
+	return []*datapb.FieldBinlog{
+		{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{
+				{LogID: 1, EntriesNum: 100},
+			},
+		},
+	}
 }
 
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_EmptyResult() {
@@ -1035,8 +1272,8 @@ func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
 
 	// Mock allocator to return sequential IDs starting from 9001
 	nextID := int64(9001)
-	alloc := &struct{ allocator.Allocator }{}
-	mock2 := mockey.Mock((*struct{ allocator.Allocator }).AllocID).To(func(ctx context.Context) (typeutil.UniqueID, error) {
+	alloc := &embeddedAllocator{}
+	mock2 := mockey.Mock((*embeddedAllocator).AllocID).To(func(ctx context.Context) (typeutil.UniqueID, error) {
 		id := nextID
 		nextID++
 		return id, nil
@@ -1094,3 +1331,7 @@ func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
 		seenIDs[newID] = true
 	}
 }
+
+// embeddedAllocator: named type for mockey interface-method patching; avoids a
+// go1.26 `go vet` printf-pass panic on method expressions of anonymous structs.
+type embeddedAllocator struct{ allocator.Allocator }

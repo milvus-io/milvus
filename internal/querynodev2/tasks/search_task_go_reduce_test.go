@@ -672,6 +672,56 @@ func collectInt64Chunks(t *testing.T, col *arrow.Chunked) [][]int64 {
 	return out
 }
 
+func assertNoSustainedJemallocGrowth(t *testing.T, runOnce func()) {
+	t.Helper()
+
+	const (
+		warmupIterations       = 300
+		windowIterations       = 1000
+		measurementWindows     = 5
+		positiveWindowNoiseMax = 96 * 1024
+		maxPositiveWindows     = 2
+	)
+
+	before := segcore.GetJemallocStats()
+	if !before.Success {
+		t.Skip("jemalloc stats not available on this platform")
+	}
+
+	// Let allocator caches reach steady state before sampling.
+	for i := 0; i < warmupIterations; i++ {
+		runOnce()
+	}
+	runtime.GC()
+
+	windowBaseline := segcore.GetJemallocStats()
+	positiveWindows := 0
+	windowGrowths := make([]int64, 0, measurementWindows)
+
+	for window := 0; window < measurementWindows; window++ {
+		for i := 0; i < windowIterations; i++ {
+			runOnce()
+		}
+		runtime.GC()
+
+		afterWindow := segcore.GetJemallocStats()
+		growth := int64(afterWindow.Allocated) - int64(windowBaseline.Allocated)
+		windowGrowths = append(windowGrowths, growth)
+		if growth > positiveWindowNoiseMax {
+			positiveWindows++
+		}
+		windowBaseline = afterWindow
+	}
+
+	// Assert sustained positive growth instead of a single noisy jemalloc delta.
+	assert.LessOrEqual(t, positiveWindows, maxPositiveWindows,
+		"jemalloc allocated had sustained positive growth over %d/%d windows (growths=%v, threshold=%d)",
+		positiveWindows, measurementWindows, windowGrowths, positiveWindowNoiseMax)
+
+	t.Logf("jemalloc C heap growth windows=%v, positiveWindows=%d/%d",
+		windowGrowths, positiveWindows, measurementWindows)
+}
+
 // TestFillOutputFieldsOrdered_NoCMemoryLeak verifies that calling
 // FillOutputFieldsOrdered in a loop does not leak C heap memory.
 // The C++ side allocates via malloc; the Go side must C.free it after use.
@@ -709,56 +759,11 @@ func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	}
 
 	plan := ts.searchReq.Plan()
-	const (
-		warmupIterations       = 300
-		windowIterations       = 1000
-		measurementWindows     = 5
-		positiveWindowNoiseMax = 96 * 1024
-		maxPositiveWindows     = 2
-	)
-
-	before := segcore.GetJemallocStats()
-	if !before.Success {
-		t.Skip("jemalloc stats not available on this platform")
-	}
-
-	// Let allocator caches reach steady state before sampling.
-	for i := 0; i < warmupIterations; i++ {
+	assertNoSustainedJemallocGrowth(t, func() {
 		b, err := segcore.FillOutputFieldsOrdered(context.Background(), ts.searchResults, plan, segIndices, segOffsets)
 		require.NoError(t, err)
 		_ = b
-	}
-	runtime.GC()
-
-	baseline := segcore.GetJemallocStats()
-	windowBaseline := baseline
-	positiveWindows := 0
-	windowGrowths := make([]int64, 0, measurementWindows)
-
-	for window := 0; window < measurementWindows; window++ {
-		for i := 0; i < windowIterations; i++ {
-			b, err := segcore.FillOutputFieldsOrdered(context.Background(), ts.searchResults, plan, segIndices, segOffsets)
-			require.NoError(t, err)
-			_ = b
-		}
-		runtime.GC()
-
-		afterWindow := segcore.GetJemallocStats()
-		growth := int64(afterWindow.Allocated) - int64(windowBaseline.Allocated)
-		windowGrowths = append(windowGrowths, growth)
-		if growth > positiveWindowNoiseMax {
-			positiveWindows++
-		}
-		windowBaseline = afterWindow
-	}
-
-	// Assert sustained positive growth instead of a single noisy jemalloc delta.
-	assert.LessOrEqual(t, positiveWindows, maxPositiveWindows,
-		"jemalloc allocated had sustained positive growth over %d/%d windows (growths=%v, threshold=%d)",
-		positiveWindows, measurementWindows, windowGrowths, positiveWindowNoiseMax)
-
-	t.Logf("jemalloc C heap growth windows=%v, positiveWindows=%d/%d",
-		windowGrowths, positiveWindows, measurementWindows)
+	})
 }
 
 func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
@@ -790,27 +795,7 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 50; i++ {
-		exportOnce()
-	}
-	runtime.GC()
-
-	baseline := segcore.GetJemallocStats()
-
-	const iterations = 1000
-	for i := 0; i < iterations; i++ {
-		exportOnce()
-	}
-	runtime.GC()
-
-	after := segcore.GetJemallocStats()
-	growth := int64(after.Allocated) - int64(baseline.Allocated)
-
-	const maxAllowedGrowth = 64 * 1024 // 64 KB
-	assert.Less(t, growth, int64(maxAllowedGrowth),
-		"jemalloc allocated grew %d bytes over %d export iterations — likely C RecordBatch leak", growth, iterations)
-
-	t.Logf("jemalloc C heap growth: %d bytes over %d export iterations (limit %d)", growth, iterations, maxAllowedGrowth)
+	assertNoSustainedJemallocGrowth(t, exportOnce)
 }
 
 // TestExecuteFilterOnly verifies that the Execute() method correctly handles

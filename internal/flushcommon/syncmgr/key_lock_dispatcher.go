@@ -21,6 +21,7 @@ type Task interface {
 	Run(context.Context) error
 	HandleError(error)
 	IsFlush() bool
+	IsDrop() bool
 }
 
 // pendingTask wraps a task queued for execution.

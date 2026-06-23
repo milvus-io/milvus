@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SegmentLoaderSuite struct {
@@ -818,9 +819,8 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	}
 	segment := &LocalSegment{
-		baseSegment: baseSegment{
-			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		},
+		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
+		bm25StatsHolder: newBM25StatsHolder(),
 	}
 
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
@@ -859,9 +859,8 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 	}
 
 	segment := &LocalSegment{
-		baseSegment: baseSegment{
-			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		},
+		baseSegment:     baseSegment{loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo)},
+		bm25StatsHolder: newBM25StatsHolder(),
 	}
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
@@ -1054,26 +1053,26 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	suite.Run("wait_success", func() {
 		idx := 0
 
-		var infos []*querypb.SegmentLoadInfo
-		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
-		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
-			defer func() { idx++ }()
-			if idx == 0 {
-				go func() {
-					<-time.After(time.Second)
-					suite.loader.notifyLoadFinish(infos...)
-				}()
-			}
-			return nil
-		})
-		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
-		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		loadInfo := &querypb.SegmentLoadInfo{
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
 			CollectionID:  suite.collectionID,
 			NumOfRows:     100,
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		}
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
+			defer func() { idx++ }()
+			if idx == 0 {
+				go func() {
+					<-time.After(time.Second)
+					suite.loader.notifyLoadFinish(loadInfo)
+				}()
+			}
+			return nil
 		})
+		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, loadInfo)
+		suite.Len(infos, 1)
 
 		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.NoError(err)
@@ -1083,26 +1082,26 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		suite.SetupTest()
 
 		var idx int
-		var infos []*querypb.SegmentLoadInfo
-		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
-		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
-			defer func() { idx++ }()
-			if idx == 0 {
-				go func() {
-					<-time.After(time.Second)
-					suite.loader.unregister(infos...)
-				}()
-			}
-
-			return nil
-		})
-		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		loadInfo := &querypb.SegmentLoadInfo{
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
 			CollectionID:  suite.collectionID,
 			NumOfRows:     100,
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		}
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
+			defer func() { idx++ }()
+			if idx == 0 {
+				go func() {
+					<-time.After(time.Second)
+					suite.loader.unregister(loadInfo)
+				}()
+			}
+
+			return nil
 		})
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, loadInfo)
+		suite.Len(infos, 1)
 
 		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.Error(err)
@@ -1111,7 +1110,6 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	suite.Run("wait_timeout", func() {
 		suite.SetupTest()
 
-		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
 		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
 			return nil
 		})
@@ -1130,6 +1128,32 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		suite.Error(err)
 		suite.True(merr.IsCanceledOrTimeout(err))
 	})
+}
+
+func TestSegmentLoaderPrepareLoadsWhenSegmentIsNotActive(t *testing.T) {
+	segmentID := rand.Int63()
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     segmentID,
+		PartitionID:   rand.Int63(),
+		CollectionID:  rand.Int63(),
+		NumOfRows:     100,
+		InsertChannel: "by-dev-rootcoord-dml_0_1v0",
+	}
+	segmentManager := NewMockSegmentManager(t)
+	loader := &segmentLoader{
+		manager: &Manager{
+			Segment: segmentManager,
+		},
+		loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult](),
+	}
+
+	segmentManager.EXPECT().GetWithType(segmentID, SegmentTypeGrowing).Return(nil).Once()
+
+	infos := loader.prepare(context.Background(), SegmentTypeGrowing, loadInfo)
+
+	assert.Len(t, infos, 1)
+	assert.Equal(t, segmentID, infos[0].GetSegmentID())
+	assert.True(t, loader.loadingSegments.Contain(segmentID))
 }
 
 func TestConfigureUseTakeForOutput(t *testing.T) {
@@ -1845,6 +1869,89 @@ func (suite *ExternalSegmentEstimateSuite) TestLazyLoadSubtractsRawData() {
 
 	suite.True(lazyUsage.MemorySize <= nonLazyUsage.MemorySize,
 		"lazy load memory (%d) should be <= non-lazy (%d)", lazyUsage.MemorySize, nonLazyUsage.MemorySize)
+}
+
+func TestGpuIndexRequiresGpu(t *testing.T) {
+	tests := []struct {
+		name     string
+		params   []*commonpb.KeyValuePair
+		expected bool
+	}{
+		{
+			name: "GPU_CAGRA adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "true"},
+			},
+			expected: false,
+		},
+		{
+			name: "GPU_CUVS_CAGRA adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CUVS_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "1"},
+			},
+			expected: false,
+		},
+		{
+			name: "GPU_CAGRA without adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+			},
+			expected: true,
+		},
+		{
+			name: "GPU_CAGRA invalid adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+				{Key: "adapt_for_cpu", Value: "invalid"},
+			},
+			expected: true,
+		},
+		{
+			name: "other GPU index ignores adapt for CPU",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "GPU_IVF_FLAT"},
+				{Key: "adapt_for_cpu", Value: "true"},
+			},
+			expected: true,
+		},
+		{
+			name: "CPU index",
+			params: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+			expected: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, gpuIndexRequiresGpu(test.params))
+		})
+	}
+
+	t.Run("GPU_CAGRA adapt for CPU from load config", func(t *testing.T) {
+		params := paramtable.Get()
+		oldEnable := params.KnowhereConfig.Enable.GetValue()
+		adaptKey := params.KnowhereConfig.IndexParam.KeyPrefix + "GPU_CAGRA.load.adapt_for_cpu"
+		oldAdaptValue := params.GetWithDefault(adaptKey, "")
+		defer params.Save(params.KnowhereConfig.Enable.Key, oldEnable)
+		defer func() {
+			if oldAdaptValue == "" {
+				params.Remove(adaptKey)
+				return
+			}
+			params.Save(adaptKey, oldAdaptValue)
+		}()
+
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(adaptKey, "true")
+
+		assert.False(t, gpuIndexRequiresGpu([]*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+		}))
+	})
 }
 
 func TestEstimateLoadingResourceUsage_DroppedFieldSkipped(t *testing.T) {

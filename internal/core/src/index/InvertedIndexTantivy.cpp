@@ -662,7 +662,8 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::Float:
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
-        case proto::schema::DataType::VarChar: {
+        case proto::schema::DataType::VarChar:
+        case proto::schema::DataType::Text: {
             // Generally, we will not build inverted index with single segment except for building index
             // for query node with older version(2.4). See more comments above `inverted_index_single_segment_`.
             if (!inverted_index_single_segment_) {
@@ -930,7 +931,12 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
     for (const auto& fn : file_names) {
         pairs.emplace_back(fn, path_ + "/" + fn);
     }
-    reader.ReadEntriesToFiles(pairs);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    reader.ReadEntriesStreamToFiles(
+        pairs, storage::io::GetPriorityFromLoadPriority(load_priority));
 
     if (has_null) {
         auto null_entry = reader.ReadEntry(INDEX_NULL_OFFSET_FILE_NAME);

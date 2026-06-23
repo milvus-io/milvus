@@ -240,6 +240,16 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
         AssertInfo(loon_ffi_properties_ != nullptr,
                    "[StorageV2] loon ffi properties is null when build index "
                    "with manifest");
+        auto is_text_match =
+            index::GetValueFromConfig<bool>(config, "is_text_match")
+                .value_or(false);
+        auto is_external_field =
+            !field_meta_.field_schema.external_field().empty();
+        if (data_type.value() == DataType::TEXT && !is_external_field &&
+            is_text_match) {
+            return GetTextFieldDatasFromManifest(
+                manifest_path_str, loon_ffi_properties_, field_meta_);
+        }
         return GetFieldDatasFromManifest(manifest_path_str,
                                          loon_ffi_properties_,
                                          field_meta_,

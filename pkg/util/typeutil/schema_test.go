@@ -303,6 +303,60 @@ func TestSchema(t *testing.T) {
 	})
 }
 
+func TestHasTextField(t *testing.T) {
+	assert.False(t, HasTextField(nil))
+	assert.False(t, HasTextField(&schemapb.CollectionSchema{}))
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+	assert.True(t, HasTextField(schema))
+}
+
+func TestValidateTextRequiresStorageV3(t *testing.T) {
+	textSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+	ordinarySchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	assert.NoError(t, ValidateTextRequiresStorageV3(nil, false))
+	assert.NoError(t, ValidateTextRequiresStorageV3(ordinarySchema, false))
+	assert.Error(t, ValidateTextRequiresStorageV3(textSchema, false))
+	assert.NoError(t, ValidateTextRequiresStorageV3(textSchema, true))
+}
+
+func TestUseGrowingSourceFlush(t *testing.T) {
+	ordinarySchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		},
+	}
+	textSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		},
+	}
+
+	assert.False(t, UseGrowingSourceFlush(ordinarySchema, false, true))
+	assert.False(t, UseGrowingSourceFlush(textSchema, false, true))
+	assert.False(t, UseGrowingSourceFlush(ordinarySchema, true, false))
+	assert.True(t, UseGrowingSourceFlush(ordinarySchema, true, true))
+	assert.True(t, UseGrowingSourceFlush(textSchema, true, false))
+	assert.False(t, UseGrowingSourceFlush(nil, true, false))
+	assert.True(t, UseGrowingSourceFlush(nil, true, true))
+}
+
 func TestSchema_GetVectorFieldSchemas(t *testing.T) {
 	schemaNormal := &schemapb.CollectionSchema{
 		Name:        "testColl",

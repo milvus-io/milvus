@@ -142,6 +142,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
                            size_t num_rows);
 
     void
+    BuildTextIndexFromTextLobRefs(FieldId field_id,
+                                  const std::vector<FieldDataPtr>& field_data,
+                                  size_t reserved_offset,
+                                  const FieldMeta& field_meta);
+
+    void
     Reopen(SchemaPtr sch) override;
 
     void
@@ -655,6 +661,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
      */
     ResourceUsage
     EstimateSegmentResourceUsage() const;
+
+    void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const override;
+
+    void
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapView valid_result) const override;
 
  protected:
     int64_t

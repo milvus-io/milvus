@@ -1650,6 +1650,7 @@ class InsertRecordGrowing {
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
+            case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT: {
                 this->append_data<std::string>(

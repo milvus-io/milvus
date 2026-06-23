@@ -17,12 +17,14 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type WriteBufferSuite struct {
@@ -74,6 +76,100 @@ func (s *WriteBufferSuite) TestHasSegment() {
 	s.True(s.wb.HasSegment(segmentID))
 }
 
+func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
+	param := paramtable.Get()
+	param.Save(param.CommonCfg.UseLoonFFI.Key, "false")
+	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
+	param.Save(param.CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	defer param.Reset(param.CommonCfg.EnableGrowingSourceFlush.Key)
+
+	s.Run("non_text_uses_v2_when_ffi_disabled", func() {
+		s.wb.useGrowingSourceFlush = false
+		s.False(s.wb.UseGrowingSourceFlush())
+		s.metacache.EXPECT().GetSegmentByID(int64(2001)).Return(nil, false).Once()
+		s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV2 &&
+				info.GetManifestPath() == "" &&
+				info.GetSchemaVersion() == 11
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		s.wb.CreateNewGrowingSegment(10, 2001, nil, 11)
+	})
+
+	s.Run("growing_source_does_not_force_v3_manifest_when_ffi_disabled", func() {
+		s.wb.useGrowingSourceFlush = true
+		s.metacache.EXPECT().GetSegmentByID(int64(2002)).Return(nil, false).Once()
+		s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV2 &&
+				info.GetManifestPath() == "" &&
+				info.GetSchemaVersion() == 12
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		s.wb.CreateNewGrowingSegment(10, 2002, nil, 12)
+	})
+
+	s.Run("text_schema_does_not_enable_growing_source_when_ffi_disabled", func() {
+		textSchema := &schemapb.CollectionSchema{
+			Name: "wb_text_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				}},
+				{FieldID: 102, DataType: schemapb.DataType_Text, Name: "text"},
+			},
+		}
+		mc := metacache.NewMockMetaCache(s.T())
+		mc.EXPECT().GetSchema(mock.Anything).Return(textSchema).Maybe()
+		mc.EXPECT().Collection().Return(s.collID).Maybe()
+
+		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
+		s.Require().NoError(err)
+		s.False(wb.UseGrowingSourceFlush())
+
+		mc.EXPECT().GetSegmentByID(int64(2003)).Return(nil, false).Once()
+		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV2 &&
+				info.GetManifestPath() == "" &&
+				info.GetSchemaVersion() == 13
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		wb.CreateNewGrowingSegment(10, 2003, nil, 13)
+	})
+
+	s.Run("text_schema_uses_v3_manifest_when_ffi_enabled", func() {
+		param.Save(param.CommonCfg.UseLoonFFI.Key, "true")
+		defer param.Save(param.CommonCfg.UseLoonFFI.Key, "false")
+
+		textSchema := &schemapb.CollectionSchema{
+			Name: "wb_text_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				}},
+				{FieldID: 102, DataType: schemapb.DataType_Text, Name: "text"},
+			},
+		}
+		mc := metacache.NewMockMetaCache(s.T())
+		mc.EXPECT().GetSchema(mock.Anything).Return(textSchema).Maybe()
+		mc.EXPECT().Collection().Return(s.collID).Maybe()
+
+		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
+		s.Require().NoError(err)
+		s.True(wb.UseGrowingSourceFlush())
+
+		mc.EXPECT().GetSegmentByID(int64(2004)).Return(nil, false).Once()
+		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+			return info.GetStorageVersion() == storage.StorageV3 &&
+				info.GetManifestPath() != "" &&
+				info.GetSchemaVersion() == 14
+		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
+
+		wb.CreateNewGrowingSegment(10, 2004, nil, 14)
+	})
+}
+
 func (s *WriteBufferSuite) TestFlushSegments() {
 	segmentID := int64(1001)
 
@@ -90,7 +186,7 @@ func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
 	segmentID := int64(1001)
 
 	s.Run("non_text_returns_error", func() {
-		s.wb.hasTextFields = false
+		s.wb.useGrowingSourceFlush = false
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
 
 		err := s.wb.SealSegments(context.Background(), []int64{segmentID})
@@ -98,9 +194,9 @@ func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
 	})
 
 	s.Run("text_skips_missing_segment", func() {
-		s.wb.hasTextFields = true
+		s.wb.useGrowingSourceFlush = true
 		defer func() {
-			s.wb.hasTextFields = false
+			s.wb.useGrowingSourceFlush = false
 		}()
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
 
@@ -433,6 +529,97 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		case <-time.After(3 * time.Second):
 			s.FailNow("EvictBuffer should finish after sync is released")
 		}
+	})
+}
+
+func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.SyncPeriod.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.SyncPeriod.Key)
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "100")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key)
+	originalEstSize := s.wb.estSizePerRecord
+	s.wb.estSizePerRecord = 10
+	defer func() {
+		s.wb.estSizePerRecord = originalEstSize
+	}()
+
+	now := time.Now()
+	recentTs := tsoutil.ComposeTSByTime(now.Add(500*time.Millisecond), 0)
+	staleTs := tsoutil.ComposeTSByTime(now.Add(2*time.Second), 0)
+	startTs := tsoutil.ComposeTSByTime(now, 0)
+
+	s.Run("pending_flush", func() {
+		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1001, &growingSourceProgress{
+			segmentID:    1001,
+			pendingFlush: true,
+		})
+		s.True(selected)
+	})
+
+	s.Run("sealed_segment", func() {
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:    1002,
+			State: commonpb.SegmentState_Sealed,
+		}, nil, nil)
+		s.metacache.EXPECT().GetSegmentByID(int64(1002)).Return(segment, true).Once()
+
+		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1002, &growingSourceProgress{
+			segmentID: 1002,
+		})
+		s.True(selected)
+	})
+
+	s.Run("recent_progress", func() {
+		s.metacache.EXPECT().GetSegmentByID(int64(1003)).Return(nil, false).Once()
+
+		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1003, &growingSourceProgress{
+			segmentID: 1003,
+			batches: []growingSourceProgressBatch{
+				{startPosition: &msgpb.MsgPosition{Timestamp: startTs}},
+			},
+		})
+		s.False(selected)
+	})
+
+	s.Run("below_row_threshold", func() {
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 1004,
+		}, nil, nil)
+		s.metacache.EXPECT().GetSegmentByID(int64(1004)).Return(segment, true).Once()
+
+		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1004, &growingSourceProgress{
+			segmentID:    1004,
+			targetOffset: 9,
+			batches: []growingSourceProgressBatch{
+				{startPosition: &msgpb.MsgPosition{Timestamp: startTs}},
+			},
+		})
+		s.False(selected)
+	})
+
+	s.Run("row_threshold", func() {
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 1005,
+		}, nil, nil)
+		s.metacache.EXPECT().GetSegmentByID(int64(1005)).Return(segment, true).Once()
+
+		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1005, &growingSourceProgress{
+			segmentID:    1005,
+			targetOffset: 10,
+		})
+		s.True(selected)
+	})
+
+	s.Run("stale_progress", func() {
+		s.metacache.EXPECT().GetSegmentByID(int64(1006)).Return(nil, false).Once()
+
+		selected := s.wb.growingSourceProgressSelectedByPolicy(staleTs, 1006, &growingSourceProgress{
+			segmentID: 1006,
+			batches: []growingSourceProgressBatch{
+				{startPosition: &msgpb.MsgPosition{Timestamp: startTs}},
+			},
+		})
+		s.True(selected)
 	})
 }
 

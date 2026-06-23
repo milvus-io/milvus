@@ -308,6 +308,7 @@ type commonConfig struct {
 	Stv2SplitByAvgSize                   ParamItem `refreshable:"true"`
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
+	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
 	StoragePathPrefix        ParamItem `refreshable:"false"`
 	StorageZstdConcurrency   ParamItem `refreshable:"false"`
@@ -1081,6 +1082,15 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.UseLoonFFI.Init(base.mgr)
+
+	p.EnableGrowingSourceFlush = ParamItem{
+		Key:          "common.storage.enableGrowingSourceFlush",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path",
+		Export:       true,
+	}
+	p.EnableGrowingSourceFlush.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
@@ -2041,6 +2051,7 @@ type proxyConfig struct {
 	HealthCheckTimeout                ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize          ParamItem `refreshable:"true"`
 	MaxNameLength                     ParamItem `refreshable:"true"`
+	MaxCollectionDescriptionLength    ParamItem `refreshable:"true"`
 	MaxUsernameLength                 ParamItem `refreshable:"true"`
 	MinPasswordLength                 ParamItem `refreshable:"true"`
 	MaxPasswordLength                 ParamItem `refreshable:"true"`
@@ -2137,6 +2148,16 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxNameLength.Init(base.mgr)
+
+	p.MaxCollectionDescriptionLength = ParamItem{
+		Key:          "proxy.maxCollectionDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "2.6.0",
+		PanicIfEmpty: true,
+		Doc:          "The maximum byte length of a collection description accepted by CreateCollection and AlterCollection. Existing collection metadata is not revalidated, but restore or replication flows that recreate a collection through CreateCollection must satisfy this limit or raise it first.",
+		Export:       true,
+	}
+	p.MaxCollectionDescriptionLength.Init(base.mgr)
 
 	p.MinPasswordLength = ParamItem{
 		Key:          "proxy.minPasswordLength",
@@ -5028,6 +5049,7 @@ type dataCoordConfig struct {
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 
 	StorageVersionCompactionEnabled                   ParamItem `refreshable:"true"`
+	StorageFormatCompactionEnabled                    ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitTokens           ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitInterval         ParamItem `refreshable:"true"`
 	StorageVersionCompactionSessionVersionRequirement ParamItem `refreshable:"true"`
@@ -5593,6 +5615,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.StorageVersionCompactionEnabled.Init(base.mgr)
+
+	p.StorageFormatCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.storageFormat.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable storage format compaction",
+		Export:       false,
+	}
+	p.StorageFormatCompactionEnabled.Init(base.mgr)
 
 	p.StorageVersionCompactionRateLimitTokens = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",

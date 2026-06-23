@@ -116,6 +116,53 @@ func TestValidateCollectionName(t *testing.T) {
 	}
 }
 
+func TestValidateCollectionDescription(t *testing.T) {
+	maxLength := Params.ProxyCfg.MaxCollectionDescriptionLength.GetAsInt()
+	tests := []struct {
+		name        string
+		description string
+		wantErr     bool
+	}{
+		{
+			name:        "empty description",
+			description: "",
+		},
+		{
+			name:        "exactly max bytes",
+			description: strings.Repeat("a", maxLength),
+		},
+		{
+			name:        "over max bytes",
+			description: strings.Repeat("a", maxLength+1),
+			wantErr:     true,
+		},
+		{
+			name:        "cjk rune count under max but byte length over max",
+			description: strings.Repeat("中", maxLength/3+1),
+			wantErr:     true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateCollectionDescription(test.description)
+			if test.wantErr {
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+
+	t.Run("uses refreshable paramtable limit", func(t *testing.T) {
+		old := Params.ProxyCfg.MaxCollectionDescriptionLength.SwapTempValue("3")
+		defer Params.ProxyCfg.MaxCollectionDescriptionLength.SwapTempValue(old)
+
+		err := validateCollectionDescription("abcd")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
 func TestValidateResourceGroupName(t *testing.T) {
 	assert.Nil(t, ValidateResourceGroupName("abc"))
 	assert.Nil(t, ValidateResourceGroupName("_123abc"))

@@ -497,19 +497,33 @@ func TestQueryArrayDifferentLenBetweenRows(t *testing.T) {
 
 	// query array idx exceeds max capacity, array[200]
 	expr := fmt.Sprintf("%s[%d] > 0", common.DefaultInt64ArrayField, common.TestCapacity*2)
-	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(common.QueryCountFieldName))
+	var countRes client.ResultSet
+	err := common.RetryOnTSafeStalled(ctx, func() error {
+		var err error
+		countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(common.QueryCountFieldName))
+		return err
+	})
 	common.CheckErr(t, err, true)
 	count, _ := countRes.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(0), count)
 
-	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields("Count(*)"))
+	err = common.RetryOnTSafeStalled(ctx, func() error {
+		var err error
+		countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields("Count(*)"))
+		return err
+	})
 	common.CheckErr(t, err, true)
 	count, _ = countRes.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(0), count)
 
 	// query: some rows has element greater than expr index array[100]
 	expr2 := fmt.Sprintf("%s[%d] > 0", common.DefaultInt64ArrayField, common.TestCapacity)
-	countRes2, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr2).WithOutputFields(common.QueryCountFieldName))
+	var countRes2 client.ResultSet
+	err2 := common.RetryOnTSafeStalled(ctx, func() error {
+		var err error
+		countRes2, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr2).WithOutputFields(common.QueryCountFieldName))
+		return err
+	})
 	common.CheckErr(t, err2, true)
 	count2, _ := countRes2.Fields[0].GetAsInt64(0)
 	require.Equal(t, int64(common.DefaultNb), count2)

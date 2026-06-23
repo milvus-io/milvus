@@ -95,8 +95,6 @@ type baseSegment struct {
 	skipGrowingBF bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
 	channel       metautil.Channel
 
-	bm25Stats map[int64]*storage.BM25Stats
-
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
 
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
@@ -113,7 +111,6 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		version:       atomic.NewInt64(version),
 		segmentType:   segmentType,
 		pkCandidate:   pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
-		bm25Stats:     make(map[int64]*storage.BM25Stats),
 		channel:       channel,
 		skipGrowingBF: segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
 
@@ -221,18 +218,63 @@ func (s *baseSegment) Refund() {
 	}
 }
 
-func (s *baseSegment) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {
+type bm25StatsHolder struct {
+	mu    sync.RWMutex
+	stats map[int64]*storage.BM25Stats
+}
+
+func newBM25StatsHolder() *bm25StatsHolder {
+	return &bm25StatsHolder{
+		stats: make(map[int64]*storage.BM25Stats),
+	}
+}
+
+func (h *bm25StatsHolder) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {
+	if h == nil {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	for fieldID, new := range stats {
-		if current, ok := s.bm25Stats[fieldID]; ok {
+		if new == nil {
+			continue
+		}
+		if current, ok := h.stats[fieldID]; ok {
 			current.Merge(new)
 		} else {
-			s.bm25Stats[fieldID] = new
+			h.stats[fieldID] = new.Clone()
 		}
 	}
 }
 
-func (s *baseSegment) GetBM25Stats() map[int64]*storage.BM25Stats {
-	return s.bm25Stats
+func (h *bm25StatsHolder) GetBM25Stats() map[int64]*storage.BM25Stats {
+	if h == nil {
+		return map[int64]*storage.BM25Stats{}
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	stats := cloneBM25StatsMap(h.stats)
+	if stats == nil {
+		return map[int64]*storage.BM25Stats{}
+	}
+	return stats
+}
+
+func cloneBM25StatsMap(stats map[int64]*storage.BM25Stats) map[int64]*storage.BM25Stats {
+	if len(stats) == 0 {
+		return nil
+	}
+	cloned := make(map[int64]*storage.BM25Stats, len(stats))
+	for fieldID, stat := range stats {
+		if stat != nil {
+			cloned[fieldID] = stat.Clone()
+		}
+	}
+	return cloned
 }
 
 // MayPkExist returns true if the given PK exists in the PK range and being positive through the bloom filter,
@@ -332,6 +374,8 @@ var _ Segment = (*LocalSegment)(nil)
 // Segment is a wrapper of the underlying C-structure segment.
 type LocalSegment struct {
 	baseSegment
+	*bm25StatsHolder
+
 	manager SegmentManager
 	ptrLock *state.LoadStateLock
 	ptr     C.CSegmentInterface // TODO: Remove in future, after move load index into segcore package.
@@ -410,6 +454,7 @@ func NewSegment(ctx context.Context,
 
 	segment := &LocalSegment{
 		baseSegment:        base,
+		bm25StatsHolder:    newBM25StatsHolder(),
 		manager:            manager,
 		ptrLock:            locker,
 		ptr:                C.CSegmentInterface(csegment.RawPointer()),
@@ -1658,6 +1703,30 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		cConfig.text_lob_paths = nil
 		cConfig.num_text_columns = 0
 	}
+	numBM25Fields := len(config.BM25FieldIDs)
+	if numBM25Fields > 0 {
+		if len(config.BM25StatsLogIDs) != numBM25Fields {
+			return nil, errors.Errorf("BM25 stats log IDs count mismatch, fields=%d logIDs=%d", numBM25Fields, len(config.BM25StatsLogIDs))
+		}
+		cBM25FieldIDs := (*C.int64_t)(C.malloc(C.size_t(numBM25Fields) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+		defer C.free(unsafe.Pointer(cBM25FieldIDs))
+		cBM25StatsLogIDs := (*C.int64_t)(C.malloc(C.size_t(numBM25Fields) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+		defer C.free(unsafe.Pointer(cBM25StatsLogIDs))
+		bm25FieldIDSlice := unsafe.Slice(cBM25FieldIDs, numBM25Fields)
+		bm25StatsLogIDSlice := unsafe.Slice(cBM25StatsLogIDs, numBM25Fields)
+		for i, fieldID := range config.BM25FieldIDs {
+			bm25FieldIDSlice[i] = C.int64_t(fieldID)
+			bm25StatsLogIDSlice[i] = C.int64_t(config.BM25StatsLogIDs[i])
+		}
+		cConfig.bm25_field_ids = cBM25FieldIDs
+		cConfig.bm25_stats_log_ids = cBM25StatsLogIDs
+		cConfig.num_bm25_fields = C.size_t(numBM25Fields)
+	} else {
+		cConfig.bm25_field_ids = nil
+		cConfig.bm25_stats_log_ids = nil
+		cConfig.num_bm25_fields = 0
+	}
+	cConfig.write_merged_bm25_stats = C.bool(config.WriteMergedBM25Stats)
 
 	// call C FFI
 	var cResult C.CFlushResult
@@ -1693,9 +1762,24 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		basePath = rawPath[:idx]
 	}
 	manifestPath := packed.MarshalManifestPath(basePath, committedVersion)
+	bm25Stats := make(map[int64]*storage.BM25Stats, int(cResult.num_bm25_stats))
+	if cResult.num_bm25_stats > 0 {
+		fieldIDs := unsafe.Slice(cResult.bm25_field_ids, int(cResult.num_bm25_stats))
+		statsBytes := unsafe.Slice(cResult.bm25_stats, int(cResult.num_bm25_stats))
+		statsSizes := unsafe.Slice(cResult.bm25_stats_sizes, int(cResult.num_bm25_stats))
+		for i := 0; i < int(cResult.num_bm25_stats); i++ {
+			bytes := C.GoBytes(unsafe.Pointer(statsBytes[i]), C.int(statsSizes[i]))
+			stats, err := storage.NewBM25StatsWithBytes(bytes)
+			if err != nil {
+				return nil, err
+			}
+			bm25Stats[int64(fieldIDs[i])] = stats
+		}
+	}
 
 	return &FlushResult{
 		ManifestPath: manifestPath,
 		NumRows:      int64(cResult.num_rows),
+		BM25Stats:    bm25Stats,
 	}, nil
 }

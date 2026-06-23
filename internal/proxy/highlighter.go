@@ -322,12 +322,27 @@ func newLexicalHighlightOperator(t *searchTask, tasks []*highlightTask) (operato
 	}, nil
 }
 
+func hasSearchResultHits(result *schemapb.SearchResultData) bool {
+	if result == nil {
+		return false
+	}
+
+	ids := result.GetIds()
+	return len(ids.GetIntId().GetData()) > 0 || len(ids.GetStrId().GetData()) > 0
+}
+
 func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
-	datas := result.GetResults().GetFieldsData()
-	// skip highlight if result is empty
-	if len(datas) == 0 {
+	resultData := result.GetResults()
+	// skip highlight if result has no hits. FieldsData may contain empty field templates
+	// even when Topks/Ids/Scores show zero matched rows.
+	if !hasSearchResultHits(resultData) {
 		return []any{result}, nil
+	}
+
+	datas := resultData.GetFieldsData()
+	if len(datas) == 0 {
+		return nil, errors.Errorf("get highlight failed, field data is empty for non-empty search result")
 	}
 
 	req := &querypb.GetHighlightRequest{
@@ -464,9 +479,14 @@ type semanticHighlightOperator struct {
 
 func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
-	datas := result.Results.GetFieldsData()
-	if len(datas) == 0 {
+	resultData := result.GetResults()
+	if !hasSearchResultHits(resultData) {
 		return []any{result}, nil
+	}
+
+	datas := resultData.GetFieldsData()
+	if len(datas) == 0 {
+		return nil, errors.Errorf("get highlight failed, field data is empty for non-empty search result")
 	}
 	highlightResults := []*commonpb.HighlightResult{}
 	topks := result.Results.GetTopks()

@@ -1,11 +1,11 @@
 module github.com/milvus-io/milvus/tests/go_client
 
-go 1.25.10
+go 1.26.4
 
 require (
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/cockroachdb/errors v1.9.1
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260514121806-9b60a053353f
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260526093827-489331a5a41f
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/minio/minio-go/v7 v7.0.73
@@ -63,7 +63,7 @@ require (
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/klauspost/compress v1.18.2 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.11 // indirect
+	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20240226150601-1dcf7310316a // indirect

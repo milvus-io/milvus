@@ -51,6 +51,81 @@ struct ActiveSliceTask {
     std::future<void> future;
 };
 
+class TransientBudgetGuard {
+ public:
+    explicit TransientBudgetGuard(size_t bytes) : bytes_(bytes) {
+        TransientMemoryBudget::GetEntryStreamBudget().Acquire(bytes_);
+    }
+
+    ~TransientBudgetGuard() {
+        TransientMemoryBudget::GetEntryStreamBudget().Release(bytes_);
+    }
+
+    TransientBudgetGuard(const TransientBudgetGuard&) = delete;
+    TransientBudgetGuard&
+    operator=(const TransientBudgetGuard&) = delete;
+
+ private:
+    size_t bytes_;
+};
+
+bool
+ShouldMergePlainStreamTail(size_t entry_size, size_t slice_size) {
+    auto tail_size = entry_size % slice_size;
+    return entry_size > slice_size && tail_size > 0 &&
+           tail_size <= kTailMergeGrace;
+}
+
+size_t
+PlainStreamSliceCount(size_t entry_size, size_t slice_size) {
+    if (entry_size == 0) {
+        return 0;
+    }
+    if (ShouldMergePlainStreamTail(entry_size, slice_size)) {
+        return entry_size / slice_size;
+    }
+    return 1 + (entry_size - 1) / slice_size;
+}
+
+size_t
+PlainStreamSliceBytes(size_t entry_size,
+                      size_t slice_size,
+                      size_t num_slices,
+                      size_t seq) {
+    auto off = seq * slice_size;
+    if (ShouldMergePlainStreamTail(entry_size, slice_size) &&
+        seq + 1 == num_slices) {
+        return slice_size + entry_size % slice_size;
+    }
+    return std::min(slice_size, entry_size - off);
+}
+
+size_t
+EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
+    AssertInfo(
+        plain_len <= (std::numeric_limits<size_t>::max() / 2) &&
+            cipher_len <= std::numeric_limits<size_t>::max() - 2 * plain_len,
+        "Encrypted stream budget size overflow");
+    return cipher_len + 2 * plain_len;
+}
+
+void
+DrainFutures(std::vector<std::future<void>>& futures,
+             std::exception_ptr& first_error) {
+    for (auto& future : futures) {
+        if (!future.valid()) {
+            continue;
+        }
+        try {
+            future.get();
+        } catch (...) {
+            if (!first_error) {
+                first_error = std::current_exception();
+            }
+        }
+    }
+}
+
 void
 ReadOrderedEntryStream(
     size_t num_slices,
@@ -338,6 +413,10 @@ IndexEntryReader::ReadFooterAndDirectory() {
         edek_ = dir_json["__edek__"].get<std::string>();
         ez_id_ = std::stoll(dir_json["__ez_id__"].get<std::string>());
         slice_size_ = dir_json["slice_size"].get<size_t>();
+        AssertInfo(IsStreamSliceSizeAligned(slice_size_),
+                   "Encrypted entry slice_size must be {}-byte aligned, got {}",
+                   kStreamSliceAlignment,
+                   slice_size_);
 
         cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
         AssertInfo(cipher_plugin_ != nullptr,
@@ -657,6 +736,148 @@ IndexEntryReader::FinalizeEntryDownload(EntryDownloadState& state) {
     state.fd = -1;
 }
 
+IndexEntryReader::EntryStreamDownloadState
+IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
+                                             const std::string& local_path,
+                                             const EntryMeta& meta,
+                                             io::Priority write_priority) {
+    auto slice_size = DefaultEntryStreamSliceSize();
+    AssertInfo(slice_size >= kMinStreamSliceSize,
+               "ReadEntriesStreamToFiles slice_size must be at least {} bytes, "
+               "got {}",
+               kMinStreamSliceSize,
+               slice_size);
+    AssertInfo(IsStreamSliceSizeAligned(slice_size),
+               "ReadEntriesStreamToFiles slice_size must be {}-byte aligned, "
+               "got {}",
+               kStreamSliceAlignment,
+               slice_size);
+
+    EntryStreamDownloadState state;
+    state.name = name;
+    if (meta.encrypted) {
+        state.expected_crc = meta.enc.crc32;
+        state.range_crcs.resize(meta.enc.slices.size());
+        state.writer = std::make_unique<PositionedFileWriter>(
+            local_path, meta.enc.original_size, write_priority);
+    } else {
+        state.expected_crc = meta.plain.crc32;
+        state.range_crcs.resize(
+            PlainStreamSliceCount(meta.plain.size, slice_size));
+        state.writer = std::make_unique<PositionedFileWriter>(
+            local_path, meta.plain.size, write_priority);
+    }
+    return state;
+}
+
+void
+IndexEntryReader::SubmitEntryStreamDownloadTasks(
+    const EntryMeta& meta,
+    EntryStreamDownloadState& state,
+    std::vector<std::future<void>>& futures) {
+    auto& pool = ThreadPools::GetThreadPool(priority_);
+    auto input = input_;
+    auto* writer = state.writer.get();
+
+    if (meta.encrypted) {
+        const auto& em = meta.enc;
+        auto cipher_plugin = cipher_plugin_;
+        auto edek = edek_;
+        int64_t ez_id = ez_id_;
+        int64_t collection_id = collection_id_;
+
+        for (size_t i = 0; i < em.slices.size(); i++) {
+            auto slice = em.slices[i];
+            size_t output_offset = i * slice_size_;
+            AssertInfo(output_offset < em.original_size,
+                       "Encrypted slice {} exceeds original entry size {}",
+                       i,
+                       em.original_size);
+            size_t remaining = em.original_size - output_offset;
+            size_t plain_len = std::min(remaining, slice_size_);
+
+            futures.push_back(pool.Submit([input,
+                                           cipher_plugin,
+                                           ez_id,
+                                           collection_id,
+                                           edek,
+                                           slice,
+                                           writer,
+                                           output_offset,
+                                           plain_len,
+                                           i,
+                                           &state]() {
+                TransientBudgetGuard budget_guard(
+                    EncryptedStreamBudgetBytes(slice.size, plain_len));
+
+                std::vector<uint8_t> cipher(slice.size);
+                size_t n = input->ReadAt(cipher.data(),
+                                         MILVUS_V3_MAGIC_SIZE + slice.offset,
+                                         slice.size);
+                AssertInfo(n == slice.size, "Failed to read encrypted slice");
+
+                auto dec =
+                    cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
+                auto plain = dec->Decrypt(cipher.data(), cipher.size());
+
+                AssertInfo(plain.size() == plain_len,
+                           "Decrypted size mismatch: expected {}, got {}",
+                           plain_len,
+                           plain.size());
+                writer->WriteAt(output_offset, plain.data(), plain.size());
+                state.range_crcs[i] = {
+                    Crc32cValue(reinterpret_cast<const uint8_t*>(plain.data()),
+                                plain.size()),
+                    plain.size()};
+            }));
+        }
+    } else {
+        auto pm = meta.plain;
+        auto slice_size = DefaultEntryStreamSliceSize();
+        auto num_slices = PlainStreamSliceCount(pm.size, slice_size);
+
+        for (size_t seq = 0; seq < num_slices; seq++) {
+            size_t output_offset = seq * slice_size;
+            size_t len =
+                PlainStreamSliceBytes(pm.size, slice_size, num_slices, seq);
+            size_t src_offset = pm.offset + output_offset;
+
+            futures.push_back(pool.Submit(
+                [input, writer, output_offset, src_offset, len, seq, &state]() {
+                    TransientBudgetGuard budget_guard(len);
+
+                    std::vector<uint8_t> buf(len);
+                    size_t n = input->ReadAt(
+                        buf.data(), MILVUS_V3_MAGIC_SIZE + src_offset, len);
+                    AssertInfo(n == len, "Failed to read entry slice");
+
+                    writer->WriteAt(output_offset, buf.data(), len);
+                    state.range_crcs[seq] = {Crc32cValue(buf.data(), len), len};
+                }));
+        }
+    }
+}
+
+void
+IndexEntryReader::FinalizeEntryStreamDownload(EntryStreamDownloadState& state) {
+    uint32_t combined_crc = 0;
+    if (!state.range_crcs.empty()) {
+        combined_crc = state.range_crcs[0].crc;
+        for (size_t i = 1; i < state.range_crcs.size(); i++) {
+            combined_crc = Crc32cCombine(
+                combined_crc, state.range_crcs[i].crc, state.range_crcs[i].len);
+        }
+    }
+    AssertInfo(combined_crc == state.expected_crc,
+               "CRC-32C mismatch for entry '{}': expected {}, got {}",
+               state.name,
+               Crc32cToHex(state.expected_crc),
+               Crc32cToHex(combined_crc));
+
+    state.writer->Finish();
+    state.writer.reset();
+}
+
 void
 IndexEntryReader::ReadEntryToFile(const std::string& name,
                                   const std::string& local_path) {
@@ -732,6 +953,62 @@ IndexEntryReader::ReadEntriesToFiles(
     }
 }
 
+void
+IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
+                                        const std::string& local_path,
+                                        io::Priority write_priority) {
+    AssertInfo(HasEntry(name), "Entry not found: {}", name);
+    auto writer = FileWriter(local_path, write_priority);
+    ReadEntryStream(name, [&writer](const uint8_t* data, size_t len) {
+        writer.Write(data, len);
+    });
+    writer.Finish();
+}
+
+void
+IndexEntryReader::ReadEntriesStreamToFiles(
+    const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
+    io::Priority write_priority) {
+    if (name_path_pairs.empty()) {
+        return;
+    }
+
+    std::vector<EntryStreamDownloadState> states;
+    states.reserve(name_path_pairs.size());
+    std::vector<std::future<void>> all_futures;
+
+    try {
+        for (const auto& [name, path] : name_path_pairs) {
+            auto it = entry_index_.find(name);
+            AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+            states.push_back(PrepareEntryStreamDownload(
+                name, path, it->second, write_priority));
+        }
+
+        for (size_t i = 0; i < name_path_pairs.size(); i++) {
+            const auto& meta = entry_index_.at(name_path_pairs[i].first);
+            SubmitEntryStreamDownloadTasks(meta, states[i], all_futures);
+        }
+
+        std::exception_ptr first_error = nullptr;
+        DrainFutures(all_futures, first_error);
+        if (first_error) {
+            std::rethrow_exception(first_error);
+        }
+
+        for (auto& state : states) {
+            FinalizeEntryStreamDownload(state);
+        }
+    } catch (...) {
+        auto first_error = std::current_exception();
+        DrainFutures(all_futures, first_error);
+        for (auto& state : states) {
+            state.writer.reset();
+        }
+        std::rethrow_exception(first_error);
+    }
+}
+
 size_t
 IndexEntryReader::GetEntrySize(const std::string& name) const {
     auto it = entry_index_.find(name);
@@ -767,11 +1044,14 @@ IndexEntryReader::ReadPlainEntryStream(
                "ReadEntryStream slice_size must be at least {} bytes, got {}",
                kMinStreamSliceSize,
                slice_size);
-    size_t num_slices =
-        pm.size == 0 ? 0 : 1 + (static_cast<size_t>(pm.size) - 1) / slice_size;
-    auto sliceBytes = [pm, slice_size](size_t seq) {
-        size_t off = seq * slice_size;
-        return std::min<size_t>(slice_size, pm.size - off);
+    AssertInfo(IsStreamSliceSizeAligned(slice_size),
+               "ReadEntryStream slice_size must be {}-byte aligned, got {}",
+               kStreamSliceAlignment,
+               slice_size);
+    auto entry_size = static_cast<size_t>(pm.size);
+    auto num_slices = PlainStreamSliceCount(entry_size, slice_size);
+    auto sliceBytes = [entry_size, slice_size, num_slices](size_t seq) {
+        return PlainStreamSliceBytes(entry_size, slice_size, num_slices, seq);
     };
     auto input = input_;
     auto load_slice = [input, pm, slice_size, sliceBytes](size_t seq) {

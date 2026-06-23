@@ -141,6 +141,18 @@ var (
 			segmentLevelLabelName,
 		})
 
+	DataNodeGrowingSourceSyncFailureCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "growing_source_sync_failure_count",
+			Help:      "consecutive failure count of growing-source source sync",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			channelNameLabelName,
+		})
+
 	DataNodeAutoFlushBufferCount = prometheus.NewCounterVec( // TODO: arguably
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -374,6 +386,7 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeAutoFlushBufferCount)
 	registry.MustRegister(DataNodeSave2StorageLatency)
 	registry.MustRegister(DataNodeFlushBufferCount)
+	registry.MustRegister(DataNodeGrowingSourceSyncFailureCount)
 	registry.MustRegister(DataNodeFlushReqCounter)
 	registry.MustRegister(DataNodeFlushedSize)
 	registry.MustRegister(DataNodeFlushedRows)

@@ -702,7 +702,12 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     for (const auto& fn : file_names) {
         pairs.emplace_back(fn, path_ + "/" + fn);
     }
-    reader.ReadEntriesToFiles(pairs);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    reader.ReadEntriesStreamToFiles(
+        pairs, storage::io::GetPriorityFromLoadPriority(load_priority));
 
     if (has_null) {
         auto null_entry = reader.ReadEntry("index_null_offset");

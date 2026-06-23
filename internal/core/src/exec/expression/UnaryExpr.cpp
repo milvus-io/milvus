@@ -219,7 +219,8 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<double>(context);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
@@ -1637,10 +1638,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     auto expr_type = expr_->op_type_;
 
-    // Pre-build regex objects once for the entire segment
+    // Pre-build regex / LIKE pattern objects once for the entire segment
     EnsureRegexCache();
+    EnsureLikeMatcherCache();
     const PartialRegexMatcher* regex_matcher_ptr = cached_regex_matcher_.get();
     const VolnitskySearcher* volnitsky_ptr = cached_volnitsky_searcher_.get();
+    const LikePatternMatcher* like_matcher_ptr = cached_like_matcher_.get();
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
@@ -1649,7 +1652,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             &processed_cursor,
             &bitmap_input,
             regex_matcher_ptr,
-            volnitsky_ptr
+            volnitsky_ptr,
+            like_matcher_ptr
         ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
@@ -1767,7 +1771,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                 break;
             }
             case proto::plan::Match: {
-                UnaryElementFunc<T, proto::plan::Match, filter_type> func;
+                UnaryElementFuncForMatch<T, filter_type> func;
+                func.matcher = like_matcher_ptr;
                 func(data,
                      size,
                      val,
@@ -1916,6 +1921,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             can_use = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
             break;
         case DataType::VARCHAR:
+        case DataType::TEXT:
             can_use =
                 SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
             break;

@@ -327,6 +327,15 @@ func validateCollectionName(collName string) error {
 	return validateCollectionNameOrAlias(collName, "name")
 }
 
+func validateCollectionDescription(description string) error {
+	if len(description) > Params.ProxyCfg.MaxCollectionDescriptionLength.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg(
+			"the length of a collection description must not exceed %s bytes",
+			Params.ProxyCfg.MaxCollectionDescriptionLength.GetValue())
+	}
+	return nil
+}
+
 func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	partitionTag = strings.TrimSpace(partitionTag)
 

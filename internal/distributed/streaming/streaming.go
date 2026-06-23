@@ -173,6 +173,11 @@ type WALAccesser interface {
 	// Local returns the local services.
 	Local() Local
 
+	// PrepareReleaseManualFlush prepares process-local release handoff.
+	// Returns false when the current process is not the local flush owner or
+	// the channel does not need growing-source retention.
+	PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
+
 	// RawAppend writes a records to the log.
 	RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)
 

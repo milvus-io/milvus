@@ -29,6 +29,8 @@ constexpr const char* MATCH_VALUE = "match_value";
 // below configurations will be persistent, do not edit them.
 constexpr const char* MARISA_TRIE_INDEX = "marisa_trie_index";
 constexpr const char* MARISA_STR_IDS = "marisa_trie_str_ids";
+constexpr const char* MARISA_CSR_INDEX = "marisa_csr_index";
+constexpr const char* MARISA_CSR_OFFSETS = "marisa_csr_offsets";
 
 // below meta key of store bitmap indexes
 constexpr const char* BITMAP_INDEX_DATA = "bitmap_index_data";

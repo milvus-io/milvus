@@ -377,12 +377,13 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 // Process flow:
 //  1. Send QueryCopySegmentRequest to assigned DataNode
 //  2. Check response state:
-//     - Not Completed: Mark task/job as failed (fail-fast)
+//     - In progress or other non-terminal states: keep polling later
+//     - Failed: Mark task/job as failed (fail-fast)
 //     - Completed: Sync binlog and index metadata to segment
 //  3. Update task state accordingly
 //
 // Failure handling:
-// - Any error or non-completed state triggers immediate failure
+// - RPC errors and worker failure responses trigger immediate failure
 // - Task failure immediately marks parent job as failed (fail-fast)
 // - Enables quick feedback to user without waiting for timeout
 //
@@ -415,8 +416,6 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 
 	if resp.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
-		log.Info("copy segment task not completed",
-			WrapCopySegmentTaskLog(t, zap.String("state", resp.GetState().String()))...)
 		return
 	}
 
@@ -617,9 +616,16 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			NewBuildIds:  newBuildIDs,
 		}
 		log.Info("prepare copy segment source and target",
-			zap.Any("source", sourceSegDesc),
-			zap.Any("target", target),
-			zap.Any("newBuildIDs", newBuildIDs))
+			WrapCopySegmentTaskLog(task,
+				zap.Int64("sourceCollectionID", source.GetCollectionId()),
+				zap.Int64("sourcePartitionID", source.GetPartitionId()),
+				zap.Int64("sourceSegmentID", source.GetSegmentId()),
+				zap.Int64("targetCollectionID", target.GetCollectionId()),
+				zap.Int64("targetPartitionID", target.GetPartitionId()),
+				zap.Int64("targetSegmentID", target.GetSegmentId()),
+				zap.Int("newBuildIDCount", len(newBuildIDs)),
+				zap.Bool("hasManifestPath", source.GetManifestPath() != ""),
+				zap.Int64("storageVersion", source.GetStorageVersion()))...)
 		targets = append(targets, target)
 	}
 
@@ -735,7 +741,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 
 			log.Info("update copy segment info done",
 				WrapCopySegmentTaskLog(task, zap.Int64("segmentID", result.GetSegmentId()),
-					zap.Any("segmentResult", result))...)
+					zap.Int64("importedRows", result.GetImportedRows()),
+					zap.Int("binlogFields", len(result.GetBinlogs())),
+					zap.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
 		}
 
 		// Mark task as completed and record copying duration

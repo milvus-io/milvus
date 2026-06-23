@@ -93,6 +93,7 @@ class MilvusConan(ConanFile):
         "icu/*:shared": False,
         "icu/*:data_packaging": "library",
         "xz_utils/*:shared": True,
+        "openblas/*:use_openmp": True,
         "opentelemetry-cpp/*:with_stl": True,
     }
 

@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <stdint.h>
+#include <boost/filesystem.hpp>
 #include <chrono>
 #include <initializer_list>
 #include <iostream>
@@ -46,19 +47,25 @@
 #include "index/TextMatchIndex.h"
 #include "index/Utils.h"
 #include "knowhere/comp/index_param.h"
+#include "milvus-storage/lob_column/lob_column_manager.h"
+#include "milvus-storage/lob_column/lob_column_writer.h"
+#include "milvus-storage/lob_column/lob_reference.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
 #include "storage/FileManager.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
@@ -107,13 +114,15 @@ GenTestSchema(std::map<std::string, std::string> params = {},
 }
 
 storage::FileManagerContext
-CreateTextMatchTestFileManagerContext(int64_t build_id) {
+CreateTextMatchTestFileManagerContext(
+    int64_t build_id,
+    proto::schema::DataType data_type = proto::schema::DataType::VarChar) {
     auto storage_config = get_default_local_storage_config();
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
     storage::FieldDataMeta field_meta{1, 2, 3, 101};
-    field_meta.field_schema.set_data_type(proto::schema::DataType::VarChar);
+    field_meta.field_schema.set_data_type(data_type);
     storage::IndexMeta index_meta{3, 101, build_id, 10000};
     return storage::FileManagerContext(
         field_meta, index_meta, chunk_manager, fs);
@@ -438,6 +447,130 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
             }
         }
     }
+}
+
+TEST(TextMatch, BuildIndexFromTextFieldData) {
+    auto ctx = CreateTextMatchTestFileManagerContext(
+        1002, proto::schema::DataType::Text);
+    auto index = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {
+        "football basketball", "swimming football", "table tennis"};
+    auto field_data =
+        storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
+    field_data->FillFieldData(texts.data(), texts.size());
+
+    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false));
+}
+
+TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
+    constexpr int64_t collection_id = 10001;
+    constexpr int64_t partition_id = 10002;
+    constexpr int64_t segment_id = 10003;
+    const FieldId text_field_id(101);
+    const std::string unique_token = "zzlobuniqueterm";
+
+    auto test_dir =
+        "sealed_text_lob_index_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+    boost::filesystem::remove_all(TestLocalPath + test_dir);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(
+        FieldName("pk"), FieldId(100), DataType::INT64, false, std::nullopt));
+    schema->set_primary_field_id(FieldId(100));
+    std::map<std::string, std::string> text_params = {
+        {"enable_match", "true"},
+        {"enable_analyzer", "true"},
+        {"analyzer_params", R"({"tokenizer": "standard"})"},
+    };
+    schema->AddField(FieldMeta(FieldName("str"),
+                               text_field_id,
+                               DataType::TEXT,
+                               65536,
+                               false,
+                               true,
+                               true,
+                               text_params,
+                               std::nullopt));
+
+    auto lob_base_path =
+        test_dir + "/lobs/" + std::to_string(text_field_id.get());
+    milvus_storage::lob_column::LobColumnConfig lob_config;
+    lob_config.lob_base_path = lob_base_path;
+    lob_config.field_id = text_field_id.get();
+    lob_config.inline_threshold = 1;
+    lob_config.max_lob_file_bytes = 256 * 1024;
+    lob_config.flush_threshold_bytes = 64 * 1024;
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    ASSERT_NE(properties, nullptr);
+    lob_config.properties = *properties;
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto manager_result =
+        milvus_storage::lob_column::LobColumnManager::Create(fs, lob_config);
+    ASSERT_TRUE(manager_result.ok()) << manager_result.status().ToString();
+    auto manager = std::move(manager_result).ValueOrDie();
+    auto writer_result = manager->CreateWriter();
+    ASSERT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    auto writer = std::move(writer_result).ValueOrDie();
+
+    std::string large_text(72 * 1024, 'x');
+    large_text += " " + unique_token;
+    std::vector<std::string> texts = {
+        "plain text without target token",
+        large_text,
+        "another row without target token",
+    };
+
+    std::vector<std::string> encoded_refs;
+    encoded_refs.reserve(texts.size());
+    for (const auto& text : texts) {
+        auto ref_result = writer->WriteText(text);
+        ASSERT_TRUE(ref_result.ok()) << ref_result.status().ToString();
+        auto ref = std::move(ref_result).ValueOrDie();
+        ASSERT_EQ(ref.size(), milvus_storage::lob_column::LOB_REFERENCE_SIZE);
+        ASSERT_TRUE(milvus_storage::lob_column::IsLOBReference(ref.data()));
+        encoded_refs.emplace_back(reinterpret_cast<const char*>(ref.data()),
+                                  ref.size());
+    }
+    auto close_result = writer->Close();
+    ASSERT_TRUE(close_result.ok()) << close_result.status().ToString();
+    auto lob_files = std::move(close_result).ValueOrDie();
+    ASSERT_FALSE(lob_files.empty());
+
+    auto field_data =
+        storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
+    field_data->FillFieldData(encoded_refs.data(), encoded_refs.size());
+
+    auto cm = storage::CreateChunkManager(get_default_local_storage_config());
+    auto load_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                    partition_id,
+                                                    segment_id,
+                                                    text_field_id.get(),
+                                                    {field_data},
+                                                    cm);
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, segment_id);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetTextLobPathForTesting(text_field_id, lob_base_path);
+
+    auto status = LoadFieldData(segment.get(), &load_info);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+
+    sealed->CreateTextIndex(text_field_id);
+    auto index_pin = sealed->GetTextIndex(nullptr, text_field_id);
+    auto hits = index_pin.get()->MatchQuery(unique_token, 1);
+    ASSERT_EQ(hits.size(), texts.size());
+    EXPECT_FALSE(hits[0]);
+    EXPECT_TRUE(hits[1]);
+    EXPECT_FALSE(hits[2]);
+
+    boost::filesystem::remove_all(TestLocalPath + test_dir);
 }
 
 // Regression test: BuildIndexFromFieldData with a single batch should still

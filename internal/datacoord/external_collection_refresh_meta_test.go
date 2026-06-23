@@ -74,7 +74,7 @@ func TestExternalCollectionRefreshMeta_NewMeta(t *testing.T) {
 		catalog := &stubCatalog{}
 
 		// Mock ListExternalCollectionRefreshJobs to return error
-		mockList := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, errors.New("list jobs error")).Build()
+		mockList := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, errors.New("list jobs error")).Build()
 		defer mockList.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -86,7 +86,7 @@ func TestExternalCollectionRefreshMeta_NewMeta(t *testing.T) {
 		catalog := &stubCatalog{}
 
 		// Mock ListExternalCollectionRefreshTasks to return error
-		mockList := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, errors.New("list tasks error")).Build()
+		mockList := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, errors.New("list tasks error")).Build()
 		defer mockList.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
@@ -125,7 +125,7 @@ func TestExternalCollectionRefreshMeta_AddJob(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Mock SaveExternalCollectionRefreshJob to return error
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		job := &datapb.ExternalCollectionRefreshJob{
@@ -237,16 +237,16 @@ func TestExternalCollectionRefreshMeta_UpdateJobState(t *testing.T) {
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
 		// Mock save to fail
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		applied, err := meta.UpdateJobState(1, indexpb.JobState_JobStateInProgress, "")
@@ -338,13 +338,13 @@ func TestExternalCollectionRefreshMeta_UpdateJobStateWithPreApply(t *testing.T) 
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		var savedJob *datapb.ExternalCollectionRefreshJob
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).
 			To(func(_ context.Context, job *datapb.ExternalCollectionRefreshJob) error {
 				savedJob = job
 				return nil
@@ -376,15 +376,15 @@ func TestExternalCollectionRefreshMeta_UpdateJobStateWithPreApply(t *testing.T) 
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		preApplyCalled := false
@@ -410,15 +410,15 @@ func TestExternalCollectionRefreshMeta_UpdateJobProgress(t *testing.T) {
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 1, CollectionId: 100, Progress: 0},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		err = meta.UpdateJobProgress(1, 50)
@@ -453,15 +453,15 @@ func TestExternalCollectionRefreshMeta_AddTaskIDToJob(t *testing.T) {
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 1, CollectionId: 100, TaskIds: []int64{}},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		err = meta.AddTaskIDToJob(1, 1001)
@@ -500,15 +500,15 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, CollectionId: 100},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
-		mockDropTask := mockey.Mock(mockey.GetMethod(catalog, "DropExternalCollectionRefreshTask")).Return(errors.New("drop task error")).Build()
+		mockDropTask := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshTask).Return(errors.New("drop task error")).Build()
 		defer mockDropTask.UnPatch()
 
 		err = meta.DropJob(ctx, 1)
@@ -523,16 +523,16 @@ func TestExternalCollectionRefreshMeta_DropJob(t *testing.T) {
 		jobs := []*datapb.ExternalCollectionRefreshJob{
 			{JobId: 1, CollectionId: 100},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(jobs, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(nil, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
 		// Mock drop job to fail
-		mockDropJob := mockey.Mock(mockey.GetMethod(catalog, "DropExternalCollectionRefreshJob")).Return(errors.New("drop job error")).Build()
+		mockDropJob := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshJob).Return(errors.New("drop job error")).Build()
 		defer mockDropJob.UnPatch()
 
 		err = meta.DropJob(ctx, 1)
@@ -596,7 +596,7 @@ func TestExternalCollectionRefreshMeta_AddTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Mock SaveExternalCollectionRefreshTask to return error
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		task := &datapb.ExternalCollectionRefreshTask{
@@ -685,15 +685,15 @@ func TestExternalCollectionRefreshMeta_UpdateTaskState(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInit},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		err = meta.UpdateTaskState(1001, indexpb.JobState_JobStateInProgress, "")
@@ -742,13 +742,13 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		var savedTask *datapb.ExternalCollectionRefreshTask
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
 			To(func(_ context.Context, task *datapb.ExternalCollectionRefreshTask) error {
 				savedTask = task
 				return nil
@@ -787,15 +787,15 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		err = meta.UpdateTaskResult(
@@ -847,13 +847,13 @@ func TestExternalCollectionRefreshMeta_ClearTaskResultsByJobID_PartialFailure(t 
 			UpdatedSegments: []*datapb.SegmentInfo{{ID: 20}},
 		},
 	}
-	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+	mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 	defer mockListJobs.UnPatch()
-	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+	mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 	defer mockListTasks.UnPatch()
 
 	saveCalls := 0
-	mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).
+	mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).
 		To(func(_ context.Context, task *datapb.ExternalCollectionRefreshTask) error {
 			saveCalls++
 			if task.GetTaskId() == 1002 {
@@ -881,15 +881,15 @@ func TestExternalCollectionRefreshMeta_UpdateTaskProgress(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, Progress: 0},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		err = meta.UpdateTaskProgress(1001, 50)
@@ -924,15 +924,15 @@ func TestExternalCollectionRefreshMeta_UpdateTaskVersion(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1, Version: 0, NodeId: 0},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).Return(errors.New("save error")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
 		err = meta.UpdateTaskVersion(1001, 10)
@@ -973,15 +973,15 @@ func TestExternalCollectionRefreshMeta_DropTask(t *testing.T) {
 		tasks := []*datapb.ExternalCollectionRefreshTask{
 			{TaskId: 1001, JobId: 1},
 		}
-		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+		mockListJobs := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(nil, nil).Build()
 		defer mockListJobs.UnPatch()
-		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		mockListTasks := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(tasks, nil).Build()
 		defer mockListTasks.UnPatch()
 
 		meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
-		mockDrop := mockey.Mock(mockey.GetMethod(catalog, "DropExternalCollectionRefreshTask")).Return(errors.New("drop error")).Build()
+		mockDrop := mockey.Mock((*stubCatalog).DropExternalCollectionRefreshTask).Return(errors.New("drop error")).Build()
 		defer mockDrop.UnPatch()
 
 		err = meta.DropTask(ctx, 1001)

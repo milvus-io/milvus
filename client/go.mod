@@ -1,13 +1,13 @@
 module github.com/milvus-io/milvus/client/v2
 
-go 1.25.10
+go 1.26.4
 
 require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260514121806-9b60a053353f
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260526093827-489331a5a41f
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/samber/lo v1.52.0

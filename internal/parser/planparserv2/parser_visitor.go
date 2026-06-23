@@ -58,6 +58,10 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 }
 
 func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
+	return v.translateIdentifierWithText(identifier, false)
+}
+
+func (v *ParserVisitor) translateIdentifierWithText(identifier string, allowText bool) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
@@ -68,7 +72,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 		nestedPath = append(nestedPath, identifier)
 	}
 
-	if field.DataType == schemapb.DataType_Text {
+	if field.DataType == schemapb.DataType_Text && !allowText {
 		return nil, merr.WrapErrParameterInvalidMsg("filter on text field (%s) is not supported yet", field.Name)
 	}
 
@@ -844,16 +848,13 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 
 func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
 	identifier := ctx.Identifier().GetText()
-	column, err := v.translateIdentifier(identifier)
+	column, err := v.translateIdentifierWithText(identifier, true)
 	if err != nil {
 		return err
 	}
 	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
 		return errors.New("text match operation on non-string is unsupported")
-	}
-	if column.dataType == schemapb.DataType_Text {
-		return errors.New("text match operation on text field is not supported yet")
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
 		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
@@ -921,7 +922,7 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
 	identifier := ctx.Identifier().GetText()
-	column, err := v.translateIdentifier(identifier)
+	column, err := v.translateIdentifierWithText(identifier, true)
 	if err != nil {
 		return err
 	}
@@ -1207,6 +1208,45 @@ func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, st
 	}
 
 	return v.getColumnInfoFromJSONIdentifier(child.GetText())
+}
+
+func (v *ParserVisitor) getStructArrayParentColumnInfo(fieldName string) (*planpb.ColumnInfo, bool, error) {
+	fieldName = decodeUnicode(fieldName)
+	if _, err := v.schema.GetFieldFromName(fieldName); err == nil {
+		return nil, false, nil
+	}
+
+	structField := v.schema.GetStructArrayFieldFromName(fieldName)
+	if structField == nil {
+		return nil, false, nil
+	}
+	subFields := structField.GetFields()
+	if len(subFields) == 0 {
+		return nil, true, merr.WrapErrParameterInvalidMsg(
+			"struct array field %s has no sub-fields", fieldName)
+	}
+
+	subField := subFields[0]
+	return &planpb.ColumnInfo{
+		FieldId:     subField.GetFieldID(),
+		DataType:    subField.GetDataType(),
+		ElementType: subField.GetElementType(),
+		Nullable:    structField.GetNullable() || subField.GetNullable(),
+	}, true, nil
+}
+
+func (v *ParserVisitor) getNullExprColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+	if identifier != nil {
+		// try struct first
+		if columnInfo, ok, err := v.getStructArrayParentColumnInfo(identifier.GetText()); ok || err != nil {
+			return columnInfo, err
+		}
+	}
+	return v.getChildColumnInfo(identifier, child, nil, nil)
+}
+
+func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
+	return typeutil.IsVectorType(dataType) && !typeutil.IsVectorArrayType(dataType)
 }
 
 // VisitCall parses the expr to call plan.
@@ -1959,12 +1999,12 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
 	}
 
-	if typeutil.IsVectorType(column.DataType) {
+	if isUnsupportedNullExprVectorType(column.DataType) {
 		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 
@@ -2006,12 +2046,12 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
 	}
 
-	if typeutil.IsVectorType(column.DataType) {
+	if isUnsupportedNullExprVectorType(column.DataType) {
 		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 

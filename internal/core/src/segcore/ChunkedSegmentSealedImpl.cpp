@@ -606,7 +606,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
             info.index_engine_version,
             info.index_size,
             info.index_params,
-            info.enable_mmap);
+            info.enable_mmap,
+            num_rows_.value_or(0));
 
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
@@ -1357,6 +1358,103 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
     if (auto column = get_column(field_id)) {
         column->PrefetchChunks(op_ctx, chunk_ids);
     }
+}
+
+void
+ChunkedSegmentSealedImpl::ApplyFieldValidData(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    int64_t offset,
+    int64_t size,
+    TargetBitmapView valid_result) const {
+    if (size == 0) {
+        return;
+    }
+
+    std::shared_ptr<ChunkedColumnInterface> column;
+    {
+        std::shared_lock lck(mutex_);
+        AssertInfo(
+            get_bit(field_data_ready_bitset_, field_id),
+            "Can't get bitset element at " + std::to_string(field_id.get()));
+        column = get_column(field_id);
+        AssertInfo(column != nullptr,
+                   "field {} must exist when applying valid data",
+                   field_id.get());
+    }
+    if (!column->IsNullable()) {
+        return;
+    }
+
+    auto data_type = schema_->operator[](field_id).get_data_type();
+    if (ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
+        auto pw = column->Span(op_ctx, chunk_id);
+        auto span = pw.get();
+        const bool* valid_data = span.valid_data();
+        if (valid_data == nullptr) {
+            return;
+        }
+        valid_data += offset;
+        for (int64_t i = 0; i < size; ++i) {
+            if (!valid_data[i]) {
+                valid_result[i] = false;
+            }
+        }
+        return;
+    }
+
+    auto row_offset = column->GetNumRowsUntilChunk(chunk_id) + offset;
+    std::vector<int64_t> offsets(size);
+    for (int64_t i = 0; i < size; ++i) {
+        offsets[i] = row_offset + i;
+    }
+    column->BulkIsValid(
+        op_ctx,
+        [&valid_result](bool is_valid, size_t i) {
+            if (!is_valid) {
+                valid_result[i] = false;
+            }
+        },
+        offsets.data(),
+        size);
+}
+
+void
+ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const int64_t* offsets,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    if (count == 0) {
+        return;
+    }
+
+    std::shared_ptr<ChunkedColumnInterface> column;
+    {
+        std::shared_lock lck(mutex_);
+        AssertInfo(
+            get_bit(field_data_ready_bitset_, field_id),
+            "Can't get bitset element at " + std::to_string(field_id.get()));
+        column = get_column(field_id);
+        AssertInfo(column != nullptr,
+                   "field {} must exist when applying valid data",
+                   field_id.get());
+    }
+    if (!column->IsNullable()) {
+        return;
+    }
+
+    column->BulkIsValid(
+        op_ctx,
+        [&valid_result](bool is_valid, size_t i) {
+            if (!is_valid) {
+                valid_result[i] = false;
+            }
+        },
+        offsets,
+        count);
 }
 
 PinWrapper<SpanBase>
@@ -2980,12 +3078,11 @@ ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
     auto it = text_lob_paths_.find(field_id);
-    if (it == text_lob_paths_.end()) {
-        throw SegcoreError(
-            ErrorCode::UnexpectedError,
-            fmt::format("LOB base path not found for TEXT field {}",
-                        field_id.get()));
-    }
+    AssertInfo(it != text_lob_paths_.end(),
+               "TEXT field {} has no LOB path. TEXT type requires StorageV3 "
+               "with manifest. segment_id={}",
+               field_id.get(),
+               id_);
     const auto& lob_base_path = it->second;
 
     std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
@@ -3109,11 +3206,79 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
                               id_,
                               field_id.get(),
                               "ChunkedSegmentSealedImpl::CreateTextIndex()");
-            column->BulkRawStringAt(
-                nullptr,
-                [&](std::string_view value, size_t offset, bool is_valid) {
-                    index->AddTextSealed(std::string(value), is_valid, offset);
-                });
+            if (field_meta.get_data_type() == DataType::TEXT) {
+                auto it = text_lob_paths_.find(field_id);
+                AssertInfo(it != text_lob_paths_.end(),
+                           "TEXT field {} has no LOB path. TEXT type "
+                           "requires StorageV3 with manifest. segment_id={}",
+                           field_id.get(),
+                           id_);
+
+                struct TextIndexEntry {
+                    size_t offset;
+                    bool is_valid;
+                    size_t text_index;
+                };
+                constexpr size_t kTextLobIndexBuildBatchSize = 1024;
+                std::vector<TextIndexEntry> entries;
+                std::vector<milvus_storage::lob_column::EncodedRef>
+                    encoded_refs;
+                auto flush_text_entries = [&]() {
+                    if (entries.empty()) {
+                        return;
+                    }
+                    auto texts = ReadTextLobBatch(it->second, encoded_refs);
+                    AssertInfo(texts.size() == encoded_refs.size(),
+                               "TEXT field {} LOB batch read returned {} "
+                               "texts for {} refs. segment_id={}",
+                               field_id.get(),
+                               texts.size(),
+                               encoded_refs.size(),
+                               id_);
+                    for (const auto& entry : entries) {
+                        if (!entry.is_valid) {
+                            index->AddNullSealed(entry.offset);
+                            continue;
+                        }
+                        index->AddTextSealed(
+                            texts[entry.text_index], true, entry.offset);
+                    }
+                    entries.clear();
+                    encoded_refs.clear();
+                    CheckCancellation(
+                        op_ctx,
+                        id_,
+                        field_id.get(),
+                        "ChunkedSegmentSealedImpl::CreateTextIndex()");
+                };
+                column->BulkRawStringAt(
+                    nullptr,
+                    [&](std::string_view value, size_t offset, bool is_valid) {
+                        if (!is_valid) {
+                            entries.push_back({offset, false, 0});
+                            if (entries.size() >= kTextLobIndexBuildBatchSize) {
+                                flush_text_entries();
+                            }
+                            return;
+                        }
+                        entries.push_back({offset, true, encoded_refs.size()});
+                        encoded_refs.push_back(
+                            MakeTextLobEncodedRef(value.data(), value.size()));
+                        if (encoded_refs.size() >=
+                                kTextLobIndexBuildBatchSize ||
+                            entries.size() >= kTextLobIndexBuildBatchSize) {
+                            flush_text_entries();
+                        }
+                    });
+                flush_text_entries();
+            } else {
+                column->BulkRawStringAt(
+                    nullptr,
+                    [&](std::string_view value, size_t offset, bool is_valid) {
+                        index->AddTextSealed(
+                            std::string(value), is_valid, offset);
+                    });
+            }
         } else {  // fetch raw data from index.
             auto field_index_iter =
                 scalar_indexings_.withRLock([&](auto& mapping) {

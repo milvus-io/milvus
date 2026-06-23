@@ -54,11 +54,10 @@ TextColumnCache::GetOrCreateReader(
 
     auto reader_result = CreateLobColumnReader(fs, config);
     if (!reader_result.ok()) {
-        throw SegcoreError(
-            ErrorCode::UnexpectedError,
-            fmt::format("Failed to create LobColumnReader for {}: {}",
-                        lob_base_path,
-                        reader_result.status().message()));
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to create LobColumnReader for {}: {}",
+                  lob_base_path,
+                  reader_result.status().message());
     }
 
     auto reader = std::shared_ptr<LobColumnReader>(
@@ -91,21 +90,20 @@ TextColumnCache::ReadText(const std::string& lob_base_path,
     }
 
     if (ref_size != LOB_REFERENCE_SIZE) {
-        throw SegcoreError(
-            ErrorCode::UnexpectedError,
-            fmt::format("Invalid LOB reference size: {}, expected: {}",
-                        ref_size,
-                        LOB_REFERENCE_SIZE));
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Invalid LOB reference size: {}, expected: {}",
+                  ref_size,
+                  LOB_REFERENCE_SIZE);
     }
 
     auto reader = GetOrCreateReader(lob_base_path, fs, properties);
 
     auto result = reader->ReadText(encoded_ref, ref_size);
     if (!result.ok()) {
-        throw SegcoreError(ErrorCode::UnexpectedError,
-                           fmt::format("Failed to read text from {}: {}",
-                                       lob_base_path,
-                                       result.status().message()));
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to read text from {}: {}",
+                  lob_base_path,
+                  result.status().message());
     }
 
     return std::move(result).ValueOrDie();
@@ -147,11 +145,10 @@ TextColumnCache::ReadBatch(const std::string& lob_base_path,
 
         auto batch_result = reader->ReadBatch(pending_refs);
         if (!batch_result.ok()) {
-            throw SegcoreError(
-                ErrorCode::UnexpectedError,
-                fmt::format("Failed to read text batch from {}: {}",
-                            lob_base_path,
-                            batch_result.status().message()));
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Failed to read text batch from {}: {}",
+                      lob_base_path,
+                      batch_result.status().message());
         }
 
         auto texts = std::move(batch_result).ValueOrDie();
@@ -201,11 +198,10 @@ TextColumnCache::ReadBatchInto(
 
         auto batch_result = reader->ReadBatch(pending_refs);
         if (!batch_result.ok()) {
-            throw SegcoreError(
-                ErrorCode::UnexpectedError,
-                fmt::format("Failed to read text batch from {}: {}",
-                            lob_base_path,
-                            batch_result.status().message()));
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Failed to read text batch from {}: {}",
+                      lob_base_path,
+                      batch_result.status().message());
         }
 
         auto texts = std::move(batch_result).ValueOrDie();

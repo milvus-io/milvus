@@ -319,6 +319,7 @@ proxy:
     timeTick:
       bufSize: 512 # The maximum number of messages can be buffered in the timeTick message stream of the proxy when producing messages.
   maxNameLength: 255 # The maximum length of the name or alias that can be created in Milvus, including the collection name, collection alias, partition name, and field name.
+  maxCollectionDescriptionLength: 1024 # The maximum byte length of a collection description accepted by CreateCollection and AlterCollection. Existing collection metadata is not revalidated, but restore or replication flows that recreate a collection through CreateCollection must satisfy this limit or raise it first.
   maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
@@ -994,6 +995,7 @@ common:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
+    enableGrowingSourceFlush: true # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

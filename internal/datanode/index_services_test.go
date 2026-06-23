@@ -532,11 +532,14 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			err = merr.Error(resp.GetStatus())
 			s.NoError(err)
 			s.Equal(1, len(resp.GetAnalyzeJobResults().GetResults()))
-			if resp.GetAnalyzeJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
-				s.NotEmpty(resp.GetAnalyzeJobResults().GetResults()[0].GetCentroidsFile())
+			result := resp.GetAnalyzeJobResults().GetResults()[0]
+			if result.GetState() == indexpb.JobState_JobStateFinished {
+				centroidsFile := result.GetCentroidsFile()
+				s.NotEmpty(centroidsFile)
+				s.Contains(centroidsFile, "/"+common.Centroids)
 				break
 			}
-			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetAnalyzeJobResults().GetResults()[0].GetState())
+			s.Equal(indexpb.JobState_JobStateInProgress, result.GetState())
 			time.Sleep(time.Second)
 		}
 

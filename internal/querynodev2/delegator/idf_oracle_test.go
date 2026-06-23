@@ -262,6 +262,18 @@ func (suite *IDFOracleSuite) TestGrow() {
 	suite.Equal(int64(2), suite.idfOracle.current.NumRow())
 }
 
+func (suite *IDFOracleSuite) TestRegisterGrowingClonesStats() {
+	stats := suite.genStats(1, 2)
+
+	suite.idfOracle.RegisterGrowing(1, stats)
+	stats[102].Append(map[uint32]float32{2: 1})
+
+	registered, ok := suite.idfOracle.growing[1]
+	suite.True(ok)
+	suite.Equal(int64(1), registered.bm25Stats[102].NumRow())
+	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+}
+
 func (suite *IDFOracleSuite) TestStats() {
 	stats := newBm25Stats([]*schemapb.FunctionSchema{{
 		Type:           schemapb.FunctionType_BM25,

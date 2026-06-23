@@ -18,6 +18,9 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -58,9 +61,156 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
+
+namespace {
+
+uint64_t
+ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
+                                int32_t scalar_version) {
+    if (index_size_in_bytes == 0) {
+        return 0;
+    }
+    if (scalar_version < 3) {
+        return index_size_in_bytes;
+    }
+    return std::min<uint64_t>(index_size_in_bytes,
+                              milvus::storage::EntryStreamMaxTransientBytes());
+}
+
+uint64_t
+BitsetBytes(int64_t num_rows) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+    return (static_cast<uint64_t>(num_rows) + 7) / 8;
+}
+
+uint64_t
+AlignUp(uint64_t size, uint64_t alignment) {
+    if (alignment == 0 || size == 0) {
+        return size;
+    }
+    if (size > std::numeric_limits<uint64_t>::max() - (alignment - 1)) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return ((size + alignment - 1) / alignment) * alignment;
+}
+
+uint64_t
+BitmapMmapFrozenBufferBytes(int64_t num_rows, uint64_t index_size_in_bytes) {
+    constexpr uint64_t kBitmapFrozenAlignment = 32;
+    auto dense_bitmap_bytes =
+        AlignUp(BitsetBytes(num_rows), kBitmapFrozenAlignment);
+    return std::max(dense_bitmap_bytes, index_size_in_bytes);
+}
+
+uint64_t
+SortLegacyAuxBytes(int64_t num_rows) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+    auto rows = static_cast<uint64_t>(num_rows);
+    if (rows > (std::numeric_limits<uint64_t>::max() - BitsetBytes(num_rows)) /
+                   sizeof(int32_t)) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return rows * sizeof(int32_t) + BitsetBytes(num_rows);
+}
+
+uint64_t
+MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+
+    auto rows = static_cast<uint64_t>(num_rows);
+    auto max_rows =
+        (std::numeric_limits<uint64_t>::max() / sizeof(uint32_t) - 1) /
+        arrays_per_row;
+    if (rows > max_rows) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+
+    // Fallback CSR has csr_offsets_ <= num_rows and csr_index_ <= num_rows + 1.
+    // During rebuild, fill_offsets also holds a temporary write_pos copy.
+    return (arrays_per_row * rows + 1) * sizeof(uint32_t);
+}
+
+std::string
+GetFileName(const std::string& path) {
+    auto pos = path.find_last_of('/');
+    return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+IndexType
+HybridInternalIndexTypeToIndexType(ScalarIndexType type) {
+    switch (type) {
+        case ScalarIndexType::BITMAP:
+            return BITMAP_INDEX_TYPE;
+        case ScalarIndexType::STLSORT:
+            return ASCENDING_SORT;
+        case ScalarIndexType::MARISA:
+            return MARISA_TRIE;
+        case ScalarIndexType::INVERTED:
+            return INVERTED_INDEX_TYPE;
+        default:
+            return "";
+    }
+}
+
+std::optional<ScalarIndexType>
+ResolveHybridInternalIndexType(
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& file_manager_context) {
+    if (index_files.empty() || !file_manager_context.Valid()) {
+        return std::nullopt;
+    }
+
+    auto load_priority = milvus::proto::common::LoadPriority::HIGH;
+    storage::MemFileManagerImpl file_manager(file_manager_context);
+
+    auto index_type_file =
+        std::find_if(index_files.begin(), index_files.end(), [](const auto& f) {
+            return GetFileName(f) == INDEX_TYPE;
+        });
+    if (index_type_file != index_files.end()) {
+        auto index_datas = file_manager.LoadIndexToMemory(
+            std::vector<std::string>{*index_type_file}, load_priority);
+        BinarySet binary_set;
+        AssembleIndexDatas(index_datas, binary_set);
+
+        auto index_type_buffer = binary_set.GetByName(INDEX_TYPE);
+        AssertInfo(index_type_buffer != nullptr,
+                   "index type file not found in hybrid index binary set");
+        uint8_t index_type;
+        memcpy(&index_type, index_type_buffer->data.get(), sizeof(uint8_t));
+        return static_cast<ScalarIndexType>(index_type);
+    }
+
+    if (index_files.size() == 1 && file_manager_context.fs != nullptr) {
+        auto input = file_manager.OpenInputStream(index_files[0]);
+        AssertInfo(input != nullptr,
+                   "failed to open packed hybrid index file: {}",
+                   index_files[0]);
+        auto reader = storage::IndexEntryReader::Open(input, input->Size());
+        AssertInfo(reader != nullptr,
+                   "failed to create IndexEntryReader for hybrid index file");
+        if (reader->HasMeta(INDEX_TYPE)) {
+            return static_cast<ScalarIndexType>(
+                reader->GetMeta<uint8_t>(INDEX_TYPE));
+        }
+    }
+
+    return std::nullopt;
+}
+
+}  // namespace
 
 template <typename T>
 ScalarIndexPtr<T>
@@ -152,8 +302,41 @@ IndexFactory::IndexLoadResource(
                                        index_version,
                                        index_size_in_bytes,
                                        index_params,
-                                       mmap_enable);
+                                       mmap_enable,
+                                       num_rows);
     }
+}
+
+LoadResourceRequest
+IndexFactory::IndexLoadResource(
+    DataType field_type,
+    DataType element_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim,
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& file_manager_context) {
+    if (milvus::IsVectorDataType(field_type)) {
+        return VecIndexLoadResource(field_type,
+                                    element_type,
+                                    index_version,
+                                    index_size_in_bytes,
+                                    index_params,
+                                    mmap_enable,
+                                    num_rows,
+                                    dim);
+    }
+    return ScalarIndexLoadResource(field_type,
+                                   index_version,
+                                   index_size_in_bytes,
+                                   index_params,
+                                   mmap_enable,
+                                   num_rows,
+                                   index_files,
+                                   file_manager_context);
 }
 
 LoadResourceRequest
@@ -366,7 +549,8 @@ IndexFactory::ScalarIndexLoadResource(
     IndexVersion index_version,
     uint64_t index_size_in_bytes,
     const std::map<std::string, std::string>& index_params,
-    bool mmap_enable) {
+    bool mmap_enable,
+    int64_t num_rows) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -374,28 +558,58 @@ IndexFactory::ScalarIndexLoadResource(
     const std::string& index_type = index_type_it->second;
 
     knowhere::expected<knowhere::Resource> resource;
+    auto scalar_version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    auto stream_memory_overhead =
+        ScalarIndexStreamMemoryOverhead(index_size_in_bytes, scalar_version);
 
     LoadResourceRequest request{};
     request.has_raw_data = false;
 
     if (index_type == milvus::index::ASCENDING_SORT) {
-        request.final_memory_cost = index_size_in_bytes;
-        request.final_disk_cost = 0;
-        request.max_memory_cost = 2 * index_size_in_bytes;
-        request.max_disk_cost = 0;
+        // Old V3 sort files do not have idx_to_offsets and valid_bitset
+        // entries, so LoadEntries rebuilds them into heap memory.
+        auto legacy_aux_bytes = SortLegacyAuxBytes(num_rows);
+        if (mmap_enable) {
+            // V3 streaming: chunks streamed to disk + mmap. The index data is
+            // not heap-resident, but legacy metadata may be heap-resident.
+            auto resident_bytes = legacy_aux_bytes;
+            request.final_memory_cost = resident_bytes;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = resident_bytes + stream_memory_overhead;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            // V3 streaming: pre-allocate target, stream into it
+            request.final_memory_cost = index_size_in_bytes + legacy_aux_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost =
+                request.final_memory_cost + stream_memory_overhead;
+            request.max_disk_cost = 0;
+        }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
         if (mmap_enable) {
-            request.final_memory_cost = 0;
+            // V3 streaming: trie, str_ids, and persisted CSR are mmap'd.
+            // Old V3 files do not have CSR entries, so LoadEntries rebuilds
+            // CSR into heap vectors. Estimate a conservative legacy upper
+            // bound because resource estimation cannot inspect entries here.
+            auto legacy_csr_resident_bytes = MarisaLegacyCsrBytes(num_rows, 2);
+            auto legacy_csr_peak_bytes = MarisaLegacyCsrBytes(num_rows, 3);
+            request.final_memory_cost = legacy_csr_resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = index_size_in_bytes;
+            request.max_memory_cost =
+                legacy_csr_peak_bytes + stream_memory_overhead;
             request.max_disk_cost = index_size_in_bytes;
         } else {
+            // V3 streaming: trie via temp file + read, str_ids pre-allocated
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_in_bytes;
-            request.max_disk_cost = index_size_in_bytes;
+            request.max_memory_cost =
+                index_size_in_bytes + stream_memory_overhead;
+            request.max_disk_cost = index_size_in_bytes;  // trie temp file
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE ||
@@ -403,17 +617,26 @@ IndexFactory::ScalarIndexLoadResource(
                index_type == milvus::index::RTREE_INDEX_TYPE) {
         request.final_memory_cost = 0;
         request.final_disk_cost = index_size_in_bytes;
-        request.max_memory_cost = index_size_in_bytes;
+        request.max_memory_cost = stream_memory_overhead;
         request.max_disk_cost = index_size_in_bytes;
 
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
-            request.final_memory_cost = 0;
+            // V3 streaming: stream to temp file (mmap'd), then MMapIndexData
+            // converts one bitmap at a time to frozen format. The conversion
+            // still allocates a per-bitmap heap buffer, so reserve for the
+            // largest plausible bitmap in addition to stream buffers.
+            auto resident_bytes = BitsetBytes(num_rows);
+            auto frozen_buffer_bytes =
+                BitmapMmapFrozenBufferBytes(num_rows, index_size_in_bytes);
+            request.final_memory_cost = resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = index_size_in_bytes;
-            request.max_disk_cost = index_size_in_bytes;
+            request.max_memory_cost =
+                resident_bytes + stream_memory_overhead + frozen_buffer_bytes;
+            request.max_disk_cost = 2 * index_size_in_bytes;  // temp + final
         } else {
+            // V3 streaming: pre-allocate buffer + deserialize
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost = 2 * index_size_in_bytes;
@@ -434,6 +657,64 @@ IndexFactory::ScalarIndexLoadResource(
         return LoadResourceRequest{0, 0, 0, 0, false};
     }
     return request;
+}
+
+LoadResourceRequest
+IndexFactory::ScalarIndexLoadResource(
+    DataType field_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& file_manager_context) {
+    auto index_type_it = index_params.find("index_type");
+    AssertInfo(index_type_it != index_params.end(), "index type is empty");
+    if (index_type_it->second != milvus::index::HYBRID_INDEX_TYPE) {
+        return ScalarIndexLoadResource(field_type,
+                                       index_version,
+                                       index_size_in_bytes,
+                                       index_params,
+                                       mmap_enable,
+                                       num_rows);
+    }
+
+    try {
+        auto internal_index_type =
+            ResolveHybridInternalIndexType(index_files, file_manager_context);
+        if (internal_index_type.has_value()) {
+            auto resolved_index_type =
+                HybridInternalIndexTypeToIndexType(internal_index_type.value());
+            if (!resolved_index_type.empty()) {
+                auto resolved_params = index_params;
+                resolved_params["index_type"] = resolved_index_type;
+                auto request = ScalarIndexLoadResource(field_type,
+                                                       index_version,
+                                                       index_size_in_bytes,
+                                                       resolved_params,
+                                                       mmap_enable,
+                                                       num_rows);
+                LOG_INFO(
+                    "estimate hybrid scalar index load resource by internal "
+                    "index type: {}",
+                    resolved_index_type);
+                return request;
+            }
+        }
+    } catch (std::exception& e) {
+        LOG_WARN(
+            "failed to resolve hybrid scalar internal index type, fallback to "
+            "hybrid estimate: {}",
+            e.what());
+    }
+
+    return ScalarIndexLoadResource(field_type,
+                                   index_version,
+                                   index_size_in_bytes,
+                                   index_params,
+                                   mmap_enable,
+                                   num_rows);
 }
 
 IndexBasePtr
@@ -481,7 +762,8 @@ IndexFactory::CreatePrimitiveScalarIndex(
 
             // create string index
         case DataType::STRING:
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             auto& ngram_params = create_index_info.ngram_params;
             if (ngram_params.has_value()) {
                 return std::make_unique<NgramInvertedIndex>(
@@ -772,6 +1054,7 @@ IndexFactory::CreateScalarIndex(
         case DataType::DOUBLE:
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::TEXT:
         case DataType::TIMESTAMPTZ:
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);

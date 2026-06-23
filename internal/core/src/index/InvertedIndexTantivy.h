@@ -72,6 +72,10 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
             return TantivyDataType::Keyword;
         }
 
+        case proto::schema::DataType::Text: {
+            return TantivyDataType::Text;
+        }
+
         case proto::schema::DataType::JSON: {
             return TantivyDataType::JSON;
         }

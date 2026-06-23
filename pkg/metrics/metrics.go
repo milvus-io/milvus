@@ -121,6 +121,7 @@ const (
 	segmentLevelLabelName          = "segment_level"
 	segmentIsSortedLabelName       = "segment_is_sorted"
 	segmentStorageVersionLabelName = "segment_storage_version"
+	segmentFormatLabelName         = "segment_format"
 	usernameLabelName              = "username"
 	roleNameLabelName              = "role_name"
 	cacheNameLabelName             = "cache_name"

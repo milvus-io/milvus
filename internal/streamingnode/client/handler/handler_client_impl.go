@@ -150,6 +150,54 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 	return cps.([]*wal.ReplicateCheckpoint), nil
 }
 
+// PrepareReleaseManualFlush appends a normal ManualFlush and prepares local growing-source retention.
+func (hc *handlerClientImpl) PrepareReleaseManualFlush(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return false, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	logger := log.With(
+		zap.String("pchannel", pchannel),
+		zap.String("vchannel", vchannel),
+		zap.Int64("collectionID", collectionID),
+		zap.Int64s("releaseSegmentIDs", releaseSegmentIDs),
+		zap.String("handler", "prepare release manual flush"),
+	)
+	result, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+		if assign.Channel.AccessMode != types.AccessModeRW {
+			logger.Info("skip release manual flush prepare because channel is not RW",
+				zap.String("accessMode", assign.Channel.AccessMode.String()))
+			return false, nil
+		}
+
+		_, err := registry.GetLocalAvailableWAL(assign.Channel)
+		if err != nil {
+			if errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
+				status.AsStreamingError(err).IsWrongStreamingNode() {
+				logger.Info("skip release manual flush prepare because channel is not owned by local streaming node",
+					zap.Error(err))
+				return false, nil
+			}
+			return false, err
+		}
+
+		preparer, err := registry.GetLocalReleaseManualFlushPreparer()
+		if err != nil {
+			return false, err
+		}
+		return preparer.PrepareReleaseManualFlush(ctx, assign.Channel, collectionID, vchannel, releaseSegmentIDs)
+	})
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return false, nil
+	}
+	return result.(bool), nil
+}
+
 // GetWALMetricsIfLocal gets the metrics of the local wal.
 func (hc *handlerClientImpl) GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -293,6 +341,15 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 				return createResult, nil
 			}
 			logger.Warn("create handler failed", zap.Any("assignment", assign), zap.Error(err))
+
+			// Unrecoverable errors (e.g. replicate violation when the WAL is no longer
+			// a secondary cluster) won't change by retrying the same WAL role. Surface
+			// them immediately so callers get a typed error within RTT instead of
+			// retrying until their context deadline.
+			if status.AsStreamingError(err).IsUnrecoverable() {
+				logger.Warn("create handler failed with unrecoverable error, stop retrying", zap.Error(err))
+				return nil, err
+			}
 
 			// Check if the error is permanent failure until new assignment.
 			if isPermanentFailureUntilNewAssignment(err) {

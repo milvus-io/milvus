@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus
 
-go 1.25.10
+go 1.26.4
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
@@ -60,8 +60,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.62
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.23.0
 	github.com/bits-and-blooms/bitset v1.12.0
-	github.com/bytedance/mockey v1.4.4
-	github.com/bytedance/sonic v1.14.0
+	github.com/bytedance/mockey v1.4.6
+	github.com/bytedance/sonic v1.15.2
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cockroachdb/redact v1.1.3
 	github.com/google/uuid v1.6.0
@@ -69,6 +69,7 @@ require (
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.18
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260526093827-489331a5a41f
 	github.com/milvus-io/milvus/client/v2 v2.6.2
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
@@ -86,6 +87,7 @@ require (
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.8.0 // indirect
+	github.com/bytedance/gopkg v0.1.4 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/gopherjs/gopherjs v1.12.80 // indirect
@@ -135,7 +137,7 @@ require (
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
-	github.com/bytedance/sonic/loader v0.3.0 // indirect
+	github.com/bytedance/sonic/loader v0.5.1 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/casbin/govaluate v1.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

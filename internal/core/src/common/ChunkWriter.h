@@ -73,7 +73,7 @@ class ChunkWriterBase {
                         size_bits);
                 } else {
                     // have to append always-true bitmap due to arrow optimize this
-                    std::vector<uint8_t> null_bitmap(size_bits, 0xff);
+                    std::vector<uint8_t> null_bitmap((size_bits + 7) / 8, 0xff);
                     bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
                         null_bitmap.data(),
                         0,

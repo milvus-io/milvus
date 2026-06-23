@@ -447,6 +447,7 @@ func applyExternalCollectionSegmentUpdate(
 				incoming.GetLevel(),
 				incoming.GetIsSorted(),
 				incoming.GetStorageVersion(),
+				segmentMetricFormatLabel(segInfo),
 				incoming.GetNumOfRows(),
 			)
 

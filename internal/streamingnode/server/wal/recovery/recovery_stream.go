@@ -97,24 +97,26 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		if !segment.IsGrowing() {
 			continue
 		}
-		// Defensive filtering: skip GROWING segments whose parent vchannel does not exist
-		// or is not active, or whose partition has been dropped. This can happen due to
+		// Defensive filtering: skip recoverable segment assignments whose parent vchannel
+		// does not exist or is not active, or whose partition has been dropped. This can happen due to
 		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
 		// for dropped collections/partitions.
 		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
-			r.Logger().Warn("getSnapshot: skipping orphaned growing segment with non-active vchannel",
+			r.Logger().Warn("getSnapshot: skipping orphaned segment assignment with non-active vchannel",
 				zap.Int64("segmentID", segmentID),
 				zap.String("vchannel", segment.meta.Vchannel),
 				zap.Int64("collectionID", segment.meta.CollectionId),
+				zap.String("state", segment.meta.State.String()),
 			)
 			continue
 		}
 		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
-			r.Logger().Warn("getSnapshot: skipping orphaned growing segment with dropped partition",
+			r.Logger().Warn("getSnapshot: skipping orphaned segment assignment with dropped partition",
 				zap.Int64("segmentID", segmentID),
 				zap.String("vchannel", segment.meta.Vchannel),
 				zap.Int64("collectionID", segment.meta.CollectionId),
 				zap.Int64("partitionID", segment.meta.PartitionId),
+				zap.String("state", segment.meta.State.String()),
 			)
 			continue
 		}

@@ -11,7 +11,11 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <optional>
+#include <unordered_map>
 
 #include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
@@ -31,6 +35,12 @@ namespace fs = std::filesystem;
 
 class FlushGrowingSegmentTest : public ::testing::Test {
  protected:
+    struct ParsedBM25Stats {
+        std::unordered_map<uint32_t, int32_t> rows_with_token;
+        int64_t num_row = 0;
+        int64_t num_token = 0;
+    };
+
     void
     SetUp() override {
         // create a temporary directory for test output
@@ -127,6 +137,107 @@ class FlushGrowingSegmentTest : public ::testing::Test {
             EXPECT_EQ(column_group->format, format);
         }
     }
+
+    std::vector<std::string>
+    ManifestStatPaths(const std::string& segment_path,
+                      int64_t version,
+                      const std::string& stat_key) {
+        auto fs = GetDefaultArrowFileSystem();
+        EXPECT_NE(fs, nullptr);
+        if (!fs) {
+            return {};
+        }
+
+        auto txn_result = milvus_storage::api::transaction::Transaction::Open(
+            fs, segment_path, version);
+        EXPECT_TRUE(txn_result.ok()) << txn_result.status().ToString();
+        if (!txn_result.ok()) {
+            return {};
+        }
+        auto txn = std::move(txn_result).ValueOrDie();
+
+        auto manifest_result = txn->GetManifest();
+        EXPECT_TRUE(manifest_result.ok())
+            << manifest_result.status().ToString();
+        if (!manifest_result.ok()) {
+            return {};
+        }
+        auto manifest = manifest_result.ValueOrDie();
+        auto stats_it = manifest->stats().find(stat_key);
+        EXPECT_NE(stats_it, manifest->stats().end())
+            << "missing stat key " << stat_key;
+        if (stats_it == manifest->stats().end()) {
+            return {};
+        }
+        return stats_it->second.paths;
+    }
+
+    std::optional<ParsedBM25Stats>
+    ParseBM25StatsBlob(const uint8_t* data, size_t size) {
+        if (size < 20 || (size - 20) % 8 != 0) {
+            ADD_FAILURE() << "invalid BM25 stats blob size " << size;
+            return std::nullopt;
+        }
+
+        int32_t version = 0;
+        ParsedBM25Stats stats;
+        std::memcpy(&version, data, sizeof(version));
+        std::memcpy(&stats.num_row, data + 4, sizeof(stats.num_row));
+        std::memcpy(&stats.num_token, data + 12, sizeof(stats.num_token));
+        EXPECT_EQ(version, 0);
+        if (version != 0) {
+            return std::nullopt;
+        }
+
+        auto entries = (size - 20) / 8;
+        for (size_t i = 0; i < entries; i++) {
+            uint32_t token = 0;
+            int32_t row_count = 0;
+            std::memcpy(&token, data + 20 + i * 8, sizeof(token));
+            std::memcpy(&row_count, data + 20 + i * 8 + 4, sizeof(row_count));
+            stats.rows_with_token[token] += row_count;
+        }
+        return stats;
+    }
+
+    std::optional<ParsedBM25Stats>
+    ParseBM25StatsFromResult(const CFlushResult& result, FieldId field_id) {
+        for (size_t i = 0; i < result.num_bm25_stats; i++) {
+            if (result.bm25_field_ids[i] == field_id.get()) {
+                return ParseBM25StatsBlob(result.bm25_stats[i],
+                                          result.bm25_stats_sizes[i]);
+            }
+        }
+        ADD_FAILURE() << "missing BM25 stats for field " << field_id.get();
+        return std::nullopt;
+    }
+
+    std::optional<ParsedBM25Stats>
+    ReadBM25StatsFromFile(const std::string& path) {
+        auto fs = GetDefaultArrowFileSystem();
+        EXPECT_NE(fs, nullptr);
+        if (!fs) {
+            return std::nullopt;
+        }
+        auto input_result = fs->OpenInputFile(path);
+        EXPECT_TRUE(input_result.ok()) << input_result.status().ToString();
+        if (!input_result.ok()) {
+            return std::nullopt;
+        }
+        auto input = input_result.ValueOrDie();
+        auto size_result = input->GetSize();
+        EXPECT_TRUE(size_result.ok()) << size_result.status().ToString();
+        if (!size_result.ok()) {
+            return std::nullopt;
+        }
+        auto buffer_result = input->Read(size_result.ValueOrDie());
+        EXPECT_TRUE(buffer_result.ok()) << buffer_result.status().ToString();
+        if (!buffer_result.ok()) {
+            return std::nullopt;
+        }
+        auto buffer = buffer_result.ValueOrDie();
+        return ParseBM25StatsBlob(buffer->data(), buffer->size());
+    }
 };
 
 // test basic flush with scalar fields
@@ -163,7 +274,7 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -179,6 +290,75 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
 
     // cleanup
     FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushAllowsStaleReadVersionOverwrite) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField("i32_field", DataType::INT32);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    int N = 100;
+    auto dataset = DataGen(schema, N);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    std::string segment_path = test_dir_ + "/segment_stale_read_version";
+
+    CFlushConfig first_config{};
+    first_config.segment_path = segment_path.c_str();
+    first_config.read_version = -1;
+    first_config.retry_limit = 3;
+
+    CFlushResult first_result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, 50, &first_config, &first_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(first_result.num_rows, 50);
+    auto acknowledged_version = first_result.committed_version;
+
+    CFlushConfig orphan_config{};
+    orphan_config.segment_path = segment_path.c_str();
+    orphan_config.read_version = acknowledged_version;
+    orphan_config.retry_limit = 3;
+
+    CFlushResult orphan_result{};
+    status = FlushGrowingSegmentData(
+        segment.get(), 50, 75, &orphan_config, &orphan_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(orphan_result.num_rows, 25);
+    ASSERT_GT(orphan_result.committed_version, acknowledged_version);
+
+    CFlushConfig retry_config{};
+    retry_config.segment_path = segment_path.c_str();
+    retry_config.read_version = acknowledged_version;
+    retry_config.retry_limit = 3;
+
+    CFlushResult retry_result{};
+    status = FlushGrowingSegmentData(
+        segment.get(), 50, 100, &retry_config, &retry_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(retry_result.num_rows, 50);
+    ASSERT_GT(retry_result.committed_version, orphan_result.committed_version);
+
+    auto pk_datas = ReadFlushedFieldData(
+        segment_path, retry_result, pk_fid, DataType::INT64, false, 0);
+    int64_t total_rows = 0;
+    for (const auto& data : pk_datas) {
+        total_rows += data->get_num_rows();
+    }
+    EXPECT_EQ(total_rows, N);
+
+    FreeFlushResult(&first_result);
+    FreeFlushResult(&orphan_result);
+    FreeFlushResult(&retry_result);
 }
 
 // test explicit writer format in flush config
@@ -252,7 +432,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithVectorFields) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -296,7 +476,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithStringFields) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -342,7 +522,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPartialRange) {
     // flush only rows 20-50
     int start = 20;
     int end = 50;
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), start, end, &config, &result);
 
@@ -395,7 +575,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithTextColumnConfig) {
     config.num_text_columns = 1;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -440,7 +620,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithNullableFields) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -448,6 +628,756 @@ TEST_F(FlushGrowingSegmentTest, FlushWithNullableFields) {
     ASSERT_EQ(result.num_rows, N);
 
     // cleanup
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushOrdinaryFieldSemanticsRoundTrip) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+
+    DefaultValueType default_value;
+    default_value.set_int_data(42);
+    auto default_fid = schema->AddDebugFieldWithDefaultValue(
+        "default_i32", DataType::INT32, default_value);
+
+    auto nullable_str_fid =
+        schema->AddDebugField("nullable_str", DataType::VARCHAR, true);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto array_fid =
+        schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
+    auto geometry_fid =
+        schema->AddDebugField("geometry", DataType::GEOMETRY, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {100, 101, 102};
+    std::vector<int64_t> pks = {1000, 1001, 1002};
+    std::vector<std::string> nullable_strings = {"alpha", "", "gamma"};
+    bool nullable_string_valid[N] = {true, false, true};
+    std::vector<std::string> json_values = {
+        R"({"k":1,"nested":{"v":"a"}})", "", R"({"k":3,"array":[1,2]})"};
+    bool json_valid[N] = {true, false, true};
+
+    std::vector<ScalarFieldProto> array_values(N);
+    array_values[0].mutable_long_data()->add_data(1);
+    array_values[0].mutable_long_data()->add_data(2);
+    array_values[1].mutable_long_data()->add_data(3);
+    array_values[2].mutable_long_data()->add_data(4);
+    array_values[2].mutable_long_data()->add_data(5);
+    array_values[2].mutable_long_data()->add_data(6);
+
+    auto geos_ctx = GEOS_init_r();
+    std::vector<std::string> geometry_values;
+    geometry_values.emplace_back(
+        Geometry(geos_ctx, "POINT (1 2)").to_wkb_string());
+    geometry_values.emplace_back("");
+    geometry_values.emplace_back(
+        Geometry(geos_ctx, "POINT (3 4)").to_wkb_string());
+    GEOS_finish_r(geos_ctx);
+    bool geometry_valid[N] = {true, false, true};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(nullable_strings.data(),
+                            nullable_string_valid,
+                            N,
+                            (*schema)[nullable_str_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            json_values.data(), json_valid, N, (*schema)[json_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            array_values.data(), nullptr, N, (*schema)[array_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            geometry_values.data(), geometry_valid, N, (*schema)[geometry_fid])
+            .release());
+
+    // default_i32 is intentionally absent from insert_data. Growing insert must
+    // fill it exactly as the DataNode write-buffer path does.
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir_ + "/segment_semantics";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto default_datas = ReadFlushedFieldData(
+        segment_path, result, default_fid, DataType::INT32, true, 0);
+    ASSERT_EQ(default_datas.size(), 1);
+    ASSERT_EQ(default_datas[0]->get_num_rows(), N);
+    ASSERT_EQ(default_datas[0]->get_valid_rows(), N);
+    for (int i = 0; i < N; i++) {
+        ASSERT_TRUE(default_datas[0]->is_valid(i));
+        EXPECT_EQ(*static_cast<const int32_t*>(default_datas[0]->RawValue(i)),
+                  42);
+    }
+
+    auto string_datas = ReadFlushedFieldData(
+        segment_path, result, nullable_str_fid, DataType::VARCHAR, true, 0);
+    ASSERT_EQ(string_datas.size(), 1);
+    ASSERT_TRUE(string_datas[0]->is_valid(0));
+    EXPECT_FALSE(string_datas[0]->is_valid(1));
+    ASSERT_TRUE(string_datas[0]->is_valid(2));
+    EXPECT_EQ(*static_cast<const std::string*>(string_datas[0]->RawValue(0)),
+              "alpha");
+    EXPECT_EQ(*static_cast<const std::string*>(string_datas[0]->RawValue(2)),
+              "gamma");
+
+    auto json_datas = ReadFlushedFieldData(
+        segment_path, result, json_fid, DataType::JSON, true, 0);
+    ASSERT_EQ(json_datas.size(), 1);
+    ASSERT_TRUE(json_datas[0]->is_valid(0));
+    EXPECT_FALSE(json_datas[0]->is_valid(1));
+    ASSERT_TRUE(json_datas[0]->is_valid(2));
+    EXPECT_EQ(std::string(
+                  static_cast<const Json*>(json_datas[0]->RawValue(0))->data()),
+              json_values[0]);
+    EXPECT_EQ(std::string(
+                  static_cast<const Json*>(json_datas[0]->RawValue(2))->data()),
+              json_values[2]);
+
+    auto array_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            array_fid,
+                                            DataType::ARRAY,
+                                            false,
+                                            0,
+                                            DataType::INT64);
+    ASSERT_EQ(array_datas.size(), 1);
+    auto row0_array =
+        static_cast<const Array*>(array_datas[0]->RawValue(0))->output_data();
+    auto row2_array =
+        static_cast<const Array*>(array_datas[0]->RawValue(2))->output_data();
+    EXPECT_EQ(row0_array.long_data().data().size(), 2);
+    EXPECT_EQ(row0_array.long_data().data(0), 1);
+    EXPECT_EQ(row0_array.long_data().data(1), 2);
+    EXPECT_EQ(row2_array.long_data().data().size(), 3);
+    EXPECT_EQ(row2_array.long_data().data(0), 4);
+    EXPECT_EQ(row2_array.long_data().data(2), 6);
+
+    auto geometry_datas = ReadFlushedFieldData(
+        segment_path, result, geometry_fid, DataType::GEOMETRY, true, 0);
+    ASSERT_EQ(geometry_datas.size(), 1);
+    ASSERT_TRUE(geometry_datas[0]->is_valid(0));
+    EXPECT_FALSE(geometry_datas[0]->is_valid(1));
+    ASSERT_TRUE(geometry_datas[0]->is_valid(2));
+    EXPECT_EQ(*static_cast<const std::string*>(geometry_datas[0]->RawValue(0)),
+              geometry_values[0]);
+    EXPECT_EQ(*static_cast<const std::string*>(geometry_datas[0]->RawValue(2)),
+              geometry_values[2]);
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushTimestamptzPartialRangeRoundTrip) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto timestamptz_fid =
+        schema->AddDebugField("event_time", DataType::TIMESTAMPTZ, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 5;
+    std::vector<int64_t> row_ids = {0, 1, 2, 3, 4};
+    std::vector<Timestamp> timestamps = {100, 101, 102, 103, 104};
+    std::vector<int64_t> pks = {10, 11, 12, 13, 14};
+    std::vector<int64_t> event_times = {1700000000000,
+                                        1700000001000,
+                                        1700000002000,
+                                        1700000003000,
+                                        1700000004000};
+    bool event_time_valid[N] = {true, false, true, false, true};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            event_times.data(), event_time_valid, N, (*schema)[timestamptz_fid])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir_ + "/segment_timestamptz";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    constexpr int64_t start = 1;
+    constexpr int64_t end = 4;
+    auto status =
+        FlushGrowingSegmentData(segment.get(), start, end, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, end - start);
+
+    auto field_datas = ReadFlushedFieldData(
+        segment_path, result, timestamptz_fid, DataType::TIMESTAMPTZ, true, 0);
+    ASSERT_EQ(field_datas.size(), 1);
+    ASSERT_EQ(field_datas[0]->get_num_rows(), end - start);
+    EXPECT_FALSE(field_datas[0]->is_valid(0));
+    ASSERT_TRUE(field_datas[0]->is_valid(1));
+    EXPECT_EQ(*static_cast<const int64_t*>(field_datas[0]->RawValue(1)),
+              event_times[2]);
+    EXPECT_FALSE(field_datas[0]->is_valid(2));
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushNullableScalarTypesPartialRangeRoundTrip) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto bool_fid = schema->AddDebugField("bool_field", DataType::BOOL, true);
+    auto int8_fid = schema->AddDebugField("int8_field", DataType::INT8, true);
+    auto int16_fid =
+        schema->AddDebugField("int16_field", DataType::INT16, true);
+    auto int64_fid =
+        schema->AddDebugField("int64_field", DataType::INT64, true);
+    auto float_fid =
+        schema->AddDebugField("float_field", DataType::FLOAT, true);
+    auto double_fid =
+        schema->AddDebugField("double_field", DataType::DOUBLE, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 5;
+    std::vector<int64_t> row_ids = {0, 1, 2, 3, 4};
+    std::vector<Timestamp> timestamps = {100, 101, 102, 103, 104};
+    std::vector<int64_t> pks = {10, 11, 12, 13, 14};
+    bool bool_values[N] = {true, false, true, false, true};
+    std::vector<int8_t> int8_values = {-2, -1, 0, 1, 2};
+    std::vector<int16_t> int16_values = {-200, -100, 0, 100, 200};
+    std::vector<int64_t> int64_values = {1000, 1001, 1002, 1003, 1004};
+    std::vector<float> float_values = {1.25F, 2.5F, 3.75F, 4.5F, 5.25F};
+    std::vector<double> double_values = {10.25, 20.5, 30.75, 40.5, 50.25};
+    bool valid_data[N] = {true, false, true, false, true};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(bool_values, valid_data, N, (*schema)[bool_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            int8_values.data(), valid_data, N, (*schema)[int8_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            int16_values.data(), valid_data, N, (*schema)[int16_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            int64_values.data(), valid_data, N, (*schema)[int64_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            float_values.data(), valid_data, N, (*schema)[float_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            double_values.data(), valid_data, N, (*schema)[double_fid])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir_ + "/segment_nullable_scalars";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    constexpr int64_t start = 1;
+    constexpr int64_t end = 5;
+    auto status =
+        FlushGrowingSegmentData(segment.get(), start, end, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, end - start);
+
+    auto bool_datas = ReadFlushedFieldData(
+        segment_path, result, bool_fid, DataType::BOOL, true, 0);
+    ASSERT_EQ(bool_datas.size(), 1);
+    EXPECT_FALSE(bool_datas[0]->is_valid(0));
+    ASSERT_TRUE(bool_datas[0]->is_valid(1));
+    EXPECT_EQ(*static_cast<const bool*>(bool_datas[0]->RawValue(1)),
+              bool_values[2]);
+    EXPECT_FALSE(bool_datas[0]->is_valid(2));
+    ASSERT_TRUE(bool_datas[0]->is_valid(3));
+    EXPECT_EQ(*static_cast<const bool*>(bool_datas[0]->RawValue(3)),
+              bool_values[4]);
+
+    auto int8_datas = ReadFlushedFieldData(
+        segment_path, result, int8_fid, DataType::INT8, true, 0);
+    ASSERT_EQ(int8_datas.size(), 1);
+    ASSERT_TRUE(int8_datas[0]->is_valid(1));
+    EXPECT_EQ(*static_cast<const int8_t*>(int8_datas[0]->RawValue(1)),
+              int8_values[2]);
+    ASSERT_TRUE(int8_datas[0]->is_valid(3));
+    EXPECT_EQ(*static_cast<const int8_t*>(int8_datas[0]->RawValue(3)),
+              int8_values[4]);
+
+    auto int16_datas = ReadFlushedFieldData(
+        segment_path, result, int16_fid, DataType::INT16, true, 0);
+    ASSERT_EQ(int16_datas.size(), 1);
+    ASSERT_TRUE(int16_datas[0]->is_valid(1));
+    EXPECT_EQ(*static_cast<const int16_t*>(int16_datas[0]->RawValue(1)),
+              int16_values[2]);
+    ASSERT_TRUE(int16_datas[0]->is_valid(3));
+    EXPECT_EQ(*static_cast<const int16_t*>(int16_datas[0]->RawValue(3)),
+              int16_values[4]);
+
+    auto int64_datas = ReadFlushedFieldData(
+        segment_path, result, int64_fid, DataType::INT64, true, 0);
+    ASSERT_EQ(int64_datas.size(), 1);
+    ASSERT_TRUE(int64_datas[0]->is_valid(1));
+    EXPECT_EQ(*static_cast<const int64_t*>(int64_datas[0]->RawValue(1)),
+              int64_values[2]);
+    ASSERT_TRUE(int64_datas[0]->is_valid(3));
+    EXPECT_EQ(*static_cast<const int64_t*>(int64_datas[0]->RawValue(3)),
+              int64_values[4]);
+
+    auto float_datas = ReadFlushedFieldData(
+        segment_path, result, float_fid, DataType::FLOAT, true, 0);
+    ASSERT_EQ(float_datas.size(), 1);
+    ASSERT_TRUE(float_datas[0]->is_valid(1));
+    EXPECT_FLOAT_EQ(*static_cast<const float*>(float_datas[0]->RawValue(1)),
+                    float_values[2]);
+    ASSERT_TRUE(float_datas[0]->is_valid(3));
+    EXPECT_FLOAT_EQ(*static_cast<const float*>(float_datas[0]->RawValue(3)),
+                    float_values[4]);
+
+    auto double_datas = ReadFlushedFieldData(
+        segment_path, result, double_fid, DataType::DOUBLE, true, 0);
+    ASSERT_EQ(double_datas.size(), 1);
+    ASSERT_TRUE(double_datas[0]->is_valid(1));
+    EXPECT_DOUBLE_EQ(*static_cast<const double*>(double_datas[0]->RawValue(1)),
+                     double_values[2]);
+    ASSERT_TRUE(double_datas[0]->is_valid(3));
+    EXPECT_DOUBLE_EQ(*static_cast<const double*>(double_datas[0]->RawValue(3)),
+                     double_values[4]);
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_array_fid = schema->AddDebugVectorArrayField(
+        "emb_list", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 4;
+    constexpr int array_len = 3;
+    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir_ + "/segment_vector_array";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto field_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            vec_array_fid,
+                                            DataType::VECTOR_ARRAY,
+                                            false,
+                                            4,
+                                            DataType::VECTOR_FLOAT);
+    ASSERT_EQ(field_datas.size(), 1);
+    ASSERT_EQ(field_datas[0]->get_num_rows(), N);
+
+    auto expected = dataset.get_col<VectorFieldProto>(vec_array_fid);
+    for (int i = 0; i < N; i++) {
+        auto actual = static_cast<const milvus::VectorArray*>(
+            field_datas[0]->RawValue(i));
+        ASSERT_NE(actual, nullptr);
+        EXPECT_EQ(actual->length(), array_len);
+        EXPECT_EQ(actual->output_data().SerializeAsString(),
+                  expected[i].SerializeAsString());
+    }
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
+    struct Case {
+        DataType element_type;
+        int64_t dim;
+        std::string metric_type;
+        std::string segment_suffix;
+    };
+
+    std::vector<Case> cases = {
+        {DataType::VECTOR_BINARY, 16, "JACCARD", "binary"},
+        {DataType::VECTOR_FLOAT16, 4, "L2", "fp16"},
+        {DataType::VECTOR_BFLOAT16, 4, "L2", "bf16"},
+        {DataType::VECTOR_INT8, 4, "L2", "int8"},
+    };
+
+    for (const auto& test_case : cases) {
+        auto schema = std::make_shared<Schema>();
+        auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+        auto vec_array_fid =
+            schema->AddDebugVectorArrayField("emb_list",
+                                             test_case.element_type,
+                                             test_case.dim,
+                                             test_case.metric_type);
+        schema->set_primary_field_id(pk_fid);
+
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        ASSERT_NE(segment, nullptr);
+
+        constexpr int N = 4;
+        constexpr int array_len = 3;
+        auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+        segment->PreInsert(N);
+        segment->Insert(0,
+                        N,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+
+        CFlushConfig config{};
+        std::string segment_path =
+            test_dir_ + "/segment_vector_array_" + test_case.segment_suffix;
+        config.segment_path = segment_path.c_str();
+        config.read_version = -1;
+        config.retry_limit = 3;
+        config.text_field_ids = nullptr;
+        config.text_lob_paths = nullptr;
+        config.num_text_columns = 0;
+
+        CFlushResult result{};
+        auto status =
+            FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+        ASSERT_EQ(status.error_code, Success) << status.error_msg;
+        ASSERT_EQ(result.num_rows, N);
+
+        auto field_datas = ReadFlushedFieldData(segment_path,
+                                                result,
+                                                vec_array_fid,
+                                                DataType::VECTOR_ARRAY,
+                                                false,
+                                                test_case.dim,
+                                                test_case.element_type);
+        ASSERT_EQ(field_datas.size(), 1);
+        ASSERT_EQ(field_datas[0]->get_num_rows(), N);
+
+        auto expected = dataset.get_col<VectorFieldProto>(vec_array_fid);
+        for (int i = 0; i < N; i++) {
+            auto actual = static_cast<const milvus::VectorArray*>(
+                field_datas[0]->RawValue(i));
+            ASSERT_NE(actual, nullptr);
+            EXPECT_EQ(actual->length(), array_len);
+            EXPECT_EQ(actual->get_element_type(), test_case.element_type);
+            EXPECT_EQ(actual->output_data().SerializeAsString(),
+                      expected[i].SerializeAsString());
+        }
+
+        FreeFlushResult(&result);
+    }
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushStringAndTextRoundTrip) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto string_fid = schema->AddDebugField("str", DataType::STRING, true);
+    auto text_fid = schema->AddDebugField("text", DataType::TEXT, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+    std::vector<std::string> strings = {"plain-string", "", "tail-string"};
+    bool string_valid[N] = {true, false, true};
+    std::vector<std::string> texts = {
+        "short text", "", std::string(512, 'x') + "-tail"};
+    bool text_valid[N] = {true, false, true};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            strings.data(), string_valid, N, (*schema)[string_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(texts.data(), text_valid, N, (*schema)[text_fid])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir_ + "/segment_string_text";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto string_datas = ReadFlushedFieldData(
+        segment_path, result, string_fid, DataType::STRING, true, 0);
+    ASSERT_EQ(string_datas.size(), 1);
+    ASSERT_TRUE(string_datas[0]->is_valid(0));
+    EXPECT_FALSE(string_datas[0]->is_valid(1));
+    ASSERT_TRUE(string_datas[0]->is_valid(2));
+    EXPECT_EQ(*static_cast<const std::string*>(string_datas[0]->RawValue(0)),
+              strings[0]);
+    EXPECT_EQ(*static_cast<const std::string*>(string_datas[0]->RawValue(2)),
+              strings[2]);
+
+    auto text_datas = ReadFlushedFieldData(
+        segment_path, result, text_fid, DataType::TEXT, true, 0);
+    ASSERT_EQ(text_datas.size(), 1);
+    ASSERT_TRUE(text_datas[0]->is_valid(0));
+    EXPECT_FALSE(text_datas[0]->is_valid(1));
+    ASSERT_TRUE(text_datas[0]->is_valid(2));
+    EXPECT_EQ(*static_cast<const std::string*>(text_datas[0]->RawValue(0)),
+              texts[0]);
+    EXPECT_EQ(*static_cast<const std::string*>(text_datas[0]->RawValue(2)),
+              texts[2]);
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushArrayElementTypesRoundTrip) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto bool_array_fid =
+        schema->AddDebugField("bool_array", DataType::ARRAY, DataType::BOOL);
+    auto int_array_fid =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT32);
+    auto string_array_fid = schema->AddDebugField(
+        "string_array", DataType::ARRAY, DataType::VARCHAR);
+    auto double_array_fid = schema->AddDebugField(
+        "double_array", DataType::ARRAY, DataType::DOUBLE, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> pks = {100, 101, 102};
+    std::vector<ScalarFieldProto> bool_arrays(N);
+    bool_arrays[0].mutable_bool_data()->add_data(true);
+    bool_arrays[0].mutable_bool_data()->add_data(false);
+    bool_arrays[1].mutable_bool_data()->add_data(false);
+    bool_arrays[2].mutable_bool_data()->add_data(true);
+    bool_arrays[2].mutable_bool_data()->add_data(true);
+
+    std::vector<ScalarFieldProto> int_arrays(N);
+    int_arrays[0].mutable_int_data()->add_data(1);
+    int_arrays[0].mutable_int_data()->add_data(2);
+    int_arrays[1].mutable_int_data()->add_data(3);
+    int_arrays[2].mutable_int_data()->add_data(4);
+    int_arrays[2].mutable_int_data()->add_data(5);
+
+    std::vector<ScalarFieldProto> string_arrays(N);
+    string_arrays[0].mutable_string_data()->add_data("a");
+    string_arrays[0].mutable_string_data()->add_data("b");
+    string_arrays[1].mutable_string_data()->add_data("c");
+    string_arrays[2].mutable_string_data()->add_data("d");
+    string_arrays[2].mutable_string_data()->add_data("e");
+
+    std::vector<ScalarFieldProto> double_arrays(N);
+    double_arrays[0].mutable_double_data()->add_data(1.25);
+    double_arrays[0].mutable_double_data()->add_data(2.5);
+    double_arrays[1].mutable_double_data()->add_data(3.75);
+    double_arrays[2].mutable_double_data()->add_data(4.5);
+    bool double_valid[N] = {true, false, true};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            bool_arrays.data(), nullptr, N, (*schema)[bool_array_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            int_arrays.data(), nullptr, N, (*schema)[int_array_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            string_arrays.data(), nullptr, N, (*schema)[string_array_fid])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(
+            double_arrays.data(), double_valid, N, (*schema)[double_array_fid])
+            .release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CFlushConfig config{};
+    std::string segment_path = test_dir_ + "/segment_arrays";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto bool_datas = ReadFlushedFieldData(segment_path,
+                                           result,
+                                           bool_array_fid,
+                                           DataType::ARRAY,
+                                           false,
+                                           0,
+                                           DataType::BOOL);
+    ASSERT_EQ(bool_datas.size(), 1);
+    EXPECT_EQ(static_cast<const Array*>(bool_datas[0]->RawValue(0))
+                  ->output_data()
+                  .SerializeAsString(),
+              bool_arrays[0].SerializeAsString());
+    EXPECT_EQ(static_cast<const Array*>(bool_datas[0]->RawValue(2))
+                  ->output_data()
+                  .SerializeAsString(),
+              bool_arrays[2].SerializeAsString());
+
+    auto int_datas = ReadFlushedFieldData(segment_path,
+                                          result,
+                                          int_array_fid,
+                                          DataType::ARRAY,
+                                          false,
+                                          0,
+                                          DataType::INT32);
+    ASSERT_EQ(int_datas.size(), 1);
+    EXPECT_EQ(static_cast<const Array*>(int_datas[0]->RawValue(0))
+                  ->output_data()
+                  .SerializeAsString(),
+              int_arrays[0].SerializeAsString());
+    EXPECT_EQ(static_cast<const Array*>(int_datas[0]->RawValue(2))
+                  ->output_data()
+                  .SerializeAsString(),
+              int_arrays[2].SerializeAsString());
+
+    auto string_datas = ReadFlushedFieldData(segment_path,
+                                             result,
+                                             string_array_fid,
+                                             DataType::ARRAY,
+                                             false,
+                                             0,
+                                             DataType::VARCHAR);
+    ASSERT_EQ(string_datas.size(), 1);
+    EXPECT_EQ(static_cast<const Array*>(string_datas[0]->RawValue(0))
+                  ->output_data()
+                  .SerializeAsString(),
+              string_arrays[0].SerializeAsString());
+    EXPECT_EQ(static_cast<const Array*>(string_datas[0]->RawValue(2))
+                  ->output_data()
+                  .SerializeAsString(),
+              string_arrays[2].SerializeAsString());
+
+    auto double_datas = ReadFlushedFieldData(segment_path,
+                                             result,
+                                             double_array_fid,
+                                             DataType::ARRAY,
+                                             true,
+                                             0,
+                                             DataType::DOUBLE);
+    ASSERT_EQ(double_datas.size(), 1);
+    ASSERT_TRUE(double_datas[0]->is_valid(0));
+    EXPECT_FALSE(double_datas[0]->is_valid(1));
+    ASSERT_TRUE(double_datas[0]->is_valid(2));
+    EXPECT_EQ(static_cast<const Array*>(double_datas[0]->RawValue(0))
+                  ->output_data()
+                  .SerializeAsString(),
+              double_arrays[0].SerializeAsString());
+    EXPECT_EQ(static_cast<const Array*>(double_datas[0]->RawValue(2))
+                  ->output_data()
+                  .SerializeAsString(),
+              double_arrays[2].SerializeAsString());
+
     FreeFlushResult(&result);
 }
 
@@ -489,7 +1419,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -557,7 +1487,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -584,6 +1514,150 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
               std::vector<int8>({5, 6, 7, 8}));
 
     FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
+    struct Case {
+        DataType data_type;
+        int64_t dim;
+        std::string metric_type;
+        std::string segment_suffix;
+    };
+
+    std::vector<Case> cases = {
+        {DataType::VECTOR_BINARY, 16, "JACCARD", "binary"},
+        {DataType::VECTOR_FLOAT16, 2, "L2", "fp16"},
+        {DataType::VECTOR_BFLOAT16, 2, "L2", "bf16"},
+    };
+
+    for (const auto& test_case : cases) {
+        auto schema = std::make_shared<Schema>();
+        auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+        auto vec_fid = schema->AddDebugField("vec",
+                                             test_case.data_type,
+                                             test_case.dim,
+                                             test_case.metric_type,
+                                             true);
+        schema->set_primary_field_id(pk_fid);
+
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        ASSERT_NE(segment, nullptr);
+
+        constexpr int N = 3;
+        std::vector<int64_t> row_ids = {0, 1, 2};
+        std::vector<Timestamp> timestamps = {10, 11, 12};
+        std::vector<int64_t> pks = {100, 101, 102};
+        bool valid_data[N] = {true, false, true};
+
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        insert_data->set_num_rows(N);
+        auto pk_array =
+            CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
+        insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+
+        std::vector<uint8_t> binary_vectors = {0x01, 0x02, 0xA0, 0xB0};
+        std::vector<float16> fp16_vectors = {1, 2, 3, 4};
+        std::vector<bfloat16> bf16_vectors = {5, 6, 7, 8};
+        const void* vector_data = nullptr;
+        switch (test_case.data_type) {
+            case DataType::VECTOR_BINARY:
+                vector_data = binary_vectors.data();
+                break;
+            case DataType::VECTOR_FLOAT16:
+                vector_data = fp16_vectors.data();
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                vector_data = bf16_vectors.data();
+                break;
+            default:
+                FAIL() << "unexpected vector type";
+        }
+
+        auto vec_array = CreateVectorDataArrayFrom(
+            vector_data, valid_data, N, 2, (*schema)[vec_fid]);
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+        segment->PreInsert(N);
+        segment->Insert(
+            0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+        CFlushConfig config{};
+        std::string segment_path =
+            test_dir_ + "/segment_nullable_" + test_case.segment_suffix;
+        config.segment_path = segment_path.c_str();
+        config.read_version = -1;
+        config.retry_limit = 3;
+        config.text_field_ids = nullptr;
+        config.text_lob_paths = nullptr;
+        config.num_text_columns = 0;
+
+        CFlushResult result{};
+        auto status =
+            FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+        ASSERT_EQ(status.error_code, Success) << status.error_msg;
+        ASSERT_EQ(result.num_rows, N);
+
+        auto field_datas = ReadFlushedFieldData(segment_path,
+                                                result,
+                                                vec_fid,
+                                                test_case.data_type,
+                                                true,
+                                                test_case.dim);
+        ASSERT_EQ(field_datas.size(), 1);
+        auto field_data = field_datas[0];
+        ASSERT_EQ(field_data->get_num_rows(), N);
+        ASSERT_EQ(field_data->get_valid_rows(), 2);
+        ASSERT_TRUE(field_data->is_valid(0));
+        EXPECT_FALSE(field_data->is_valid(1));
+        ASSERT_TRUE(field_data->is_valid(2));
+
+        switch (test_case.data_type) {
+            case DataType::VECTOR_BINARY: {
+                auto row0 =
+                    static_cast<const uint8_t*>(field_data->RawValue(0));
+                auto row2 =
+                    static_cast<const uint8_t*>(field_data->RawValue(2));
+                ASSERT_NE(row0, nullptr);
+                ASSERT_NE(row2, nullptr);
+                EXPECT_EQ(std::vector<uint8_t>(row0, row0 + 2),
+                          std::vector<uint8_t>({0x01, 0x02}));
+                EXPECT_EQ(std::vector<uint8_t>(row2, row2 + 2),
+                          std::vector<uint8_t>({0xA0, 0xB0}));
+                break;
+            }
+            case DataType::VECTOR_FLOAT16: {
+                auto row0 =
+                    static_cast<const float16*>(field_data->RawValue(0));
+                auto row2 =
+                    static_cast<const float16*>(field_data->RawValue(2));
+                ASSERT_NE(row0, nullptr);
+                ASSERT_NE(row2, nullptr);
+                EXPECT_EQ(std::vector<float16>(row0, row0 + 2),
+                          std::vector<float16>({1, 2}));
+                EXPECT_EQ(std::vector<float16>(row2, row2 + 2),
+                          std::vector<float16>({3, 4}));
+                break;
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                auto row0 =
+                    static_cast<const bfloat16*>(field_data->RawValue(0));
+                auto row2 =
+                    static_cast<const bfloat16*>(field_data->RawValue(2));
+                ASSERT_NE(row0, nullptr);
+                ASSERT_NE(row2, nullptr);
+                EXPECT_EQ(std::vector<bfloat16>(row0, row0 + 2),
+                          std::vector<bfloat16>({5, 6}));
+                EXPECT_EQ(std::vector<bfloat16>(row2, row2 + 2),
+                          std::vector<bfloat16>({7, 8}));
+                break;
+            }
+            default:
+                FAIL() << "unexpected vector type";
+        }
+
+        FreeFlushResult(&result);
+    }
 }
 
 TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
@@ -624,7 +1698,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -659,6 +1733,145 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
     FreeFlushResult(&result);
 }
 
+TEST_F(FlushGrowingSegmentTest, FlushBM25StatsRangeAndCompoundManifest) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto sparse_fid = schema->AddDebugField(
+        "bm25", DataType::VECTOR_SPARSE_U32_F32, 0, std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 4;
+    std::vector<int64_t> row_ids = {0, 1, 2, 3};
+    std::vector<Timestamp> timestamps = {10, 11, 12, 13};
+    std::vector<int64_t> pks = {100, 101, 102, 103};
+    auto sparse_vectors =
+        std::make_unique<knowhere::sparse::SparseRow<SparseValueType>[]>(N);
+
+    sparse_vectors[0] = knowhere::sparse::SparseRow<SparseValueType>(2);
+    sparse_vectors[0].set_at(0, 10, 2.0F);
+    sparse_vectors[0].set_at(1, 20, 1.0F);
+    sparse_vectors[1] = knowhere::sparse::SparseRow<SparseValueType>(1);
+    sparse_vectors[1].set_at(0, 10, 1.0F);
+    sparse_vectors[2] = knowhere::sparse::SparseRow<SparseValueType>(1);
+    sparse_vectors[2].set_at(0, 30, 4.0F);
+    sparse_vectors[3] = knowhere::sparse::SparseRow<SparseValueType>(2);
+    sparse_vectors[3].set_at(0, 10, 3.0F);
+    sparse_vectors[3].set_at(1, 30, 1.0F);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    auto sparse_array = CreateVectorDataArrayFrom(
+        sparse_vectors.get(), nullptr, N, N, (*schema)[sparse_fid]);
+    insert_data->mutable_fields_data()->AddAllocated(sparse_array.release());
+
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    std::string segment_path = test_dir_ + "/segment_bm25";
+    int64_t bm25_field_ids[] = {sparse_fid.get()};
+    int64_t first_bm25_stats_log_ids[] = {1001};
+    int64_t second_bm25_stats_log_ids[] = {1002};
+
+    CFlushConfig first_config{};
+    first_config.segment_path = segment_path.c_str();
+    first_config.read_version = -1;
+    first_config.retry_limit = 3;
+    first_config.bm25_field_ids = bm25_field_ids;
+    first_config.bm25_stats_log_ids = first_bm25_stats_log_ids;
+    first_config.num_bm25_fields = 1;
+    first_config.write_merged_bm25_stats = false;
+
+    CFlushResult first_result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, 2, &first_config, &first_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(first_result.num_rows, 2);
+    ASSERT_EQ(first_result.num_bm25_stats, 1);
+
+    auto first_stats = ParseBM25StatsFromResult(first_result, sparse_fid);
+    ASSERT_TRUE(first_stats.has_value());
+    EXPECT_EQ(first_stats->num_row, 2);
+    EXPECT_EQ(first_stats->num_token, 4);
+    EXPECT_EQ(first_stats->rows_with_token[10], 2);
+    EXPECT_EQ(first_stats->rows_with_token[20], 1);
+
+    CFlushConfig second_config{};
+    second_config.segment_path = segment_path.c_str();
+    second_config.read_version = first_result.committed_version;
+    second_config.retry_limit = 3;
+    second_config.bm25_field_ids = bm25_field_ids;
+    second_config.bm25_stats_log_ids = second_bm25_stats_log_ids;
+    second_config.num_bm25_fields = 1;
+    second_config.write_merged_bm25_stats = true;
+
+    CFlushResult second_result{};
+    status = FlushGrowingSegmentData(
+        segment.get(), 2, 4, &second_config, &second_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(second_result.num_rows, 2);
+    ASSERT_EQ(second_result.num_bm25_stats, 1);
+
+    auto second_stats = ParseBM25StatsFromResult(second_result, sparse_fid);
+    ASSERT_TRUE(second_stats.has_value());
+    EXPECT_EQ(second_stats->num_row, 2);
+    EXPECT_EQ(second_stats->num_token, 8);
+    EXPECT_EQ(second_stats->rows_with_token[10], 1);
+    EXPECT_EQ(second_stats->rows_with_token[30], 2);
+
+    auto stat_key = "bm25." + std::to_string(sparse_fid.get());
+    auto stat_paths = ManifestStatPaths(
+        segment_path, second_result.committed_version, stat_key);
+    ASSERT_EQ(stat_paths.size(), 3);
+
+    auto stats_prefix = "_stats/bm25." + std::to_string(sparse_fid.get()) + "/";
+    auto merged_rel_path = stats_prefix + "1";
+    auto merged_full_path = segment_path + "/" + merged_rel_path;
+    size_t merged_path_count = 0;
+    size_t delta_path_count = 0;
+    for (const auto& path : stat_paths) {
+        auto rel_path = path;
+        auto full_prefix = segment_path + "/";
+        if (rel_path.rfind(full_prefix, 0) == 0) {
+            rel_path = rel_path.substr(full_prefix.size());
+        }
+        ASSERT_TRUE(rel_path.rfind(stats_prefix, 0) == 0) << rel_path;
+        if (rel_path == merged_rel_path) {
+            merged_path_count++;
+        } else {
+            EXPECT_NE(rel_path.substr(stats_prefix.size()), "");
+            delta_path_count++;
+        }
+    }
+    EXPECT_EQ(merged_path_count, 1);
+    EXPECT_EQ(delta_path_count, 2);
+    auto has_merged_path = std::any_of(
+        stat_paths.begin(), stat_paths.end(), [&](const std::string& path) {
+            auto suffix = "/" + merged_rel_path;
+            return path == merged_rel_path || path == merged_full_path ||
+                   (path.size() >= suffix.size() &&
+                    path.compare(path.size() - suffix.size(),
+                                 suffix.size(),
+                                 suffix) == 0);
+        });
+    EXPECT_TRUE(has_merged_path);
+    auto merged_stats = ReadBM25StatsFromFile(merged_full_path);
+    ASSERT_TRUE(merged_stats.has_value());
+    EXPECT_EQ(merged_stats->num_row, 4);
+    EXPECT_EQ(merged_stats->num_token, 12);
+    EXPECT_EQ(merged_stats->rows_with_token[10], 3);
+    EXPECT_EQ(merged_stats->rows_with_token[20], 1);
+    EXPECT_EQ(merged_stats->rows_with_token[30], 2);
+
+    FreeFlushResult(&first_result);
+    FreeFlushResult(&second_result);
+}
+
 // test flush with empty range
 TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
     // create schema
@@ -691,7 +1904,7 @@ TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
     config.num_text_columns = 0;
 
     // flush empty range (start == end)
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 10, 10, &config, &result);
 
@@ -737,7 +1950,7 @@ TEST_F(FlushGrowingSegmentTest, FlushLargeDataMultipleChunks) {
     config.num_text_columns = 0;
 
     // flush all data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -794,7 +2007,7 @@ TEST_F(FlushGrowingSegmentTest, FlushMultipleTextColumns) {
     config.num_text_columns = 2;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -838,7 +2051,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithBoolField) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -886,7 +2099,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllNumericTypes) {
     config.num_text_columns = 0;
 
     // flush data
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -928,7 +2141,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         config.text_lob_paths = nullptr;
         config.num_text_columns = 0;
 
-        CFlushResult result;
+        CFlushResult result{};
         auto status =
             FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -967,7 +2180,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         config.text_lob_paths = nullptr;
         config.num_text_columns = 0;
 
-        CFlushResult result;
+        CFlushResult result{};
         auto status =
             FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1006,7 +2219,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         config.text_lob_paths = nullptr;
         config.num_text_columns = 0;
 
-        CFlushResult result;
+        CFlushResult result{};
         auto status =
             FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
 
@@ -1019,7 +2232,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
 
 // test FreeFlushResult with null manifest_path
 TEST_F(FlushGrowingSegmentTest, FreeFlushResultNull) {
-    CFlushResult result;
+    CFlushResult result{};
     result.manifest_path = nullptr;
     result.committed_version = 0;
     result.num_rows = 0;
@@ -1050,7 +2263,7 @@ TEST_F(FlushGrowingSegmentTest, FlushSealedSegmentFails) {
     config.num_text_columns = 0;
 
     // flush should fail for sealed segment
-    CFlushResult result;
+    CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, 10, &config, &result);
 

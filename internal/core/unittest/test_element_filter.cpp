@@ -2249,6 +2249,101 @@ TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
     ASSERT_EQ(retrieve_results->offset_size(), 0);
 }
 
+TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
+    auto schema = std::make_shared<Schema>();
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, true);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    SegcoreConfig config;
+    config.set_chunk_rows(1024);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
+
+    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    insert_record_proto->set_num_rows(3);
+
+    auto pk_data = insert_record_proto->add_fields_data();
+    pk_data->set_field_id(int64_fid.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(0);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(1);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(2);
+
+    auto array_data = insert_record_proto->add_fields_data();
+    array_data->set_field_id(int_array_fid.get());
+    array_data->set_type(proto::schema::DataType::Array);
+    array_data->add_valid_data(true);
+    array_data->add_valid_data(false);
+    array_data->add_valid_data(true);
+    auto arrays = array_data->mutable_scalars()->mutable_array_data();
+    arrays->set_element_type(proto::schema::DataType::Int32);
+    auto row0 = arrays->mutable_data()->Add();
+    row0->mutable_int_data()->mutable_data()->Add(10);
+    row0->mutable_int_data()->mutable_data()->Add(11);
+    auto row1 = arrays->mutable_data()->Add();
+    row1->mutable_int_data();
+    auto row2 = arrays->mutable_data()->Add();
+    row2->mutable_int_data()->mutable_data()->Add(20);
+
+    std::vector<int64_t> row_ids = {0, 1, 2};
+    std::vector<Timestamp> timestamps = {100, 101, 102};
+    auto offset = segment->PreInsert(3);
+    segment->Insert(offset,
+                    3,
+                    row_ids.data(),
+                    timestamps.data(),
+                    insert_record_proto.get());
+
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_is_count(false);
+    query->set_limit(10);
+
+    auto* element_filter =
+        query->mutable_predicates()->mutable_element_filter_expr();
+    element_filter->set_struct_name("structA");
+
+    auto* element_expr = element_filter->mutable_element_expr();
+    auto* elem_range = element_expr->mutable_unary_range_expr();
+    auto* elem_col = elem_range->mutable_column_info();
+    elem_col->set_field_id(int_array_fid.get());
+    elem_col->set_data_type(proto::schema::DataType::Int32);
+    elem_col->set_element_type(proto::schema::DataType::Int32);
+    elem_col->set_is_element_level(true);
+    elem_range->set_op(proto::plan::OpType::GreaterEqual);
+    elem_range->mutable_value()->set_int64_val(0);
+
+    plan_node.add_output_field_ids(int64_fid.get());
+    plan_node.add_output_field_ids(int_array_fid.get());
+
+    auto parser = ProtoParser(schema);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+
+    std::unique_ptr<proto::segcore::RetrieveResults> retrieve_results;
+    ASSERT_NO_THROW({
+        retrieve_results = segment->Retrieve(nullptr,
+                                             plan.get(),
+                                             1L << 63,
+                                             INT64_MAX,
+                                             false,
+                                             folly::CancellationToken(),
+                                             0,
+                                             0);
+    });
+
+    ASSERT_NE(retrieve_results, nullptr);
+    ASSERT_TRUE(retrieve_results->element_level());
+    ASSERT_EQ(retrieve_results->offset_size(), 2);
+    EXPECT_EQ(retrieve_results->offset(0), 0);
+    ASSERT_EQ(retrieve_results->element_indices(0).indices_size(), 2);
+    EXPECT_EQ(retrieve_results->element_indices(0).indices(0), 0);
+    EXPECT_EQ(retrieve_results->element_indices(0).indices(1), 1);
+    EXPECT_EQ(retrieve_results->offset(1), 2);
+    ASSERT_EQ(retrieve_results->element_indices(1).indices_size(), 1);
+    EXPECT_EQ(retrieve_results->element_indices(1).indices(0), 0);
+}
+
 TEST_P(ElementFilterEmptyDocHit, ElementLevelSearchWithZeroElements) {
     bool with_sealed = GetParam();
 

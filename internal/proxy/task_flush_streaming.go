@@ -52,19 +52,6 @@ func (t *flushTask) Execute(ctx context.Context) error {
 			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 		}
 
-		// Check if collection has TEXT fields — TEXT collections use deferred flush via WAL.
-		schemaInfo, err := globalMetaCache.GetCollectionSchema(ctx, t.DbName, collName)
-		if err != nil {
-			return err
-		}
-		hasTextFields := false
-		for _, field := range schemaInfo.GetFields() {
-			if field.GetDataType() == schemapb.DataType_Text {
-				hasTextFields = true
-				break
-			}
-		}
-
 		vchannels, err := t.chMgr.getVChannels(collID)
 		if err != nil {
 			return err
@@ -77,9 +64,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if !hasTextFields {
-				onFlushSegmentIDs = append(onFlushSegmentIDs, segmentIDs...)
-			}
+			onFlushSegmentIDs = append(onFlushSegmentIDs, segmentIDs...)
 		}
 
 		// Ask datacoord to get flushed segment infos.
@@ -108,11 +93,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		coll2Segments[collName] = &schemapb.LongArray{Data: onFlushSegmentIDs}
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
 		coll2SealTimes[collName] = timeOfSeal.Unix()
-		if hasTextFields {
-			coll2FlushTs[collName] = 0
-		} else {
-			coll2FlushTs[collName] = flushTs
-		}
+		coll2FlushTs[collName] = flushTs
 		channelCps = resp.GetChannelCps()
 	}
 	t.result = &milvuspb.FlushResponse{

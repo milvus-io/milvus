@@ -294,6 +294,45 @@ class FileWriter {
     io::WriteRateLimiter& rate_limiter_;
 };
 
+class PositionedFileWriter {
+ public:
+    explicit PositionedFileWriter(std::string filename,
+                                  size_t file_size,
+                                  io::Priority priority = io::Priority::MIDDLE);
+
+    ~PositionedFileWriter();
+
+    PositionedFileWriter(const PositionedFileWriter&) = delete;
+    PositionedFileWriter&
+    operator=(const PositionedFileWriter&) = delete;
+
+    void
+    WriteAt(size_t file_offset, const void* data, size_t size);
+
+    size_t
+    Finish();
+
+ private:
+    void
+    WriteBufferedAt(size_t file_offset, const void* data, size_t size);
+
+    void
+    WriteDirectAlignedAt(size_t file_offset, const void* data, size_t size);
+
+    void
+    Cleanup() noexcept;
+
+    int fd_{-1};
+    std::string filename_{""};
+    size_t file_size_{0};
+    FileWriter::WriteMode mode_{FileWriter::WriteMode::BUFFERED};
+    bool use_direct_io_{false};
+    bool finished_{false};
+
+    io::Priority priority_;
+    io::WriteRateLimiter& rate_limiter_;
+};
+
 class FileWriteWorkerPool {
  public:
     FileWriteWorkerPool() = default;

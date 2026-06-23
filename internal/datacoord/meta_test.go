@@ -27,6 +27,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -173,7 +174,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.NoError(err)
 
-		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0"), 1)
+		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0", "legacy"), 1)
 	})
 
 	suite.Run("ListIndexes_fail", func() {
@@ -464,9 +465,9 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 
 		// check mutation metrics - only input segments changed to Dropped
 		suite.EqualValues(-4, mutation.rowCountChange)
-		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"]
+		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
 		suite.EqualValues(-2, flushedUnsorted)
-		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"]
+		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
 		suite.EqualValues(2, droppedUnsorted)
 	})
 
@@ -525,10 +526,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(2, len(mutation.stateChange[datapb.SegmentLevel_L1.String()]))
 		suite.EqualValues(-4, mutation.rowCountChange)
 		suite.EqualValues(0, mutation.rowCountAccChange)
-		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"]
+		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
 		suite.EqualValues(-2, flushedUnsorted)
 
-		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"]
+		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
 		suite.EqualValues(3, droppedUnsorted)
 	})
 
@@ -600,10 +601,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(2, len(mutation.stateChange[datapb.SegmentLevel_L1.String()]))
 		suite.EqualValues(-2, mutation.rowCountChange)
 		suite.EqualValues(2, mutation.rowCountAccChange)
-		flushedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"]
+		flushedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
 		suite.EqualValues(-1, flushedCount)
 
-		droppedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"]
+		droppedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
 		suite.EqualValues(2, droppedCount)
 	})
 
@@ -3782,6 +3783,252 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		seg = meta.GetSegment(context.TODO(), 1)
 		assert.Equal(t, uint64(0), seg.GetCommitTimestamp())
 	})
+}
+
+func TestSegmentMetricFormatLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		segment *SegmentInfo
+		want    string
+	}{
+		{
+			name: "legacy storage without format",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV1,
+			}),
+			want: "legacy",
+		},
+		{
+			name: "storage v2 without format",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV2,
+			}),
+			want: "unknown",
+		},
+		{
+			name: "storage v3 parquet",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				Binlogs: []*datapb.FieldBinlog{
+					{Format: "parquet"},
+					{Format: "parquet"},
+				},
+			}),
+			want: "parquet",
+		},
+		{
+			name: "storage v3 external iceberg table",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				Binlogs: []*datapb.FieldBinlog{
+					{Format: "iceberg-table"},
+				},
+			}),
+			want: "iceberg-table",
+		},
+		{
+			name: "storage v3 external lance table",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				Binlogs: []*datapb.FieldBinlog{
+					{Format: "lance-table"},
+				},
+			}),
+			want: "lance-table",
+		},
+		{
+			name: "mixed column group formats",
+			segment: NewSegmentInfo(&datapb.SegmentInfo{
+				StorageVersion: storage.StorageV3,
+				Binlogs: []*datapb.FieldBinlog{
+					{Format: "parquet"},
+					{Format: "vortex"},
+				},
+			}),
+			want: "mixed",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, segmentMetricFormatLabel(test.segment))
+		})
+	}
+}
+
+func TestUpdateSegmentsInfoUpdatesSegmentFormatMetric(t *testing.T) {
+	metrics.DataCoordNumSegments.Reset()
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	defer metrics.DataCoordNumSegments.Reset()
+
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             1,
+		State:          commonpb.SegmentState_Flushed,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV3,
+	})
+	require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+	unknownLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "unknown"}
+	icebergLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "iceberg-table"}
+	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(unknownLabels...)))
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
+		[]*datapb.FieldBinlog{
+			{
+				FieldID:     100,
+				ChildFields: []int64{100},
+				Format:      "iceberg-table",
+				Binlogs: []*datapb.Binlog{
+					{LogID: 10, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
+				},
+			},
+		},
+		nil,
+		nil,
+		nil,
+	))
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(0), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(unknownLabels...)))
+	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(icebergLabels...)))
+}
+
+func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricToMixed(t *testing.T) {
+	metrics.DataCoordNumSegments.Reset()
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	defer metrics.DataCoordNumSegments.Reset()
+
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             1,
+		State:          commonpb.SegmentState_Flushed,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV3,
+	})
+	require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+	unknownLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "unknown"}
+	mixedLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), segmentMetricFormatMixed}
+	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(unknownLabels...)))
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
+		[]*datapb.FieldBinlog{
+			{
+				FieldID:     100,
+				ChildFields: []int64{100},
+				Format:      "parquet",
+				Binlogs: []*datapb.Binlog{
+					{LogID: 10, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
+				},
+			},
+			{
+				FieldID:     101,
+				ChildFields: []int64{101},
+				Format:      "vortex",
+				Binlogs: []*datapb.Binlog{
+					{LogID: 11, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
+				},
+			},
+		},
+		nil,
+		nil,
+		nil,
+	))
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(0), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(unknownLabels...)))
+	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(mixedLabels...)))
+}
+
+func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricWithStateChange(t *testing.T) {
+	metrics.DataCoordNumSegments.Reset()
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	defer metrics.DataCoordNumSegments.Reset()
+
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             1,
+		State:          commonpb.SegmentState_Growing,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV3,
+	})
+	require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+	growingUnknownLabels := []string{commonpb.SegmentState_Growing.String(), datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), segmentMetricFormatUnknown}
+	flushedUnknownLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), segmentMetricFormatUnknown}
+	flushedLanceLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "lance-table"}
+	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(growingUnknownLabels...)))
+
+	err = meta.UpdateSegmentsInfo(context.TODO(),
+		UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
+		AddBinlogsOperator(1,
+			[]*datapb.FieldBinlog{
+				{
+					FieldID:     100,
+					ChildFields: []int64{100},
+					Format:      "lance-table",
+					Binlogs: []*datapb.Binlog{
+						{LogID: 10, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
+					},
+				},
+			},
+			nil,
+			nil,
+			nil,
+		),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(0), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(growingUnknownLabels...)))
+	assert.Equal(t, float64(0), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(flushedUnknownLabels...)))
+	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(flushedLanceLabels...)))
+}
+
+func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricWithBinlogsBeforeStateChange(t *testing.T) {
+	metrics.DataCoordNumSegments.Reset()
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	defer metrics.DataCoordNumSegments.Reset()
+
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             1,
+		State:          commonpb.SegmentState_Importing,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV3,
+		NumOfRows:      100,
+	})
+	require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+	importingUnknownLabels := []string{commonpb.SegmentState_Importing.String(), datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), segmentMetricFormatUnknown}
+	importingParquetLabels := []string{commonpb.SegmentState_Importing.String(), datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "parquet"}
+	flushedParquetLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "parquet"}
+	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(importingUnknownLabels...)))
+
+	err = meta.UpdateSegmentsInfo(context.TODO(),
+		UpdateBinlogsOperator(1,
+			[]*datapb.FieldBinlog{
+				{
+					FieldID:     100,
+					ChildFields: []int64{100},
+					Format:      "parquet",
+					Binlogs: []*datapb.Binlog{
+						{LogID: 10, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
+					},
+				},
+			},
+			nil,
+			nil,
+			nil,
+		),
+		UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(0), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(importingUnknownLabels...)))
+	assert.Equal(t, float64(0), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(importingParquetLabels...)))
+	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(flushedParquetLabels...)))
 }
 
 func TestUpdateManifestVersion(t *testing.T) {

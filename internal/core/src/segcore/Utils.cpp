@@ -648,6 +648,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
             obj->mutable_data()->Add(data, data + count);
             break;
         }
+        case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
@@ -1025,6 +1026,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }
+            case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT: {
                 auto* mutable_src = src_field_data->mutable_scalars()

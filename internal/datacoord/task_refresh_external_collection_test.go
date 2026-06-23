@@ -690,7 +690,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
 
 		// Mock SaveExternalCollectionRefreshTask to return error
-		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshTask")).Return(errors.New("save failed")).Build()
+		mockSave := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save failed")).Build()
 		defer mockSave.UnPatch()
 
 		cluster := &stubCluster{}
@@ -725,7 +725,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
 
 		// Mock AllocN to return error
-		mockAllocN := mockey.Mock(mockey.GetMethod(alloc, "AllocN")).Return(int64(0), int64(0), errors.New("alloc batch failed")).Build()
+		mockAllocN := mockey.Mock((*stubAllocator).AllocN).Return(int64(0), int64(0), errors.New("alloc batch failed")).Build()
 		defer mockAllocN.UnPatch()
 
 		cluster := &stubCluster{}
@@ -805,7 +805,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// Mock CreateRefreshExternalCollectionTask to return error
-		mockCreate := mockey.Mock(mockey.GetMethod(cluster, "CreateRefreshExternalCollectionTask")).Return(errors.New("create task failed")).Build()
+		mockCreate := mockey.Mock((*stubCluster).CreateRefreshExternalCollectionTask).Return(errors.New("create task failed")).Build()
 		defer mockCreate.UnPatch()
 
 		task.CreateTaskOnWorker(1, cluster)
@@ -974,7 +974,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// Mock QueryRefreshExternalCollectionTask to return error
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(nil, errors.New("query failed")).Build()
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(nil, errors.New("query failed")).Build()
 		defer mockQuery.UnPatch()
 
 		task.QueryTaskOnWorker(cluster)
@@ -1061,7 +1061,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// Mock QueryRefreshExternalCollectionTask to return failed state
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State:      indexpb.JobState_JobStateFailed,
 			FailReason: "worker error",
 		}, nil).Build()
@@ -1126,7 +1126,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// Mock QueryRefreshExternalCollectionTask to return Finished with response
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State:        indexpb.JobState_JobStateFinished,
 			KeptSegments: []int64{1},
 			UpdatedSegments: []*datapb.SegmentInfo{
@@ -1186,7 +1186,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// Mock QueryRefreshExternalCollectionTask to return Finished
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateFinished,
 		}, nil).Build()
 		defer mockQuery.UnPatch()
@@ -1236,7 +1236,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// Worker reports JobStateNone — task hasn't been picked up yet.
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateNone,
 		}, nil).Build()
 		defer mockQuery.UnPatch()
@@ -1285,7 +1285,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// Worker reports JobStateInit — task accepted but not yet running.
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateInit,
 		}, nil).Build()
 		defer mockQuery.UnPatch()
@@ -1331,7 +1331,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// JobStateRetry is the only state still considered unexpected.
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateRetry,
 		}, nil).Build()
 		defer mockQuery.UnPatch()
@@ -1386,7 +1386,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 	cluster := &stubCluster{}
 
 	// Mock QueryRefreshExternalCollectionTask to return Finished with response
-	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+	mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 		State:        indexpb.JobState_JobStateFinished,
 		KeptSegments: []int64{},
 		UpdatedSegments: []*datapb.SegmentInfo{
@@ -1451,7 +1451,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_DelaysSegmentUpdateUnti
 	}
 
 	cluster := &stubCluster{}
-	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+	mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 		State:        indexpb.JobState_JobStateFinished,
 		KeptSegments: []int64{},
 		UpdatedSegments: []*datapb.SegmentInfo{
@@ -2005,7 +2005,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedValidateSourceF
 	cluster := &stubCluster{}
 
 	// Mock query to return Finished
-	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+	mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 		State: indexpb.JobState_JobStateFinished,
 	}, nil).Build()
 	defer mockQuery.UnPatch()
@@ -2054,7 +2054,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedPersistsResultW
 	cluster := &stubCluster{}
 
 	// Mock query to return Finished
-	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+	mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 		State:        indexpb.JobState_JobStateFinished,
 		KeptSegments: []int64{10},
 		UpdatedSegments: []*datapb.SegmentInfo{
@@ -2317,7 +2317,7 @@ func TestRefreshExternalCollectionTask_DropTaskOnWorker(t *testing.T) {
 		cluster := &stubCluster{}
 
 		// Mock DropRefreshExternalCollectionTask to return error
-		mockDrop := mockey.Mock(mockey.GetMethod(cluster, "DropRefreshExternalCollectionTask")).Return(errors.New("drop failed")).Build()
+		mockDrop := mockey.Mock((*stubCluster).DropRefreshExternalCollectionTask).Return(errors.New("drop failed")).Build()
 		defer mockDrop.UnPatch()
 
 		task.DropTaskOnWorker(cluster)

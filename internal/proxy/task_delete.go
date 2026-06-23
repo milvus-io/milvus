@@ -287,6 +287,9 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
+	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
+		return ErrWithLog(log, "TEXT field requires StorageV3", err)
+	}
 
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
 	if err != nil {

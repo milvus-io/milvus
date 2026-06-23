@@ -53,6 +53,7 @@ var (
 			segmentLevelLabelName,
 			segmentIsSortedLabelName,
 			segmentStorageVersionLabelName,
+			segmentFormatLabelName,
 		})
 
 	// DataCoordCollectionNum records the num of collections managed by DataCoord.

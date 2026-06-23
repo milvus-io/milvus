@@ -443,16 +443,19 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	// filter out loaded & loading segments
 	infos := make([]*querypb.SegmentLoadInfo, 0, len(segments))
 	for _, segment := range segments {
-		// Not loaded & loading & releasing.
-		if !loader.manager.Segment.Exist(segment.GetSegmentID(), segmentType) &&
-			!loader.loadingSegments.Contain(segment.GetSegmentID()) {
+		// Only active loaded segments should be skipped here. SegmentManager.Exist()
+		// also reports detached/on-releasing segments, which are no longer active
+		// and must be allowed to load again.
+		isLoaded := loader.manager.Segment.GetWithType(segment.GetSegmentID(), segmentType) != nil
+		isLoading := loader.loadingSegments.Contain(segment.GetSegmentID())
+		if !isLoaded && !isLoading {
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
 			log.Info("skip loaded/loading segment",
 				zap.Int64("segmentID", segment.GetSegmentID()),
-				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
-				zap.Bool("isLoading", loader.loadingSegments.Contain(segment.GetSegmentID())),
+				zap.Bool("isLoaded", isLoaded),
+				zap.Bool("isLoading", isLoading),
 			)
 		}
 	}
@@ -1149,9 +1152,11 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			if err := loader.loadBm25Stats(ctx, segment.ID(), segment.bm25Stats, bm25Paths); err != nil {
+			bm25Stats := make(map[int64]*storage.BM25Stats)
+			if err := loader.loadBm25Stats(ctx, segment.ID(), bm25Stats, bm25Paths); err != nil {
 				return err
 			}
+			segment.UpdateBM25Stats(bm25Stats)
 		}
 	}
 	return nil
@@ -2026,7 +2031,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
 
-			if vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(common.GetIndexType(fieldIndexInfo.IndexParams)) {
+			if gpuIndexRequiresGpu(fieldIndexInfo.IndexParams) {
 				fieldGpuMemorySize = append(fieldGpuMemorySize, estimateResult.MaxMemoryCost)
 			}
 
@@ -2425,6 +2430,37 @@ func getBinlogDataMemorySize(fieldBinlog *datapb.FieldBinlog) int64 {
 	}
 
 	return fieldSize
+}
+
+func gpuIndexRequiresGpu(indexParams []*commonpb.KeyValuePair) bool {
+	indexParamMap := funcutil.KeyValuePair2Map(indexParams)
+	indexType := indexParamMap[common.IndexTypeKey]
+
+	switch indexType {
+	case "GPU_CAGRA", "GPU_CUVS_CAGRA":
+	case "GPU_BRUTE_FORCE", "GPU_CUVS_BRUTE_FORCE",
+		"GPU_IVF_FLAT", "GPU_CUVS_IVF_FLAT",
+		"GPU_IVF_PQ", "GPU_CUVS_IVF_PQ":
+		return true
+	default:
+		return false
+	}
+
+	err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParamMap)
+	if err != nil {
+		log.Warn("failed to append prepare load params for gpu index resource check",
+			zap.String("indexType", indexType),
+			zap.Error(err))
+	}
+
+	adaptForCPU, ok := indexParamMap["adapt_for_cpu"]
+	if ok {
+		enabled, err := strconv.ParseBool(adaptForCPU)
+		if err == nil && enabled {
+			return false
+		}
+	}
+	return true
 }
 
 func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresholdPercentage float32) error {

@@ -76,6 +76,12 @@ func TestGenerateTargetPath(t *testing.T) {
 			wantErr:    false,
 		},
 		{
+			name:       "v3 bm25 stats numeric log id path",
+			sourcePath: "files/insert_log/111/222/333/_stats/bm25.100/12345",
+			wantPath:   "files/insert_log/444/555/666/_stats/bm25.100/12345",
+			wantErr:    false,
+		},
+		{
 			name:       "external component in regular binlog root is not external table",
 			sourcePath: "files/external/insert_log/111/222/333/100/log1.log",
 			wantPath:   "files/external/insert_log/444/555/666/100/log1.log",

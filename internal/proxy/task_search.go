@@ -178,6 +178,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Warn("get collection schema failed", zap.Error(err))
 		return err
 	}
+	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
+		return err
+	}
 
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
@@ -553,6 +556,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId())
 		if err != nil {
+			return err
+		}
+		if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType); err != nil {
 			return err
 		}
 
@@ -999,6 +1005,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, t.FieldId, placeholderType); err != nil {
+		return err
+	}
 
 	// For ArrayOfVector fields, the placeholder type decides the search semantics:
 	// - Element-level (plain vector placeholder): behaves like a normal single-vector
@@ -1213,6 +1222,31 @@ func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {
 	default:
 		return false
 	}
+}
+
+func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {
+	anns := plan.GetVectorAnns()
+	if anns == nil {
+		return nil
+	}
+	elementFilter := anns.GetPredicates().GetElementFilterExpr()
+	if elementFilter == nil {
+		return nil
+	}
+
+	field := typeutil.GetField(schema, fieldID)
+	parentStructName, isStructSubField := getStructParentFieldName(schema, fieldID)
+	_, isPlainVectorPlaceholderType := placeholderTypeToDataType[placeholderType]
+	if field != nil &&
+		field.GetDataType() == schemapb.DataType_ArrayOfVector &&
+		isStructSubField &&
+		parentStructName == elementFilter.GetStructName() &&
+		isPlainVectorPlaceholderType {
+		return nil
+	}
+
+	return merr.WrapErrParameterInvalidMsg(
+		"element_filter is only supported for element-level search on vector sub-fields of the same struct array; use MATCH_ANY/MATCH_* for row-level vector search")
 }
 
 func (t *searchTask) PostExecute(ctx context.Context) error {

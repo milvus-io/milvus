@@ -81,6 +81,44 @@ func TestSearchTaskFillResultSkipsTopksInsufficientForSearchAggregation(t *testi
 	require.False(t, task.resultSizeInsufficient)
 }
 
+func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	})
+
+	oldCache := globalMetaCache
+	t.Cleanup(func() {
+		globalMetaCache = oldCache
+	})
+
+	const (
+		dbName         = "db"
+		collectionName = "text_collection"
+		collectionID   = int64(100)
+	)
+	schema := newSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
+	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
+	globalMetaCache = cache
+
+	task := &searchTask{
+		ctx:           context.Background(),
+		SearchRequest: &internalpb.SearchRequest{},
+		request: &milvuspb.SearchRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		},
+	}
+	require.NoError(t, task.OnEnqueue())
+
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "TEXT field requires StorageV3")
+}
+
 func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 
@@ -6115,6 +6153,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 				Name:    "struct_array",
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 104, Name: "emb_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+					{FieldID: 105, Name: typeutil.ConcatStructFieldName("struct_array", "price"), DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 				},
 			},
 		},
@@ -6225,6 +6264,37 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
 	})
+
+	t.Run("regular vector with element_filter should fail", func(t *testing.T) {
+		task := makeTask("regular_vec", commonpb.PlaceholderType_FloatVector, plainParams, false, false)
+		task.request.Dsl = `element_filter(struct_array, $[price] > 10)`
+
+		err := task.initSearchRequest(ctx)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "element_filter is only supported")
+	})
+
+	t.Run("element-level struct vector with element_filter should succeed", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, false, false)
+		task.request.Dsl = `element_filter(struct_array, $[price] > 10)`
+
+		err := task.initSearchRequest(ctx)
+
+		assert.NoError(t, err)
+	})
+
+	t.Run("embedding-list struct vector with element_filter should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, plainParams, false, false)
+		task.request.Dsl = `element_filter(struct_array, $[price] > 10)`
+
+		err := task.initSearchRequest(ctx)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "element_filter is only supported")
+	})
 }
 
 // TestSearchTask_ArrayOfVectorHybridSearch verifies ArrayOfVector hybrid
@@ -6247,6 +6317,7 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 104, Name: "emb_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
 					{FieldID: 105, Name: "emb_text_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+					{FieldID: 106, Name: typeutil.ConcatStructFieldName("struct_array", "price"), DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 				},
 			},
 		},
@@ -6387,6 +6458,26 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 	t.Run("hybrid with element-level ArrayOfVector plain topK should succeed", func(t *testing.T) {
 		qt := buildElementHybridTask("emb_vec", "", false, "")
 		err := qt.initAdvancedSearchRequest(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("hybrid regular vector with element_filter should fail", func(t *testing.T) {
+		qt := buildHybridTaskWithMetric("regular_vec", metric.L2, commonpb.PlaceholderType_FloatVector, "", false, "")
+		qt.request.SubReqs[0].Dsl = `element_filter(struct_array, $[price] > 10)`
+
+		err := qt.initAdvancedSearchRequest(ctx)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "element_filter is only supported")
+	})
+
+	t.Run("hybrid element-level struct vector with element_filter should succeed", func(t *testing.T) {
+		qt := buildElementHybridTask("emb_vec", "", false, "")
+		qt.request.SubReqs[0].Dsl = `element_filter(struct_array, $[price] > 10)`
+
+		err := qt.initAdvancedSearchRequest(ctx)
+
 		assert.NoError(t, err)
 	})
 

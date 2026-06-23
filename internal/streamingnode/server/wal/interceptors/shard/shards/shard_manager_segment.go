@@ -13,12 +13,13 @@ import (
 
 // AssignSegmentRequest is a request to allocate segment.
 type AssignSegmentRequest struct {
-	CollectionID    int64
-	PartitionID     int64
-	ModifiedMetrics stats.ModifiedMetrics
-	TimeTick        uint64
-	TxnSession      TxnSession
-	SchemaVersion   int32
+	CollectionID          int64
+	PartitionID           int64
+	ModifiedMetrics       stats.ModifiedMetrics
+	TimeTick              uint64
+	TxnSession            TxnSession
+	SchemaVersion         int32
+	UseGrowingSourceFlush bool
 }
 
 // AssignSegmentResult is a result of segment allocation.
@@ -142,6 +143,7 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	// single place that resolves and stamps it before forwarding to partitionManager.
 	if info := m.collections[req.CollectionID]; info != nil {
 		req.SchemaVersion = info.SchemaVersion()
+		req.UseGrowingSourceFlush = info.UseGrowingSourceFlush()
 	}
 
 	result, err := pm.AssignSegment(req)

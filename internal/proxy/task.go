@@ -205,6 +205,13 @@ type dmlTask interface {
 
 type BaseInsertTask = msgstream.InsertMsg
 
+func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
+	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
+	return nil
+}
+
 type createCollectionTask struct {
 	baseTask
 	Condition
@@ -450,6 +457,9 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
+	if err := validateTextStorageV3Enabled(t.schema); err != nil {
+		return err
+	}
 
 	// External collections must be single-shard: the refresh mechanism assigns all
 	// segments to VChannelNames[0], so multiple shards would leave segments orphaned.
@@ -477,6 +487,9 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate collection name
 	if err := validateCollectionName(t.schema.Name); err != nil {
+		return err
+	}
+	if err := validateCollectionDescription(t.schema.GetDescription()); err != nil {
 		return err
 	}
 
@@ -943,6 +956,11 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		if err := typeutil.ValidateExternalCollectionResolvedSchema(schemaWithNewField); err != nil {
 			return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 		}
+	}
+	schemaWithNewField := proto.Clone(schema).(*schemapb.CollectionSchema)
+	schemaWithNewField.Fields = append(schemaWithNewField.GetFields(), proto.Clone(newFieldSchema).(*schemapb.FieldSchema))
+	if err := validateTextStorageV3Enabled(schemaWithNewField); err != nil {
+		return err
 	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))
@@ -2187,6 +2205,15 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 
+		for _, property := range t.Properties {
+			if property.GetKey() != common.CollectionDescription {
+				continue
+			}
+			if err := validateCollectionDescription(property.GetValue()); err != nil {
+				return err
+			}
+		}
+
 		enabled, _ := common.IsAllowInsertAutoID(t.Properties...)
 		if enabled {
 			primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(collSchema.CollectionSchema)
@@ -3086,6 +3113,9 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	if err := validateTextStorageV3Enabled(collSchema.CollectionSchema); err != nil {
+		return err
+	}
 	// prepare load field list
 	loadFields, err := collSchema.GetLoadFieldIDs(t.GetLoadFields(), t.GetSkipLoadDynamicField())
 	if err != nil {
@@ -3342,6 +3372,9 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	t.collectionID = collID
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
+		return err
+	}
+	if err := validateTextStorageV3Enabled(collSchema.CollectionSchema); err != nil {
 		return err
 	}
 	// prepare load field list

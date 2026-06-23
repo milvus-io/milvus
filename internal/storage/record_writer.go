@@ -539,6 +539,7 @@ func NewPackedTextBatchWriter(
 	config := &packed.SegmentWriterConfig{
 		SegmentPath:        basePath,
 		TextColumns:        textColumnConfigs,
+		ColumnGroups:       columnGroups,
 		WriterFormat:       writerFormat,
 		SchemaBasedPattern: schemaBasedPattern,
 		SchemaBasedFormats: schemaBasedFormats,

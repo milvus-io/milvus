@@ -66,7 +66,8 @@ PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::DOUBLE:
             result = DoEval<double>(input);
             break;
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             result = DoEval<std::string>(input);
             break;
         }

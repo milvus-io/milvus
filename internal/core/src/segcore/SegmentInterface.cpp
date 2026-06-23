@@ -773,9 +773,9 @@ SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
     std::shared_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
     if (iter == text_indexes_.end()) {
-        throw SegcoreError(
-            milvus::ErrorCode::TextIndexNotFound,
-            fmt::format("text index not found for field {}", field_id.get()));
+        ThrowInfo(milvus::ErrorCode::TextIndexNotFound,
+                  "text index not found for field {}",
+                  field_id.get());
     }
 
     auto make_pin = [&](auto&& alt) -> PinWrapper<index::TextMatchIndex*> {
@@ -799,11 +799,9 @@ SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
             auto index = ca->get_cell_of(0);
             return PinWrapper<index::TextMatchIndex*>(std::move(ca), index);
         } else {
-            throw SegcoreError(
-                milvus::ErrorCode::UnexpectedError,
-                fmt::format(
-                    "text index of segment is not supported for field {}",
-                    field_id.get()));
+            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                      "text index of segment is not supported for field {}",
+                      field_id.get());
         }
     };
 
