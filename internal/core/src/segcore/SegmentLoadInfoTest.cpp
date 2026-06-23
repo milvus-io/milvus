@@ -286,6 +286,38 @@ TEST_F(SegmentLoadInfoTest,
                   INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
 }
 
+TEST_F(SegmentLoadInfoTest, BuildCacheSkipsHybridScalarResourceEstimate) {
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    auto* hybrid_index = proto.add_index_infos();
+    hybrid_index->set_fieldid(108);
+    hybrid_index->set_indexid(5001);
+    hybrid_index->add_index_file_paths("/path/to/hybrid_index");
+    auto* hybrid_param = hybrid_index->add_index_params();
+    hybrid_param->set_key(milvus::index::INDEX_TYPE);
+    hybrid_param->set_value(milvus::index::HYBRID_INDEX_TYPE);
+
+    auto* inverted_index = proto.add_index_infos();
+    inverted_index->set_fieldid(109);
+    inverted_index->set_indexid(5002);
+    inverted_index->add_index_file_paths("/path/to/inverted_index");
+    auto* inverted_param = inverted_index->add_index_params();
+    inverted_param->set_key(milvus::index::INDEX_TYPE);
+    inverted_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo segment_info(proto, schema_);
+
+    auto hybrid_infos = segment_info.GetFieldIndexInfos(FieldId(108));
+    ASSERT_EQ(hybrid_infos.size(), 1);
+    EXPECT_FALSE(hybrid_infos[0].load_resource_request.has_value());
+
+    auto inverted_infos = segment_info.GetFieldIndexInfos(FieldId(109));
+    ASSERT_EQ(inverted_infos.size(), 1);
+    EXPECT_TRUE(inverted_infos[0].load_resource_request.has_value());
+}
+
 TEST_F(SegmentLoadInfoTest, BinlogInfo) {
     SegmentLoadInfo info(proto_, schema_);
 
