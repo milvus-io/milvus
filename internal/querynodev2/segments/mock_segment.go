@@ -1520,6 +1520,53 @@ func (_c *MockSegment_PinIfNotReleased_Call) RunAndReturn(run func() error) *Moc
 	return _c
 }
 
+// Prewarm provides a mock function with given fields: ctx, fieldIDs
+func (_m *MockSegment) Prewarm(ctx context.Context, fieldIDs []int64) error {
+	ret := _m.Called(ctx, fieldIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Prewarm")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) error); ok {
+		r0 = rf(ctx, fieldIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_Prewarm_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prewarm'
+type MockSegment_Prewarm_Call struct {
+	*mock.Call
+}
+
+// Prewarm is a helper method to define mock.On call
+//   - ctx context.Context
+//   - fieldIDs []int64
+func (_e *MockSegment_Expecter) Prewarm(ctx interface{}, fieldIDs interface{}) *MockSegment_Prewarm_Call {
+	return &MockSegment_Prewarm_Call{Call: _e.mock.On("Prewarm", ctx, fieldIDs)}
+}
+
+func (_c *MockSegment_Prewarm_Call) Run(run func(ctx context.Context, fieldIDs []int64)) *MockSegment_Prewarm_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_Prewarm_Call) Return(_a0 error) *MockSegment_Prewarm_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_Prewarm_Call) RunAndReturn(run func(context.Context, []int64) error) *MockSegment_Prewarm_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PkCandidateExist provides a mock function with no fields
 func (_m *MockSegment) PkCandidateExist() bool {
 	ret := _m.Called()

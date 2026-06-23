@@ -599,6 +599,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
     void
+    Prewarm(milvus::OpContext* op_ctx,
+            const std::vector<FieldId>& field_ids) const override;
+
+    void
     ApplyFieldValidData(milvus::OpContext* op_ctx,
                         FieldId field_id,
                         int64_t chunk_id,
