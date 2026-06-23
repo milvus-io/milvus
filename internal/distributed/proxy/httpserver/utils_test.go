@@ -3202,8 +3202,20 @@ func TestGenerateExpressionTemplate(t *testing.T) {
 		},
 	}
 	for i, template := range expressionTemplates {
-		actual := generateExpressionTemplate(template)
-		assert.Equal(t, actual, ans[i])
+		actual, err := generateExpressionTemplate(template)
+		require.NoError(t, err)
+		assert.Equal(t, ans[i], actual)
+	}
+
+	for name, template := range map[string]map[string]interface{}{
+		"nil":         {"v": nil},
+		"object":      {"v": map[string]interface{}{"nested": "value"}},
+		"empty array": {"v": []interface{}{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := generateExpressionTemplate(template)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
 	}
 }
 
