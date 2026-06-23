@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -34,11 +35,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -57,6 +60,8 @@ type indexBuildTask struct {
 }
 
 var _ globalTask.Task = (*indexBuildTask)(nil)
+
+var errVectorArrayFieldBinlogNotFound = errors.New("vector array field binlog not found")
 
 func newIndexBuildTask(segIndex *model.SegmentIndex,
 	taskSlot int64,
@@ -169,18 +174,74 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	indexParams := it.meta.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID)
 	indexType := GetIndexType(indexParams)
 	effectiveRows := segIndex.NumRows
+	estimatedVectorArrayVectors := int64(0)
+	isVectorArrayIndex := false
+	isEmbeddingListIndex := false
 	if fieldID := it.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 {
 		if collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID); err == nil {
 			for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
-				if f.FieldID == fieldID && f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
-					effectiveRows = segmentutil.CalcValidRowCountFromFieldBinLog(segment.SegmentInfo, fieldID)
+				if f.FieldID == fieldID {
+					if f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
+						effectiveRows = segmentutil.CalcValidRowCountFromFieldBinLog(segment.SegmentInfo, fieldID)
+					}
+					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
+					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
+					if isVectorArrayIndex {
+						estimate, err := estimateVectorArrayElementCountForIndexBuild(segment.SegmentInfo, collectionInfo.Schema, f)
+						if err != nil {
+							failReason := "failed to estimate vector array element count, count is unknown: " + err.Error()
+							log.Warn("failed to estimate vector array element count",
+								zap.Int64("fieldID", f.GetFieldID()),
+								zap.String("fieldName", f.GetName()),
+								zap.String("failReason", failReason),
+								zap.Error(err))
+							if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, failReason); updateErr != nil {
+								log.Warn("failed to update vector array index task state to Failed",
+									zap.String("failReason", failReason),
+									zap.Error(updateErr))
+							}
+							return
+						}
+						estimatedVectorArrayVectors = estimate.vectorCount
+						if estimate.emptyOnStaleSchema {
+							effectiveRows = 0
+							log.Info("vector array field binlog is absent on stale schema segment, treating as empty field",
+								zap.Int64("fieldID", f.GetFieldID()),
+								zap.String("fieldName", f.GetName()),
+								zap.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
+								zap.Int32("collectionSchemaVersion", collectionInfo.Schema.GetVersion()))
+						}
+					}
 					break
 				}
 			}
 		}
 	}
-	if isNoTrainIndex(indexType) || effectiveRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
-		log.Info("segment does not need index really, marking as finished", zap.Int64("numRows", segIndex.NumRows), zap.Int64("effectiveRows", effectiveRows))
+	minRowsToBuildIndex := Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64()
+	rowCountBelowThreshold := effectiveRows < minRowsToBuildIndex
+	vectorArrayVectorCountBelowThreshold := false
+	indexDataBelowThreshold := rowCountBelowThreshold
+	if isVectorArrayIndex {
+		// Element-level ArrayOfVector indexes are built from flattened inner vectors,
+		// so row count alone should not block index building. MaxSim metrics build
+		// EmbList indexes and additionally require enough logical rows.
+		vectorArrayVectorCountBelowThreshold = estimatedVectorArrayVectors < minRowsToBuildIndex
+		indexDataBelowThreshold = vectorArrayVectorCountBelowThreshold ||
+			(isEmbeddingListIndex && rowCountBelowThreshold)
+	}
+	if isNoTrainIndex(indexType) || indexDataBelowThreshold {
+		log.Info("segment does not need index really, marking as finished",
+			zap.Int64("numRows", segIndex.NumRows),
+			zap.Int64("effectiveRows", effectiveRows),
+			zap.Int64("estimatedVectorArrayVectors", estimatedVectorArrayVectors),
+			zap.Int64("minRowsToBuildIndex", minRowsToBuildIndex),
+			zap.String("indexType", indexType),
+			zap.Bool("vectorArrayIndex", isVectorArrayIndex),
+			zap.Bool("embeddingListIndex", isEmbeddingListIndex),
+			zap.Bool("rowCountBelowThreshold", rowCountBelowThreshold),
+			zap.Bool("vectorArrayVectorCountBelowThreshold", vectorArrayVectorCountBelowThreshold),
+			zap.Bool("indexDataBelowThreshold", indexDataBelowThreshold),
+		)
 		now := time.Now()
 		it.SetTaskTime(taskcommon.TimeStart, now)
 		it.SetTaskTime(taskcommon.TimeEnd, now)
@@ -220,6 +281,133 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}
 
 	log.Info("index task assigned successfully")
+}
+
+func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {
+	metricType, err := getIndexParam(indexParams, common.MetricTypeKey)
+	if err != nil {
+		return false
+	}
+	switch strings.ToUpper(metricType) {
+	case metric.MaxSim,
+		metric.MaxSimCosine,
+		metric.MaxSimL2,
+		metric.MaxSimIP,
+		metric.MaxSimHamming,
+		metric.MaxSimJaccard:
+		return true
+	default:
+		return false
+	}
+}
+
+type vectorArrayElementCountEstimate struct {
+	vectorCount        int64
+	emptyOnStaleSchema bool
+}
+
+func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) (vectorArrayElementCountEstimate, error) {
+	count, err := estimateVectorArrayElementCount(segment, field)
+	if err == nil {
+		return vectorArrayElementCountEstimate{vectorCount: count}, nil
+	}
+	if isMissingVectorArrayFieldOnStaleSchema(err, segment, schema, field) {
+		// A nullable field added after this segment was written has no binlog in the
+		// stale segment. For index build purposes it contributes zero vectors and
+		// should be fake-finished by the threshold check below.
+		return vectorArrayElementCountEstimate{emptyOnStaleSchema: true}, nil
+	}
+	return vectorArrayElementCountEstimate{}, err
+}
+
+func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemapb.FieldSchema) (int64, error) {
+	if segment == nil {
+		return 0, merr.WrapErrServiceInternalMsg("segment info is nil")
+	}
+	if field == nil {
+		return 0, merr.WrapErrServiceInternalMsg("field schema is nil")
+	}
+	elementSize, err := vectorArrayElementSize(field)
+	if err != nil {
+		return 0, err
+	}
+
+	var totalPayloadBytes int64
+	var seenFieldLog bool
+	for _, fieldBinlog := range segment.GetBinlogs() {
+		if !fieldBinlogContainsField(fieldBinlog, field.GetFieldID()) {
+			continue
+		}
+
+		seenFieldLog = true
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			payloadBytes := binlog.GetMemorySize()
+			if payloadBytes <= 0 {
+				continue
+			}
+
+			// VectorArrayFieldData stores each logical row with a 4-byte inner-vector byte length.
+			payloadBytes -= binlog.GetEntriesNum() * 4
+			if field.GetNullable() {
+				payloadBytes -= binlog.GetEntriesNum()
+			}
+			if payloadBytes > 0 {
+				totalPayloadBytes += payloadBytes
+			}
+		}
+	}
+
+	if !seenFieldLog {
+		return 0, merr.WrapErrServiceInternalErr(errVectorArrayFieldBinlogNotFound, "fieldID=%d", field.GetFieldID())
+	}
+	return totalPayloadBytes / elementSize, nil
+}
+
+func isMissingVectorArrayFieldOnStaleSchema(err error, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	return errors.Is(err, errVectorArrayFieldBinlogNotFound) &&
+		segment != nil &&
+		schema != nil &&
+		field != nil &&
+		field.GetNullable() &&
+		segment.GetSchemaVersion() < schema.GetVersion()
+}
+
+func fieldBinlogContainsField(fieldBinlog *datapb.FieldBinlog, fieldID int64) bool {
+	if fieldBinlog.GetFieldID() == fieldID {
+		return true
+	}
+	for _, childFieldID := range fieldBinlog.GetChildFields() {
+		if childFieldID == fieldID {
+			return true
+		}
+	}
+	return false
+}
+
+func vectorArrayElementSize(field *schemapb.FieldSchema) (int64, error) {
+	if field == nil {
+		return 0, merr.WrapErrServiceInternalMsg("field schema is nil")
+	}
+	dim, err := storage.GetDimFromParams(field.GetTypeParams())
+	if err != nil {
+		return 0, merr.WrapErrServiceInternalErr(err, "invalid vector array dim, fieldID=%d", field.GetFieldID())
+	}
+	if dim <= 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("invalid vector array dim %d, fieldID=%d", dim, field.GetFieldID())
+	}
+
+	switch field.GetElementType() {
+	case schemapb.DataType_FloatVector:
+		return int64(dim) * 4, nil
+	case schemapb.DataType_BinaryVector:
+		return int64(dim+7) / 8, nil
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return int64(dim) * 2, nil
+	case schemapb.DataType_Int8Vector:
+		return int64(dim), nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported vector array element type %s, fieldID=%d", field.GetElementType().String(), field.GetFieldID())
+	}
 }
 
 // Helper method to prepare job request
