@@ -69,9 +69,6 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		r.Logger().Info("recover segment info done", zap.Int("segments", len(r.segments)))
 		return struct{}{}, nil
 	})
-	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
-		return err
-	}
 	return conc.BlockOnAll(fVChannel, fSegment)
 }
 

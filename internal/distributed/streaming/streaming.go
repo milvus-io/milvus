@@ -69,6 +69,7 @@ func WAL() WALAccesser {
 type AppendOption struct {
 	BarrierTimeTick uint64 // BarrierTimeTick is the barrier time tick of the message.
 	// Must be allocated from tso, otherwise undetermined behavior.
+	IdempotencyKey string
 }
 
 type ReadOption struct {
@@ -197,6 +198,9 @@ type WALAccesser interface {
 	// Otherwise, it will be sent as individual messages.
 	// !!! This function do not promise the atomicity and deliver order of the messages appending.
 	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
+
+	// AppendMessagesWithOptions appends messages to the wal with append options.
+	AppendMessagesWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...AppendOption) AppendResponses
 }
 
 type Local interface {

@@ -16,10 +16,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -38,6 +40,8 @@ func TestRecoveryStorage(t *testing.T) {
 
 	vchannelMetas := make(map[string]*streamingpb.VChannelMeta)
 	segmentMetas := make(map[int64]*streamingpb.SegmentAssignmentMeta)
+	idempotencyWindowMetas := make(map[string]*streamingpb.VChannelWindowMeta)
+	var pchannelWindowMeta *streamingpb.PChannelWindowMeta
 	cp := &streamingpb.WALCheckpoint{
 		MessageId:     rmq.NewRmqID(1).IntoProto(),
 		TimeTick:      1,
@@ -53,6 +57,11 @@ func TestRecoveryStorage(t *testing.T) {
 	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.VChannelMeta, error) {
 		return lo.MapToSlice(vchannelMetas, func(_ string, v *streamingpb.VChannelMeta) *streamingpb.VChannelMeta {
 			return proto.Clone(v).(*streamingpb.VChannelMeta)
+		}), nil
+	})
+	snCatalog.EXPECT().ListVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
+		return lo.MapToSlice(idempotencyWindowMetas, func(_ string, v *streamingpb.VChannelWindowMeta) *streamingpb.VChannelWindowMeta {
+			return proto.Clone(v).(*streamingpb.VChannelWindowMeta)
 		}), nil
 	})
 	snCatalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, m map[int64]*streamingpb.SegmentAssignmentMeta) error {
@@ -89,6 +98,28 @@ func TestRecoveryStorage(t *testing.T) {
 		cp = checkpoint
 		return nil
 	})
+	snCatalog.EXPECT().SaveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, viewType string, metas map[string]*streamingpb.VChannelWindowMeta) error {
+		if rand.Int31n(3) == 0 {
+			return errors.New("save failed")
+		}
+		for k, v := range metas {
+			idempotencyWindowMetas[k] = v
+		}
+		return nil
+	})
+	snCatalog.EXPECT().GetPChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelWindowMeta, error) {
+		if pchannelWindowMeta == nil {
+			return nil, nil
+		}
+		return proto.Clone(pchannelWindowMeta).(*streamingpb.PChannelWindowMeta), nil
+	})
+	snCatalog.EXPECT().SavePChannelWindowMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, meta *streamingpb.PChannelWindowMeta) error {
+		if rand.Int31n(3) == 0 {
+			return errors.New("save failed")
+		}
+		pchannelWindowMeta = proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
+		return nil
+	}).Maybe()
 	mixCoord := mocks.NewMockMixCoordClient(t)
 	mixCoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
 		Status: merr.Success(),
@@ -96,7 +127,20 @@ func TestRecoveryStorage(t *testing.T) {
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(mixCoord)
 
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f))
+	windowStoreRoot := t.TempDir()
+	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, windowStoreRoot)
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().MinioCfg.RootPath.Key)
+	})
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(windowStoreRoot))
+	pchannelWindowMeta = writeTestBootstrapPChannelWindowMeta(
+		t,
+		context.Background(),
+		"test_channel",
+		chunkManager,
+		utility.NewWALCheckpointFromProto(cp),
+	)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f), resource.OptChunkManager(chunkManager))
 	b := &streamBuilder{
 		channel:                types.PChannelInfo{Name: "test_channel"},
 		lastConfirmedMessageID: 1,

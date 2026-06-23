@@ -162,6 +162,16 @@ message InsertMessageHeader {
     repeated PartitionSegmentAssignment partitions = 2;
     // optional so consumers can distinguish omitted (legacy producer) from explicit value.
     optional int32 schema_version                  = 3;
+    optional string idempotency_key                         = 4;
+    optional IdempotentInsertResult idempotent_result       = 5;
+}
+
+// IdempotentInsertResult carries the first successful insert result for a
+// duplicate idempotent insert append. Proxy uses row_offsets to merge ids back
+// into the original request order.
+message IdempotentInsertResult {
+    repeated uint32 row_offsets = 1;
+    schema.IDs ids = 2;
 }
 
 // PartitionSegmentAssignment is the segment assignment of a partition.
@@ -259,8 +269,9 @@ message BeginTxnMessageHeader {
 }
 
 // CommitTxnMessageHeader is the header of commit transaction message.
-// Just do nothing now.
-message CommitTxnMessageHeader {}
+message CommitTxnMessageHeader {
+    string idempotency_key = 1;
+}
 
 // RollbackTxnMessageHeader is the header of rollback transaction
 // message.

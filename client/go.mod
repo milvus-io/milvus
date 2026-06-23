@@ -122,3 +122,5 @@ require (
 )
 
 replace github.com/milvus-io/milvus/pkg/v3 => ../pkg
+
+replace github.com/milvus-io/milvus-proto/go-api/v3 => /Users/zilliz/workspace_zilliz/e2e_src/milvus-proto/go-api
