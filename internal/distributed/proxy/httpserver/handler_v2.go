@@ -2056,7 +2056,32 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if partitionsNum > 0 {
 		req.NumPartitions = partitionsNum
 	}
+	ttlPropertySet := false
+	for _, propertyKey := range []string{common.CollectionTTLConfigKey, "ttl.seconds"} {
+		value, ok := httpReq.Properties[propertyKey]
+		if !ok {
+			continue
+		}
+		if ttlPropertySet {
+			err := merr.WrapErrParameterInvalidMsg("collection TTL is specified multiple times")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		ttlPropertySet = true
+		req.Properties = append(req.Properties, &commonpb.KeyValuePair{Key: common.CollectionTTLConfigKey, Value: fmt.Sprintf("%v", value)})
+	}
 	if _, ok := httpReq.Params["ttlSeconds"]; ok {
+		if ttlPropertySet {
+			err := merr.WrapErrParameterInvalidMsg("collection TTL is specified multiple times")
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
 		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
 			Value: fmt.Sprintf("%v", httpReq.Params["ttlSeconds"]),
