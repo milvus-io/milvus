@@ -486,6 +486,274 @@ INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
                                ArrayBitmapIndexTestV2,
                                BitmapTypeV1);
 
+TEST(BitmapIndexArrayNestedTest, BuildAndLoadElementLevelBitmap) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int32);
+    field_schema.set_nullable(true);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3001, 3001};
+
+    std::vector<ScalarFieldProto> scalar_arrays(4);
+    scalar_arrays[0].mutable_int_data()->add_data(1);
+    scalar_arrays[0].mutable_int_data()->add_data(2);
+    // row 1 is an empty, non-null array.
+    // row 2 is null and should not produce any nested element.
+    scalar_arrays[3].mutable_int_data()->add_data(2);
+    scalar_arrays[3].mutable_int_data()->add_data(3);
+
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(scalar_arrays.size());
+    for (const auto& scalar_array : scalar_arrays) {
+        array_data.emplace_back(scalar_array);
+    }
+
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    uint8_t valid_data = 0x0B;  // rows 0, 1, and 3 are valid; row 2 is null.
+    field_data->FillFieldData(
+        array_data.data(), &valid_data, array_data.size(), 0);
+
+    auto root_path = fmt::format("{}/bitmap_nested_array", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+    index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_TRUE(index->HasRawData());
+    ASSERT_EQ(index->Count(), 4);
+
+    auto binary_set = index->Serialize({});
+    auto loaded_index =
+        std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
+    loaded_index->Load(binary_set, {});
+    ASSERT_TRUE(loaded_index->IsNestedIndex());
+    ASSERT_EQ(loaded_index->Count(), 4);
+
+    int32_t value = 2;
+    auto in_result = loaded_index->In(1, &value);
+    ASSERT_EQ(in_result.size(), 4);
+    EXPECT_FALSE(in_result[0]);
+    EXPECT_TRUE(in_result[1]);
+    EXPECT_TRUE(in_result[2]);
+    EXPECT_FALSE(in_result[3]);
+
+    auto not_in_result = loaded_index->NotIn(1, &value);
+    ASSERT_EQ(not_in_result.size(), 4);
+    EXPECT_TRUE(not_in_result[0]);
+    EXPECT_FALSE(not_in_result[1]);
+    EXPECT_FALSE(not_in_result[2]);
+    EXPECT_TRUE(not_in_result[3]);
+
+    auto is_null = loaded_index->IsNull();
+    auto is_not_null = loaded_index->IsNotNull();
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_FALSE(is_null[i]);
+        EXPECT_TRUE(is_not_null[i]);
+    }
+
+    auto element = loaded_index->Reverse_Lookup(3);
+    ASSERT_TRUE(element.has_value());
+    EXPECT_EQ(element.value(), 3);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+TEST(BitmapIndexArrayNestedTest, UnifiedLoadRestoresNestedBitmapMeta) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("array[0]");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int32);
+    field_schema.set_nullable(true);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3002, 3002};
+
+    std::vector<ScalarFieldProto> scalar_arrays(4);
+    scalar_arrays[0].mutable_int_data()->add_data(1);
+    scalar_arrays[0].mutable_int_data()->add_data(2);
+    scalar_arrays[3].mutable_int_data()->add_data(2);
+    scalar_arrays[3].mutable_int_data()->add_data(3);
+
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(scalar_arrays.size());
+    for (const auto& scalar_array : scalar_arrays) {
+        array_data.emplace_back(scalar_array);
+    }
+
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    uint8_t valid_data = 0x0B;  // rows 0, 1, and 3 are valid; row 2 is null.
+    field_data->FillFieldData(
+        array_data.data(), &valid_data, array_data.size(), 0);
+
+    auto root_path = fmt::format("{}/bitmap_nested_array_v3", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    auto build_index = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+    build_index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+
+    auto create_index_result = build_index->UploadUnified({});
+    ASSERT_EQ(create_index_result->GetIndexFiles().size(), 1);
+
+    Config config;
+    config["index_files"] = create_index_result->GetIndexFiles();
+    config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+
+    ctx.set_for_loading_index(true);
+    auto loaded_index =
+        std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
+    ASSERT_FALSE(loaded_index->IsNestedIndex());
+
+    loaded_index->LoadUnified(config);
+    ASSERT_TRUE(loaded_index->IsNestedIndex());
+    ASSERT_EQ(loaded_index->Count(), 4);
+
+    int32_t value = 2;
+    auto in_result = loaded_index->In(1, &value);
+    ASSERT_EQ(in_result.size(), 4);
+    EXPECT_FALSE(in_result[0]);
+    EXPECT_TRUE(in_result[1]);
+    EXPECT_TRUE(in_result[2]);
+    EXPECT_FALSE(in_result[3]);
+
+    auto is_null = loaded_index->IsNull();
+    auto is_not_null = loaded_index->IsNotNull();
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_FALSE(is_null[i]);
+        EXPECT_TRUE(is_not_null[i]);
+    }
+
+    boost::filesystem::remove_all(root_path);
+}
+
+TEST(BitmapIndexArrayNestedTest, UnifiedMmapLoadRestoresNestedBitmapMeta) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("array[0]");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int32);
+    field_schema.set_nullable(true);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3003, 3003};
+
+    const int32_t posting_count = DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 50;
+    const int32_t target_value = posting_count + 7;
+    std::vector<ScalarFieldProto> scalar_arrays(4);
+    for (int32_t i = 0; i < posting_count; ++i) {
+        scalar_arrays[0].mutable_int_data()->add_data(i);
+    }
+    scalar_arrays[3].mutable_int_data()->add_data(target_value);
+
+    std::vector<milvus::Array> array_data;
+    array_data.reserve(scalar_arrays.size());
+    for (const auto& scalar_array : scalar_arrays) {
+        array_data.emplace_back(scalar_array);
+    }
+
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    uint8_t valid_data = 0x0B;  // rows 0, 1, and 3 are valid; row 2 is null.
+    field_data->FillFieldData(
+        array_data.data(), &valid_data, array_data.size(), 0);
+
+    auto root_path =
+        fmt::format("{}/bitmap_nested_array_v3_mmap", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    auto build_index = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+    build_index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+
+    auto create_index_result = build_index->UploadUnified({});
+    ASSERT_EQ(create_index_result->GetIndexFiles().size(), 1);
+
+    Config config;
+    config["index_files"] = create_index_result->GetIndexFiles();
+    config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    config[milvus::index::MMAP_FILE_PATH] =
+        fmt::format("{}/bitmap_index.mmap", root_path);
+
+    ctx.set_for_loading_index(true);
+    auto loaded_index =
+        std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
+    ASSERT_FALSE(loaded_index->IsNestedIndex());
+
+    loaded_index->LoadUnified(config);
+    ASSERT_TRUE(loaded_index->IsNestedIndex());
+    ASSERT_TRUE(loaded_index->is_mmap_);
+    ASSERT_EQ(loaded_index->Count(), posting_count + 1);
+
+    auto in_result = loaded_index->In(1, &target_value);
+    ASSERT_EQ(in_result.size(), posting_count + 1);
+    for (int32_t i = 0; i < posting_count; ++i) {
+        EXPECT_FALSE(in_result[i]);
+    }
+    EXPECT_TRUE(in_result[posting_count]);
+
+    auto is_null = loaded_index->IsNull();
+    auto is_not_null = loaded_index->IsNotNull();
+    for (size_t i = 0; i < is_null.size(); ++i) {
+        EXPECT_FALSE(is_null[i]);
+        EXPECT_TRUE(is_not_null[i]);
+    }
+
+    boost::filesystem::remove_all(root_path);
+}
+
+TEST(BitmapIndexArrayNestedTest, FactoryCreatesNestedBitmapForStructSubField) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("array");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int32);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3001, 3001};
+
+    auto root_path =
+        fmt::format("{}/bitmap_nested_array_factory", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = milvus::index::BITMAP_INDEX_TYPE;
+    index_info.field_type = DataType::ARRAY;
+    index_info.field_name = "array[0]";
+
+    auto index =
+        index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_NE(dynamic_cast<index::BitmapIndex<int32_t>*>(index.get()),
+              nullptr);
+
+    boost::filesystem::remove_all(root_path);
+}
+
 struct BitmapIndexArrayRegressionParam {
     proto::schema::DataType element_type;
     bool use_v3;

@@ -49,7 +49,8 @@ class BitmapIndex : public ScalarIndex<T> {
  public:
     explicit BitmapIndex(
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        bool is_nested_index = false);
 
     ~BitmapIndex() {
         if (is_mmap_) {
@@ -74,6 +75,11 @@ class BitmapIndex : public ScalarIndex<T> {
     ScalarIndexType
     GetIndexType() const override {
         return ScalarIndexType::BITMAP;
+    }
+
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
     }
 
     void
@@ -182,7 +188,8 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        if (schema_.data_type() == proto::schema::DataType::Array) {
+        if (schema_.data_type() == proto::schema::DataType::Array &&
+            !is_nested_index_) {
             return false;
         }
         return true;
@@ -292,6 +299,9 @@ class BitmapIndex : public ScalarIndex<T> {
     void
     BuildArrayField(const std::vector<FieldDataPtr>& datas);
 
+    void
+    BuildArrayFieldNested(const std::vector<FieldDataPtr>& datas);
+
     size_t
     GetIndexDataSize();
 
@@ -399,6 +409,7 @@ class BitmapIndex : public ScalarIndex<T> {
     std::map<T, roaring::Roaring> data_;
     std::map<T, TargetBitmap> bitsets_;
     bool is_mmap_{false};
+    bool is_nested_index_{false};
     char* mmap_data_;
     int64_t mmap_size_;
     std::map<T, roaring::Roaring> bitmap_info_map_;

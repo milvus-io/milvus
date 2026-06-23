@@ -143,6 +143,11 @@ class IndexFactory {
             storage::FileManagerContext());
 
     IndexBasePtr
+    CreateNestedIndexBitmap(
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
+    IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info,
                       const storage::FileManagerContext& file_manager_context =
                           storage::FileManagerContext());
