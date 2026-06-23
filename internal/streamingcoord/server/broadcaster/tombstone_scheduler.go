@@ -61,8 +61,8 @@ func (s *tombstoneScheduler) AddPending(broadcastID uint64) {
 		// must not panic. Dropping the in-memory enqueue is safe: the task state is
 		// already persisted as TOMBSTONE (MarkAckCallbackDone) before reaching here,
 		// and will be recovered into the GC list on the next startup.
-		s.Logger().Info("tombstone scheduler is closing, skip adding pending tombstone",
-			zap.Uint64("broadcastID", broadcastID))
+		s.Logger().Info(context.TODO(), "tombstone scheduler is closing, skip adding pending tombstone",
+			mlog.Uint64("broadcastID", broadcastID))
 		return
 	case s.pending <- broadcastID:
 	}
