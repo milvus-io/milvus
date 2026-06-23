@@ -5058,6 +5058,39 @@ func (s *MaterializedViewTestSuite) getSearchTask() *searchTask {
 	return task
 }
 
+func (s *MaterializedViewTestSuite) getHybridSearchTask(dsl string) *searchTask {
+	placeholderGroup, err := proto.Marshal(constructPlaceholderGroup(1, testVecDim))
+	s.NoError(err)
+
+	subReqs := make([]*milvuspb.SubSearchRequest, 0, 2)
+	for i := 0; i < 2; i++ {
+		subReqs = append(subReqs, &milvuspb.SubSearchRequest{
+			Dsl:              dsl,
+			DslType:          commonpb.DslType_BoolExprV1,
+			PlaceholderGroup: placeholderGroup,
+			Nq:               1,
+			SearchParams:     getValidSearchParams(),
+		})
+	}
+
+	task := &searchTask{
+		ctx:            s.ctx,
+		collectionName: s.colName,
+		SearchRequest:  &internalpb.SearchRequest{},
+		request: &milvuspb.SearchRequest{
+			DbName:         s.dbName,
+			CollectionName: s.colName,
+			Nq:             1,
+			SearchParams: []*commonpb.KeyValuePair{
+				{Key: LimitKey, Value: "5"},
+			},
+			SubReqs: subReqs,
+		},
+	}
+	s.NoError(task.OnEnqueue())
+	return task
+}
+
 func (s *MaterializedViewTestSuite) TestMvNotEnabledWithNoPartitionKey() {
 	task := s.getSearchTask()
 	task.enableMaterializedView = false
@@ -5169,6 +5202,40 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		schemaInfo := newSchemaInfo(schema)
 		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
 		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
+	}
+}
+
+func (s *MaterializedViewTestSuite) TestHybridSearchPartitionKeyIsolationWithoutMaterializedView() {
+	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Maybe()
+	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil).Maybe()
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil).Maybe()
+
+	testCases := []struct {
+		name     string
+		dsl      string
+		errorMsg string
+	}{
+		{
+			name:     "missing partition key filter",
+			dsl:      "",
+			errorMsg: "partition key not found in expr or the expr is invalid when validating partition key isolation",
+		},
+		{
+			name:     "multiple partition key values",
+			dsl:      testVarCharField + " in [\"a\", \"b\"]",
+			errorMsg: "partition key isolation does not support IN",
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			task := s.getHybridSearchTask(tc.dsl)
+			task.enableMaterializedView = false
+
+			s.ErrorContains(task.PreExecute(s.ctx), tc.errorMsg)
+		})
 	}
 }
 

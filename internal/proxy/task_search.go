@@ -77,6 +77,7 @@ type searchTask struct {
 	schema                 *schemaInfo
 	needRequery            bool
 	partitionKeyMode       bool
+	partitionKeyIsolation  bool
 	largeTopKEnabled       bool
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
@@ -189,6 +190,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err2
 	}
 	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
+	t.partitionKeyIsolation = collectionInfo.partitionKeyIsolation
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
@@ -449,7 +451,19 @@ func (t *searchTask) initSearchAggregation() error {
 	return nil
 }
 
-func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *planpb.PlanNode) error {
+func (t *searchTask) validatePartitionKeyIsolation(plan *planpb.PlanNode) error {
+	if !t.partitionKeyIsolation {
+		return nil
+	}
+	expr, err := exprutil.ParseExprFromPlan(plan)
+	if err != nil {
+		log.Ctx(t.ctx).Warn("failed to parse expr from plan when validating partition key isolation", zap.Error(err))
+		return err
+	}
+	return exprutil.ValidatePartitionKeyIsolation(expr)
+}
+
+func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask) error {
 	if t.enableMaterializedView {
 		partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(t.schema.CollectionSchema)
 		if err != nil {
@@ -457,23 +471,7 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *pl
 			return err
 		}
 		if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyFieldSchema) {
-			collInfo, colErr := globalMetaCache.GetCollectionInfo(t.ctx, t.request.GetDbName(), t.collectionName, t.CollectionID)
-			if colErr != nil {
-				log.Ctx(t.ctx).Warn("failed to get collection info", zap.Error(colErr))
-				return err
-			}
-
-			if collInfo.partitionKeyIsolation {
-				expr, err := exprutil.ParseExprFromPlan(plan)
-				if err != nil {
-					log.Ctx(t.ctx).Warn("failed to parse expr from plan during MV", zap.Error(err))
-					return err
-				}
-				err = exprutil.ValidatePartitionKeyIsolation(expr)
-				if err != nil {
-					return err
-				}
-				// force set hints to disable
+			if t.partitionKeyIsolation {
 				queryInfo.Hints = "disable"
 			}
 			queryInfo.MaterializedViewInvolved = true
@@ -645,7 +643,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
 			// isolation has tighter constraint, check first
-			mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
+			if err := t.validatePartitionKeyIsolation(plan); err != nil {
+				return err
+			}
+			mvErr := setQueryInfoIfMvEnable(queryInfo, t)
 			if mvErr != nil {
 				return mvErr
 			}
@@ -868,7 +869,10 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	if t.partitionKeyMode {
 		// isolation has tighter constraint, check first
-		mvErr := setQueryInfoIfMvEnable(queryInfo, t, plan)
+		if err := t.validatePartitionKeyIsolation(plan); err != nil {
+			return err
+		}
+		mvErr := setQueryInfoIfMvEnable(queryInfo, t)
 		if mvErr != nil {
 			return mvErr
 		}
