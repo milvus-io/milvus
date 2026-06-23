@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -1213,7 +1214,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(
 			&querypb.GetHighlightResponse{
 				Status:  merr.Success(),
-				Results: []*querypb.HighlightResult{},
+				Results: []*querypb.HighlightResult{{}},
 			}, nil)
 		workload.Exec(ctx, 0, qn, "test_chan")
 	}).Return(nil)
@@ -1239,6 +1240,156 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		},
 	})
 	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestLexicalHighlightOpNullableStringKeepsEmptyHighlightData() {
+	cases := []struct {
+		name          string
+		rowNum        int
+		stringData    []string
+		validData     []bool
+		expectedTexts []string
+	}{
+		{
+			name:          "compact nullable string",
+			rowNum:        2,
+			stringData:    []string{"match text"},
+			validData:     []bool{true, false},
+			expectedTexts: []string{"target text", "match text", ""},
+		},
+		{
+			name:          "all null string",
+			rowNum:        1,
+			stringData:    []string{},
+			validData:     []bool{false},
+			expectedTexts: []string{"target text", ""},
+		},
+		{
+			name:          "empty string",
+			rowNum:        1,
+			stringData:    []string{""},
+			validData:     []bool{true},
+			expectedTexts: []string{"target text", ""},
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			proxy := &Proxy{}
+			proxy.tsoAllocator = &timestampAllocator{
+				tso: newMockTimestampAllocatorInterface(),
+			}
+			sched, err := newTaskScheduler(ctx, proxy.tsoAllocator)
+			s.Require().NoError(err)
+
+			err = sched.Start()
+			s.Require().NoError(err)
+			defer sched.Close()
+			proxy.sched = sched
+
+			collName := "test_coll_highlight_nullable"
+			fieldName2Types := map[string]schemapb.DataType{
+				testVarCharField: schemapb.DataType_VarChar,
+			}
+			schema := constructCollectionSchemaByDataType(collName, fieldName2Types, testVarCharField, false)
+
+			highlightTasks := map[int64]*highlightTask{
+				100: {
+					HighlightTask: &querypb.HighlightTask{
+						Texts:         []string{"target text"},
+						FieldName:     testVarCharField,
+						FieldId:       100,
+						SearchTextNum: 1,
+					},
+					preTags:  [][]byte{[]byte(DefaultPreTag)},
+					postTags: [][]byte{[]byte(DefaultPostTag)},
+				},
+			}
+
+			mockLb := shardclient.NewMockLBPolicy(s.T())
+			searchTask := &searchTask{
+				node: proxy,
+				highlighter: &LexicalHighlighter{
+					tasks: highlightTasks,
+				},
+				lb:             mockLb,
+				schema:         newSchemaInfo(schema),
+				request:        &milvuspb.SearchRequest{CollectionName: collName, DbName: "default"},
+				collectionName: collName,
+				SearchRequest:  &internalpb.SearchRequest{CollectionID: 0},
+			}
+
+			op, err := opFactory[highlightOp](searchTask, map[string]any{})
+			s.Require().NoError(err)
+
+			queryNodeResults := make([]*querypb.HighlightResult, tc.rowNum)
+			for i := range queryNodeResults {
+				queryNodeResults[i] = &querypb.HighlightResult{}
+			}
+
+			mockLb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+				qn := mocks.NewMockQueryNodeClient(s.T())
+				qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *querypb.GetHighlightRequest, opts ...grpc.CallOption) {
+					s.Require().Len(req.GetTasks(), 1)
+					task := req.GetTasks()[0]
+					s.Equal(int64(tc.rowNum), task.GetCorpusTextNum())
+					s.Equal(tc.expectedTexts, task.GetTexts())
+				}).Return(
+					&querypb.GetHighlightResponse{
+						Status:  merr.Success(),
+						Results: queryNodeResults,
+					}, nil)
+				workload.Exec(ctx, 0, qn, "test_chan")
+			}).Return(nil)
+
+			ids := make([]int64, tc.rowNum)
+			scores := make([]float32, tc.rowNum)
+			for i := range tc.rowNum {
+				ids[i] = int64(i + 1)
+				scores[i] = 1.0 - float32(i)*0.1
+			}
+
+			results, err := op.run(ctx, s.span, &milvuspb.SearchResults{
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       int64(tc.rowNum),
+					Topks:      []int64{int64(tc.rowNum)},
+					Ids:        testSearchResultIDs(ids...),
+					Scores:     scores,
+					FieldsData: []*schemapb.FieldData{
+						{
+							FieldId:   100,
+							FieldName: testVarCharField,
+							Type:      schemapb.DataType_VarChar,
+							ValidData: tc.validData,
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_StringData{
+										StringData: &schemapb.StringArray{Data: tc.stringData},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			s.NoError(err)
+			s.Require().Len(results, 1)
+
+			result := results[0].(*milvuspb.SearchResults)
+			highlightResults := result.GetResults().GetHighlightResults()
+			s.Require().Len(highlightResults, 1)
+			s.Equal(testVarCharField, highlightResults[0].GetFieldName())
+			s.Require().Len(highlightResults[0].GetDatas(), tc.rowNum)
+			for _, data := range highlightResults[0].GetDatas() {
+				s.NotNil(data)
+				s.Empty(data.GetFragments())
+			}
+		})
+	}
 }
 
 func (s *SearchPipelineSuite) TestLexicalHighlightOpZeroHitWithNonEmptyFieldsData() {
