@@ -3052,6 +3052,39 @@ func TestUserDescriptionV2(t *testing.T) {
 	}
 }
 
+func TestCreateImportJobPreservesRBACRoleContext(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+	paramtable.Get().Save(proxy.Params.CommonCfg.RootShouldBindRole.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.CommonCfg.RootShouldBindRole.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+			roles, ok := ctx.Value(proxy.RBACRoleContextKey).([]string)
+			assert.True(t, ok)
+			assert.ElementsMatch(t, []string{util.RoleAdmin, util.RolePublic}, roles)
+			return &internalpb.ImportResponse{
+				Status: commonSuccessStatus,
+				JobID:  "1234567890",
+			}, nil
+		}).Once()
+	testEngine := initHTTPServerV2(mp, true)
+
+	bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "files": [["book.json"]]}`))
+	req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction), bodyReader)
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.NoError(t, err)
+	assert.Equal(t, merr.Code(nil), returnBody.Code)
+}
+
 func validateTestCases(t *testing.T, testEngine *gin.Engine, queryTestCases []requestBodyTestCase, allowInt64 bool) {
 	for i, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
