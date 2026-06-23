@@ -19,12 +19,16 @@ package querynodev2
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/resource"
 )
 
 var _ cluster.Worker = &LocalWorker{}
@@ -59,7 +63,25 @@ func (w *LocalWorker) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchR
 }
 
 func (w *LocalWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	return w.node.SearchSegments(ctx, req)
+	resp, err := w.node.SearchSegments(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	// The gRPC codec (releaseCodec) never runs for in-process calls, so any C
+	// memory pinned in MsgPins will never be triggered by Marshal. We must
+	// consume it here: unmarshal SlicedBlob → ResultData (so the delegator can
+	// use it directly), then release any pinned C memory.
+	if blob := resp.GetSlicedBlob(); len(blob) > 0 {
+		var resultData schemapb.SearchResultData
+		if unmarshalErr := proto.Unmarshal(blob, &resultData); unmarshalErr != nil {
+			resource.MsgPins.Release(resp) // still release to avoid leak
+			return nil, merr.WrapErrServiceInternal("unmarshal SearchResultData from SlicedBlob", unmarshalErr.Error())
+		}
+		resp.ResultData = &resultData
+		resp.SlicedBlob = nil
+		resource.MsgPins.Release(resp) // no-op if not pinned
+	}
+	return resp, nil
 }
 
 func (w *LocalWorker) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
