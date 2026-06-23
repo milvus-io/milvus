@@ -4385,12 +4385,20 @@ func TestCreateImportJobAutoCommitOptionValidation(t *testing.T) {
 		mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
 			return kvPairsToMap(req.GetOptions())["auto_commit"] == "false"
 		})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "2"}, nil).Once()
+		mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
+			return kvPairsToMap(req.GetOptions())["auto_commit"] == "False"
+		})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "3"}, nil).Once()
+		mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
+			return kvPairsToMap(req.GetOptions())["priority"] == ""
+		})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "4"}, nil).Once()
 		testEngine := initHTTPServerV2(mp, false)
 
 		for _, body := range []string{
 			`{"collectionName": "book", "files": [["a.parquet"]]}`,
 			`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": "true"}}`,
 			`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": "false"}}`,
+			`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": "False"}}`,
+			`{"collectionName": "book", "files": [["a.parquet"]], "options": {"priority": null}}`,
 		} {
 			req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction), bytes.NewReader([]byte(body)))
 			w := httptest.NewRecorder()

@@ -286,9 +286,10 @@ func (req *ImportReq) UnmarshalJSON(data []byte) error {
 			if key == importutilv2.AutoCommitKey {
 				return merr.WrapErrParameterInvalidMsg("options.%s must be one of %q or %q", importutilv2.AutoCommitKey, autoCommitTrue, autoCommitFalse)
 			}
-			return merr.WrapErrParameterInvalidMsg("options.%s must be a string", key)
+			options[key] = ""
+			continue
 		}
-		if key == importutilv2.AutoCommitKey && *value != autoCommitTrue && *value != autoCommitFalse {
+		if key == importutilv2.AutoCommitKey && strings.ToLower(*value) != autoCommitTrue && strings.ToLower(*value) != autoCommitFalse {
 			return merr.WrapErrParameterInvalidMsg("options.%s must be one of %q or %q", importutilv2.AutoCommitKey, autoCommitTrue, autoCommitFalse)
 		}
 		options[key] = *value
