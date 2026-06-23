@@ -141,6 +141,16 @@ func (job *LoadCollectionJob) Execute() error {
 		fieldIDs = append(fieldIDs, loadField.GetFieldId())
 	}
 	replicaNumber := int32(len(replicas))
+	currentPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	currentPartitionMap := lo.SliceToMap(currentPartitions, func(partition *meta.Partition) (int64, *meta.Partition) {
+		return partition.GetPartitionID(), partition
+	})
+	forceSyncWarmup := req.GetForceSyncWarmup()
+	for _, partitionID := range req.GetPartitionIds() {
+		if current, ok := currentPartitionMap[partitionID]; ok {
+			forceSyncWarmup = forceSyncWarmup || current.GetForceSyncWarmup()
+		}
+	}
 	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
 	collection := &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
@@ -152,22 +162,20 @@ func (job *LoadCollectionJob) Execute() error {
 			LoadFields:               fieldIDs,
 			DbID:                     req.GetDbId(),
 			UserSpecifiedReplicaMode: req.GetUserSpecifiedReplicaMode(),
+			ForceSyncWarmup:          forceSyncWarmup,
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
 		Schema:    collInfo.GetSchema(),
 	}
 	incomingPartitions := typeutil.NewSet(req.GetPartitionIds()...)
-	currentPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
-	currentPartitionMap := lo.SliceToMap(currentPartitions, func(partition *meta.Partition) (int64, *meta.Partition) {
-		return partition.GetPartitionID(), partition
-	})
 	partitions, newPartitionCount := buildPartitionsToPersist(
 		req.GetCollectionId(),
 		req.GetPartitionIds(),
 		currentPartitionMap,
 		replicaNumber,
 		fieldIndexIDs,
+		req.GetForceSyncWarmup(),
 	)
 	toReleasePartitions := make([]int64, 0)
 	for _, partition := range currentPartitions {
@@ -265,6 +273,7 @@ func buildPartitionsToPersist(
 	currentPartitions map[int64]*meta.Partition,
 	replicaNumber int32,
 	fieldIndexIDs map[int64]int64,
+	requestForceSyncWarmup bool,
 ) ([]*meta.Partition, int) {
 	partitions := make([]*meta.Partition, 0, len(partitionIDs))
 	newPartitionCount := 0
@@ -275,11 +284,12 @@ func buildPartitionsToPersist(
 			newPartitionCount++
 			partitions = append(partitions, &meta.Partition{
 				PartitionLoadInfo: &querypb.PartitionLoadInfo{
-					CollectionID:  collectionID,
-					PartitionID:   partitionID,
-					ReplicaNumber: replicaNumber,
-					Status:        querypb.LoadStatus_Loading,
-					FieldIndexID:  fieldIndexIDs,
+					CollectionID:    collectionID,
+					PartitionID:     partitionID,
+					ReplicaNumber:   replicaNumber,
+					Status:          querypb.LoadStatus_Loading,
+					FieldIndexID:    fieldIndexIDs,
+					ForceSyncWarmup: requestForceSyncWarmup,
 				},
 				CreatedAt: time.Now(),
 			})

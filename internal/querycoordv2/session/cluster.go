@@ -39,6 +39,7 @@ type Cluster interface {
 	WatchDmChannels(ctx context.Context, nodeID int64, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	UnsubDmChannel(ctx context.Context, nodeID int64, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error)
 	LoadSegments(ctx context.Context, nodeID int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error)
+	Prewarm(ctx context.Context, nodeID int64, req *querypb.PrewarmRequest) (*commonpb.Status, error)
 	ReleaseSegments(ctx context.Context, nodeID int64, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	LoadPartitions(ctx context.Context, nodeID int64, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error)
 	ReleasePartitions(ctx context.Context, nodeID int64, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
@@ -133,6 +134,20 @@ func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *quer
 		req = proto.Clone(req).(*querypb.LoadSegmentsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.LoadSegments(ctx, req)
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return status, err
+}
+
+func (c *QueryCluster) Prewarm(ctx context.Context, nodeID int64, req *querypb.PrewarmRequest) (*commonpb.Status, error) {
+	var status *commonpb.Status
+	var err error
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		req := proto.Clone(req).(*querypb.PrewarmRequest)
+		req.Base.TargetID = nodeID
+		status, err = cli.Prewarm(ctx, req)
 	})
 	if err1 != nil {
 		return nil, err1

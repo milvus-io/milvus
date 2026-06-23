@@ -340,6 +340,11 @@ class SegmentInterface {
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx) = 0;
 
+    virtual void
+    Prewarm(milvus::OpContext* op_ctx,
+            const std::vector<FieldId>& field_ids) const {
+    }
+
     // Get IArrayOffsets for element-level filtering on array fields
     // Returns nullptr if the field doesn't have IArrayOffsets
     virtual std::shared_ptr<const IArrayOffsets>

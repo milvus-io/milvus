@@ -8573,6 +8573,65 @@ func (_c *MixCoord_PinSnapshotData_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// Prewarm provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) Prewarm(_a0 context.Context, _a1 *querypb.PrewarmRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Prewarm")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.PrewarmRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_Prewarm_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prewarm'
+type MixCoord_Prewarm_Call struct {
+	*mock.Call
+}
+
+// Prewarm is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.PrewarmRequest
+func (_e *MixCoord_Expecter) Prewarm(_a0 interface{}, _a1 interface{}) *MixCoord_Prewarm_Call {
+	return &MixCoord_Prewarm_Call{Call: _e.mock.On("Prewarm", _a0, _a1)}
+}
+
+func (_c *MixCoord_Prewarm_Call) Run(run func(_a0 context.Context, _a1 *querypb.PrewarmRequest)) *MixCoord_Prewarm_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.PrewarmRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_Prewarm_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_Prewarm_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_Prewarm_Call) RunAndReturn(run func(context.Context, *querypb.PrewarmRequest) (*commonpb.Status, error)) *MixCoord_Prewarm_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PushClientCommand provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) PushClientCommand(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	ret := _m.Called(_a0, _a1)

@@ -571,6 +571,61 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	return merr.Success(), nil
 }
 
+func (node *QueryNode) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*commonpb.Status, error) {
+	log := mlog.With(
+		mlog.Int64("collectionID", req.GetCollectionID()),
+		mlog.Int64s("partitionIDs", req.GetPartitionIDs()),
+		mlog.Int64s("segmentIDs", req.GetSegmentIDs()),
+		mlog.Int64s("fieldIDs", req.GetFieldIDs()),
+	)
+	log.Info(ctx, "received prewarm request")
+
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	filters := []segments.SegmentFilter{
+		segments.WithType(segments.SegmentTypeSealed),
+	}
+	if req.GetCollectionID() != 0 {
+		filters = append(filters, segments.SegmentFilterFunc(func(segment segments.Segment) bool {
+			return segment.Collection() == req.GetCollectionID()
+		}))
+	}
+	if len(req.GetPartitionIDs()) > 0 {
+		partitions := typeutil.NewUniqueSet(req.GetPartitionIDs()...)
+		filters = append(filters, segments.SegmentFilterFunc(func(segment segments.Segment) bool {
+			return partitions.Contain(segment.Partition())
+		}))
+	}
+
+	var (
+		loadedSegments []segments.Segment
+		err            error
+	)
+	if len(req.GetSegmentIDs()) > 0 {
+		loadedSegments, err = node.manager.Segment.GetAndPin(req.GetSegmentIDs(), filters...)
+	} else {
+		loadedSegments, err = node.manager.Segment.GetAndPinBy(filters...)
+	}
+	if err != nil {
+		log.Warn(ctx, "failed to pin segments for prewarm", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	defer node.manager.Segment.Unpin(loadedSegments)
+
+	for _, segment := range loadedSegments {
+		if err := segment.Prewarm(ctx, req.GetFieldIDs()); err != nil {
+			log.Warn(ctx, "failed to prewarm segment", mlog.FieldSegmentID(segment.ID()), mlog.Err(err))
+			return merr.Status(merr.Wrapf(err, "failed to prewarm segment %d", segment.ID())), nil
+		}
+	}
+
+	log.Info(ctx, "prewarm done", mlog.Int("segmentCount", len(loadedSegments)))
+	return merr.Success(), nil
+}
+
 // UpdateSchema updates the schema of the collection on the querynode.
 func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()

@@ -445,7 +445,7 @@ func (suite *LoadCollectionJobSuite) TestBuildPartitionsToPersistOnlyNewPartitio
 		},
 	}
 
-	partitions, newCount := buildPartitionsToPersist(1, []int64{100, 101, 102}, current, 1, map[int64]int64{1: 10})
+	partitions, newCount := buildPartitionsToPersist(1, []int64{100, 101, 102}, current, 1, map[int64]int64{1: 10}, false)
 	suite.Len(partitions, 1)
 	suite.Equal(1, newCount)
 	suite.EqualValues(102, partitions[0].GetPartitionID())
@@ -467,7 +467,7 @@ func (suite *LoadCollectionJobSuite) TestBuildPartitionsToPersistKeepExistingSta
 		},
 	}
 
-	partitions, newCount := buildPartitionsToPersist(1, []int64{100}, current, 2, map[int64]int64{1: 20})
+	partitions, newCount := buildPartitionsToPersist(1, []int64{100}, current, 2, map[int64]int64{1: 20}, false)
 	suite.Len(partitions, 1)
 	suite.Equal(0, newCount)
 	suite.EqualValues(100, partitions[0].GetPartitionID())
