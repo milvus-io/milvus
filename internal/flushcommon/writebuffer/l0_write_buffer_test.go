@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -838,13 +839,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				return &syncmgr.GrowingFlushResult{ManifestPath: "manifest-retry", NumRows: 10}, nil
 			},
 		}
-		errorHandlerCalled := false
+		var errorHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			growingSourceRetryInterval: time.Hour,
 			errorHandler: func(error) {
-				errorHandlerCalled = true
-				panic("growing source task should not call writebuffer error handler directly")
+				errorHandlerCalls.Add(1)
 			},
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
@@ -862,7 +862,6 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 						done <- textTask
 					}()
 					err := textTask.Run(ctx)
-					textTask.HandleError(err)
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -883,7 +882,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "mock growing source flush error")
 		firstTask := <-done
 
-		s.False(errorHandlerCalled)
+		s.EqualValues(1, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1010)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -899,12 +898,81 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.Require().Len(futures, 1)
 		s.NoError(conc.AwaitAll(futures...))
 		secondTask := <-done
+		s.EqualValues(1, errorHandlerCalls.Load())
 		s.EqualValues(10, secondTask.BatchRows())
 		segment, ok = metacache.GetSegmentByID(1010)
 		s.True(ok)
 		s.EqualValues(10, segment.FlushedRows())
 		s.EqualValues(0, segment.SyncingRows())
 		s.Equal("manifest-retry", segment.ManifestPath())
+	})
+
+	s.Run("source_task_layout_mismatch_is_non_retryable", func() {
+		textSchema := s.textSchema()
+		metacache := s.newTextRealMetaCache(textSchema)
+		source := fakeGrowingFlushSource{
+			flushFunc: func(context.Context, int64, int64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+				return nil, fmt.Errorf("Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")
+			},
+		}
+		var errorHandlerCalls atomic.Int32
+		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
+			idAllocator:                s.allocator,
+			growingSourceRetryInterval: time.Hour,
+			errorHandler: func(error) {
+				errorHandlerCalls.Add(1)
+			},
+			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+				return source, syncmgr.GrowingSourceUsable
+			},
+		})
+		s.NoError(err)
+
+		done := make(chan struct{})
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.AnythingOfType("*syncmgr.GrowingSourceSyncTask"), mock.Anything).
+			RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+				textTask := task.(*syncmgr.GrowingSourceSyncTask)
+				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
+				return conc.Go(func() (struct{}, error) {
+					defer close(done)
+					err := textTask.Run(ctx)
+					for _, callback := range callbacks {
+						if cbErr := callback(err); cbErr != nil {
+							return struct{}{}, cbErr
+						}
+					}
+					return struct{}{}, err
+				}), nil
+			}).Once()
+
+		_, msg := s.composeTextInsertMsg(1014, 10)
+		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		s.NoError(err)
+		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+		s.NoError(err)
+		l0wb := wb.(*l0WriteBuffer)
+		futures := l0wb.syncSegments(context.Background(), []int64{1014})
+		s.Require().Len(futures, 1)
+		s.ErrorContains(conc.AwaitAll(futures...), "Column group size mismatch")
+		<-done
+
+		s.EqualValues(1, errorHandlerCalls.Load())
+		progress, ok := l0wb.growingSourceProgress[int64(1014)]
+		s.True(ok)
+		s.EqualValues(1, progress.failureCount)
+		s.Contains(progress.lastFailure, "Column group size mismatch")
+		s.True(progress.nonRetryableFailure)
+		s.False(l0wb.growingSourceRetryScheduled)
+
+		segments, retry := l0wb.getGrowingSourceSegmentsToRetry()
+		s.Empty(segments)
+		s.False(retry)
+
+		segment, ok := metacache.GetSegmentByID(1014)
+		s.True(ok)
+		s.EqualValues(0, segment.FlushedRows())
+		s.EqualValues(0, segment.SyncingRows())
+		s.EqualValues(10, segment.BufferRows())
 	})
 
 	s.Run("source_task_row_count_mismatch_retries_without_meta_update", func() {
@@ -916,14 +984,13 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		}
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
-		errorHandlerCalled := false
+		var errorHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			metaWriter:                 metaWriter,
 			growingSourceRetryInterval: time.Hour,
 			errorHandler: func(error) {
-				errorHandlerCalled = true
-				panic("growing source row count mismatch should not call writebuffer error handler directly")
+				errorHandlerCalls.Add(1)
 			},
 			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
@@ -959,7 +1026,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "row count mismatch")
 		<-done
 
-		s.False(errorHandlerCalled)
+		s.EqualValues(1, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1011)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -976,9 +1043,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		var ranges [][2]int64
 		source := fakeGrowingFlushSource{
 			currentOffset: 15,
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, _ *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				ranges = append(ranges, [2]int64{startOffset, endOffset})
-				return &syncmgr.GrowingFlushResult{ManifestPath: fmt.Sprintf("manifest-%d", endOffset), NumRows: endOffset - startOffset}, nil
+				return &syncmgr.GrowingFlushResult{ManifestPath: packed.MarshalManifestPath(config.SegmentBasePath, endOffset), NumRows: endOffset - startOffset}, nil
 			},
 		}
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{

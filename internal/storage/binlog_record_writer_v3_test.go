@@ -43,7 +43,7 @@ func TestPackedManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, nil, cfg, nil, false)
+		1024, 0, 0, nil, cfg, nil, false, "")
 	require.NoError(t, err)
 
 	// No Write before Close. The internal `writer` field stays nil so
@@ -71,7 +71,7 @@ func TestPackedTextManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 	w, err := NewPackedTextManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, nil, cfg, nil)
+		1024, 0, 0, nil, cfg, nil, "")
 	require.NoError(t, err)
 
 	// No Write before Close. The text writer's nil-handling path must
@@ -118,7 +118,7 @@ func TestPackedManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) {
 	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, columnGroups, cfg, nil, false)
+		1024, 0, 0, columnGroups, cfg, nil, false, "")
 	require.NoError(t, err)
 	require.NoError(t, w.initWriters(nil))
 
@@ -171,12 +171,54 @@ func TestPackedManifestRecordWriter_TextRefsUseBinarySchema(t *testing.T) {
 	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, columnGroups, cfg, nil, true)
+		1024, 0, 0, columnGroups, cfg, nil, true, "")
 	require.NoError(t, err)
 	err = w.initWriters(nil)
 	require.NoError(t, err)
 	require.NotNil(t, gotSchema)
 	require.Equal(t, arrow.BINARY, gotSchema.Field(2).Type.ID())
+}
+
+func TestPackedManifestRecordWriter_UsesExplicitWriterFormat(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "vortex"))
+	defer params.Reset(params.DataNodeCfg.StorageFormat.Key)
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+		{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, DataType: schemapb.DataType_Int64},
+	}}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{common.TimeStampField, common.RowIDField}},
+		{GroupID: 101, Columns: []int{2}, Fields: []int64{101}},
+	}
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+
+	var gotWriterFormat string
+	var gotSchemaBasedFormats []string
+	patch := mockey.Mock(newPackedRecordBatchWriter).To(
+		func(_ string, _ *schemapb.CollectionSchema, _, _ int64, _ []storagecommon.ColumnGroup,
+			_ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext, validatePK bool, textRefsAsBinary bool,
+			writerFormat string, schemaBasedFormats []string,
+		) (*packedRecordBatchWriter, error) {
+			assert.True(t, validatePK)
+			assert.False(t, textRefsAsBinary)
+			gotWriterFormat = writerFormat
+			gotSchemaBasedFormats = append([]string(nil), schemaBasedFormats...)
+			return &packedRecordBatchWriter{}, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
+		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
+		allocator.NewLocalAllocator(1, 1<<20),
+		1024, 0, 0, columnGroups, cfg, nil, false, "parquet")
+	require.NoError(t, err)
+	require.NoError(t, w.initWriters(nil))
+
+	assert.Equal(t, "parquet", gotWriterFormat)
+	assert.Equal(t, []string{"parquet", "parquet"}, gotSchemaBasedFormats)
 }
 
 func TestPackedTextManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) {
@@ -212,7 +254,7 @@ func TestPackedTextManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) 
 	w, err := NewPackedTextManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, columnGroups, cfg, nil)
+		1024, 0, 0, columnGroups, cfg, nil, "")
 	require.NoError(t, err)
 	require.NoError(t, w.initWriters(nil))
 

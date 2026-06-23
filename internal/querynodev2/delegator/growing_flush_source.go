@@ -545,16 +545,24 @@ func (s *delegatorGrowingFlushSource) CurrentOffset() int64 {
 
 func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 	result, err := s.segment.FlushData(ctx, startOffset, endOffset, &segments.FlushConfig{
-		SegmentBasePath:      config.SegmentBasePath,
-		PartitionBasePath:    config.PartitionBasePath,
-		CollectionID:         config.CollectionID,
-		PartitionID:          config.PartitionID,
-		TextFieldIDs:         config.TextFieldIDs,
-		TextLobPaths:         config.TextLobPaths,
-		BM25FieldIDs:         config.BM25FieldIDs,
-		BM25StatsLogIDs:      config.BM25StatsLogIDs,
-		WriteMergedBM25Stats: config.WriteMergedBM25Stats,
-		ReadVersion:          config.ReadVersion,
+		SegmentBasePath:         config.SegmentBasePath,
+		PartitionBasePath:       config.PartitionBasePath,
+		CollectionID:            config.CollectionID,
+		PartitionID:             config.PartitionID,
+		Schema:                  config.Schema,
+		TextFieldIDs:            config.TextFieldIDs,
+		TextLobPaths:            config.TextLobPaths,
+		TextInlineThreshold:     config.TextInlineThreshold,
+		TextMaxLobFileBytes:     config.TextMaxLobFileBytes,
+		TextFlushThresholdBytes: config.TextFlushThresholdBytes,
+		BM25FieldIDs:            config.BM25FieldIDs,
+		BM25StatsLogIDs:         config.BM25StatsLogIDs,
+		WriteMergedBM25Stats:    config.WriteMergedBM25Stats,
+		ReadVersion:             config.ReadVersion,
+		WriterFormat:            config.WriterFormat,
+		SchemaBasedPattern:      config.SchemaBasedPattern,
+		SchemaBasedFormats:      config.SchemaBasedFormats,
+		AllowedFieldIDs:         config.AllowedFieldIDs,
 	})
 	if err != nil || result == nil {
 		return nil, err

@@ -21,12 +21,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 )
+
+func TestDelegatorGrowingFlushSourcePassesTaskSchema(t *testing.T) {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{Name: "task-schema"}
+	segment := segments.NewMockSegment(t)
+	segment.EXPECT().
+		FlushData(ctx, int64(3), int64(7), mock.Anything).
+		RunAndReturn(func(_ context.Context, startOffset int64, endOffset int64, config *segments.FlushConfig) (*segments.FlushResult, error) {
+			require.EqualValues(t, 3, startOffset)
+			require.EqualValues(t, 7, endOffset)
+			require.True(t, config.Schema == schema)
+			return &segments.FlushResult{ManifestPath: "manifest", NumRows: 4}, nil
+		})
+
+	source := &delegatorGrowingFlushSource{segment: segment}
+	result, err := source.FlushGrowingData(ctx, 3, 7, &syncmgr.GrowingFlushConfig{
+		Schema: schema,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "manifest", result.ManifestPath)
+	require.EqualValues(t, 4, result.NumRows)
+}
 
 func TestDelegatorGrowingSourceProviderCloseWaitsForSourceRelease(t *testing.T) {
 	segmentManager := segments.NewMockSegmentManager(t)
