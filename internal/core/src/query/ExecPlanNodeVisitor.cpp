@@ -110,6 +110,47 @@ ExecPlanNodeVisitor::ExecuteTask(
     return ret;
 }
 
+void
+ExecPlanNodeVisitor::ExecuteTaskWithoutResult(
+    plan::PlanFragment& plan,
+    std::shared_ptr<milvus::exec::QueryContext> query_context) {
+    tracer::AutoSpan span(
+        "ExecuteTaskWithoutResult", tracer::GetRootSpan(), true);
+    span.GetSpan()->SetAttribute("active_count",
+                                 query_context->get_active_count());
+
+    LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
+              plan.plan_node_->ToString(),
+              query_context->get_active_count(),
+              query_context->get_query_timestamp());
+
+    auto task =
+        milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
+    int64_t processed_num = 0;
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            if (query_context->bitset_is_element_level()) {
+                Assert(processed_num ==
+                       query_context->get_active_element_count());
+            } else {
+                Assert(processed_num == query_context->get_active_count());
+            }
+            break;
+        }
+        const auto& childrens = result->childrens();
+        AssertInfo(childrens.size() == 1,
+                   "plannode result vector's children size not equal one");
+        LOG_DEBUG("output result length:{}", childrens[0]->size());
+        if (auto vec = std::dynamic_pointer_cast<ColumnVector>(childrens[0])) {
+            processed_num += vec->size();
+        } else {
+            PanicInfo(UnexpectedError, "expr return type not matched");
+        }
+    }
+    span.GetSpan()->SetAttribute("total_rows", processed_num);
+}
+
 std::unique_ptr<RetrieveResult>
 wrap_num_entities(int64_t cnt) {
     auto retrieve_result = std::make_unique<RetrieveResult>();
@@ -513,7 +554,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     query_context->set_op_context(&op_context);
 
     // Do plan fragment task work
-    auto result = ExecuteTask(plan, query_context);
+    ExecuteTaskWithoutResult(plan, query_context);
 
     // Store result
     search_result_opt_ = std::move(query_context->get_search_result());

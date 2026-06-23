@@ -149,6 +149,11 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     ExecuteTask(plan::PlanFragment& plan,
                 std::shared_ptr<milvus::exec::QueryContext> query_context);
 
+    static void
+    ExecuteTaskWithoutResult(
+        plan::PlanFragment& plan,
+        std::shared_ptr<milvus::exec::QueryContext> query_context);
+
     void
     setupRetrieveResult(
         const RowVectorPtr& result,
