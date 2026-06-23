@@ -639,7 +639,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		// Use cached mapping stats loaded in preparation
 		cachedStats, ok := t.mappingStatsCache[segment.SegmentID]
 		if !ok {
-			return fmt.Errorf("mapping stats not found for segment %d", segment.SegmentID)
+			return merr.WrapErrServiceInternalMsg("mapping stats not found for segment %d", segment.SegmentID)
 		}
 		offSetPath := t.segmentIDOffsetMapping[segment.SegmentID]
 		offsetBytes, err := t.binlogIO.Download(ctx, []string{offSetPath})
@@ -1139,7 +1139,7 @@ func (t *clusteringCompactionTask) createCentroidsInfo(
 	vectors := make([][]float32, len(centroids))
 	for i, c := range centroids {
 		if c.GetDim() == 0 {
-			return nil, fmt.Errorf("empty centroid vector %d", i)
+			return nil, merr.WrapErrServiceInternalMsg("empty centroid vector %d", i)
 		}
 		vectors[i] = c.GetFloatVector().GetData()
 	}
