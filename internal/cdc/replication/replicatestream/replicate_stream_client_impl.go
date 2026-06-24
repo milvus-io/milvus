@@ -25,7 +25,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -244,36 +243,11 @@ func (r *replicateStreamClient) doSend(req *milvuspb.ReplicateRequest) error {
 	return r.client.Send(req)
 }
 
-// sendMessage sends a single message, rooted at a fresh context.Background().
-func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) error {
-	return r.sendMessageWithCtx(context.Background(), msg)
-}
-
-// sendMessageWithCtx sends a single message wrapped in a cdc.replicate span.
-//
-// If parentCtx already carries a valid span (the txn case), the new span is
-// created as a child.  Otherwise a new root span is created on
-// context.Background() with a W3C Link back to the primary WAL span that was
-// persisted in msg's _tc property.
-func (r *replicateStreamClient) sendMessageWithCtx(parentCtx context.Context, msg message.ImmutableMessage) (err error) {
+func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
 	immutableMessage := msg.IntoImmutableMessageProto()
 
-	// Determine span start options.
-	var startOpts []trace.SpanStartOption
-	spanCtx := trace.SpanContextFromContext(parentCtx)
-	if !spanCtx.IsValid() {
-		// Not inside a parent span (non-txn path): link to the primary WAL span.
-		primarySC := trace.SpanContextFromContext(message.ExtractTraceContext(
-			context.Background(),
-			message.MilvusMessageToImmutableMessage(immutableMessage),
-		))
-		if primarySC.IsValid() {
-			startOpts = append(startOpts, trace.WithLinks(trace.Link{SpanContext: primarySC}))
-		}
-		parentCtx = context.Background()
-	}
-
-	_, span := otel.Tracer("milvus.streaming.wal").Start(parentCtx, "cdc.replicate", startOpts...)
+	ctx := message.ExtractTraceContext(context.Background(), message.MilvusMessageToImmutableMessage(immutableMessage))
+	_, span := otel.Tracer("milvus.streaming.wal").Start(ctx, "cdc.replicate")
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
@@ -308,44 +282,21 @@ func (r *replicateStreamClient) sendMessageWithCtx(parentCtx context.Context, ms
 	return r.doSend(req)
 }
 
-// sendTxnMessage wraps the entire begin+bodies+commit sequence in a single
-// cdc.replicate.txn span (with a Link to the primary WAL txn span) and sends
-// each message as a child cdc.replicate span.
 func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
-	// Extract the primary span context from the Begin message's _tc.
-	beginMsg := txnMsg.Begin()
-	beginProto := beginMsg.IntoImmutableMessageProto()
-	primarySC := trace.SpanContextFromContext(message.ExtractTraceContext(
-		context.Background(),
-		message.MilvusMessageToImmutableMessage(beginProto),
-	))
-	var startOpts []trace.SpanStartOption
-	if primarySC.IsValid() {
-		startOpts = append(startOpts, trace.WithLinks(trace.Link{SpanContext: primarySC}))
-	}
-
-	ctx, span := otel.Tracer("milvus.streaming.wal").Start(context.Background(), "cdc.replicate.txn", startOpts...)
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-		}
-		span.End()
-	}()
-
 	// send txn begin message
-	if err = r.sendMessageWithCtx(ctx, beginMsg); err != nil {
+	if err = r.sendMessage(txnMsg.Begin()); err != nil {
 		return err
 	}
 
 	// send txn body messages
 	if err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-		return r.sendMessageWithCtx(ctx, msg)
+		return r.sendMessage(msg)
 	}); err != nil {
 		return err
 	}
 
 	// send txn commit message
-	err = r.sendMessageWithCtx(ctx, txnMsg.Commit())
+	err = r.sendMessage(txnMsg.Commit())
 	return
 }
 

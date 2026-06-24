@@ -31,12 +31,11 @@ func buildTestCDCImmutableMessage(t *testing.T, primaryCtx context.Context) mess
 	return mutableMsg.IntoImmutableMessage(msgID)
 }
 
-// TestSendMessageWithCtx_OpensCdcSpanWithLink asserts that:
-//   - A cdc.replicate span is exported with a Link back to the primary span
-//     that was persisted in the incoming message's _tc property.
+// TestSendMessage_OpensCdcSpanWithExtractedParent asserts that:
+//   - A cdc.replicate span is exported under the source span carried by _tc.
 //   - The outgoing ReplicateRequest preserves the original immutable message
 //     properties; secondary-side WAL span injection happens on the replicate server.
-func TestSendMessageWithCtx_OpensCdcSpanWithLink(t *testing.T) {
+func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
 	defer mockey.UnPatchAll()
 
 	exporter := tracetest.NewInMemoryExporter()
@@ -56,7 +55,7 @@ func TestSendMessageWithCtx_OpensCdcSpanWithLink(t *testing.T) {
 
 	imsg := buildTestCDCImmutableMessage(t, primaryCtx)
 
-	// Capture the ReplicateRequest that sendMessageWithCtx hands off to doSend.
+	// Capture the ReplicateRequest that sendMessage hands off to doSend.
 	var capturedReq *milvuspb.ReplicateRequest
 	mockey.Mock((*replicateStreamClient).doSend).To(
 		func(_ *replicateStreamClient, req *milvuspb.ReplicateRequest) error {
@@ -68,7 +67,7 @@ func TestSendMessageWithCtx_OpensCdcSpanWithLink(t *testing.T) {
 		clusterID: "test-cluster",
 		metrics:   NewReplicateMetrics(nil),
 	}
-	err := c.sendMessageWithCtx(context.Background(), imsg)
+	err := c.sendMessage(imsg)
 	assert.NoError(t, err)
 	assert.NotNil(t, capturedReq, "doSend must have been called")
 
@@ -84,9 +83,9 @@ func TestSendMessageWithCtx_OpensCdcSpanWithLink(t *testing.T) {
 	assert.Equal(t, primarySC.SpanID(), outSC.SpanID(),
 		"outgoing _tc should preserve the immutable message trace context")
 	assert.Equal(t, imsg.Properties().ToRawMap(), outProps,
-		"sendMessageWithCtx should not mutate immutable message properties")
+		"sendMessage should not mutate immutable message properties")
 
-	// The cdc.replicate span must carry a Link with the primary's trace_id.
+	// The cdc.replicate span should use the extracted _tc as its parent.
 	spans := exporter.GetSpans()
 	var cdc tracetest.SpanStub
 	for _, s := range spans {
@@ -96,15 +95,15 @@ func TestSendMessageWithCtx_OpensCdcSpanWithLink(t *testing.T) {
 		}
 	}
 	assert.Equal(t, "cdc.replicate", cdc.Name, "a cdc.replicate span must be exported")
-	assert.GreaterOrEqual(t, len(cdc.Links), 1, "cdc.replicate span must have at least one Link")
-	assert.Equal(t, primarySC.TraceID(), cdc.Links[0].SpanContext.TraceID(),
-		"cdc.replicate link must point to primary trace ID")
+	assert.Equal(t, primarySC.TraceID(), cdc.SpanContext.TraceID(),
+		"cdc.replicate must share the source trace ID")
+	assert.Equal(t, primarySC.SpanID(), cdc.Parent.SpanID(),
+		"cdc.replicate must be a child of the source span")
 }
 
-// TestSendTxnMessage_OpensCdcReplicateTxnSpan verifies that sendTxnMessage:
-// - Opens a cdc.replicate.txn span with a Link to the primary span from Begin's _tc.
-// - Each inner send opens a child cdc.replicate span under cdc.replicate.txn.
-func TestSendTxnMessage_OpensCdcReplicateTxnSpan(t *testing.T) {
+// TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan verifies that txn
+// replication does not add an extra txn-level span.
+func TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan(t *testing.T) {
 	defer mockey.UnPatchAll()
 
 	exporter := tracetest.NewInMemoryExporter()
@@ -153,48 +152,20 @@ func TestSendTxnMessage_OpensCdcReplicateTxnSpan(t *testing.T) {
 	_ = tp.ForceFlush(context.Background())
 	spans := exporter.GetSpans()
 
-	var txnSpan tracetest.SpanStub
 	var cdcReplicateSpans []tracetest.SpanStub
 	for _, s := range spans {
-		if s.Name == "cdc.replicate.txn" {
-			txnSpan = s
-		}
+		assert.NotEqual(t, "cdc.replicate.txn", s.Name, "txn replication should not emit a txn-level span")
 		if s.Name == "cdc.replicate" {
 			cdcReplicateSpans = append(cdcReplicateSpans, s)
 		}
 	}
 
-	assert.Equal(t, "cdc.replicate.txn", txnSpan.Name, "a cdc.replicate.txn span must be exported")
-	assert.GreaterOrEqual(t, len(txnSpan.Links), 1, "cdc.replicate.txn span must have at least one Link")
-	assert.Equal(t, primarySC.TraceID(), txnSpan.Links[0].SpanContext.TraceID(),
-		"cdc.replicate.txn link must point to primary trace ID")
-
-	// Three inner cdc.replicate spans, all children of txnSpan.
 	assert.Equal(t, 3, len(cdcReplicateSpans), "3 cdc.replicate spans must be exported for begin+body+commit")
+	var beginSpan tracetest.SpanStub
 	for _, s := range cdcReplicateSpans {
-		assert.Equal(t, txnSpan.SpanContext.SpanID(), s.Parent.SpanID(),
-			"cdc.replicate spans must be children of cdc.replicate.txn")
+		if s.Parent.SpanID() == primarySC.SpanID() {
+			beginSpan = s
+		}
 	}
-}
-
-// TestSendMessage_DelegatesToSendMessageWithCtx ensures the refactored sendMessage
-// still calls through correctly (smoke test).
-func TestSendMessage_DelegatesToSendMessageWithCtx(t *testing.T) {
-	defer mockey.UnPatchAll()
-
-	var sendCount int
-	mockey.Mock((*replicateStreamClient).doSend).To(
-		func(_ *replicateStreamClient, req *milvuspb.ReplicateRequest) error {
-			sendCount++
-			return nil
-		}).Build()
-
-	imsg := buildTestCDCImmutableMessage(t, context.Background())
-	c := &replicateStreamClient{
-		clusterID: "test-cluster",
-		metrics:   NewReplicateMetrics(nil),
-	}
-	err := c.sendMessage(imsg)
-	assert.NoError(t, err)
-	assert.Equal(t, 1, sendCount)
+	assert.Equal(t, "cdc.replicate", beginSpan.Name, "begin message span should use the source span as parent")
 }
