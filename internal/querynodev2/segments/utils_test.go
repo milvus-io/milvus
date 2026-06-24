@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -70,6 +71,31 @@ func TestGetSegmentRelatedDataSize(t *testing.T) {
 			},
 		})
 		assert.EqualValues(t, 100, GetSegmentRelatedDataSize(segment))
+	})
+
+	t.Run("local sealed segment uses cached log size", func(t *testing.T) {
+		loadInfo := &querypb.SegmentLoadInfo{
+			BinlogPaths: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogSize:    10,
+							MemorySize: 1000,
+						},
+					},
+				},
+			},
+		}
+		segment := &LocalSegment{
+			baseSegment: baseSegment{
+				segmentType: SegmentTypeSealed,
+				loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](compactSegmentLoadInfoForRuntime(loadInfo)),
+			},
+			binlogSize:      atomic.NewInt64(calculateSegmentMemorySize(loadInfo)),
+			relatedDataSize: atomic.NewInt64(calculateSegmentLogSize(loadInfo)),
+		}
+
+		assert.EqualValues(t, 10, GetSegmentRelatedDataSize(segment))
 	})
 
 	t.Run("growing segment", func(t *testing.T) {
