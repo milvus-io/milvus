@@ -754,6 +754,93 @@ func TestShouldUpdateNextTarget_DoesNotExpireAfterDelegatorSyncStarted(t *testin
 	assert.False(t, observer.shouldUpdateNextTarget(ctx, collectionID))
 }
 
+func TestShouldUpdateCurrentTarget_SyncMetadataFailureDoesNotPinNextTarget(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.QueryCoordCfg.NextTargetSurviveTime.Key, "1")
+
+	ctx := context.Background()
+	collectionID := int64(1000)
+	newVersion := int64(100)
+	segmentID := int64(100)
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+
+	targetMgr := meta.NewMockTargetManager(t)
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	broker := meta.NewMockBroker(t)
+	cluster := session.NewMockCluster(t)
+
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  collectionID,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         []int64{1},
+	})
+	mockCatalog := mocks.NewQueryCoordCatalog(t)
+	mockCatalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
+	replicaMgr := meta.NewReplicaManager(nil, mockCatalog)
+	assert.NoError(t, replicaMgr.Put(ctx, replica))
+
+	metaInstance := &meta.Meta{
+		CollectionManager: meta.NewCollectionManager(nil),
+		ReplicaManager:    replicaMgr,
+	}
+	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, broker, cluster, nodeMgr)
+
+	channelNames := map[string]*meta.DmChannel{
+		"channel-1": {
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "channel-1"},
+		},
+	}
+	targetSegments := map[int64]*datapb.SegmentInfo{
+		segmentID: {ID: segmentID, CollectionID: collectionID, InsertChannel: "channel-1"},
+	}
+
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
+	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments).Maybe()
+	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
+	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
+	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
+	targetMgr.EXPECT().GetPartitions(mock.Anything, collectionID, mock.Anything).Return([]int64{}, nil).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(targetSegments).Maybe()
+	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, collectionID).Return(true).Once()
+
+	broker.EXPECT().ListIndexes(mock.Anything, collectionID).Return(nil, assert.AnError).Once()
+
+	distMgr.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  "channel-1",
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:           1,
+			CollectionID: collectionID,
+			Channel:      "channel-1",
+			Segments: map[int64]*querypb.SegmentDist{
+				segmentID: {NodeID: 1},
+			},
+			Status: &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	distMgr.SegmentDistManager.Update(1, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  collectionID,
+			InsertChannel: "channel-1",
+		},
+		Node: 1,
+	})
+
+	assert.False(t, observer.shouldUpdateCurrentTarget(ctx, collectionID))
+	cluster.AssertNotCalled(t, "SyncDistribution", mock.Anything, mock.Anything, mock.Anything)
+
+	observer.nextTargetLastUpdate.Insert(collectionID, time.Now().Add(-time.Hour))
+	assert.True(t, observer.shouldUpdateNextTarget(ctx, collectionID))
+}
+
 // TestShouldUpdateCurrentTarget_AllChannelsSynced tests that shouldUpdateCurrentTarget returns true
 // only when ALL channels are synced successfully. This validates the fix where we check:
 // syncSuccess && lo.Every(syncedChannelNames, lo.Keys(channelNames))

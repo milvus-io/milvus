@@ -560,51 +560,51 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		return false
 	}
 
-	// Commit phase: once any delegator is synced to newVersion, updateNextTarget
-	// must not expire-replace this NextTarget. Later observer ticks will retry
-	// remaining delegators and then promote CurrentTarget.
-	if len(readyDelegatorsToSync) > 0 {
+	syncSuccess, syncStarted := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsToSync, newVersion)
+	if syncStarted {
 		ob.nextTargetSyncStarted.Insert(collectionID, newVersion)
 	}
-	return ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsToSync, newVersion)
+	return syncSuccess
 }
 
 // sync next target info to delegator as readable snapshot
 // 1. if next target is changed before delegator becomes serviceable, we need to sync the new next target to delegator to support partial search
 // 2. if next target is ready to read, we need to sync the next target to delegator to support full search
-func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collectionID int64, collReadyDelegatorList []*meta.DmChannel, newVersion int64) bool {
+func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collectionID int64, collReadyDelegatorList []*meta.DmChannel, newVersion int64) (bool, bool) {
 	var partitions []int64
 	var indexInfo []*indexpb.IndexInfo
 	var err error
+	syncStarted := false
 	for _, d := range collReadyDelegatorList {
 		updateVersionAction := ob.genSyncAction(ctx, d.View, newVersion)
 		replica := ob.meta.GetByCollectionAndNode(ctx, collectionID, d.Node)
 		if replica == nil {
 			mlog.Warn(ctx, "replica not found", mlog.FieldNodeID(d.Node), mlog.FieldCollectionID(collectionID))
 			// should not happen, don't update current target if replica not found
-			return false
+			return false, syncStarted
 		}
 		// init all the meta information
 		if partitions == nil {
 			partitions, err = utils.GetPartitions(ctx, ob.targetMgr, collectionID)
 			if err != nil {
 				mlog.Warn(ctx, "failed to get partitions", mlog.Err(err))
-				return false
+				return false, syncStarted
 			}
 
 			// Get collection index info
 			indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
 			if err != nil {
 				mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
-				return false
+				return false, syncStarted
 			}
 		}
 
 		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, partitions, indexInfo) {
-			return false
+			return false, syncStarted
 		}
+		syncStarted = true
 	}
-	return true
+	return true, syncStarted
 }
 
 func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Replica, LeaderView *meta.LeaderView, action *querypb.SyncAction,
