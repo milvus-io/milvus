@@ -108,7 +108,7 @@ func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
 }
 
 // WithTraceContext injects the current ctx's span context into message
-// properties under the reserved _tc key. No-op when ctx has no active span.
+// properties under the reserved _tc key when it is absent.
 func (m *messageImpl) WithTraceContext(ctx context.Context) {
 	injectTraceContext(ctx, m.properties)
 }

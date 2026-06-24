@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -321,12 +320,12 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 }
 
 // runAckCallbackWithTrace extracts the persisted trace context from the
-// broadcast task's message Properties and opens a broadcast.ack_callback
+// broadcast task's message Properties and opens a wal.bc_callback
 // span under it, invoking fn with the new ctx. Span is always ended,
 // and errors are recorded on the span.
 func runAckCallbackWithTrace(msg message.BroadcastMutableMessage, fn func(ctx context.Context) error) error {
 	parentCtx := message.ExtractTraceContext(context.Background(), msg)
-	ctx, span := otel.Tracer("milvus.streaming.wal").Start(parentCtx, "broadcast.ack_callback")
+	ctx, span := message.StartSpan(parentCtx, message.SpanNameWALBCCallback)
 	defer span.End()
 	err := fn(ctx)
 	if err != nil {

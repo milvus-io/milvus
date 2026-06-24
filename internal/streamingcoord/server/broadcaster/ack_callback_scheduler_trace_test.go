@@ -49,10 +49,10 @@ func TestRunAckCallbackWithTrace_OpensChildSpan(t *testing.T) {
 	spans := exporter.GetSpans()
 	var found bool
 	for _, s := range spans {
-		if s.Name == "broadcast.ack_callback" {
+		if s.Name == message.SpanNameWALBCCallback {
 			assert.Equal(t, originTraceID, s.SpanContext.TraceID())
 			found = true
 		}
 	}
-	assert.True(t, found, "broadcast.ack_callback span must be emitted")
+	assert.True(t, found, "wal.bc_callback span must be emitted")
 }

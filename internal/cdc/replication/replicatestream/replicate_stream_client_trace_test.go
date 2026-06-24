@@ -46,15 +46,15 @@ func setupTraceExporter(t *testing.T) *tracetest.InMemoryExporter {
 }
 
 // TestSendMessage_OpensCdcSpanWithExtractedParent asserts that:
-//   - A cdc.replicate span is exported under the source span carried by _tc.
+//   - A replicate.client span is exported under the source span carried by _tc.
 //   - The outgoing ReplicateRequest preserves the original immutable message
 //     properties; secondary-side WAL span injection happens on the replicate server.
 func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
 	exporter := setupTraceExporter(t)
 
 	// Simulate a primary WAL message with a persisted _tc pointing at
-	// the primary wal.append.server span.
-	primaryCtx, primarySpan := otel.Tracer("test").Start(context.Background(), "primary.wal.append.server")
+	// the primary wal.server span.
+	primaryCtx, primarySpan := otel.Tracer("test").Start(context.Background(), "primary.wal.server")
 	primarySC := trace.SpanContextFromContext(primaryCtx)
 	primarySpan.End()
 
@@ -82,20 +82,20 @@ func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
 	assert.Equal(t, imsg.Properties().ToRawMap(), outProps,
 		"sendMessage should not mutate immutable message properties")
 
-	// The cdc.replicate span should use the extracted _tc as its parent.
+	// The replicate.client span should use the extracted _tc as its parent.
 	spans := exporter.GetSpans()
 	var cdc tracetest.SpanStub
 	for _, s := range spans {
-		if s.Name == "cdc.replicate" {
+		if s.Name == message.SpanNameReplicateClient {
 			cdc = s
 			break
 		}
 	}
-	assert.Equal(t, "cdc.replicate", cdc.Name, "a cdc.replicate span must be exported")
+	assert.Equal(t, message.SpanNameReplicateClient, cdc.Name, "a replicate.client span must be exported")
 	assert.Equal(t, primarySC.TraceID(), cdc.SpanContext.TraceID(),
-		"cdc.replicate must share the source trace ID")
+		"replicate.client must share the source trace ID")
 	assert.Equal(t, primarySC.SpanID(), cdc.Parent.SpanID(),
-		"cdc.replicate must be a child of the source span")
+		"replicate.client must be a child of the source span")
 }
 
 // TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan verifies that txn
@@ -137,18 +137,18 @@ func TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan(t *testing.T) {
 
 	var cdcReplicateSpans []tracetest.SpanStub
 	for _, s := range spans {
-		assert.NotEqual(t, "cdc.replicate.txn", s.Name, "txn replication should not emit a txn-level span")
-		if s.Name == "cdc.replicate" {
+		assert.NotEqual(t, "replicate.client.txn", s.Name, "txn replication should not emit a txn-level span")
+		if s.Name == message.SpanNameReplicateClient {
 			cdcReplicateSpans = append(cdcReplicateSpans, s)
 		}
 	}
 
-	assert.Equal(t, 3, len(cdcReplicateSpans), "3 cdc.replicate spans must be exported for begin+body+commit")
+	assert.Equal(t, 3, len(cdcReplicateSpans), "3 replicate.client spans must be exported for begin+body+commit")
 	var beginSpan tracetest.SpanStub
 	for _, s := range cdcReplicateSpans {
 		if s.Parent.SpanID() == primarySC.SpanID() {
 			beginSpan = s
 		}
 	}
-	assert.Equal(t, "cdc.replicate", beginSpan.Name, "begin message span should use the source span as parent")
+	assert.Equal(t, message.SpanNameReplicateClient, beginSpan.Name, "begin message span should use the source span as parent")
 }

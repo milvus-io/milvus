@@ -24,7 +24,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -242,7 +241,7 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 	immutableMessage := msg.IntoImmutableMessageProto()
 
 	ctx := message.ExtractTraceContext(context.Background(), message.MilvusMessageToImmutableMessage(immutableMessage))
-	_, span := otel.Tracer("milvus.streaming.wal").Start(ctx, "cdc.replicate")
+	_, span := message.StartSpan(ctx, message.SpanNameReplicateClient)
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
