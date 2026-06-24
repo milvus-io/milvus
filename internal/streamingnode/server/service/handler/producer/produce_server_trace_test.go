@@ -17,13 +17,13 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 // TestHandleProduce_ExtractsAndOpensServerSpan verifies that handleProduce:
@@ -54,14 +54,14 @@ func TestHandleProduce_ExtractsAndOpensServerSpan(t *testing.T) {
 		"_v": "1",
 		"_t": strconv.FormatInt(int64(message.MessageTypeTimeTick), 10),
 	}
-	// Use InjectTraceContextIntoMap to inject the client span context into the raw map.
-	message.InjectTraceContextIntoMap(clientCtx, props)
+	injectedMsg := message.NewMutableMessageBeforeAppend([]byte("test-payload"), props)
+	message.InjectTraceContext(clientCtx, injectedMsg)
 
 	req := &streamingpb.ProduceMessageRequest{
 		RequestId: 42,
 		Message: &messagespb.Message{
 			Payload:    []byte("test-payload"),
-			Properties: props,
+			Properties: injectedMsg.Properties().ToRawMap(),
 		},
 	}
 
@@ -101,7 +101,7 @@ func TestHandleProduce_ExtractsAndOpensServerSpan(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 		metrics:          newProducerMetrics(types.PChannelInfo{Name: "test-ch", Term: 1}),

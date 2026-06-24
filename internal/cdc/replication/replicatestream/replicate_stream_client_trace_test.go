@@ -14,10 +14,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	mock_message "github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 // buildTestCDCImmutableMessage creates an ImmutableMessage with the trace context from primaryCtx injected.
@@ -34,8 +34,8 @@ func buildTestCDCImmutableMessage(t *testing.T, primaryCtx context.Context) mess
 // TestSendMessageWithCtx_OpensCdcSpanWithLink asserts that:
 //   - A cdc.replicate span is exported with a Link back to the primary span
 //     that was persisted in the incoming message's _tc property.
-//   - The outgoing ReplicateRequest has _tc overwritten with the cdc.replicate
-//     span's SpanContext (NOT the primary one).
+//   - The outgoing ReplicateRequest preserves the original immutable message
+//     properties; secondary-side WAL span injection happens on the replicate server.
 func TestSendMessageWithCtx_OpensCdcSpanWithLink(t *testing.T) {
 	defer mockey.UnPatchAll()
 
@@ -75,13 +75,16 @@ func TestSendMessageWithCtx_OpensCdcSpanWithLink(t *testing.T) {
 	// Flush spans.
 	_ = tp.ForceFlush(context.Background())
 
-	// Outgoing _tc must be overwritten with the cdc.replicate span context,
-	// not the primary span context.
+	// Outgoing _tc is still the primary span context. The replicate server owns
+	// the next WAL span and will overwrite _tc after it starts that span.
 	outProps := capturedReq.GetReplicateMessage().GetMessage().GetProperties()
-	outSC := message.ExtractSpanContextFromProperties(rawMapProps(outProps))
+	outMsg := message.MilvusMessageToImmutableMessage(capturedReq.GetReplicateMessage().GetMessage())
+	outSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), outMsg))
 	assert.True(t, outSC.IsValid(), "outgoing _tc must be valid")
-	assert.NotEqual(t, primarySC.SpanID(), outSC.SpanID(),
-		"outgoing _tc must be overwritten with the CDC span")
+	assert.Equal(t, primarySC.SpanID(), outSC.SpanID(),
+		"outgoing _tc should preserve the immutable message trace context")
+	assert.Equal(t, imsg.Properties().ToRawMap(), outProps,
+		"sendMessageWithCtx should not mutate immutable message properties")
 
 	// The cdc.replicate span must carry a Link with the primary's trace_id.
 	spans := exporter.GetSpans()

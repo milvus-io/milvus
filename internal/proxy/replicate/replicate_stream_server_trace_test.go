@@ -15,21 +15,21 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 )
 
 // TestHandleReplicateMessage_OpensWalReplicateAppendSpan verifies that
-// handleReplicateMessage extracts the CDC-injected trace context from the
-// message Properties and opens a "wal.replicate.append" child span whose
-// trace ID matches the CDC parent.
+// handleReplicateMessage extracts the replicated message trace context,
+// opens a "wal.replicate.append" child span, and injects that new span
+// context back into the local mutable message before append.
 func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 	defer mockey.UnPatchAll()
 
@@ -43,13 +43,14 @@ func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 	otel.SetTracerProvider(tp)
 	defer otel.SetTracerProvider(prev)
 
-	// Build a CDC-side traced context and capture the expected trace ID.
-	cdcCtx, cdcSpan := otel.Tracer("test").Start(context.Background(), "cdc.replicate")
-	expectedTraceID := trace.SpanContextFromContext(cdcCtx).TraceID()
-	cdcSpan.End()
+	// Build a source-side traced context and capture the expected trace ID.
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), "source.wal.append")
+	sourceSC := trace.SpanContextFromContext(sourceCtx)
+	expectedTraceID := sourceSC.TraceID()
+	sourceSpan.End()
 
-	// Build a replicate message proto with _tc injected (mimicking CDC sender).
-	reqMsg := buildTraceTestReplicateMsgProto(t, cdcCtx)
+	// Build a replicate message proto with _tc carried by the immutable message.
+	reqMsg := buildTraceTestReplicateMsgProto(t, sourceCtx)
 
 	req := &milvuspb.ReplicateRequest_ReplicateMessage{
 		ReplicateMessage: &milvuspb.ReplicateMessage{
@@ -60,11 +61,13 @@ func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 
 	// Capture the ctx passed to Append.
 	var capturedCtx context.Context
+	var capturedMsg message.ReplicateMutableMessage
 
 	replicateService := mock_streaming.NewMockReplicateService(t)
 	replicateService.EXPECT().Append(mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, msg message.ReplicateMutableMessage) (*types.AppendResult, error) {
 			capturedCtx = ctx
+			capturedMsg = msg
 			return &types.AppendResult{TimeTick: 1}, nil
 		})
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
@@ -86,15 +89,17 @@ func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 
 	// Assert that a "wal.replicate.append" span was emitted with the right trace ID.
 	spans := exporter.GetSpans()
-	var found bool
+	var walSpan tracetest.SpanStub
 	for _, s := range spans {
 		if s.Name == "wal.replicate.append" {
+			walSpan = s
 			assert.Equal(t, expectedTraceID, s.SpanContext.TraceID(),
-				"wal.replicate.append span must share the CDC trace ID")
-			found = true
+				"wal.replicate.append span must share the source trace ID")
 		}
 	}
-	assert.True(t, found, "a 'wal.replicate.append' span must be emitted")
+	assert.Equal(t, "wal.replicate.append", walSpan.Name, "a 'wal.replicate.append' span must be emitted")
+	assert.Equal(t, sourceSC.SpanID(), walSpan.Parent.SpanID(),
+		"wal.replicate.append should be a child of the source message span")
 
 	// Also verify that the ctx passed to Append carries the same trace ID.
 	if capturedCtx != nil {
@@ -102,12 +107,18 @@ func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 		assert.True(t, capturedSpan.SpanContext().IsValid(),
 			"ctx passed to Append should carry a valid span")
 		assert.Equal(t, expectedTraceID, capturedSpan.SpanContext().TraceID(),
-			"ctx passed to Append must share the CDC trace ID")
+			"ctx passed to Append must share the source trace ID")
 	}
+
+	assert.NotNil(t, capturedMsg)
+	msgSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsg))
+	assert.True(t, msgSC.IsValid(), "replicate server should inject wal.replicate.append context into the mutable message")
+	assert.Equal(t, walSpan.SpanContext.TraceID(), msgSC.TraceID())
+	assert.Equal(t, walSpan.SpanContext.SpanID(), msgSC.SpanID())
 }
 
 // buildTraceTestReplicateMsgProto builds a *commonpb.ImmutableMessage that
-// NewReplicateMessage will accept, with _tc injected from tracedCtx.
+// carries _tc through the normal message conversion path.
 func buildTraceTestReplicateMsgProto(t *testing.T, tracedCtx context.Context) *commonpb.ImmutableMessage {
 	t.Helper()
 	messageID := pulsar2.NewPulsarID(pulsar.EarliestMessageID())
@@ -119,10 +130,7 @@ func buildTraceTestReplicateMsgProto(t *testing.T, tracedCtx context.Context) *c
 		MustBuildMutable().WithTimeTick(tt).
 		WithLastConfirmed(messageID)
 
-	immutable := msg.IntoImmutableMessage(messageID)
-	milvusMsg := message.ImmutableMessageToMilvusMessage(commonpb.WALName_Pulsar.String(), immutable)
-
-	// Inject the CDC trace context into the proto Properties map.
-	message.InjectTraceContextIntoMap(tracedCtx, milvusMsg.GetProperties())
+	msg.WithTraceContext(tracedCtx)
+	milvusMsg := message.ImmutableMessageToMilvusMessage(commonpb.WALName_Pulsar.String(), msg.IntoImmutableMessage(messageID))
 	return milvusMsg
 }

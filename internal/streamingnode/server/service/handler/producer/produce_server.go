@@ -203,7 +203,7 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 
 	// Extract the client-injected trace context and open a server-side span so
 	// the WAL append is linked to the originating client request in traces.
-	msgCtx := message.ExtractTraceContext(p.produceServer.Context(), msg.Properties())
+	msgCtx := message.ExtractTraceContext(p.produceServer.Context(), msg)
 	msgCtx, span := otel.Tracer("milvus.streaming.wal").Start(msgCtx, "wal.append.server")
 
 	// Append message to wal.

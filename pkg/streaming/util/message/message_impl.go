@@ -109,9 +109,8 @@ func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
 
 // WithTraceContext injects the current ctx's span context into message
 // properties under the reserved _tc key. No-op when ctx has no active span.
-func (m *messageImpl) WithTraceContext(ctx context.Context) MutableMessage {
-	InjectTraceContext(ctx, m.properties)
-	return m
+func (m *messageImpl) WithTraceContext(ctx context.Context) {
+	injectTraceContext(ctx, m.properties)
 }
 
 // WithReplicateHeader sets the replicate header of current message.

@@ -29,7 +29,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/meta"
@@ -250,28 +249,13 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) error 
 	return r.sendMessageWithCtx(context.Background(), msg)
 }
 
-// rawMapProps is a thin wrapper around map[string]string that satisfies the
-// message.RProperties interface without allocating a new struct type at each
-// call site.
-type rawMapProps map[string]string
-
-func (p rawMapProps) Get(k string) (string, bool) { v, ok := p[k]; return v, ok }
-func (p rawMapProps) Exist(k string) bool         { _, ok := p[k]; return ok }
-func (p rawMapProps) ToRawMap() map[string]string { return map[string]string(p) }
-
 // sendMessageWithCtx sends a single message wrapped in a cdc.replicate span.
 //
 // If parentCtx already carries a valid span (the txn case), the new span is
 // created as a child.  Otherwise a new root span is created on
 // context.Background() with a W3C Link back to the primary WAL span that was
 // persisted in msg's _tc property.
-//
-// The outgoing ReplicateRequest's _tc is replaced with the cdc.replicate span
-// context so that the secondary cluster's handling nests under the CDC span,
-// not under the (potentially long-expired) primary span.
 func (r *replicateStreamClient) sendMessageWithCtx(parentCtx context.Context, msg message.ImmutableMessage) (err error) {
-	// Serialize the message proto first — we need the raw properties map both
-	// for extracting the primary span context and for the outgoing request.
 	immutableMessage := msg.IntoImmutableMessageProto()
 
 	// Determine span start options.
@@ -279,14 +263,17 @@ func (r *replicateStreamClient) sendMessageWithCtx(parentCtx context.Context, ms
 	spanCtx := trace.SpanContextFromContext(parentCtx)
 	if !spanCtx.IsValid() {
 		// Not inside a parent span (non-txn path): link to the primary WAL span.
-		primarySC := message.ExtractSpanContextFromProperties(rawMapProps(immutableMessage.GetProperties()))
+		primarySC := trace.SpanContextFromContext(message.ExtractTraceContext(
+			context.Background(),
+			message.MilvusMessageToImmutableMessage(immutableMessage),
+		))
 		if primarySC.IsValid() {
 			startOpts = append(startOpts, trace.WithLinks(trace.Link{SpanContext: primarySC}))
 		}
 		parentCtx = context.Background()
 	}
 
-	ctx, span := otel.Tracer("milvus.streaming.wal").Start(parentCtx, "cdc.replicate", startOpts...)
+	_, span := otel.Tracer("milvus.streaming.wal").Start(parentCtx, "cdc.replicate", startOpts...)
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
@@ -310,22 +297,11 @@ func (r *replicateStreamClient) sendMessageWithCtx(parentCtx context.Context, ms
 		}
 	}()
 
-	// Build the outgoing properties with _tc overwritten to carry the CDC span context.
-	clonedProps := make(map[string]string, len(immutableMessage.GetProperties()))
-	for k, v := range immutableMessage.GetProperties() {
-		clonedProps[k] = v
-	}
-	message.InjectTraceContextIntoMap(ctx, clonedProps)
-
 	req := &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
 			ReplicateMessage: &milvuspb.ReplicateMessage{
 				SourceClusterId: r.clusterID,
-				Message: &commonpb.ImmutableMessage{
-					Id:         msg.MessageID().IntoProto(),
-					Payload:    immutableMessage.GetPayload(),
-					Properties: clonedProps,
-				},
+				Message:         immutableMessage,
 			},
 		},
 	}
@@ -337,11 +313,12 @@ func (r *replicateStreamClient) sendMessageWithCtx(parentCtx context.Context, ms
 // each message as a child cdc.replicate span.
 func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
 	// Extract the primary span context from the Begin message's _tc.
-	// Use IntoImmutableMessageProto to get the raw properties map so we avoid
-	// an extra interface call through Properties().
 	beginMsg := txnMsg.Begin()
 	beginProto := beginMsg.IntoImmutableMessageProto()
-	primarySC := message.ExtractSpanContextFromProperties(rawMapProps(beginProto.GetProperties()))
+	primarySC := trace.SpanContextFromContext(message.ExtractTraceContext(
+		context.Background(),
+		message.MilvusMessageToImmutableMessage(beginProto),
+	))
 	var startOpts []trace.SpanStartOption
 	if primarySC.IsValid() {
 		startOpts = append(startOpts, trace.WithLinks(trace.Link{SpanContext: primarySC}))
