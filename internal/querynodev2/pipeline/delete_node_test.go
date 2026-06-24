@@ -23,8 +23,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -94,6 +96,47 @@ func (suite *DeleteNodeSuite) TestBasic() {
 	in := suite.buildDeleteNodeMsg()
 	suite.delegator.EXPECT().UpdateTSafe(in.timeRange.timestampMax).Return()
 	// run
+	out := node.Operate(in)
+	suite.Nil(out)
+}
+
+func (suite *DeleteNodeSuite) TestSchemaBarrierSuccess() {
+	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockSegmentManager := segments.NewMockSegmentManager(suite.T())
+	suite.manager = &segments.Manager{
+		Collection: mockCollectionManager,
+		Segment:    mockSegmentManager,
+	}
+	suite.delegator = delegator.NewMockShardDelegator(suite.T())
+	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
+	in := suite.buildDeleteNodeMsg()
+	in.schema = &schemapb.CollectionSchema{Version: 10}
+	in.schemaBarrierTs = 100
+
+	suite.delegator.EXPECT().ProcessDelete(mock.Anything, in.timeRange.timestampMax).Return()
+	suite.delegator.EXPECT().UpdateSchema(mock.Anything, in.schema, in.schemaBarrierTs).Return(nil).Once()
+	suite.delegator.EXPECT().UpdateTSafe(in.timeRange.timestampMax).Return().Once()
+
+	out := node.Operate(in)
+	suite.Nil(out)
+}
+
+func (suite *DeleteNodeSuite) TestSchemaBarrierFailureSkipsTSafe() {
+	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockSegmentManager := segments.NewMockSegmentManager(suite.T())
+	suite.manager = &segments.Manager{
+		Collection: mockCollectionManager,
+		Segment:    mockSegmentManager,
+	}
+	suite.delegator = delegator.NewMockShardDelegator(suite.T())
+	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
+	in := suite.buildDeleteNodeMsg()
+	in.schema = &schemapb.CollectionSchema{Version: 10}
+	in.schemaBarrierTs = 100
+
+	suite.delegator.EXPECT().ProcessDelete(mock.Anything, in.timeRange.timestampMax).Return()
+	suite.delegator.EXPECT().UpdateSchema(mock.Anything, in.schema, in.schemaBarrierTs).Return(merr.WrapErrServiceInternal("mocked")).Once()
+
 	out := node.Operate(in)
 	suite.Nil(out)
 }

@@ -480,8 +480,7 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 
 func (sd *shardDelegator) maybeReopenLoadedSegmentsBeforePublish(ctx context.Context, worker cluster.Worker, req *querypb.LoadSegmentsRequest) (uint64, error) {
 	sd.schemaChangeMutex.RLock()
-	currentSchema := sd.collection.Schema()
-	_, _, currentBarrierTs := sd.collection.SchemaSnapshot()
+	currentSchema, _, currentBarrierTs := sd.collection.SchemaSnapshot()
 	sd.schemaChangeMutex.RUnlock()
 
 	loadMeta := req.GetLoadMeta()
@@ -664,7 +663,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	effectiveSchemaBarrierTs, err := sd.maybeReopenLoadedSegmentsBeforePublish(ctx, worker, req)
 	if err != nil {
-		log.Warn("failed to reopen loaded segments before publish", zap.Error(err))
+		log.Warn(ctx, "failed to reopen loaded segments before publish", mlog.Err(err))
 		return err
 	}
 

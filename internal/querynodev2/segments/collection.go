@@ -50,8 +50,9 @@ type CollectionManager interface {
 	// UpdateSchema updates the underlying collection schema of the provided collection.
 	// schemaBarrierTs is the DDL/update barrier timestamp, not the logical schema
 	// version. The manager derives the logical schema version from schema.Version
-	// when a schema payload is present.
-	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	// when a schema payload is present. The returned bool reports whether the
+	// collection snapshot actually advanced; stale/no-op updates return false, nil.
+	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) (bool, error)
 }
 
 type collectionManager struct {
@@ -149,13 +150,13 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) (bool, error) {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
 	collection, ok := m.collections[collectionID]
 	if !ok {
-		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
+		return false, merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
 	logicalSchemaVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
@@ -166,14 +167,14 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	//   properties-only schema snapshots such as ttl_field changes.
 	plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, logicalSchemaVersion, schemaBarrierTs)
 	if !shouldUpdate {
-		return nil
+		return false, nil
 	}
 
 	if err := collection.ccollection.UpdateSchema(schema, plan.segcoreSchemaVersion); err != nil {
-		return err
+		return false, err
 	}
 	collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
-	return nil
+	return true, nil
 }
 
 // ShouldUpdateCollectionSchema reports whether an UpdateSchema payload would
