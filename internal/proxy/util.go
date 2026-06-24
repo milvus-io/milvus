@@ -432,7 +432,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 	}
 
 	// for dense vector field, dim will be limited by max_dimension
-	if typeutil.IsBinaryVectorType(field.DataType) {
+	if isBinaryVectorDimension(field) {
 		if dim%8 != 0 {
 			return merr.WrapErrParameterInvalidMsg("invalid dimension: %d of field %s. binary vector dimension should be multiple of 8. ", dim, field.GetName())
 		}
@@ -445,6 +445,11 @@ func validateDimension(field *schemapb.FieldSchema) error {
 		}
 	}
 	return nil
+}
+
+func isBinaryVectorDimension(field *schemapb.FieldSchema) bool {
+	return typeutil.IsBinaryVectorType(field.GetDataType()) ||
+		(typeutil.IsArrayOfVectorType(field.GetDataType()) && typeutil.IsBinaryVectorType(field.GetElementType()))
 }
 
 func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema) error {

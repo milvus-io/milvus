@@ -312,7 +312,32 @@ func TestValidateDimension(t *testing.T) {
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))
 
+	fieldSchema.DataType = schemapb.DataType_ArrayOfVector
+	fieldSchema.ElementType = schemapb.DataType_BinaryVector
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "10",
+		},
+	}
+	assert.NotNil(t, validateDimension(fieldSchema))
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "16",
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt() * 8),
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+
 	fieldSchema.DataType = schemapb.DataType_Int8Vector
+	fieldSchema.ElementType = schemapb.DataType_None
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
 			Key:   common.DimKey,
@@ -4107,6 +4132,33 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.NoError(t, err)
+	})
+
+	t.Run("valid binary array of vector field", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "valid_binary_array_vector",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt() * 8)},
+			},
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("binary array of vector dimension must be multiple of 8", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "invalid_binary_array_vector",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "10"},
+			},
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "binary vector dimension should be multiple of 8")
 	})
 
 	t.Run("invalid field name", func(t *testing.T) {
