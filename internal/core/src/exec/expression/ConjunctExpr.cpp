@@ -58,14 +58,23 @@ PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
         common::ThreeValuedLogicOp::Or(result, input_result);
     }
 
-    // Return the count of active rows for short-circuit optimization
-    // For AND: return count of true (if 0, all false, can skip)
-    // For OR: return count of false (if 0, all true, can skip)
-    TargetBitmapView res_data(result->GetRawData(), result->size());
+    // Return rows that still need the following expressions.
+    // For AND: TRUE or NULL rows still need evaluation; only definite FALSE can
+    // stop. For OR: FALSE or NULL rows still need evaluation; only definite TRUE
+    // can stop.
+    const size_t size = result->size();
+    TargetBitmapView res_data(result->GetRawData(), size);
+    TargetBitmapView res_valid(result->GetValidRawData(), size);
     if (is_and_) {
-        return static_cast<int64_t>(res_data.count());
+        TargetBitmap active_rows(res_valid);
+        active_rows.inplace_sub(res_data, size);  // valid & ~data
+        active_rows.flip();                       // data | ~valid
+        return static_cast<int64_t>(active_rows.count());
     } else {
-        return static_cast<int64_t>(result->size() - res_data.count());
+        TargetBitmap active_rows(res_data);
+        active_rows.inplace_and(res_valid, size);  // data & valid
+        active_rows.flip();                        // ~data | ~valid
+        return static_cast<int64_t>(active_rows.count());
     }
 }
 
