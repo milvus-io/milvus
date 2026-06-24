@@ -369,15 +369,15 @@ func (w *walAdaptorImpl) Close() {
 		w.unregisterQueryViewHandler()
 	}
 	if w.param.RecoveryStorage != nil {
-		w.Logger().Info("wal begin to detach query resource load config listener...")
+		w.Logger().Info(context.TODO(), "wal begin to detach query resource load config listener...")
 		w.param.RecoveryStorage.DetachLoadConfigListener()
 	}
 	if w.queryViewHandler != nil {
-		w.Logger().Info("wal begin to close query view state machine...")
+		w.Logger().Info(context.TODO(), "wal begin to close query view state machine...")
 		w.queryViewHandler.CloseForHandoff()
 	}
 	if w.viewResourceManager != nil {
-		w.Logger().Info("wal begin to close query view resources...")
+		w.Logger().Info(context.TODO(), "wal begin to close query view resources...")
 		w.viewResourceManager.Close()
 	}
 

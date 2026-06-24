@@ -942,10 +942,10 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 					CollectionID: task.GetCollectionId(),
 					SegmentIDs:   []int64{result.GetSegmentId()},
 				}); err != nil {
-					log.Warn("failed to publish DataView after copy segment completion",
+					mlog.Warn(ctx, "failed to publish DataView after copy segment completion",
 						WrapCopySegmentTaskLog(task,
-							zap.Int64("segmentID", result.GetSegmentId()),
-							zap.Error(err))...)
+							mlog.Int64("segmentID", result.GetSegmentId()),
+							mlog.Err(err))...)
 				}
 			}
 
