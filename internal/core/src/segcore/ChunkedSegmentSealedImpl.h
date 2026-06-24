@@ -764,22 +764,35 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         void* dst_raw);
 
-    template <typename S>
     static void
-    bulk_subscript_ptr_impl(
+    bulk_subscript_string_impl(
         milvus::OpContext* op_ctx,
-        ChunkedColumnInterface* field,
+        const ChunkedColumnInterface* field,
         const int64_t* seg_offsets,
         int64_t count,
         google::protobuf::RepeatedPtrField<std::string>* dst_raw);
 
-    template <typename S, typename T = S>
     static void
-    bulk_subscript_ptr_impl(milvus::OpContext* op_ctx,
-                            const ChunkedColumnInterface* field,
-                            const int64_t* seg_offsets,
-                            int64_t count,
-                            T* dst);
+    bulk_subscript_json_impl(
+        milvus::OpContext* op_ctx,
+        const ChunkedColumnInterface* field,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<std::string>* dst_raw);
+
+    static void
+    bulk_subscript_string_impl(milvus::OpContext* op_ctx,
+                               const ChunkedColumnInterface* field,
+                               const int64_t* seg_offsets,
+                               int64_t count,
+                               std::string* dst);
+
+    static void
+    bulk_subscript_json_impl(milvus::OpContext* op_ctx,
+                             const ChunkedColumnInterface* field,
+                             const int64_t* seg_offsets,
+                             int64_t count,
+                             Json* dst);
 
     template <typename T>
     static void

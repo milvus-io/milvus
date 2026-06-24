@@ -3130,33 +3130,31 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         case DataType::TEXT: {
             // dst must have at least count elements; the callback's offset
             // parameter is guaranteed to be in [0, count)
-            bulk_subscript_ptr_impl<std::string>(
-                op_ctx,
-                column.get(),
-                seg_offsets,
-                count,
-                static_cast<std::string*>(data));
+            bulk_subscript_string_impl(op_ctx,
+                                       column.get(),
+                                       seg_offsets,
+                                       count,
+                                       static_cast<std::string*>(data));
             break;
         }
         case DataType::JSON: {
             // dst must have at least count elements; the callback's offset
             // parameter is guaranteed to be in [0, count)
-            bulk_subscript_ptr_impl<Json>(op_ctx,
-                                          column.get(),
-                                          seg_offsets,
-                                          count,
-                                          static_cast<Json*>(data));
+            bulk_subscript_json_impl(op_ctx,
+                                     column.get(),
+                                     seg_offsets,
+                                     count,
+                                     static_cast<Json*>(data));
             break;
         }
         case DataType::GEOMETRY: {
             // dst must have at least count elements; the callback's offset
             // parameter is guaranteed to be in [0, count)
-            bulk_subscript_ptr_impl<std::string>(
-                op_ctx,
-                column.get(),
-                seg_offsets,
-                count,
-                static_cast<std::string*>(data));
+            bulk_subscript_string_impl(op_ctx,
+                                       column.get(),
+                                       seg_offsets,
+                                       count,
+                                       static_cast<std::string*>(data));
             break;
         }
         case DataType::ARRAY: {
@@ -3223,60 +3221,68 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
         op_ctx, dst_vec, seg_offsets, element_sizeof, count);
 }
 
-template <typename S>
 void
-ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
-    milvus::OpContext* op_ctx,
-    ChunkedColumnInterface* column,
-    const int64_t* seg_offsets,
-    int64_t count,
-    google::protobuf::RepeatedPtrField<std::string>* dst) {
-    if constexpr (std::is_same_v<S, Json>) {
-        column->BulkRawJsonAt(
-            op_ctx,
-            [&](Json json, size_t offset, bool is_valid) {
-                dst->at(offset) = std::string(json.data());
-            },
-            seg_offsets,
-            count);
-    } else {
-        static_assert(std::is_same_v<S, std::string>);
-        column->BulkRawStringAt(
-            op_ctx,
-            [dst](std::string_view value, size_t offset, bool is_valid) {
-                dst->at(offset) = std::string(value);
-            },
-            seg_offsets,
-            count);
-    }
-}
-
-template <typename S, typename T>
-void
-ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
+ChunkedSegmentSealedImpl::bulk_subscript_string_impl(
     milvus::OpContext* op_ctx,
     const ChunkedColumnInterface* column,
     const int64_t* seg_offsets,
     int64_t count,
-    T* dst) {
-    if constexpr (std::is_same_v<S, Json>) {
-        column->BulkRawJsonAt(
-            op_ctx,
-            [&](Json json, size_t offset, bool is_valid) {
-                dst[offset] = std::move(T(json));
-            },
-            seg_offsets,
-            count);
-    } else {
-        static_assert(std::is_same_v<S, std::string>);
-        column->BulkRawStringAt(
-            op_ctx,
-            [&](std::string_view value, size_t offset, bool is_valid) {
-                dst[offset] = std::move(T(value));
-            },
-            seg_offsets,
-            count);
-    }
+    google::protobuf::RepeatedPtrField<std::string>* dst) {
+    column->BulkRawStringAt(
+        op_ctx,
+        [dst](std::string_view value, size_t offset, bool is_valid) {
+            dst->at(offset) = std::string(value);
+        },
+        seg_offsets,
+        count);
+}
+
+void
+ChunkedSegmentSealedImpl::bulk_subscript_json_impl(
+    milvus::OpContext* op_ctx,
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<std::string>* dst) {
+    column->BulkRawJsonAt(
+        op_ctx,
+        [dst](Json json, size_t offset, bool is_valid) {
+            dst->at(offset) = std::string(json.data());
+        },
+        seg_offsets,
+        count);
+}
+
+void
+ChunkedSegmentSealedImpl::bulk_subscript_string_impl(
+    milvus::OpContext* op_ctx,
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    std::string* dst) {
+    column->BulkRawStringAt(
+        op_ctx,
+        [dst](std::string_view value, size_t offset, bool is_valid) {
+            dst[offset] = std::string(value);
+        },
+        seg_offsets,
+        count);
+}
+
+void
+ChunkedSegmentSealedImpl::bulk_subscript_json_impl(
+    milvus::OpContext* op_ctx,
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    Json* dst) {
+    column->BulkRawJsonAt(
+        op_ctx,
+        [dst](Json json, size_t offset, bool is_valid) {
+            dst[offset] = Json(json);
+        },
+        seg_offsets,
+        count);
 }
 
 template <typename T>
@@ -3854,7 +3860,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
         case DataType::STRING: {
-            bulk_subscript_ptr_impl<std::string>(
+            bulk_subscript_string_impl(
                 op_ctx,
                 column.get(),
                 seg_offsets,
@@ -3882,7 +3888,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         }
 
         case DataType::JSON: {
-            bulk_subscript_ptr_impl<Json>(
+            bulk_subscript_json_impl(
                 op_ctx,
                 column.get(),
                 seg_offsets,
@@ -3892,13 +3898,13 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         }
 
         case DataType::GEOMETRY: {
-            bulk_subscript_ptr_impl<std::string>(op_ctx,
-                                                 column.get(),
-                                                 seg_offsets,
-                                                 count,
-                                                 ret->mutable_scalars()
-                                                     ->mutable_geometry_data()
-                                                     ->mutable_data());
+            bulk_subscript_string_impl(op_ctx,
+                                       column.get(),
+                                       seg_offsets,
+                                       count,
+                                       ret->mutable_scalars()
+                                           ->mutable_geometry_data()
+                                           ->mutable_data());
             break;
         }
 
