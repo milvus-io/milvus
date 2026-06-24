@@ -203,10 +203,26 @@ KnowhereStatusString(knowhere::Status status) {
 //              Cardinal-only, raised by BuildAsync's Interrupt on cancel-or-build
 //              -timeout (not a search timeout), and conflates cancellation with
 //              timeout, so it falls here rather than to a retriable code.
+// A few statuses that knowhere's IsInputError lumps into the input bucket are
+// really capability / data errors, not malformed caller input, so we pull them
+// out before the IsInputError check:
+//   not_implemented / invalid_instruction_set -> Unsupported (a feature or CPU
+//       capability gap, e.g. SCANN needs AVX2; the request itself is fine).
+//   invalid_serialized_index_type -> DataFormatBroken (an incompatible-version
+//       or corrupt serialized index read back from storage).
 // Callers that need a more specific code (e.g. invalid_index_error -> Unsupported,
 // build path -> IndexBuildError) should special-case before falling back here.
 inline ErrorCode
 KnowhereStatusToErrorCode(knowhere::Status status) {
+    switch (status) {
+        case knowhere::Status::not_implemented:
+        case knowhere::Status::invalid_instruction_set:
+            return ErrorCode::Unsupported;
+        case knowhere::Status::invalid_serialized_index_type:
+            return ErrorCode::DataFormatBroken;
+        default:
+            break;
+    }
     if (knowhere::IsInputError(status)) {
         return ErrorCode::InvalidParameter;
     }
