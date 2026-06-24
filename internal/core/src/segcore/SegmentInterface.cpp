@@ -646,6 +646,10 @@ SegmentInternalInterface::Retrieve(
 
 int64_t
 SegmentInternalInterface::get_real_count() const {
+    if (get_deleted_count() == 0) {
+        return get_row_count();
+    }
+
 #if 0
     auto insert_cnt = get_row_count();
     BitsetType bitset_holder;
