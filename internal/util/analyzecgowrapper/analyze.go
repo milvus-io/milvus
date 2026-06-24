@@ -109,7 +109,7 @@ func runAnalyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) anal
 		mlog.Warn(ctx, "marshal analyzeInfo failed",
 			mlog.FieldBuildID(analyzeInfo.GetBuildID()),
 			mlog.Err(err))
-		return nil, err
+		return analyzeResult{err: err}
 	}
 
 	var analyzePtr C.CAnalyze
