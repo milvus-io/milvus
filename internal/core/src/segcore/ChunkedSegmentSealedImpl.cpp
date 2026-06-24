@@ -306,6 +306,30 @@ get_pk_value(const PinWrapper<Chunk*>& pin, int64_t offset) {
     }
 }
 
+std::vector<int64_t>
+build_chunk_offsets(const ChunkedColumnInterface& column) {
+    auto num_chunks = column.num_chunks();
+    std::vector<int64_t> chunk_offsets(num_chunks + 1, 0);
+    for (int64_t c = 0; c < num_chunks; ++c) {
+        chunk_offsets[c + 1] = chunk_offsets[c] + column.chunk_row_nums(c);
+    }
+    return chunk_offsets;
+}
+
+int64_t
+chunk_id_for_offset(const std::vector<int64_t>& chunk_offsets,
+                    int64_t offset) {
+    AssertInfo(chunk_offsets.size() >= 2, "chunk offsets must not be empty");
+    auto chunk_it = std::ranges::upper_bound(chunk_offsets, offset);
+    if (chunk_it == chunk_offsets.begin()) {
+        return 0;
+    }
+    if (chunk_it == chunk_offsets.end()) {
+        return static_cast<int64_t>(chunk_offsets.size()) - 2;
+    }
+    return static_cast<int64_t>(chunk_it - chunk_offsets.begin() - 1);
+}
+
 template <sealed_segment_detail::PrimaryKey PK, typename Callback>
 void
 for_each_sorted_pk_match(
@@ -2545,12 +2569,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     std::vector<int64_t> ts_chunk_offsets;
     if (ts_column) {
         ts_chunk_pins = ts_column->GetAllChunks(nullptr);
-        auto num_ts_chunks = ts_column->num_chunks();
-        ts_chunk_offsets.resize(num_ts_chunks + 1, 0);
-        for (int64_t c = 0; c < num_ts_chunks; c++) {
-            ts_chunk_offsets[c + 1] =
-                ts_chunk_offsets[c] + ts_column->chunk_row_nums(c);
-        }
+        ts_chunk_offsets = build_chunk_offsets(*ts_column);
     } else if (!effective_commit_ts) {
         AssertInfo(!insert_record_.timestamps_.empty(),
                    "timestamp data is not ready");
@@ -2562,11 +2581,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
         if (!ts_column) {
             return insert_record_.timestamps_[offset];
         }
-        auto num_ts_chunks = static_cast<int64_t>(ts_chunk_pins.size());
-        int64_t c = 0;
-        while (c < num_ts_chunks - 1 && offset >= ts_chunk_offsets[c + 1]) {
-            ++c;
-        }
+        auto c = chunk_id_for_offset(ts_chunk_offsets, offset);
         auto* data = reinterpret_cast<const Timestamp*>(
             ts_chunk_pins[c].get()->RawData());
         return data[offset - ts_chunk_offsets[c]];
@@ -2978,21 +2993,10 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             if (ts_column) {
                 // StorageV2: read from timestamp column directly
                 auto all_chunks = ts_column->GetAllChunks(op_ctx);
-                // Build prefix-sum for chunk offset lookup
-                auto num_chunks = ts_column->num_chunks();
-                std::vector<int64_t> chunk_offsets(num_chunks + 1, 0);
-                for (int64_t c = 0; c < num_chunks; c++) {
-                    chunk_offsets[c + 1] =
-                        chunk_offsets[c] + ts_column->chunk_row_nums(c);
-                }
+                auto chunk_offsets = build_chunk_offsets(*ts_column);
                 for (int64_t i = 0; i < count; ++i) {
                     auto offset = seg_offsets[i];
-                    // Find chunk via linear scan (chunks are typically few)
-                    int64_t c = 0;
-                    while (c < num_chunks - 1 &&
-                           offset >= chunk_offsets[c + 1]) {
-                        ++c;
-                    }
+                    auto c = chunk_id_for_offset(chunk_offsets, offset);
                     auto* chunk_data = reinterpret_cast<const Timestamp*>(
                         all_chunks[c].get()->RawData());
                     dst[i] = chunk_data[offset - chunk_offsets[c]];
