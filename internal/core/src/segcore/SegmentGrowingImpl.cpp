@@ -1776,6 +1776,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     auto manifest_path = load_info_.manifest_path();
     if (manifest_path != "") {
         LoadColumnsGroups(manifest_path);
+        FillAbsentFields();
         return;
     }
 
@@ -1812,20 +1813,40 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
 void
 SegmentGrowingImpl::FinishLoad() {
+    FillAbsentFields();
+
+    // Update resource tracking
+    UpdateResourceTracking();
+}
+
+void
+SegmentGrowingImpl::FillAbsentFields() {
+    if (insert_record_.row_count() == 0) {
+        return;
+    }
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
+        if (IsVectorDataType(field_meta.get_data_type())) {
+            // A vector field may be legally absent from the loaded data only
+            // when it is nullable (added by AddField after the binlogs were
+            // written). Backfill its validity bitmap so that queries observe
+            // all-null values instead of an uninitialized column.
+            if (field_meta.is_nullable() &&
+                insert_record_.is_data_exist(field_id) &&
+                insert_record_.is_valid_data_exist(field_id) &&
+                insert_record_.get_valid_data(field_id)->get_data().empty()) {
+                fill_empty_field(field_meta);
+            }
+            continue;
+        }
         // append_data is called according to schema before
         // so we must check data empty here
-        if (!IsVectorDataType(field_meta.get_data_type()) &&
-            insert_record_.get_data_base(field_id)->empty()) {
+        if (insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
         }
     }
-
-    // Update resource tracking
-    UpdateResourceTracking();
 }
 
 void
@@ -1996,8 +2017,10 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto total_row_num = insert_record_.row_count();
 
     auto data = bulk_subscript_not_exist_field(field_meta, total_row_num);
-    insert_record_.get_valid_data(field_id)->set_data_raw(
-        total_row_num, data.get(), field_meta);
+    if (insert_record_.is_valid_data_exist(field_id)) {
+        insert_record_.get_valid_data(field_id)->set_data_raw(
+            total_row_num, data.get(), field_meta);
+    }
     insert_record_.get_data_base(field_id)->set_data_raw(
         0, total_row_num, data.get(), field_meta);
 
