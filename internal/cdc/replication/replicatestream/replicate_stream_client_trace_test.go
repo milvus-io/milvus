@@ -6,7 +6,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/otel"
@@ -14,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -31,13 +30,8 @@ func buildTestCDCImmutableMessage(t *testing.T, primaryCtx context.Context) mess
 	return mutableMsg.IntoImmutableMessage(msgID)
 }
 
-// TestSendMessage_OpensCdcSpanWithExtractedParent asserts that:
-//   - A cdc.replicate span is exported under the source span carried by _tc.
-//   - The outgoing ReplicateRequest preserves the original immutable message
-//     properties; secondary-side WAL span injection happens on the replicate server.
-func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
-	defer mockey.UnPatchAll()
-
+func setupTraceExporter(t *testing.T) *tracetest.InMemoryExporter {
+	t.Helper()
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSyncer(exporter),
@@ -45,7 +39,18 @@ func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
 	)
 	prev := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(prev)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(prev)
+	})
+	return exporter
+}
+
+// TestSendMessage_OpensCdcSpanWithExtractedParent asserts that:
+//   - A cdc.replicate span is exported under the source span carried by _tc.
+//   - The outgoing ReplicateRequest preserves the original immutable message
+//     properties; secondary-side WAL span injection happens on the replicate server.
+func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
+	exporter := setupTraceExporter(t)
 
 	// Simulate a primary WAL message with a persisted _tc pointing at
 	// the primary wal.append.server span.
@@ -54,25 +59,17 @@ func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
 	primarySpan.End()
 
 	imsg := buildTestCDCImmutableMessage(t, primaryCtx)
-
-	// Capture the ReplicateRequest that sendMessage hands off to doSend.
-	var capturedReq *milvuspb.ReplicateRequest
-	mockey.Mock((*replicateStreamClient).doSend).To(
-		func(_ *replicateStreamClient, req *milvuspb.ReplicateRequest) error {
-			capturedReq = req
-			return nil
-		}).Build()
+	client := newMockReplicateStreamClient(t)
 
 	c := &replicateStreamClient{
 		clusterID: "test-cluster",
+		client:    client,
+		channel:   &meta.ReplicateChannel{Key: "test-replicate-key"},
 		metrics:   NewReplicateMetrics(nil),
 	}
 	err := c.sendMessage(imsg)
 	assert.NoError(t, err)
-	assert.NotNil(t, capturedReq, "doSend must have been called")
-
-	// Flush spans.
-	_ = tp.ForceFlush(context.Background())
+	capturedReq := <-client.ch
 
 	// Outgoing _tc is still the primary span context. The replicate server owns
 	// the next WAL span and will overwrite _tc after it starts that span.
@@ -104,16 +101,7 @@ func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
 // TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan verifies that txn
 // replication does not add an extra txn-level span.
 func TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan(t *testing.T) {
-	defer mockey.UnPatchAll()
-
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSyncer(exporter),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-	)
-	prev := otel.GetTracerProvider()
-	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(prev)
+	exporter := setupTraceExporter(t)
 
 	// Simulate a primary wal.txn trace context in the Begin message.
 	primaryCtx, primarySpan := otel.Tracer("test").Start(context.Background(), "primary.wal.txn")
@@ -132,24 +120,19 @@ func TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan(t *testing.T) {
 	})
 	txnMock.EXPECT().Commit().Return(commitMsg)
 
-	var sendCount int
-	mockey.Mock((*replicateStreamClient).doSend).To(
-		func(_ *replicateStreamClient, req *milvuspb.ReplicateRequest) error {
-			sendCount++
-			return nil
-		}).Build()
-
+	client := newMockReplicateStreamClient(t)
 	c := &replicateStreamClient{
 		clusterID: "test-cluster",
+		client:    client,
+		channel:   &meta.ReplicateChannel{Key: "test-replicate-key"},
 		metrics:   NewReplicateMetrics(nil),
 	}
 	err := c.sendTxnMessage(txnMock)
 	assert.NoError(t, err)
 
 	// begin + 1 body + commit = 3 sends.
-	assert.Equal(t, 3, sendCount)
+	assert.Len(t, client.ch, 3)
 
-	_ = tp.ForceFlush(context.Background())
 	spans := exporter.GetSpans()
 
 	var cdcReplicateSpans []tracetest.SpanStub

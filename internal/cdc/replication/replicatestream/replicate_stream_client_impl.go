@@ -238,11 +238,6 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 	}
 }
 
-// doSend is a thin wrapper around r.client.Send used as a seam for mocking in tests.
-func (r *replicateStreamClient) doSend(req *milvuspb.ReplicateRequest) error {
-	return r.client.Send(req)
-}
-
 func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
 	immutableMessage := msg.IntoImmutableMessageProto()
 
@@ -256,13 +251,7 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 	}()
 
 	defer func() {
-		var channelKey string
-		var channelRevision int64
-		if r.channel != nil {
-			channelKey = r.channel.Key
-			channelRevision = r.channel.ModRevision
-		}
-		logger := mlog.With(mlog.String("key", channelKey), mlog.Int64("revision", channelRevision))
+		logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("revision", r.channel.ModRevision))
 		if err != nil {
 			logger.Warn(r.ctx, "send message failed", mlog.Err(err), mlog.FieldMessage(msg))
 		} else {
@@ -279,7 +268,7 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 			},
 		},
 	}
-	return r.doSend(req)
+	return r.client.Send(req)
 }
 
 func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
