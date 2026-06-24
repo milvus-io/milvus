@@ -127,7 +127,13 @@ PhyNullExpr::DetermineExecPath() {
         exec_path_ = ExprExecPath::RawData;
         return;
     }
+
     SegmentExpr::DetermineExecPath();
+    if (exec_path_ == ExprExecPath::ScalarIndex && CanUseNestedIndex()) {
+        exec_path_ = ExprExecPath::RawData;
+        pinned_index_.clear();
+        num_index_chunk_ = 0;
+    }
 }
 
 template <typename T>
