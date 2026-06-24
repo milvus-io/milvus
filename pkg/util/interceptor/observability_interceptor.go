@@ -25,7 +25,6 @@ import (
 
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -42,20 +41,20 @@ func nodeIDLabels(context.Context) prometheus.Labels {
 	return prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}
 }
 
-// parseZapLevel maps a textual log level to zapcore.Level. Unknown values
+// parseLogLevel maps a textual log level to mlog.Level. Unknown values
 // fall through to info so a misconfigured string cannot silence or amplify logs.
-func parseZapLevel(s string) zapcore.Level {
+func parseLogLevel(s string) mlog.Level {
 	switch strings.ToLower(s) {
 	case "debug":
-		return zapcore.DebugLevel
+		return mlog.DebugLevel
 	case "warn", "warning":
-		return zapcore.WarnLevel
+		return mlog.WarnLevel
 	case "error":
-		return zapcore.ErrorLevel
+		return mlog.ErrorLevel
 	case "info", "":
 		fallthrough
 	default:
-		return zapcore.InfoLevel
+		return mlog.InfoLevel
 	}
 }
 
@@ -105,7 +104,7 @@ func parseMethodFilter(methods string) (*methodFilter, []string) {
 // Both fields are read lock-free via atomics so shouldLog adds at most a pointer
 // load and a map lookup per RPC on the hot path.
 type dynamicLogConfig struct {
-	level   atomic.Int32 // zapcore.Level stored as int32
+	level   atomic.Int32 // mlog.Level stored as int32
 	methods atomic.Pointer[methodFilter]
 }
 
@@ -126,7 +125,7 @@ func (c *dynamicLogConfig) updateMethods(methodsKey string, methods string) bool
 // registers watchers for hot updates.
 func newDynamicLogConfig(levelKey, methodsKey, initialLevel, initialMethods string) *dynamicLogConfig {
 	c := &dynamicLogConfig{}
-	c.level.Store(int32(parseZapLevel(initialLevel)))
+	c.level.Store(int32(parseLogLevel(initialLevel)))
 	filter, invalidRegexs := parseMethodFilter(initialMethods)
 	c.methods.Store(filter)
 	if len(invalidRegexs) > 0 {
@@ -141,7 +140,7 @@ func newDynamicLogConfig(levelKey, methodsKey, initialLevel, initialMethods stri
 		if !evt.HasUpdated {
 			return
 		}
-		c.level.Store(int32(parseZapLevel(evt.Value)))
+		c.level.Store(int32(parseLogLevel(evt.Value)))
 		mlog.Info(context.TODO(), "gRPC log level updated", mlog.String("key", levelKey), mlog.String("value", evt.Value))
 	}))
 	pt.Watch(methodsKey, config.NewHandler("grpc.log."+methodsKey, func(evt *config.Event) {
@@ -158,17 +157,17 @@ func newDynamicLogConfig(levelKey, methodsKey, initialLevel, initialMethods stri
 
 // shouldLog is the fast allowlist check. Returns ok=false when no methods are
 // allow-listed or the current method is not in the allowlist — the default state.
-func (c *dynamicLogConfig) shouldLog(fullMethod string) (zapcore.Level, bool) {
+func (c *dynamicLogConfig) shouldLog(fullMethod string) (mlog.Level, bool) {
 	filter := c.methods.Load()
 	if filter == nil {
 		return 0, false
 	}
 	if _, ok := filter.exact[fullMethod]; ok {
-		return zapcore.Level(c.level.Load()), true
+		return mlog.Level(c.level.Load()), true
 	}
 	for _, re := range filter.regexs {
 		if re.MatchString(fullMethod) {
-			return zapcore.Level(c.level.Load()), true
+			return mlog.Level(c.level.Load()), true
 		}
 	}
 	return 0, false
@@ -178,7 +177,7 @@ func (c *dynamicLogConfig) shouldLog(fullMethod string) (zapcore.Level, bool) {
 // metadata. The zap Check gate lets us skip field construction entirely when
 // the global log level is above lvl (e.g. debug-level RPC logs in a production
 // info-level deployment).
-func emitServerAccessLog(ctx context.Context, lvl zapcore.Level, method string, err error, duration time.Duration) {
+func emitServerAccessLog(ctx context.Context, lvl mlog.Level, method string, err error, duration time.Duration) {
 	if !mlog.LevelEnabled(lvl) {
 		return
 	}
@@ -195,7 +194,7 @@ func emitServerAccessLog(ctx context.Context, lvl zapcore.Level, method string, 
 
 // emitClientAccessLog is the client counterpart. The destination server id, if
 // present, is injected onto outgoing metadata by ServerIDInjection*ClientInterceptor.
-func emitClientAccessLog(ctx context.Context, lvl zapcore.Level, method string, err error, duration time.Duration) {
+func emitClientAccessLog(ctx context.Context, lvl mlog.Level, method string, err error, duration time.Duration) {
 	if !mlog.LevelEnabled(lvl) {
 		return
 	}
