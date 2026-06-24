@@ -534,7 +534,7 @@ ChunkedSegmentSealedImpl::search_pks_with_two_pointers_impl(
     for (const auto& pk : pks) {
         sorted_pks.push_back(std::get<PK>(pk));
     }
-    std::sort(sorted_pks.begin(), sorted_pks.end());
+    std::ranges::sort(sorted_pks);
 
     auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
 
@@ -4459,7 +4459,7 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
     }
 
     // step 1: sort timestamp
-    std::sort(ordering.begin(), ordering.end());
+    std::ranges::sort(ordering);
     std::vector<PkType> sort_pks(size);
     std::vector<Timestamp> sort_timestamps(size);
 
@@ -6093,11 +6093,7 @@ ChunkedSegmentSealedImpl::BuildTakeContext(const int64_t* offsets,
     for (int64_t i = 0; i < size; i++) {
         entries.push_back({offsets[i], i});
     }
-    std::sort(entries.begin(),
-              entries.end(),
-              [](const OffsetEntry& a, const OffsetEntry& b) {
-                  return a.offset < b.offset;
-              });
+    std::ranges::sort(entries, {}, &OffsetEntry::offset);
 
     TakeContext ctx;
     ctx.unique_offsets.reserve(size);
