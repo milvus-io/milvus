@@ -21,12 +21,15 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
@@ -315,6 +318,66 @@ func (s *MixCompactionTaskStorageV3Suite) TestCompactV3ManifestSegments() {
 	s.Empty(segment.GetDeltalogs())
 }
 
+func (s *MixCompactionTaskStorageV3Suite) TestMergeSortPreservesTextLobFiles() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.UseMergeSort.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.UseMergeSort.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key)
+
+	schema := genTextLOBCompactionSchema()
+	s.meta.Schema = schema
+	s.task.plan.Schema = schema
+	s.task.sortByFieldIDs = []int64{Int64Field}
+	s.task.compactionParams = compaction.GenParams()
+
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0, 2)
+
+	totalSourceLobFiles := 0
+	for _, segmentID := range []int64{10, 11} {
+		binlogs, _, _, _, manifest, _, err := s.initTextLOBStorageV3Segment(2, segmentID, alloc)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(manifest)
+
+		lobFiles, err := packed.GetManifestLobFiles(manifest, s.task.compactionParams.StorageConfig)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(lobFiles)
+		totalSourceLobFiles += len(lobFiles)
+
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID:   CollectionID,
+			PartitionID:    PartitionID,
+			SegmentID:      segmentID,
+			FieldBinlogs:   storage.SortFieldBinlogs(binlogs),
+			Deltalogs:      []*datapb.FieldBinlog{},
+			StorageVersion: storage.StorageV3,
+			Manifest:       manifest,
+			IsSorted:       true,
+		})
+	}
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(19531, segment.GetSegmentID())
+	s.EqualValues(4, segment.GetNumOfRows())
+	s.EqualValues(storage.StorageV3, segment.GetStorageVersion())
+	s.NotEmpty(segment.GetManifest())
+	s.True(segment.GetIsSorted())
+
+	outputLobFiles, err := packed.GetManifestLobFiles(segment.GetManifest(), s.task.compactionParams.StorageConfig)
+	s.Require().NoError(err)
+	s.Len(outputLobFiles, totalSourceLobFiles)
+	for _, lobFile := range outputLobFiles {
+		s.EqualValues(StringField, lobFile.FieldID)
+		s.Greater(lobFile.TotalRows, int64(0))
+		s.Greater(lobFile.ValidRows, int64(0))
+	}
+}
+
 func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmentID int64, alloc allocator.Interface) (
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
@@ -360,4 +423,109 @@ func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmen
 		RootPath:    rootPath,
 	}, columnGroups, manifestPath)
 	return bw.Write(context.Background(), pack)
+}
+
+func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, segmentID int64, alloc allocator.Interface) (
+	inserts map[int64]*datapb.FieldBinlog,
+	deltas *datapb.FieldBinlog,
+	stats map[int64]*datapb.FieldBinlog,
+	bm25Stats map[int64]*datapb.FieldBinlog,
+	manifest string,
+	size int64,
+	err error,
+) {
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))
+	bfs := pkoracle.NewBloomFilterSet()
+
+	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ManifestPath: manifestPath,
+	}, bfs, nil)
+	metacache.UpdateNumOfRows(int64(rows))(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(CollectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.meta.GetSchema()).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return().Maybe()
+
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
+	pack := new(syncmgr.SyncPack).
+		WithCollectionID(CollectionID).
+		WithPartitionID(PartitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genTextLOBInsertData(rows, segmentID, s.meta.GetSchema()))
+	schema := s.meta.GetSchema()
+	fields := typeutil.GetAllFieldSchemas(schema)
+	columnGroups := storagecommon.SplitColumns(fields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+	bw := syncmgr.NewBulkPackWriterV3(mc, schema, cm, alloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    rootPath,
+	}, columnGroups, manifestPath)
+	return bw.Write(context.Background(), pack)
+}
+
+func genTextLOBCompactionSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:        "text_lob_schema",
+		Description: "text_lob_schema",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  common.RowIDField,
+				Name:     "row_id",
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  common.TimeStampField,
+				Name:     "Timestamp",
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      Int64Field,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  StringField,
+				Name:     "text",
+				DataType: schemapb.DataType_Text,
+			},
+			{
+				FieldID:     FloatVectorField,
+				Name:        "vector",
+				Description: "float_vector",
+				DataType:    schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "4",
+					},
+				},
+			},
+		},
+	}
+}
+
+func genTextLOBInsertData(rows int, seed int64, schema *schemapb.CollectionSchema) []*storage.InsertData {
+	buf, _ := storage.NewInsertData(schema)
+	ts := int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0))
+	for i := 0; i < rows; i++ {
+		pk := seed*100 + int64(i)
+		_ = buf.Append(map[int64]interface{}{
+			common.RowIDField:     pk,
+			common.TimeStampField: ts,
+			Int64Field:            pk,
+			StringField:           fmt.Sprintf("segment-%d-row-%d-%s", seed, i, strings.Repeat("x", 256)),
+			FloatVectorField:      []float32{float32(i), 1, 2, 3},
+		})
+	}
+	return []*storage.InsertData{buf}
 }

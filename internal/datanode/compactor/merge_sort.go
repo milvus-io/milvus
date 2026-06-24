@@ -30,6 +30,8 @@ func mergeSortMultipleSegments(ctx context.Context,
 	currentTime time.Time,
 	collectionTTL int64,
 	compactionParams compaction.Params,
+	writerOpts []storage.RwOption,
+	lobContext *compaction.LOBCompactionContext,
 	sortByFields []int64,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
@@ -45,9 +47,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
 	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), writerSchema, compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096,
-		storage.WithStorageConfig(compactionParams.StorageConfig),
-		storage.WithUseLoonFFI(compactionParams.UseLoonFFI),
-	)
+		writerOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,9 +98,11 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	var predicate func(r storage.Record, ri, i int) bool
+	segmentTotalRows := make([]int64, len(binlogs))
 	switch pkField.DataType {
 	case schemapb.DataType_Int64:
 		predicate = func(r storage.Record, ri, i int) bool {
+			segmentTotalRows[ri]++
 			pk := r.Column(pkField.FieldID).(*array.Int64).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
@@ -114,6 +116,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		}
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
+			segmentTotalRows[ri]++
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
@@ -134,6 +137,13 @@ func mergeSortMultipleSegments(ctx context.Context,
 			log.Warn(ctx, "failed to close writer after merge sort error", mlog.Err(closeErr))
 		}
 		return nil, err
+	}
+
+	if lobContext != nil && lobContext.HasReuseAllFields() {
+		for i, segment := range binlogs {
+			totalDeleted := int64(segmentFilters[i].GetDeletedCount() + segmentFilters[i].GetExpiredCount())
+			lobContext.SetSegmentRowStats(segment.GetSegmentID(), segmentTotalRows[i], totalDeleted)
+		}
 	}
 
 	if err := writer.Close(); err != nil {
