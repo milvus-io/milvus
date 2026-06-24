@@ -27,7 +27,7 @@ milvus::SegcoreError
 BinlogReader::Read(int64_t nbytes, void* out) {
     auto remain = size_ - tell_;
     if (nbytes > remain) {
-        return SegcoreError(milvus::UnexpectedError,
+        return SegcoreError(milvus::DataFormatBroken,
                             "out range of binlog data");
     }
     milvus::fastmem::FastMemcpy(out, data_.get() + tell_, nbytes);
@@ -40,7 +40,7 @@ BinlogReader::Read(int64_t nbytes) {
     auto remain = size_ - tell_;
     if (nbytes > remain) {
         return std::make_pair(
-            SegcoreError(milvus::UnexpectedError, "out range of binlog data"),
+            SegcoreError(milvus::DataFormatBroken, "out range of binlog data"),
             nullptr);
     }
     auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction

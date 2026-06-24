@@ -40,6 +40,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
+#include "arrow/status.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/metadata.h"
@@ -57,6 +58,25 @@
 #include "storage/Types.h"
 
 namespace milvus::storage {
+
+// Map an arrow::Status failure to a segcore ErrorCode so the policy survives to
+// Go (pkg/util/merr/segcore.go) instead of every storage failure collapsing to
+// UnexpectedError(2001) via AssertInfo. Transient IO / OOM stay retriable;
+// malformed data is a permanent data error; anything else is an internal bug.
+inline ErrorCode
+ArrowStatusToErrorCode(const arrow::Status& status) {
+    if (status.IsOutOfMemory()) {
+        return ErrorCode::MemAllocateFailed;  // 2034, retriable
+    }
+    if (status.IsIOError()) {
+        return ErrorCode::
+            FileReadFailed;  // 2014, retriable (another replica may have it)
+    }
+    if (status.IsInvalid() || status.IsTypeError() || status.IsKeyError()) {
+        return ErrorCode::DataFormatBroken;  // 2024, permanent data corruption
+    }
+    return ErrorCode::UnexpectedError;  // 2001, unclassified internal error
+}
 
 void
 ReadMediumType(BinlogReaderPtr reader);

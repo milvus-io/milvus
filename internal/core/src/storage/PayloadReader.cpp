@@ -66,13 +66,21 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
 
         parquet::arrow::FileReaderBuilder reader_builder;
         auto st = reader_builder.Open(input, reader_properties);
-        AssertInfo(st.ok(), "file to read file");
+        if (!st.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(st),
+                      "failed to open parquet file reader: {}",
+                      st.ToString());
+        }
         reader_builder.memory_pool(pool);
         reader_builder.properties(arrow_reader_props);
 
         std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
         st = reader_builder.Build(&arrow_reader);
-        AssertInfo(st.ok(), "build file reader");
+        if (!st.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(st),
+                      "failed to build parquet file reader: {}",
+                      st.ToString());
+        }
 
         int64_t column_index = 0;
         auto file_meta = arrow_reader->parquet_reader()->metadata();
@@ -85,7 +93,11 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
             if (nullable_) {
                 std::shared_ptr<arrow::Schema> arrow_schema;
                 auto st = arrow_reader->GetSchema(&arrow_schema);
-                AssertInfo(st.ok(), "Failed to get arrow schema");
+                if (!st.ok()) {
+                    ThrowInfo(ArrowStatusToErrorCode(st),
+                              "failed to get arrow schema: {}",
+                              st.ToString());
+                }
                 AssertInfo(arrow_schema->num_fields() == 1,
                            "Vector field should have exactly 1 field, got {}",
                            arrow_schema->num_fields());
@@ -122,7 +134,11 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
         if (IsVectorArrayDataType(column_type_)) {
             std::shared_ptr<arrow::Schema> arrow_schema;
             st = arrow_reader->GetSchema(&arrow_schema);
-            AssertInfo(st.ok(), "Failed to get arrow schema for VectorArray");
+            if (!st.ok()) {
+                ThrowInfo(ArrowStatusToErrorCode(st),
+                          "failed to get arrow schema for VectorArray: {}",
+                          st.ToString());
+            }
             AssertInfo(arrow_schema->num_fields() == 1,
                        "VectorArray should have exactly 1 field, got {}",
                        arrow_schema->num_fields());

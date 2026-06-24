@@ -253,14 +253,20 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
                              bool nullable,
                              bool is_field_data) {
     auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
-    AssertInfo(ast.ok(), "read start timestamp failed");
+    if (!ast.ok()) {
+        throw ast;
+    }
     ast = reader->ReadSingleValue<Timestamp>(end_timestamp);
-    AssertInfo(ast.ok(), "read end timestamp failed");
+    if (!ast.ok()) {
+        throw ast;
+    }
 
     int payload_length =
         event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = reader->Read(payload_length);
-    AssertInfo(res.first.ok(), "read payload failed");
+    if (!res.first.ok()) {
+        throw res.first;
+    }
     payload_reader = std::make_shared<PayloadReader>(
         res.second.get(), payload_length, data_type, nullable, is_field_data);
 }
@@ -532,12 +538,18 @@ LocalInsertEvent::Serialize() {
 
 LocalIndexEvent::LocalIndexEvent(BinlogReaderPtr reader) {
     auto ret = reader->Read(sizeof(index_size), &index_size);
-    AssertInfo(ret.ok(), "read binlog failed");
+    if (!ret.ok()) {
+        throw ret;
+    }
     ret = reader->Read(sizeof(degree), &degree);
-    AssertInfo(ret.ok(), "read binlog failed");
+    if (!ret.ok()) {
+        throw ret;
+    }
 
     auto res = reader->Read(index_size);
-    AssertInfo(res.first.ok(), "read payload failed");
+    if (!res.first.ok()) {
+        throw res.first;
+    }
     auto payload_reader = std::make_shared<PayloadReader>(
         res.second.get(), index_size, DataType::INT8, false);
     field_data = payload_reader->get_field_data();
