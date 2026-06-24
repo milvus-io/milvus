@@ -28,8 +28,8 @@ import (
 
 // TestHandleReplicateMessage_OpensWalReplicateAppendSpan verifies that
 // handleReplicateMessage extracts the replicated message trace context,
-// opens a "wal.replicate.append" child span, and injects that new span
-// context back into the local mutable message before append.
+// opens a "wal.replicate.append" child span, and keeps the source message
+// trace context in the local mutable message before append.
 func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 	defer mockey.UnPatchAll()
 
@@ -112,9 +112,9 @@ func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 
 	assert.NotNil(t, capturedMsg)
 	msgSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsg))
-	assert.True(t, msgSC.IsValid(), "replicate server should inject wal.replicate.append context into the mutable message")
-	assert.Equal(t, walSpan.SpanContext.TraceID(), msgSC.TraceID())
-	assert.Equal(t, walSpan.SpanContext.SpanID(), msgSC.SpanID())
+	assert.True(t, msgSC.IsValid(), "replicate server should keep the source trace context in the mutable message")
+	assert.Equal(t, sourceSC.TraceID(), msgSC.TraceID())
+	assert.Equal(t, sourceSC.SpanID(), msgSC.SpanID())
 }
 
 // buildTraceTestReplicateMsgProto builds a *commonpb.ImmutableMessage that

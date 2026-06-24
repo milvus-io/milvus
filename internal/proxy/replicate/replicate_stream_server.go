@@ -129,7 +129,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	)
 
 	// Extract trace context carried by the replicated immutable message, then
-	// persist this secondary append span back into the local mutable message.
+	// keep it in the local mutable message if it already exists.
 	msgCtx := message.ExtractTraceContext(p.streamServer.Context(), msg)
 	msgCtx, span := otel.Tracer("milvus.streaming.wal").Start(msgCtx, "wal.replicate.append")
 	defer span.End()

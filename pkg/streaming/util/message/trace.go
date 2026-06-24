@@ -8,9 +8,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
-// InjectTraceContext writes the current span context into msg
-// under the reserved key _tc as a base64-encoded marshaled TraceContextHeader.
-// No-op when no active / valid span is present on ctx.
+// InjectTraceContext writes the current span context into msg under the
+// reserved key _tc as a base64-encoded marshaled TraceContextHeader.
+// No-op when _tc already exists or no active / valid span is present on ctx.
 func InjectTraceContext(ctx context.Context, msg TraceContextInjector) {
 	if msg == nil {
 		return
@@ -19,6 +19,9 @@ func InjectTraceContext(ctx context.Context, msg TraceContextInjector) {
 }
 
 func injectTraceContext(ctx context.Context, p Properties) {
+	if p.Exist(messageTraceContext) {
+		return
+	}
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
 		return
