@@ -243,7 +243,7 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 65535,
+        error = {ct.err_code: 1100,
                 ct.err_msg: f"partition name {invalid_partition_names} not found"}
         self.hybrid_search(client, INVALID_COLLECTION_NAME, [sub_search1, sub_search1], ranker, limit=default_limit,
                            partition_names=[invalid_partition_names], check_task=CheckTasks.err_res,
@@ -941,7 +941,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
 
         if req_num > ct.max_hybrid_search_req_num:
             check_task = CheckTasks.err_res
-            check_items = {"err_code": 65535,
+            check_items = {"err_code": 1100,
                            "err_msg": "maximum of ann search requests is 1024"}
         else:
             check_task = CheckTasks.check_search_results
@@ -988,7 +988,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
             req_list1.append(req)
 
         # hybrid search with over max limit
-        error = {"err_code": 65535, "err_msg": f"invalid max query result window, (offset+limit) "
+        error = {"err_code": 1100, "err_msg": f"invalid max query result window, (offset+limit) "
                                                f"should be in range [1, 16384], but got {over_max_limit}"}
         self.hybrid_search(client, self.collection_name, reqs=req_list1,
                            ranker=ranker, limit=over_max_limit,
@@ -1006,7 +1006,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
             }
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
-        error = {"err_code": 65535, "err_msg": f"topk [{over_max_limit}] is invalid, "
+        error = {"err_code": 1100, "err_msg": f"topk [{over_max_limit}] is invalid, "
                                                f"it should be in range [1, 16384], but got {over_max_limit}"}
         self.hybrid_search(client, self.collection_name, reqs=req_list,
                            ranker=ranker, limit=default_limit,
@@ -1074,7 +1074,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                 "limit": limit,
             })
             req_list.append(req)
-        error = {"err_code": 1,
+        error = {"err_code": 1100,
                  "err_msg": f"topk [{limit}] is invalid, it should be in range [1, 16384], but got {limit}"}
         self.hybrid_search(client, self.collection_name, reqs=req_list,
                            ranker=ranker, limit=ct.default_limit,
@@ -1443,7 +1443,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                                                "output_fields": expected_output_fields})[0]
         output_fields = self.all_fields
         # verify the error message when output sparse vector field
-        err_msg = {"err_code": 999,
+        err_msg = {"err_code": ct.ANY_CODE,
                    "err_msg": "not allowed to retrieve raw data of field sparse_vector1"}
         self.hybrid_search(client, self.collection_name, reqs=req_list,
                            ranker=WeightedRanker(0.5, 0.5),
@@ -1761,7 +1761,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
             - Hybrid search failed with error message
         """
         client = self._client()
-        err_msg = {"err_code": 65535,
+        err_msg = {"err_code": 1100,
                    "err_msg": "nq [0] is invalid, nq (number of search vector per search request) "
                               "should be in range [1, 16384], but got 0"}
         self.hybrid_search(client, self.collection_name,
@@ -1795,9 +1795,9 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
             })
             req_list.append(req)
 
-        err_msg = {"err_code": 999, "err_msg": "rank param weight should be in range [0, 1]"}
+        err_msg = {"err_code": ct.ANY_CODE, "err_msg": "rank param weight should be in range [0, 1]"}
         if ranker_param == [0.2, 0.4, 0.8]:
-            err_msg = {"err_code": 999,
+            err_msg = {"err_code": ct.ANY_CODE,
                        "err_msg": "the length of weights param mismatch with ann search requests: "
                                   "invalid parameter[expected=2][actual=3]"}
 
@@ -1836,7 +1836,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
 
         ranker = RRFRanker(k)
         # TODO: #29867, the error msg is not good enough, but as it is for now.
-        err_msg = {"err_code": 65535,
+        err_msg = {"err_code": 1100,
                    "err_msg": "rank params k should be in range (0, 16384)"}
         self.hybrid_search(client, self.collection_name,
                            reqs=req_list,
@@ -1873,7 +1873,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
 
         if nq == ct.max_nq + 1:
             check_task = CheckTasks.err_res
-            check_items = {"err_code": 65535,
+            check_items = {"err_code": 1100,
                            "err_msg": "nq (number of search vector per search request) should be in range [1, 16384]"}
         else:
             check_task = CheckTasks.check_search_results

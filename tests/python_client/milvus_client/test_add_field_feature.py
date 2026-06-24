@@ -114,7 +114,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
 
         # verify failed to insert null vector for vector field nullable is false by default
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: "float vector field 'embeddings' is illegal, "
             "array type mismatch: invalid parameter[expected=need float vector][actual=got nil]",
         }
@@ -187,7 +187,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
 
         # search on the new added null vector field fails for no reloading for it yet
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: f"field index of the field: {new_vec_field_name} is not loaded, please reload the collection",
         }
         self.search(
@@ -204,7 +204,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         # load fails for no index for the nullable vector field
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: f"there is no vector index on field: [{new_vec_field_name}], please create index first",
         }
         self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
@@ -1230,7 +1230,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         search_vecs = cf.gen_vectors(ct.default_nq, search_dim, vector_data_type=vector_type)
         # err_code 999 = gRPC unknown; Milvus uses it for "field not loaded" and "no index" errors
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: f"field index of the field: {new_vec_field} is not loaded, please reload the collection",
         }
         self.search(
@@ -1246,7 +1246,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # 6. release → verify load fails without index → create index → reload
         self.release_collection(client, collection_name)
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: f"there is no vector index on field: [{new_vec_field}], please create index first",
         }
         self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
@@ -1438,7 +1438,10 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, default_new_field_name
-        error = {ct.err_code: 999, ct.err_msg: "Adding vector field to existing collection requires nullable=True"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "Adding vector field to existing collection requires nullable=True",
+        }
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
@@ -1463,7 +1466,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
             check_items=error,
         )
         # try to add vector field with default value
-        error = {ct.err_code: 999, ct.err_msg: "Default value unsupported data type: 999"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Default value unsupported data type: 999"}
         self.add_collection_field(
             client,
             collection_name,
@@ -1488,7 +1491,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         # 1. create collection
         dim, field_name = 8, default_new_field_name
         error = {
-            ct.err_code: 1100,
+            ct.err_code: 1101,
             ct.err_msg: f"type param(max_length) should be specified for "
             f"the field({field_name}) of collection {collection_name}",
         }
@@ -1732,7 +1735,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         # 1. create collection
         dim, field_name = 8, default_new_field_name
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: f"maximum vector field's number should be limited to {ct.max_vector_field_num}",
         }
         self.create_collection(client, collection_name, dim)

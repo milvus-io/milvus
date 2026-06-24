@@ -123,7 +123,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         elif isinstance(invalid_dim, float):  # type conversion errors: 32.1
             expected_msg = "wrong type of argument [dimension], expected type: [int], got type: [float]"
         # Try to create collection and expect error
-        error = {ct.err_code: 65535, ct.err_msg: expected_msg}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: expected_msg}
         self.create_collection(client, collection_name, invalid_dim, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -153,7 +153,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1101,
             ct.err_msg: f"type param(max_length) should be specified for the field(id) of collection {collection_name}",
         }
         self.create_collection(
@@ -192,7 +192,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         # Create schema and try to add field with auto_id=None - this should raise exception
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        error = {ct.err_code: 0, ct.err_msg: "Param auto_id must be bool type"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Param auto_id must be bool type"}
         self.add_field(
             schema,
             ct.default_int64_field_name,
@@ -216,7 +216,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # Add primary key field
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=True)
         # Test that adding a non-primary field with auto_id=True raises exception
-        error = {ct.err_code: 0, ct.err_msg: "auto_id can only be specified on the primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "auto_id can only be specified on the primary key field"}
         self.add_field(
             schema, "int_field", DataType.INT64, auto_id=True, check_task=CheckTasks.err_res, check_items=error
         )
@@ -232,7 +232,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # Create schema and try to add non-primary field with auto_id=True - this should raise exception
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         # Test that creating a non-primary field with auto_id=True raises exception
-        error = {ct.err_code: 999, ct.err_msg: "auto_id can only be specified on the primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "auto_id can only be specified on the primary key field"}
         self.add_field(
             schema,
             ct.default_int64_field_name,
@@ -254,7 +254,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         # Test 1: Different dimensions
         error = {
-            ct.err_code: 1,
+            ct.err_code: 1100,
             ct.err_msg: f"create duplicate collection with different parameters, collection: {collection_name}",
         }
         self.create_collection(
@@ -338,7 +338,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         # Try to add a field with invalid dtype
-        error = {ct.err_code: 999, ct.err_msg: "Field dtype must be of DataType"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Field dtype must be of DataType"}
         # The add_field method should raise an error for invalid dtype
         self.add_field(schema, field_name="test", datatype=dtype, check_task=CheckTasks.err_res, check_items=error)
 
@@ -397,7 +397,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
             schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True)
         schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
         # Try to create collection - should fail here
-        error = {ct.err_code: 1100, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -493,7 +493,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create an empty schema (no fields added)
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        error = {ct.err_code: 1100, ct.err_msg: "Schema must have a primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Schema must have a primary key field"}
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -517,7 +517,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         for _ in range(limit_num):
             schema_1.add_field(cf.gen_unique_str("field_name"), DataType.INT64)
         schema_1.add_field(cf.gen_unique_str("extra_field"), DataType.INT64)
-        error_fields_over = {ct.err_code: 1, ct.err_msg: "maximum field's number should be limited to 64"}
+        error_fields_over = {ct.err_code: 1100, ct.err_msg: "maximum field's number should be limited to 64"}
         self.create_collection(
             client,
             collection_name,
@@ -532,7 +532,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
             schema_2.add_field(cf.gen_unique_str("vector_field_name"), DataType.FLOAT_VECTOR, dim=default_dim)
         schema_2.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
         error_vector_over = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: f"maximum vector field's number should be limited to {ct.max_vector_field_num}",
         }
         self.create_collection(
@@ -551,7 +551,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         for _ in range(ct.max_field_num):
             schema_3.add_field(cf.gen_unique_str("field_name"), DataType.INT64)
         schema_3.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        error_fields_over_64 = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
+        error_fields_over_64 = {ct.err_code: 1100, ct.err_msg: "maximum field's number should be limited to 64"}
         self.create_collection(
             client,
             collection_name,
@@ -607,7 +607,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         # Add vector field without dim
         schema.add_field("vector_field", vector_type)
-        error = {ct.err_code: 1, ct.err_msg: "dimension is not defined in field type params"}
+        error = {ct.err_code: 1100, ct.err_msg: "dimension is not defined in field type params"}
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -624,14 +624,14 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema1 = self.create_schema(client, enable_dynamic_field=False)[0]
         schema1.add_field("int_field", DataType.INT64)  # Not primary
         schema1.add_field("vector_field", vector_type, dim=default_dim)
-        error = {ct.err_code: 1100, ct.err_msg: "Schema must have a primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Schema must have a primary key field"}
         self.create_collection(
             client, collection_name, schema=schema1, check_task=CheckTasks.err_res, check_items=error
         )
         # Create schema with only vector field
         schema2 = self.create_schema(client, enable_dynamic_field=False)[0]
         schema2.add_field("vector_field", vector_type, dim=default_dim)
-        error = {ct.err_code: 1100, ct.err_msg: "Schema must have a primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Schema must have a primary key field"}
         self.create_collection(
             client, collection_name, schema=schema2, check_task=CheckTasks.err_res, check_items=error
         )
@@ -646,7 +646,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         # Test at schema creation level - create schema with invalid primary_field parameter
-        error = {ct.err_code: 999, ct.err_msg: "Param primary_field must be int or str type"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Param primary_field must be int or str type"}
         # This should fail when creating schema with invalid primary_field type
         self.create_schema(
             client,
@@ -667,7 +667,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         # Create schema and attempt to add a field with invalid is_primary value
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        error = {ct.err_code: 999, ct.err_msg: "Param is_primary must be bool type"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Param is_primary must be bool type"}
         # Attempt to add a field with invalid is_primary value, expect error
         self.add_field(
             schema, "id", DataType.INT64, is_primary=is_primary, check_task=CheckTasks.err_res, check_items=error
@@ -738,7 +738,10 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
 
-        error = {ct.err_code: 1100, ct.err_msg: "description [None] has type NoneType, but expected one of: bytes, str"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "description [None] has type NoneType, but expected one of: bytes, str",
+        }
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -756,7 +759,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema_1.add_field("field2", DataType.INT64, is_primary=True, auto_id=False)  # Second primary key
         schema_1.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
         # Try to create collection with multiple primary keys
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Expected only one primary key field"}
         self.create_collection(
             client, collection_name, schema=schema_1, check_task=CheckTasks.err_res, check_items=error
         )
@@ -766,7 +769,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema_2.add_field("field2", DataType.INT64)  # Second primary key
         schema_2.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
         # Try to create collection with multiple primary keys
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Expected only one primary key field"}
         self.create_collection(
             client, collection_name, schema=schema_2, check_task=CheckTasks.err_res, check_items=error
         )
@@ -784,9 +787,9 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         if error_type == "range":
-            error = {ct.err_code: 1, ct.err_msg: f"maximum shards's number should be limited to {ct.max_shards_num}"}
+            error = {ct.err_code: 1100, ct.err_msg: f"maximum shards's number should be limited to {ct.max_shards_num}"}
         else:  # error_type == "type"
-            error = {ct.err_code: 999, ct.err_msg: "invalid num_shards type"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "invalid num_shards type"}
         # Try to create collection with invalid shards_num (should fail)
         self.create_collection(
             client,
@@ -1119,7 +1122,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         )
 
         # not support search on null vector with is null or is not null filter
-        error = {ct.err_code: 999, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
         self.search(
             client,
             collection_name,
@@ -2678,7 +2681,7 @@ class TestMilvusClientReleaseCollectionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str("nonexisted")
-        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
         self.release_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2790,7 +2793,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str("nonexisted")
-        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
         self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2806,7 +2809,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         self.drop_collection(client, collection_name)
-        error = {ct.err_code: 999, ct.err_msg: "collection not found"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "collection not found"}
         self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2919,7 +2922,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         # 4. Attempt to load with empty partition_names list
-        error = {ct.err_code: 0, ct.err_msg: "due to no partition specified"}
+        error = {ct.err_code: 1100, ct.err_msg: "due to no partition specified"}
         self.load_partitions(
             client, collection_name, partition_names=partition_names, check_task=CheckTasks.err_res, check_items=error
         )
@@ -2960,7 +2963,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         # 4. Attempt to load with invalid replica_number
-        error = {ct.err_code: 999, ct.err_msg: f"`replica_number` value {invalid_num_replica} is illegal"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`replica_number` value {invalid_num_replica} is illegal"}
         self.load_collection(
             client,
             collection_name,
@@ -3048,7 +3051,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 5. Load with replica_number=3 (should fail if only 2 querynodes available)
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 12,
             ct.err_msg: "when load 3 replica count: service resource insufficient",
         }
         self.load_collection(
@@ -3101,7 +3104,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 999, ct.err_msg: "should create connection first"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "should create connection first"}
         self.release_collection(client_temp, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -3490,7 +3493,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
         self.release_partitions(client, collection_name, [partition_name_2])
-        error = {ct.err_code: 65538, ct.err_msg: "partition not loaded"}
+        error = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
         self.query(
             client,
             collection_name,
@@ -3527,7 +3530,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
         self.release_partitions(client, collection_name, [partition_name_2])
-        error = {ct.err_code: 65538, ct.err_msg: "partition not loaded"}
+        error = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
         self.query(
             client,
             collection_name,
@@ -4042,7 +4045,7 @@ class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
         self.load_partitions(client, collection_name, [partition_name_1])
         self.load_partitions(client, collection_name, [partition_name_1])
         # 6. query on the non-loaded partition2 (should fail)
-        error = {ct.err_code: 65538, ct.err_msg: "partition not loaded"}
+        error = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
         self.query(
             client,
             collection_name,
@@ -4126,7 +4129,7 @@ class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
         self.load_partitions(client, collection_name, [partition_name_1])
         self.release_partitions(client, collection_name, [partition_name_1])
         self.release_partitions(client, collection_name, [partition_name_2])
-        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         self.query(
             client,
             collection_name,
@@ -4145,7 +4148,7 @@ class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
         self.load_partitions(client, collection_name, [partition_name_1])
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
-        error = {ct.err_code: 65535, ct.err_msg: f"partition name {partition_name_1} not found"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition name {partition_name_1} not found"}
         self.query(
             client,
             collection_name,
@@ -4388,9 +4391,9 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         if collection_name is None:
-            error = {ct.err_code: -1, ct.err_msg: "`collection_name` value None is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "`collection_name` value None is illegal"}
         else:  # empty string
-            error = {ct.err_code: -1, ct.err_msg: "`collection_name` value  is illegal"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "`collection_name` value  is illegal"}
         self.has_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4479,7 +4482,7 @@ class TestMilvusClientListCollection(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 999, ct.err_msg: "should create connection first"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "should create connection first"}
         self.list_collections(client_temp, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4646,7 +4649,7 @@ class TestMilvusClientUsingDatabaseInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         # db_name = cf.gen_unique_str("nonexisted")
-        error = {ct.err_code: 999, ct.err_msg: f"database not found[database={db_name}]"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"database not found[database={db_name}]"}
         self.using_database(client, db_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -5221,7 +5224,7 @@ class TestMilvusClientCollectionCountBinary(TestMilvusClientV2Base):
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
         # Try to add binary vector field with invalid dimension
         error = {
-            ct.err_code: 1,
+            ct.err_code: 1100,
             ct.err_msg: f"invalid dimension: {ct.min_dim} of field {ct.default_binary_vec_field_name}. "
             f"binary vector dimension should be multiple of 8.",
         }
@@ -5469,7 +5472,10 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         schema.add_field("int64_pk", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         # Try to add field with deprecated DataType.STRING
-        error = {ct.err_code: 1100, ct.err_msg: "string data type not supported yet, please use VarChar type instead"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "string data type not supported yet, please use VarChar type instead",
+        }
         schema.add_field("string_field", DataType.STRING)
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
@@ -5497,7 +5503,7 @@ class TestMilvusClientCollectionJSON(TestMilvusClientV2Base):
         schema1 = self.create_schema(client, enable_dynamic_field=False)[0]
         schema1.add_field("json_field", DataType.JSON, is_primary=True, auto_id=auto_id)
         schema1.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
-        error = {ct.err_code: 1100, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
         self.create_collection(
             client, collection_name, schema=schema1, check_task=CheckTasks.err_res, check_items=error
         )
@@ -5560,11 +5566,11 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         # Determine expected error based on element_type
         error = {ct.err_code: 1100, ct.err_msg: f"element type {element_type} is not supported"}
         if element_type in ["a", {1}]:
-            error = {ct.err_code: 1100, ct.err_msg: "Unexpected error"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "Unexpected error"}
         elif element_type == []:
-            error = {ct.err_code: 1100, ct.err_msg: "'list' object cannot be interpreted as an integer"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "'list' object cannot be interpreted as an integer"}
         elif element_type == ():
-            error = {ct.err_code: 1100, ct.err_msg: "'tuple' object cannot be interpreted as an integer"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "'tuple' object cannot be interpreted as an integer"}
         elif element_type in [DataType.BINARY_VECTOR, DataType.FLOAT_VECTOR, DataType.JSON, DataType.ARRAY]:
             data_type = element_type.name
             if element_type == DataType.BINARY_VECTOR:
@@ -5573,7 +5579,7 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
                 data_type = "FloatVector"
             elif element_type == DataType.ARRAY:
                 data_type = "Array"
-            error = {ct.err_code: 1100, ct.err_msg: f"element type {data_type} is not supported"}
+            error = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"element type {data_type} is not supported"}
         # Try to add array field with invalid element_type
         schema.add_field("array_field", DataType.ARRAY, element_type=element_type)
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
@@ -5619,7 +5625,7 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         schema.add_field("int64_pk", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
         # Try to add string array field without max_length - should fail at add_field stage
-        error = {ct.err_code: 1100, ct.err_msg: "type param(max_length) should be specified for the field(array_field)"}
+        error = {ct.err_code: 1101, ct.err_msg: "type param(max_length) should be specified for the field(array_field)"}
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.VARCHAR)
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
@@ -6097,7 +6103,7 @@ class TestMilvusClientCollectionMultipleVectorInvalid(TestMilvusClientV2Base):
         schema.add_field(invalid_vector_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(invalid_vector_name + " ", DataType.FLOAT_VECTOR, dim=default_dim)
         # Try to create collection with invalid field names
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid field name: {invalid_vector_name}"}
+        error = {ct.err_code: 1701, ct.err_msg: f"Invalid field name: {invalid_vector_name}"}
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -6190,7 +6196,7 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
         # Load collection
         self.load_collection(client, collection_name)
         # Try to alter mmap after loading - should raise exception
-        error = {ct.err_code: 999, ct.err_msg: "can not alter mmap properties if collection loaded"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "can not alter mmap properties if collection loaded"}
         self.alter_collection_properties(
             client, collection_name, properties={"mmap.enabled": True}, check_task=CheckTasks.err_res, check_items=error
         )

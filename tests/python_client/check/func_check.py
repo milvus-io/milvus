@@ -164,23 +164,30 @@ class ResponseChecker:
     def assert_exception(self, res, actual=True, error_dict=None):
         assert actual is False, f"Response of API {self.func_name} expect get error, but success"
         assert len(error_dict) > 0
-        if isinstance(res, Error):
-            # assert res.code == error_code or error_dict[ct.err_msg] in res.message, (
-            #     f"Response of API {self.func_name} "
-            #     f"expect get error code {error_dict[ct.err_code]} or error message {error_dict[ct.err_code]}, "
-            #     f"but got {res.code} {res.message}")
+        if not isinstance(res, Error):
+            log.error(f"[CheckFunc] Response of API is not an error: {str(res)}")
+            assert False, (
+                f"Response of API {self.func_name} expect get error "
+                f"(code={error_dict.get(ct.err_code)}, msg={error_dict.get(ct.err_msg)}), but success"
+            )
+
+        # message check: substring match when err_msg is provided
+        if ct.err_msg in error_dict:
             assert error_dict[ct.err_msg] in res.message, (
                 f"Response of API {self.func_name} "
                 f"expect get error message {error_dict[ct.err_msg]}, "
                 f"but got {res.code} {res.message}"
             )
 
-        else:
-            log.error(f"[CheckFunc] Response of API is not an error: {str(res)}")
-            assert False, (
-                f"Response of API expect get error code {error_dict[ct.err_code]} or "
-                f"error message {error_dict[ct.err_code]}"
-                f"but success"
+        # code check: pin the stable merr error code. ct.ANY_CODE is the
+        # "don't care" sentinel and is skipped, so only tests that name a real
+        # code are pinned to it. err_code 0 is also skipped: it means success, so
+        # it can never be a real error code here and is only ever a placeholder.
+        if ct.err_code in error_dict and error_dict[ct.err_code] not in (0, ct.ANY_CODE):
+            assert res.code == error_dict[ct.err_code], (
+                f"Response of API {self.func_name} "
+                f"expect get error code {error_dict[ct.err_code]}, "
+                f"but got {res.code} {res.message}"
             )
         return True
 

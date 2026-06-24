@@ -160,6 +160,11 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	wrapErrorStatus := func(err error) *commonpb.Status {
 		status := &commonpb.Status{}
 		if errors.Is(err, merr.ErrCollectionNotFound) {
+			// Fill the modern merr Code so clients see the consistent
+			// not-found code (every other op already returns it); the legacy
+			// ErrorCode / Reason / ExtraInfo are kept verbatim because current
+			// pymilvus still matches the reason substring "can't find collection".
+			status.Code = merr.Code(merr.ErrCollectionNotFound)
 			// nolint
 			status.ErrorCode = commonpb.ErrorCode_CollectionNotExists
 			// nolint

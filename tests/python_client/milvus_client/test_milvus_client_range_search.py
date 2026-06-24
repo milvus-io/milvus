@@ -225,7 +225,7 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
             filter=default_search_exp,
             check_task=CheckTasks.err_res,
             check_items={
-                ct.err_code: 65535,
+                ct.err_code: 1100,
                 ct.err_msg: "metric type not match: invalid parameter[expected=COSINE][actual=IP]",
             },
         )
@@ -480,7 +480,7 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
             filter=default_search_exp,
             check_task=CheckTasks.err_res,
             check_items={
-                ct.err_code: 65535,
+                ct.err_code: 1100,
                 ct.err_msg: "metric type not match: invalid parameter[expected=COSINE][actual=IP]",
             },
         )

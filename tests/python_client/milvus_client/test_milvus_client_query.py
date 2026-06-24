@@ -212,7 +212,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
             )
         else:
             error = {
-                ct.err_code: 65535,
+                ct.err_code: 1100,
                 ct.err_msg: "field invalid_field not exist",
             }
             self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
@@ -257,7 +257,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
                     check_items={"exp_res": exp_res, "pk_name": ct.default_int64_field_name},
                 )
             else:
-                error = {ct.err_code: 65535, ct.err_msg: "field int not exist"}
+                error = {ct.err_code: 1100, ct.err_msg: "field int not exist"}
                 self.query(
                     client,
                     collection_name,
@@ -335,7 +335,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
             f"Expected {default_nb} entities in partition, got {partition_info['row_count']}"
         )
         # 5. query on partition without loading collection
-        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         self.query(
             client,
             collection_name,
@@ -373,7 +373,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_partitions(client, collection_name, partition_name1)
         # 3. query on partition without loading
-        error = {ct.err_code: 65535, ct.err_msg: "partition not loaded"}
+        error = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
         self.query(
             client,
             collection_name,
@@ -442,7 +442,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise error (empty filter requires explicit limit)
         """
         client = self._client()
-        error = {ct.err_code: 65535, ct.err_msg: "empty expression should be used with limit"}
+        error = {ct.err_code: 1100, ct.err_msg: "empty expression should be used with limit"}
         self.query(client, INVALID_SHARED_COLLECTION, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -454,7 +454,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        error = {"err_code": 1, "err_msg": "collection not found"}
+        error = {"err_code": 100, "err_msg": "collection not found"}
         self.query(client, collection_name, filter=default_search_exp, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -467,7 +467,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise error in both cases (empty filter requires explicit limit)
         """
         client = self._client()
-        error = {ct.err_code: 0, ct.err_msg: "empty expression should be used with limit: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: "empty expression should be used with limit: invalid parameter"}
         self.query(client, INVALID_SHARED_COLLECTION, filter=filter, check_task=CheckTasks.err_res, check_items=error)
         self.query(
             client, INVALID_SHARED_COLLECTION, filter=filter, offset=1, check_task=CheckTasks.err_res, check_items=error
@@ -498,14 +498,14 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         client = self._client()
         expr_1 = f"{ct.default_int64_field_name} inn [1, 2]"
         error_1 = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "invalid expression: int64 inn [1, 2]",
         }
         self.query(client, INVALID_SHARED_COLLECTION, filter=expr_1, check_task=CheckTasks.err_res, check_items=error_1)
 
         expr_2 = f"{ct.default_int64_field_name} in not [1, 2]"
         error_2 = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "not can only apply on boolean",
         }
         self.query(client, INVALID_SHARED_COLLECTION, filter=expr_2, check_task=CheckTasks.err_res, check_items=error_2)
@@ -573,7 +573,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         """
         client = self._client()
         error = {
-            ct.err_code: 1,
+            ct.err_code: 1100,
             ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384]",
         }
         self.query(
@@ -598,7 +598,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
             check_items=error,
         )
         error = {
-            ct.err_code: 1,
+            ct.err_code: 1100,
             ct.err_msg: "invalid max query result window, offset [-1] is invalid, should be gte than 0",
         }
         self.query(
@@ -620,7 +620,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise parse error
         """
         client = self._client()
-        error = {ct.err_code: 65535, ct.err_msg: "parse output field name failed"}
+        error = {ct.err_code: 1100, ct.err_msg: "parse output field name failed"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -639,7 +639,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         """
         client = self._client()
         partition_name = cf.gen_unique_str()
-        error = {ct.err_code: 65535, ct.err_msg: f"partition name {partition_name} not found"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition name {partition_name} not found"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -658,7 +658,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise parse error for ignore_growing field
         """
         client = self._client()
-        error = {ct.err_code: 999, ct.err_msg: "parse ignore growing field failed"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "parse ignore growing field failed"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -680,7 +680,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         # milvus strips leading/trailing whitespace before echoing the value
         # in the error message, so " " becomes "" in `limit [<displayed>] is invalid`
         displayed = limit.strip() if isinstance(limit, str) else limit
-        error = {ct.err_code: 1, ct.err_msg: f"limit [{displayed}] is invalid"}
+        error = {ct.err_code: 1100, ct.err_msg: f"limit [{displayed}] is invalid"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -701,12 +701,12 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         """
         client = self._client()
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384], but got 67900",
         }
         if limit == -1:
             error = {
-                ct.err_code: 65535,
+                ct.err_code: 1100,
                 ct.err_msg: f"invalid max query result window, limit [{limit}] is invalid, should be greater than 0",
             }
         self.query(
@@ -731,7 +731,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         # milvus strips leading/trailing whitespace before echoing the value
         # in the error message, so " " becomes "" in `offset [<displayed>] is invalid`
         displayed = offset.strip() if isinstance(offset, str) else offset
-        error = {ct.err_code: 1, ct.err_msg: f"offset [{displayed}] is invalid"}
+        error = {ct.err_code: 1100, ct.err_msg: f"offset [{displayed}] is invalid"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -1221,7 +1221,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
 
         # 3. query
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: "the sample factor should be between 0 and 1 and not too close to 0 or 1",
         }
         self.query(client, collection_name, filter=expr, check_task=CheckTasks.err_res, check_items=error)
@@ -1551,7 +1551,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 5. not support filter bool field with expr 'bool in [0/ 1]'
         not_support_expr = f"{ct.default_bool_field_name} in [0]"
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "value 'int64_val:0' in list cannot be casted to Bool",
         }
         self.query(
@@ -4289,7 +4289,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
         collection_info = self.get_collection_stats(client, collection_name)[0]
         assert collection_info["row_count"] == default_nb
         # 4. query without loading
-        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         self.query(
             client,
             collection_name,
@@ -5031,7 +5031,7 @@ class TestQueryStringPrimaryShared(TestMilvusClientV2Base):
         client = self._client()
         expression = 'float like "0%"'
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "like operation on non-string or no-json field is unsupported",
         }
         self.query(
@@ -5548,7 +5548,7 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
                 filter=default_search_exp,
                 output_fields=[invalid_output_field],
                 check_task=CheckTasks.err_res,
-                check_items={"err_code": 1, "err_msg": err_msg},
+                check_items={"err_code": 1100, "err_msg": err_msg},
             )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -5574,7 +5574,7 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
             output_fields=["count(*)"],
             limit=10,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"},
+            check_items={ct.err_code: 1100, ct.err_msg: "count entities with pagination is not allowed"},
         )
         self.query(
             client,
@@ -5584,7 +5584,7 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
             offset=10,
             limit=10,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"},
+            check_items={ct.err_code: 1100, ct.err_msg: "count entities with pagination is not allowed"},
         )
 
 
@@ -5891,7 +5891,7 @@ class TestQueryCount(TestMilvusClientV2Base):
             output_fields=["count(*)"],
             partition_names=[partition_name],
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": f"partition name {partition_name} not found"},
+            check_items={"err_code": 1100, "err_msg": f"partition name {partition_name} not found"},
         )
         # count remaining _default partition
         self.query(
@@ -6384,7 +6384,7 @@ class TestQueryCount(TestMilvusClientV2Base):
             client,
             alias,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "cannot drop the collection via alias"},
+            check_items={ct.err_code: 1100, ct.err_msg: "cannot drop the collection via alias"},
         )
         # 7. clean up - drop alias and collection
         self.drop_alias(client, alias)

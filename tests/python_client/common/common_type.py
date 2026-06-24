@@ -188,6 +188,15 @@ value_content = "value_content"
 code = "code"
 err_code = "err_code"
 err_msg = "err_msg"
+# Sentinel for err_code in CheckTasks.err_res: when err_code is ANY_CODE the
+# code assertion is skipped and only the message is checked. Use it when the
+# code carries no discriminating signal — e.g. a client-side pymilvus
+# ParamError whose code is the generic, overloaded 1 (also merr ServiceNotReady),
+# where asserting the code would be meaningless or false-pass-prone.
+# It is None, not a magic number, so it can never collide with a real code
+# (the old 999 placeholder only "worked" because the server happened never to
+# return 999).
+ANY_CODE = None
 in_cluster_env = "IN_CLUSTER"
 default_count_output = "count(*)"
 

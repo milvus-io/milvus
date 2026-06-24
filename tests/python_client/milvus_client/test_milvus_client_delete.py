@@ -109,7 +109,7 @@ class TestMilvusClientDeleteInvalid(TestMilvusClientV2Base):
         # 2. delete
         self.delete(client, collection_name,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": "The type of expr must be string ,but <class 'NoneType'> is given."})
 
 

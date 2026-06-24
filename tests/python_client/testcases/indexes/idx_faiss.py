@@ -1,3 +1,4 @@
+import common.common_type as ct
 from pymilvus import DataType
 
 success = "success"
@@ -69,7 +70,7 @@ class FAISS:
             "description": "IVF Flat invalid nprobe string",
             "build_params": {"faiss_index_name": "IVF64,Flat"},
             "search_params": {"nprobe": "invalid"},
-            "expected": {"err_code": 999, "err_msg": "expects a number"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "expects a number"},
         },
         {
             "description": "HNSW Flat efSearch",
@@ -81,7 +82,7 @@ class FAISS:
             "description": "HNSW Flat invalid efSearch string",
             "build_params": {"faiss_index_name": "HNSW16,Flat"},
             "search_params": {"efSearch": "invalid"},
-            "expected": {"err_code": 999, "err_msg": "expects a number"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "expects a number"},
         },
         {
             "description": "IVF PQ RFlat rerank",
@@ -93,7 +94,7 @@ class FAISS:
             "description": "IVF PQ RFlat invalid k_factor string",
             "build_params": {"faiss_index_name": "IVF64,PQ8x4,RFlat"},
             "search_params": {"nprobe": 8, "k_factor": "invalid"},
-            "expected": {"err_code": 999, "err_msg": "expects a number"},
+            "expected": {"err_code": ct.ANY_CODE, "err_msg": "expects a number"},
         },
     ]
 

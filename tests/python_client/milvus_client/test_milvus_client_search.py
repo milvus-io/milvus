@@ -189,7 +189,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the "
+        error = {ct.err_code: 1101, ct.err_msg: f"type param(max_length) should be specified for the "
                                                  f"field({default_primary_key_field_name}) of collection {collection_name}"}
         self.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
                                check_task=CheckTasks.err_res, check_items=error)
@@ -209,7 +209,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         # 2. create collection with same params
         self.create_collection(client, collection_name, default_dim)
         # 3. create collection with same name and different params
-        error = {ct.err_code: 1, ct.err_msg: f"create duplicate collection with different parameters, "
+        error = {ct.err_code: 1100, ct.err_msg: f"create duplicate collection with different parameters, "
                                              f"collection: {collection_name}"}
         self.create_collection(client, collection_name, default_dim + 1,
                                check_task=CheckTasks.err_res, check_items=error)
@@ -488,7 +488,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": err_msg})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_dim(self):
@@ -506,7 +506,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 2000,
                                  "err_msg": 'vector dimension mismatch'})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -520,7 +520,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         if invalid_field_name in [None, ""]:
             pytest.skip("None is legal")
         client = self._client(alias=self.shared_alias)
-        error = {"err_code": 999, "err_msg": f"failed to create query plan: failed to get field schema by name"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": f"failed to create query plan: failed to get field schema by name"}
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=invalid_field_name,
                     search_params=default_search_params, limit=default_limit,
@@ -552,7 +552,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                         search_params=search_params, limit=default_limit,
                         filter=v2_invalid_search_exp,
                         check_task=CheckTasks.err_res,
-                        check_items={"err_code": 65535,
+                        check_items={"err_code": 1100,
                                      "err_msg": "metric type not match"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -570,7 +570,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 1100,
                                  "err_msg": "metric type not match: invalid parameter"
                                             "[expected=COSINE][actual=L2]"})
 
@@ -611,7 +611,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -623,7 +623,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        error = {"err_code": 999, "err_msg": "failed to create query plan: cannot parse expression"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "failed to create query plan: cannot parse expression"}
         if invalid_search_expr == 1:
             error = {"err_code": 1, "err_msg": "bad argument type for built-in operation"}
         self.search(client, self.collection_name,
@@ -650,7 +650,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=invalid_search_expr,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": "failed to create query plan: cannot parse expression: %s"
                                             % invalid_search_expr})
 
@@ -672,7 +672,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=expression,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1,
+                    check_items={"err_code": 1100,
                                  "err_msg": "failed to create query plan: cannot parse "
                                             "expression: %s" % expression})
 
@@ -692,7 +692,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     partition_names=invalid_partitions,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -711,7 +711,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     partition_names=invalid_partitions,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": err_msg})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_output_fields", [[None], [1, 2], ct.default_int64_field_name])
@@ -729,7 +729,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     output_fields=invalid_output_fields,
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 999,
+                    check_items={ct.err_code: ct.ANY_CODE,
                                  ct.err_msg: err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -749,7 +749,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     output_fields=non_existing_output_fields,
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 999,
+                    check_items={ct.err_code: ct.ANY_CODE,
                                  ct.err_msg: err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -791,7 +791,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     output_fields=output_fields,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 1100,
                                  "err_msg": f"field {output_fields[-1]} not exist"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -853,7 +853,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1,
+                    check_items={"err_code": 1100,
                                  "err_msg": "nq (number of search vector per search "
                                             "request) should be in range [1, 16384]"})
 
@@ -875,7 +875,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=range_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "type must be number"})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": "type must be number"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr", [
@@ -900,7 +900,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=expr,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "by zero"})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": "by zero"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr", [
@@ -918,7 +918,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.query(client, self.collection_name,
                    filter=expr,
                    check_task=CheckTasks.err_res,
-                   check_items={"err_code": 999, "err_msg": "by zero"})
+                   check_items={"err_code": ct.ANY_CODE, "err_msg": "by zero"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr,expr_params", [
@@ -940,7 +940,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=expr, filter_params=expr_params,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "by zero"})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": "by zero"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr", [
@@ -983,7 +983,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     search_params=range_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999, "err_msg": "type must be number"})
+                    check_items={"err_code": ct.ANY_CODE, "err_msg": "type must be number"})
 
 
 class TestSearchInvalidIndependent(TestMilvusClientV2Base):
@@ -1062,7 +1062,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1,
+                    check_items={"err_code": 100,
                                  "err_msg": "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1105,7 +1105,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                             search_params=search_params, limit=default_limit,
                             filter=v2_invalid_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 999,
+                            check_items={"err_code": ct.ANY_CODE,
                                          "err_msg": "fail to search on QueryNode"})
 
     @pytest.mark.skip("not support now")
@@ -1186,7 +1186,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=nb,
                     filter=expression,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": "failed to create query plan: "
                                             "cannot parse expression: %s" % expression})
 
@@ -1227,7 +1227,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=invalid_search_expr_bool,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1,
+                    check_items={"err_code": 1100,
                                  "err_msg": "failed to create query plan"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1427,7 +1427,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=default_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 101,
                                  "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1470,7 +1470,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     partition_names=[par_name],
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 101,
                                  "err_msg": "collection not loaded"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1637,7 +1637,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     partition_names=[deleted_par_name],
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 1100,
                                  "err_msg": "partition name search_partition_0 not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1667,7 +1667,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=v2_invalid_search_exp,
                     partition_names=[partition_name],
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 1100,
                                  "err_msg": "partition name %s not found" % partition_name})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1699,7 +1699,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=search_params, limit=reorder_k + 1,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 2000,
                                  "err_msg": "reorder_k(100) should be larger than k(101)"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1742,7 +1742,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=wrong_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 1100,
                                  "err_msg": "metric type not match"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1781,7 +1781,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit,
                     filter=f"{ct.default_int64_field_name} >= 0",
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 1100,
                                  "err_msg": "metric type not match: invalid "
                                             "parameter[expected=JACCARD][actual=L2]"})
 
@@ -1840,7 +1840,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                         filter=v2_invalid_search_exp,
                         output_fields=[output_fields],
                         check_task=CheckTasks.err_res,
-                        check_items={ct.err_code: 65535,
+                        check_items={ct.err_code: 1100,
                                      ct.err_msg: "field int63 not exist"})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1915,7 +1915,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 999,
+                    check_items={"err_code": ct.ANY_CODE,
                                  "err_msg": "parse ignore growing field failed"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1950,7 +1950,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=range_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 2000,
                                  "err_msg": "must be less than radius"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1986,7 +1986,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     search_params=range_search_params, limit=default_limit,
                     filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 2000,
                                  "err_msg": "must be greater than radius"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2059,7 +2059,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     data=vectors, anns_field=ct.default_float_vec_field_name,
                     search_params=search_params, limit=100,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 65535,
+                    check_items={"err_code": 2000,
                                  "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
 
 
@@ -2870,7 +2870,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         assert old_query_res == new_query_res
 
         rows = cf.gen_row_data_by_schema(nb=200, schema=c_info, start=default_nb)
-        error = {ct.err_code: 0, ct.err_msg: "collection not found"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         self.insert(client, old_name, rows,
                     check_task=CheckTasks.err_res,
                     check_items=error)
@@ -3235,7 +3235,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         self.search(client, collection_name, data=[search_vector], filter='id >= 10',
                     search_params=search_params, limit=default_limit)
         not_supported_hints = "not_supported_hints"
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 2000,
                  ct.err_msg: f"hints: {not_supported_hints} not supported"}
         search_params = {'hints': not_supported_hints,
                          'params': cf.get_search_params_params('IVF_FLAT')}
@@ -7546,7 +7546,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[random.random() for _ in range(128)]]
-        error = {ct.err_code: 65535, ct.err_msg: "unknown rerank model provider"}
+        error = {ct.err_code: 1100, ct.err_msg: "unknown rerank model provider"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7574,7 +7574,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "not a valid http/https link"}
+        error = {ct.err_code: 1100, ct.err_msg: "not a valid http/https link"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7601,7 +7601,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "call service failed"}
+        error = {ct.err_code: 2, ct.err_msg: "call service failed"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7629,7 +7629,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "parse rerank params [queries] failed"}
+        error = {ct.err_code: 1100, ct.err_msg: "parse rerank params [queries] failed"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7655,7 +7655,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "rerank function missing required param: queries"}
+        error = {ct.err_code: 1100, ct.err_msg: "rerank function missing required param: queries"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7682,7 +7682,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "is not a valid http/https link"}
+        error = {ct.err_code: 1100, ct.err_msg: "is not a valid http/https link"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7711,7 +7711,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "unsupported reranker"}
+        error = {ct.err_code: 1100, ct.err_msg: "unsupported reranker"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7738,7 +7738,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "reranker name not specified"}
+        error = {ct.err_code: 1101, ct.err_msg: "reranker name not specified"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7765,7 +7765,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]  # single search data
-        error = {ct.err_code: 65535, ct.err_msg: "queries count (3) != nq count (1)"}
+        error = {ct.err_code: 5, ct.err_msg: "queries count (3) != nq count (1)"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7792,7 +7792,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "model input field id must be VarChar, got Int64"}
+        error = {ct.err_code: 1100, ct.err_msg: "model input field id must be VarChar, got Int64"}
         self.search(client, collection_name, data, anns_field="dense", limit=5, output_fields=["doc_id", "document"],
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7819,7 +7819,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 1, ct.err_msg: "field not found"}
+        error = {ct.err_code: 1100, ct.err_msg: "field not found"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -7847,7 +7847,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "model reranker requires exactly 1 input field, got 2"}
+        error = {ct.err_code: 1100, ct.err_msg: "model reranker requires exactly 1 input field, got 2"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 

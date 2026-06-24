@@ -2927,7 +2927,7 @@ class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
             index_name="invalid_inv_on_vec",
         )
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.create_collection(
             client,
             collection_name,
@@ -3413,7 +3413,7 @@ class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
         )
 
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "only fixed dimension vector types are supported",
         }
         self.create_collection(
@@ -4087,7 +4087,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         data = self._create_collection_ready(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -4112,7 +4112,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         data = self._create_collection_ready(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -4137,7 +4137,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         data = self._create_collection_ready(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -4162,7 +4162,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         data = self._create_collection_ready(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -4187,7 +4187,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         data = self._create_collection_ready(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -4212,7 +4212,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         data = self._create_collection_ready(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -4236,7 +4236,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_dollar")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4259,7 +4259,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         data = self._create_collection_ready(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: "metric type not match"}
+        error = {ct.err_code: 1100, ct.err_msg: "metric type not match"}
         self.search(
             client,
             collection_name,
@@ -4285,7 +4285,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
 
         search_tensor = EmbeddingList()
         search_tensor.add(_seed_vector(42))
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -4309,7 +4309,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_match_nested")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4331,7 +4331,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_ml_neg")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4353,7 +4353,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_ml_zero")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4375,7 +4375,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_mmost_neg")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4397,7 +4397,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_me_neg")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4419,7 +4419,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_match_nostruct")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4441,7 +4441,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_match_nosub")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4492,7 +4492,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
         index_params.add_index(field_name="structA[nonexistent]", index_type="INVERTED")
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.create_collection(
             client,
             collection_name,
@@ -4546,7 +4546,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
             index_name="invalid_stl_on_vec",
         )
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.create_collection(
             client,
             collection_name,
@@ -4568,7 +4568,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         data = self._create_collection_ready(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -4592,7 +4592,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_inv_ma_noexpr")
         self._create_collection_ready(client, collection_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.query(
             client,
             collection_name,
@@ -4665,7 +4665,7 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         tensor = EmbeddingList()
         tensor.add(_seed_vector(7))
         tensor.add(_seed_vector(8))
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 1100, ct.err_msg: ""}
         self.search(
             client,
             collection_name,
@@ -5721,7 +5721,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_range_l2_invalid")
         data = self._setup_collection(client, collection_name, metric_type="L2")
         qv = data[0]["structA"][0]["embedding"]
-        error = {ct.err_code: 65535, ct.err_msg: ""}
+        error = {ct.err_code: 2000, ct.err_msg: ""}
         self.search(
             client,
             collection_name,

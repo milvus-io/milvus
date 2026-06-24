@@ -418,7 +418,7 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
             collection_name,
             {"partitionkey.isolation": enable_isolation},
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100, "err_msg": err_msg},
+            check_items={"err_code": 105, "err_msg": err_msg},
         )
 
     def test_set_par_key_isolation_after_vector_indexed(self):

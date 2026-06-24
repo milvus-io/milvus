@@ -450,7 +450,7 @@ class TestSparseInvertedIndexV3IPShared(_SparseInvertedIndexV3Base):
             search_params={"metric_type": "IP", "params": {"dim_max_score_ratio": dim_max_score_ratio}},
             limit=10,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 999, ct.err_msg: "should be in range [0.500000, 1.300000]"},
+            check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: "should be in range [0.500000, 1.300000]"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)

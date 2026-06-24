@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 from base.client_base import TestcaseBase
 from common import common_func as cf
+from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.mock_tei_server import MockTEIServer, get_docker_host, get_local_ip
 from faker import Faker
@@ -144,7 +145,7 @@ class TestCreateCollectionWithTextEmbeddingNegative(TestcaseBase):
             name=cf.gen_unique_str(prefix),
             schema=schema,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": "unsupported_endpoint"},
+            check_items={"err_code": 2, "err_msg": "unsupported_endpoint"},
         )
 
     def test_create_collection_with_text_embedding_unmatched_dim(self, tei_endpoint):
@@ -178,7 +179,7 @@ class TestCreateCollectionWithTextEmbeddingNegative(TestcaseBase):
             schema=schema,
             check_task=CheckTasks.err_res,
             check_items={
-                "err_code": 65535,
+                "err_code": 2400,
                 "err_msg": f"the required embedding dim is [{dim}], but the embedding obtained from the model is [768]",
             },
         )
@@ -1618,7 +1619,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         collection_w.insert(
             data_no_vector,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": ""},
+            check_items={"err_code": ct.ANY_CODE, "err_msg": ""},
         )
 
         # === UPSERT after drop - must provide vector manually ===

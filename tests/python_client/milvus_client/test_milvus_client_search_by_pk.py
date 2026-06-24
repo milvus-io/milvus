@@ -272,7 +272,10 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
             )
 
         #  search again without specify anns_field
-        error = {"err_code": 999, "err_msg": "multiple vector fields exist, please specify anns_field in search_params"}
+        error = {
+            "err_code": ct.ANY_CODE,
+            "err_msg": "multiple vector fields exist, please specify anns_field in search_params",
+        }
         self.search(
             client,
             collection_name,
@@ -383,7 +386,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         collection_name = self.collection_name
 
         # search with empty vectors
-        error = {"err_code": 999, "err_msg": "`ids` value [] is illegal"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "`ids` value [] is illegal"}
         self.search(
             client,
             collection_name,
@@ -446,7 +449,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
 
         # search with duplicate primary key values
         # TODO: Update the error msg after #46740 fixed
-        error = {"err_code": 999, "err_msg": "duplicate IDs found in search request"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "duplicate IDs found in search request"}
         self.search(
             client,
             collection_name,
@@ -476,7 +479,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(nb=2, dim=self.float_vector_dim)
 
         # search with duplicate primary key values
-        error = {"err_code": 999, "err_msg": "Either ids or data must be provided, not both"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "Either ids or data must be provided, not both"}
         self.search(
             client,
             collection_name,
@@ -506,7 +509,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         search_params = {}
 
         # search with duplicate primary key values
-        error = {"err_code": 999, "err_msg": "primary key is int64, but IDs type mismatch"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "primary key is int64, but IDs type mismatch"}
         self.search(
             client,
             collection_name,
@@ -690,8 +693,8 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         search_params = {}
         invalid_output_fields = [["%"], [""], ["-"]]
         for field in invalid_output_fields:
-            error1 = {ct.err_code: 999, ct.err_msg: f"parse output field name failed: {field[0]}"}
-            error2 = {ct.err_code: 999, ct.err_msg: f"`output_fields` value {field} is illegal"}
+            error1 = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"parse output field name failed: {field[0]}"}
+            error2 = {ct.err_code: ct.ANY_CODE, ct.err_msg: f"`output_fields` value {field} is illegal"}
             error = error2 if field == [""] else error1
             self.search(
                 client,
@@ -740,7 +743,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         search_params = {"metric_type": self.float_vector_metric, "params": {"nprobe": 100}}
 
         error = {
-            "err_code": 999,
+            "err_code": ct.ANY_CODE,
             "err_msg": f"topk [{ct.max_limit + 1}] is invalid, it should be in range "
             f"[1, {ct.max_limit}], but got {ct.max_limit + 1}",
         }
@@ -770,7 +773,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         search_params = {"metric_type": self.sparse_vector_metric}
 
         error = {
-            "err_code": 999,
+            "err_code": ct.ANY_CODE,
             "err_msg": f"nq [{ct.max_nq + 1}] is invalid, nq (number of search vector per search request) should be in range "
             f"[1, {ct.max_nq}], but got {ct.max_nq + 1}",
         }
@@ -848,7 +851,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         client.close()
 
         # search with client closed
-        error = {"err_code": 999, "err_msg": "should create connection first"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "should create connection first"}
         self.search(
             client,
             collection_name,
@@ -874,7 +877,10 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         search_params = {"metric_type": self.sparse_vector_metric, "params": {"nprobe": 100}}
 
         # search with mismatched metric type
-        error = {"err_code": 999, "err_msg": "metric type not match: invalid parameter[expected=COSINE][actual=IP]"}
+        error = {
+            "err_code": ct.ANY_CODE,
+            "err_msg": "metric type not match: invalid parameter[expected=COSINE][actual=IP]",
+        }
         self.search(
             client,
             collection_name,
@@ -901,7 +907,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         search_params = {"metric_type": self.float_vector_metric, "params": {"nprobe": 100}}
 
         # search with invalid partition name
-        error = {"err_code": 999, "err_msg": f"partition name {partition_name} not found"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": f"partition name {partition_name} not found"}
         self.search(
             client,
             collection_name,
@@ -964,7 +970,7 @@ class TestSearchByPkIndependent(TestMilvusClientV2Base):
 
         # search
         ids_to_search = [0, 1]
-        error = {"err_code": 999, "err_msg": f"some of the provided primary key IDs do not exist: missing IDs"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": f"some of the provided primary key IDs do not exist: missing IDs"}
         search_params = {}
         self.search(
             client,
@@ -1165,7 +1171,7 @@ class TestSearchByPkIndependent(TestMilvusClientV2Base):
         # release collection
         self.release_collection(client, collection_name)
         # search after release
-        error = {"err_code": 999, "err_msg": "collection not loaded"}
+        error = {"err_code": ct.ANY_CODE, "err_msg": "collection not loaded"}
         ids_to_search = [data[i][fast_create_pk_field] for i in range(default_nq)]
         search_params = {}
         self.search(
@@ -1288,7 +1294,7 @@ class TestSearchByPkIndependent(TestMilvusClientV2Base):
 
         # search again with error for some ids in partition_1 was released
         error = {
-            ct.err_code: 100,
+            ct.err_code: 1100,
             ct.err_msg: f"some of the provided primary key IDs do not exist: missing IDs = [1 4 7]",
         }
         self.search(
@@ -1775,7 +1781,7 @@ class TestSearchByPkIndependent(TestMilvusClientV2Base):
         )
         if vector_dtype == DataType.INT8_VECTOR and index != "HNSW":
             # INT8_Vector only supports HNSW index for now
-            error = {"err_code": 999, "err_msg": f"data type Int8Vector can't build with this index {index}"}
+            error = {"err_code": ct.ANY_CODE, "err_msg": f"data type Int8Vector can't build with this index {index}"}
             self.create_index(
                 client, collection_name, index_params=index_params, check_task=CheckTasks.err_res, check_items=error
             )
@@ -2380,7 +2386,7 @@ class TestSearchByPkIndependent(TestMilvusClientV2Base):
         search_params = {}
         ids_to_search = [i for i in range(ct.default_nq)]
         search_exp = "json_field1['count'] < json_field2['count']"
-        error = {ct.err_code: 999, ct.err_msg: "two column comparison with JSON type is not supported"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "two column comparison with JSON type is not supported"}
         self.search(
             client,
             collection_name,

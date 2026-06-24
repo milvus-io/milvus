@@ -255,7 +255,7 @@ class TestMilvusClientFileResourceAdd(FileResourceTestBase):
         """
         client = self._client()
         # 1. add file resource with non-existent path
-        error = {ct.err_code: 65535, ct.err_msg: "file resource path not exist"}
+        error = {ct.err_code: 1100, ct.err_msg: "file resource path not exist"}
         self.add_file_resource(
             client,
             cf.gen_unique_str(prefix),
@@ -289,7 +289,7 @@ class TestMilvusClientFileResourceAdd(FileResourceTestBase):
         # 1. add file resource
         self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
         # 2. add same name with different path should fail
-        error = {ct.err_code: 65535, ct.err_msg: "already exists"}
+        error = {ct.err_code: 1100, ct.err_msg: "already exists"}
         self.add_file_resource(
             client,
             res_name,
@@ -400,7 +400,7 @@ class TestMilvusClientFileResourceRemove(FileResourceTestBase):
         # 2. create collection referencing it
         self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
         # 3. remove should fail
-        error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
+        error = {ct.err_code: 1100, ct.err_msg: "is still in use"}
         self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -967,7 +967,7 @@ class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
         # 2. create collection referencing the resource
         self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
         # 3. remove should fail
-        error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
+        error = {ct.err_code: 1100, ct.err_msg: "is still in use"}
         self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -983,7 +983,7 @@ class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
         self.add_file_resource(client, res_name, STOPWORDS_PATH)
         self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
 
-        error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
+        error = {ct.err_code: 1100, ct.err_msg: "is still in use"}
         self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, col_name)
@@ -1020,7 +1020,7 @@ class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
         # 3. drop one collection (drop_collection is synchronous at meta layer)
         self.drop_collection(client, col1)
         # 4. remove should still fail (col2 still references)
-        error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
+        error = {ct.err_code: 1100, ct.err_msg: "is still in use"}
         self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1810,7 +1810,7 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
         self.create_bm25_collection(client, col, analyzer_params)
 
         # while referenced, none of the 4 can be removed
-        error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
+        error = {ct.err_code: 1100, ct.err_msg: "is still in use"}
         for name in (jieba_name, stop_name, synonym_name):
             self.remove_file_resource(client, name, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1918,7 +1918,7 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
         # drop two, one still references -> remove must fail
         self.drop_collection(client, cols[0])
         self.drop_collection(client, cols[1])
-        error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
+        error = {ct.err_code: 1100, ct.err_msg: "is still in use"}
         self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
         # drop the last -> remove eventually succeeds
@@ -2007,7 +2007,7 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
             self.create_bm25_collection_with_stop_filter(client, col, res_name)
 
             # refcount should block removal
-            error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
+            error = {ct.err_code: 1100, ct.err_msg: "is still in use"}
             self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
             # drop collection in that db first (drop_database usually requires empty db)

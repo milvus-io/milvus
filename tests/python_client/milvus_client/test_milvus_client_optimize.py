@@ -101,7 +101,7 @@ class TestMilvusClientOptimizeInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 0, ct.err_msg: "can't find collection"}
+        error = {ct.err_code: 100, ct.err_msg: "can't find collection"}
         self.optimize(
             client,
             collection_name,

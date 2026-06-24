@@ -158,7 +158,7 @@ class TestFaissBuildParams(TestFaissBase):
                 metric_type=metric_type,
                 params=build_params,
                 check_task=CheckTasks.err_res,
-                check_items={"err_code": 999, "err_msg": "invalid parameter"},
+                check_items={"err_code": ct.ANY_CODE, "err_msg": "invalid parameter"},
             )
         else:
             self._create_faiss_index(client, collection_name, metric_type=metric_type, params=build_params)
@@ -253,7 +253,7 @@ class TestFaissSearchParams(TestFaissBase):
             search_params={"efSearch": 64},
             limit=ct.default_limit,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 999, "err_msg": "not supported"},
+            check_items={"err_code": ct.ANY_CODE, "err_msg": "not supported"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -345,7 +345,7 @@ class TestFaissSearchParams(TestFaissBase):
             search_params={"radius": 1000, "range_filter": 0},
             limit=ct.default_limit,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 999, "err_msg": "RangeSearch unsupported for binary faiss indexes"},
+            check_items={"err_code": ct.ANY_CODE, "err_msg": "RangeSearch unsupported for binary faiss indexes"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -372,7 +372,7 @@ class TestFaissSearchParams(TestFaissBase):
             search_params={},
             limit=ct.default_limit,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 999, "err_msg": "selector not supported"},
+            check_items={"err_code": ct.ANY_CODE, "err_msg": "selector not supported"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -398,5 +398,5 @@ class TestFaissSearchParams(TestFaissBase):
             batch_size=100,
             search_params={},
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": "Failed to create iterators from index"},
+            check_items={"err_code": 2000, "err_msg": "Failed to create iterators from index"},
         )

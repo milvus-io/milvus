@@ -409,7 +409,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         schema.add_function(bm25_function)
         check_task = CheckTasks.err_res
         check_items = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "BM25 function input field must set enable_analyzer to true",
         }
         self.init_collection_wrap(
@@ -457,7 +457,7 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         check_items = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "function output field cannot be nullable",
         }
         self.init_collection_wrap(
@@ -2018,7 +2018,7 @@ class TestCreateIndexWithFullTextSearchNegative(TestcaseBase):
             },
         )
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "index metric type of BM25 function output field must be BM25",
         }
         collection_w.create_index(
@@ -3669,7 +3669,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             )
         # log.info(f"search data: {search_data}")
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "please provide varchar/text for BM25 Function based search",
         }
         collection_w.search(

@@ -906,7 +906,7 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
             collection_name=coll,
             schema=schema,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "__virtual_pk__"},
+            check_items={ct.err_code: 1701, ct.err_msg: "__virtual_pk__"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3634,7 +3634,7 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
             client,
             collection_name=coll,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "in progress"},
+            check_items={ct.err_code: 703, ct.err_msg: "in progress"},
         )
         first_progress = self.wait_refresh_progress(client, job_first)
         assert first_progress.state == "RefreshCompleted"
@@ -3739,7 +3739,7 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
             client,
             collection_name=coll,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: err_hint},
+            check_items={ct.err_code: ct.ANY_CODE, ct.err_msg: err_hint},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4404,7 +4404,7 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
             output_fields=["id"],
             limit=1,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "collection"},
+            check_items={ct.err_code: 100, ct.err_msg: "collection"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)

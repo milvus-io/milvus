@@ -2185,7 +2185,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
         # Search using EmbeddingList
         error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: "array of vector is not supported for search by IDs",
         }
         self.search(
@@ -4367,7 +4367,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
         )
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "only fixed dimension vector types are supported",
         }
         self.create_collection(
@@ -4404,7 +4404,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
         )
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "element type JSON is not supported",
         }
         self.create_collection(
@@ -4441,7 +4441,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
         )
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "element type Geometry is not supported",
         }
         self.create_collection(
@@ -4532,7 +4532,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
         )
 
-        error = {ct.err_code: 65535, ct.err_msg: "invalid dimension"}
+        error = {ct.err_code: 1100, ct.err_msg: "invalid dimension"}
         res, check = self.create_collection(
             client,
             collection_name,
@@ -4646,7 +4646,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
 
         # Should fail - sparse vectors are not supported in struct array
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: "only fixed dimension vector types are supported",
         }
         self.create_collection(

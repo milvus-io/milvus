@@ -126,7 +126,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: "decay reranker requires exactly 1 input field, got 2"}
+        error = {ct.err_code: 1100, ct.err_msg: "decay reranker requires exactly 1 input field, got 2"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -186,7 +186,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: "unsupported reranker 1"}
+        error = {ct.err_code: 1100, ct.err_msg: "unsupported reranker 1"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -220,7 +220,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: f"unsupported reranker {not_supported_reranker}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"unsupported reranker {not_supported_reranker}"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -255,7 +255,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
         error = {
-            ct.err_code: 65535,
+            ct.err_code: 1100,
             ct.err_msg: f'decay: invalid function "{not_supported_function}", must be one of [gauss, exp, linear]',
         }
         self.search(
@@ -291,7 +291,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: f"decay param origin: {invalid_origin} is not a number"}
+        error = {ct.err_code: 1100, ct.err_msg: f"decay param origin: {invalid_origin} is not a number"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -317,7 +317,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: "decay origin not specified"}
+        error = {ct.err_code: 1101, ct.err_msg: "decay origin not specified"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -351,7 +351,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: f"decay param scale: {invalid_scale} is not a number"}
+        error = {ct.err_code: 1100, ct.err_msg: f"decay param scale: {invalid_scale} is not a number"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -377,7 +377,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: "decay scale not specified"}
+        error = {ct.err_code: 1101, ct.err_msg: "decay scale not specified"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -411,7 +411,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: f"decay: scale must be > 0, got {invalid_scale}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"decay: scale must be > 0, got {invalid_scale}"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -445,7 +445,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: f"decay param offset: {invalid_offset} is not a number"}
+        error = {ct.err_code: 1100, ct.err_msg: f"decay param offset: {invalid_offset} is not a number"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -479,7 +479,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: f"decay: offset must be >= 0, got {invalid_offset}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"decay: offset must be >= 0, got {invalid_offset}"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -513,7 +513,7 @@ class TestMilvusClientSearchInvalidRerankerShared(TestMilvusClientV2Base):
         )
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, RERANKER_INVALID_DIM))
-        error = {ct.err_code: 65535, ct.err_msg: f"decay param decay: {invalid_decay} is not a number"}
+        error = {ct.err_code: 1100, ct.err_msg: f"decay param decay: {invalid_decay} is not a number"}
         self.search(
             client,
             RERANKER_INVALID_SHARED_COLLECTION,
@@ -571,7 +571,7 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
         if not_support_datatype == DataType.JSON:
             err_msg = "unsupported field type: JSON"
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535, ct.err_msg: err_msg}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: err_msg}
         self.search(
             client,
             collection_name,
@@ -621,7 +621,7 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
             params={"reranker": "decay", "function": "gauss", "origin": 0, "offset": 0, "decay": 0.5, "scale": 100},
         )
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535, ct.err_msg: "unsupported field type: Array"}
+        error = {ct.err_code: 5, ct.err_msg: "unsupported field type: Array"}
         self.search(
             client,
             collection_name,
@@ -671,7 +671,7 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
             params={"reranker": "decay", "function": "gauss", "origin": 0, "offset": 0, "decay": 0.5, "scale": 100},
         )
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535, ct.err_msg: "unsupported field type: FloatVector"}
+        error = {ct.err_code: 5, ct.err_msg: "unsupported field type: FloatVector"}
         self.search(
             client,
             collection_name,
@@ -861,7 +861,7 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
             params={"reranker": "decay", "function": "gauss", "origin": 0, "offset": 0, "decay": 0.5, "scale": 100},
         )
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535, ct.err_msg: "input field not_exist_field not found in collection schema"}
+        error = {ct.err_code: 1100, ct.err_msg: "input field not_exist_field not found in collection schema"}
         self.search(
             client,
             collection_name,
@@ -1028,7 +1028,7 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
             params={"reranker": "decay", "function": "gauss", "origin": 0, "offset": 0, "decay": 0.5, "scale": 100},
         )
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535, ct.err_msg: "input field dynamic_fields not found in collection schema"}
+        error = {ct.err_code: 1100, ct.err_msg: "input field dynamic_fields not found in collection schema"}
         self.search(
             client,
             collection_name,
@@ -4025,7 +4025,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[random.random() for _ in range(128)]]
-        error = {ct.err_code: 65535, ct.err_msg: "unknown rerank model provider"}
+        error = {ct.err_code: 1100, ct.err_msg: "unknown rerank model provider"}
         self.search(
             client,
             collection_name,
@@ -4061,7 +4061,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "not a valid http/https link"}
+        error = {ct.err_code: 1100, ct.err_msg: "not a valid http/https link"}
         self.search(
             client,
             collection_name,
@@ -4096,7 +4096,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "call service failed"}
+        error = {ct.err_code: 2, ct.err_msg: "call service failed"}
         self.search(
             client,
             collection_name,
@@ -4133,7 +4133,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "parse rerank params [queries] failed"}
+        error = {ct.err_code: 1100, ct.err_msg: "parse rerank params [queries] failed"}
         self.search(
             client,
             collection_name,
@@ -4167,7 +4167,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "rerank function missing required param: queries"}
+        error = {ct.err_code: 1100, ct.err_msg: "rerank function missing required param: queries"}
         self.search(
             client,
             collection_name,
@@ -4202,7 +4202,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "is not a valid http/https link"}
+        error = {ct.err_code: 1100, ct.err_msg: "is not a valid http/https link"}
         self.search(
             client,
             collection_name,
@@ -4240,7 +4240,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "unsupported reranker"}
+        error = {ct.err_code: 1100, ct.err_msg: "unsupported reranker"}
         self.search(
             client,
             collection_name,
@@ -4275,7 +4275,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "reranker name not specified"}
+        error = {ct.err_code: 1101, ct.err_msg: "reranker name not specified"}
         self.search(
             client,
             collection_name,
@@ -4310,7 +4310,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]  # single search data
-        error = {ct.err_code: 65535, ct.err_msg: "queries count (3) != nq count (1)"}
+        error = {ct.err_code: 5, ct.err_msg: "queries count (3) != nq count (1)"}
         self.search(
             client,
             collection_name,
@@ -4345,7 +4345,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "model input field id must be VarChar, got Int64"}
+        error = {ct.err_code: 1100, ct.err_msg: "model input field id must be VarChar, got Int64"}
         self.search(
             client,
             collection_name,
@@ -4381,7 +4381,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 1, ct.err_msg: "field not found"}
+        error = {ct.err_code: 1100, ct.err_msg: "field not found"}
         self.search(
             client,
             collection_name,
@@ -4418,7 +4418,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "model reranker requires exactly 1 input field, got 2"}
+        error = {ct.err_code: 1100, ct.err_msg: "model reranker requires exactly 1 input field, got 2"}
         self.search(
             client,
             collection_name,

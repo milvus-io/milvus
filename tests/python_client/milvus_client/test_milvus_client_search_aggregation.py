@@ -278,7 +278,7 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         expected: proxy rejects the request with max-depth validation error.
         """
         client = self._client(alias=self.shared_alias)
-        error = {ct.err_code: 999, ct.err_msg: "search_aggregation nesting exceeds max 4 levels"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "search_aggregation nesting exceeds max 4 levels"}
         self.search(
             client,
             self.collection_name,
@@ -316,7 +316,7 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         expected: default proxy limit 10000 rejects 12500 derived result entries.
         """
         client = self._client(alias=self.shared_alias)
-        error = {ct.err_code: 999, ct.err_msg: "number of search_aggregation result entries is too large"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "number of search_aggregation result entries is too large"}
         self.search(
             client,
             self.collection_name,
@@ -421,7 +421,7 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         expected: request fails with field-not-found error.
         """
         client = self._client(alias=self.shared_alias)
-        error = {ct.err_code: 999, ct.err_msg: "not found in schema"}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "not found in schema"}
         self.search(
             client,
             self.collection_name,
@@ -454,7 +454,7 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         search_params = kwargs.pop("search_params", self._search_params())
-        error = {ct.err_code: 999, ct.err_msg: err_msg}
+        error = {ct.err_code: ct.ANY_CODE, ct.err_msg: err_msg}
         self.search(
             client,
             self.collection_name,
@@ -477,7 +477,10 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         expected: proxy rejects FLOAT/DOUBLE group-by keys.
         """
         client = self._client(alias=self.shared_alias)
-        error = {ct.err_code: 999, ct.err_msg: "FLOAT / DOUBLE fields are not supported with search_aggregation"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "FLOAT / DOUBLE fields are not supported with search_aggregation",
+        }
         self.search(
             client,
             self.collection_name,
@@ -1135,7 +1138,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+        }
         self.search(
             client,
             collection_name,
@@ -1162,7 +1168,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             client, collection_name
         )
 
-        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+        }
         self.search(
             client,
             collection_name,
@@ -1270,7 +1279,10 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         vectors, vector_field, _, json_field, _ = self._prepare_json_field_collection(client, collection_name)
 
-        error = {ct.err_code: 999, ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation"}
+        error = {
+            ct.err_code: ct.ANY_CODE,
+            ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
+        }
         self.search(
             client,
             collection_name,
@@ -1300,7 +1312,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
         )
 
         metric_error = {
-            ct.err_code: 999,
+            ct.err_code: ct.ANY_CODE,
             ct.err_msg: "JSON / dynamic fields are not yet supported with search_aggregation",
         }
         self.search(
@@ -1321,7 +1333,7 @@ class TestSearchAggregationIndependent(TestMilvusClientV2Base):
             check_items=metric_error,
         )
 
-        sort_error = {ct.err_code: 999, ct.err_msg: "top_hits.sort JSON path is not yet supported"}
+        sort_error = {ct.err_code: ct.ANY_CODE, ct.err_msg: "top_hits.sort JSON path is not yet supported"}
         self.search(
             client,
             collection_name,
