@@ -230,11 +230,9 @@ func TestPrivilegeInterceptorRequestDBName(t *testing.T) {
 
 // TestPrivilegeInterceptorClusterLevel guards the cluster-level half of the
 // #50678 fix: cluster-level privileges (e.g. CreateDatabase/DropDatabase) are
-// not scoped to a specific database, so they must be authorized against the
-// connection-context db rather than the request's DbName (which for
-// CreateDatabase is the brand-new database name and would never match the
-// cluster grant). Without the level-aware resolution this denies every
-// pre-existing cluster grant.
+// not scoped to a specific database, so they are authorized globally (AnyWord),
+// independent of the connection namespace and of the request's DbName (which
+// for CreateDatabase is the brand-new database name).
 func TestPrivilegeInterceptorClusterLevel(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
@@ -245,10 +243,10 @@ func TestPrivilegeInterceptorClusterLevel(t *testing.T) {
 		return &internalpb.ListPolicyResponse{
 			Status: merr.Success(),
 			PolicyInfos: []string{
-				// cluster admin: granted PrivilegeAll on the connection-context db
-				// (default). carol below also connects on the default db, so the
-				// cluster check (context-scoped) matches this grant.
-				funcutil.PolicyForPrivilege("role_cluster", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeAll.String(), "default"),
+				// cluster admin: granted PrivilegeAll at the cluster scope (db=*),
+				// which is how cluster-level grants are necessarily stored
+				// (grant-side forces db="*" for cluster-level privileges).
+				funcutil.PolicyForPrivilege("role_cluster", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeAll.String(), util.AnyWord),
 			},
 			UserRoles: []string{
 				funcutil.EncodeUserRoleCache("carol", "role_cluster"),
@@ -258,10 +256,10 @@ func TestPrivilegeInterceptorClusterLevel(t *testing.T) {
 	err := InitMetaCache(context.Background(), client)
 	assert.NoError(t, err)
 
-	t.Run("cluster grant authorizes CreateDatabase for any new db name", func(t *testing.T) {
-		// carol connects without useDatabase (context db = default); the request
-		// targets a brand-new db. Authorization must use AnyWord, not "brand_new_db".
-		_, err := PrivilegeInterceptor(GetContext(context.Background(), "carol:pwd"), &milvuspb.CreateDatabaseRequest{
+	t.Run("cluster grant authorizes CreateDatabase regardless of namespace", func(t *testing.T) {
+		// Even connected on a non-default namespace, the cluster check is global
+		// (AnyWord) and independent of the connection namespace.
+		_, err := PrivilegeInterceptor(GetContextWithDB(context.Background(), "carol:pwd", "some_namespace"), &milvuspb.CreateDatabaseRequest{
 			DbName: "brand_new_db",
 		})
 		assert.NoError(t, err)
@@ -340,6 +338,63 @@ func TestPrivilegeInterceptorDatabaseLevel(t *testing.T) {
 	})
 }
 
+// TestPrivilegeInterceptorRenameCollection covers RenameCollection's split
+// authorization: a same-db rename needs database-admin on the db; a cross-db
+// rename needs a cluster-scoped (global) grant. It is NOT authorized by a
+// collection-level ReadWrite grant (covered in TestPrivilegeGroup).
+func TestPrivilegeInterceptorRenameCollection(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				// database admin on db_a: RenameCollection scoped to db_a.
+				funcutil.PolicyForPrivilege("role_dbadmin", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeRenameCollection.String(), "db_a"),
+				// global admin: RenameCollection at the cluster scope (db=*).
+				funcutil.PolicyForPrivilege("role_global", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeRenameCollection.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("dbadmin", "role_dbadmin"),
+				funcutil.EncodeUserRoleCache("globaladmin", "role_global"),
+			},
+		}, nil
+	}
+	err := InitMetaCache(context.Background(), client)
+	assert.NoError(t, err)
+
+	t.Run("same-db rename allowed with database-admin on that db", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "dbadmin:pwd"), &milvuspb.RenameCollectionRequest{
+			DbName: "db_a", OldName: "c1", NewDBName: "db_a", NewName: "c2",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("same-db rename denied on a db without the grant", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "dbadmin:pwd"), &milvuspb.RenameCollectionRequest{
+			DbName: "db_b", OldName: "c1", NewDBName: "db_b", NewName: "c2",
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("cross-db rename denied for database-admin (needs global)", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "dbadmin:pwd"), &milvuspb.RenameCollectionRequest{
+			DbName: "db_a", OldName: "c1", NewDBName: "db_b", NewName: "c2",
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("cross-db rename allowed with global admin", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "globaladmin:pwd"), &milvuspb.RenameCollectionRequest{
+			DbName: "db_a", OldName: "c1", NewDBName: "db_b", NewName: "c2",
+		})
+		assert.NoError(t, err)
+	})
+}
+
 func TestRootShouldBindRole(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
@@ -390,12 +445,13 @@ func TestResourceGroupPrivilege(t *testing.T) {
 			return &internalpb.ListPolicyResponse{
 				Status: merr.Success(),
 				PolicyInfos: []string{
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String(), "default"),
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String(), "default"),
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeDescribeResourceGroup.String(), "default"),
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String(), "default"),
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeTransferNode.String(), "default"),
-					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeTransferReplica.String(), "default"),
+					// cluster-level privileges are granted at the cluster scope (db=*)
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String(), util.AnyWord),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String(), util.AnyWord),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeDescribeResourceGroup.String(), util.AnyWord),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String(), util.AnyWord),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeTransferNode.String(), util.AnyWord),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeTransferReplica.String(), util.AnyWord),
 				},
 				UserRoles: []string{
 					funcutil.EncodeUserRoleCache("fooo", "role1"),
@@ -640,11 +696,13 @@ func TestPrivilegeGroup(t *testing.T) {
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ShowCollectionsRequest{})
 		assert.NoError(t, err)
 
+		// RenameCollection is no longer part of the collection-level ReadWrite
+		// group; it requires database-admin (same-db) / global-admin (cross-db).
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.RenameCollectionRequest{
 			OldName: "coll1",
 			NewName: "newName",
 		})
-		assert.NoError(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("grant ReadWrite to all collection", func(t *testing.T) {
@@ -747,8 +805,11 @@ func TestPrivilegeGroup(t *testing.T) {
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DeleteRequest{})
 		assert.NoError(t, err)
 
+		// Admin granted on the "default" db is a database-level admin, not a
+		// cluster admin; cluster-level ops (CreateResourceGroup) require a
+		// cluster-scoped (db="*") grant.
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
-		assert.NoError(t, err)
+		assert.Error(t, err)
 	})
 }
 
@@ -764,7 +825,8 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 		policies := []string{}
 		for _, priv := range Params.RbacConfig.GetDefaultPrivilegeGroup("ClusterReadOnly").Privileges {
 			objectType := util.GetObjectType(priv.Name)
-			policies = append(policies, funcutil.PolicyForPrivilege("role1", objectType, "*", util.PrivilegeNameForMetastore(priv.Name), "default"))
+			// cluster-level privileges are granted at the cluster scope (db=*)
+			policies = append(policies, funcutil.PolicyForPrivilege("role1", objectType, "*", util.PrivilegeNameForMetastore(priv.Name), util.AnyWord))
 		}
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return &internalpb.ListPolicyResponse{

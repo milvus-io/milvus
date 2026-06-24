@@ -70,17 +70,24 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
-	// Authorize against the db the request actually operates on: the request-body
-	// DbName takes precedence over the connection-context db (see
-	// milvus-io/milvus#50678). Cluster-level privileges (e.g. CreateDatabase) are
-	// not scoped to a specific database, so authorize them against the
-	// connection-context db (the pre-#50678 behavior) rather than the request's
-	// DbName — for CreateDatabase the request DbName is the brand-new database
-	// name, which would never match a pre-existing cluster grant. Database- and
-	// Collection-level privileges stay scoped to the db the request targets.
+	// Authorize against the db the request actually operates on, resolved by
+	// privilege level (mirrors the grant-side validation; see
+	// milvus-io/milvus#50678):
+	//   - Cluster-level privileges (CreateDatabase/ResourceGroup/...) are not
+	//     scoped to a database, so authorize them globally (AnyWord),
+	//     independent of the connection namespace.
+	//   - Database-/Collection-level privileges are scoped to the db the request
+	//     targets: the request-body DbName takes precedence, falling back to the
+	//     connection-context db.
 	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
 	if util.GetPrivilegeLevel(util.MetaStore2API(objectPrivilege)) == milvuspb.PrivilegeLevel_Cluster.String() {
-		dbName = GetCurDBNameFromContextOrDefault(ctx)
+		dbName = util.AnyWord
+	}
+	// RenameCollection is a database-admin privilege: a same-db rename is
+	// authorized against the target db (database level, handled above), while a
+	// cross-db rename additionally requires a cluster-scoped (global) grant.
+	if r, ok := req.(*milvuspb.RenameCollectionRequest); ok && r.GetDbName() != r.GetNewDBName() {
+		dbName = util.AnyWord
 	}
 
 	// Resolve alias to actual collection name for RBAC checks
