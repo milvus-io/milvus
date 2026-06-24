@@ -172,7 +172,7 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 // a single SplitShard message, then creates the target vchannels with a freshly
 // allocated barrier time tick (always greater than T_switch). It records
 // T_switch on the task so the redistribution drain can gate on the source
-// channel checkpoint reaching it, and each target's consume start position.
+// channel checkpoint reaching it.
 func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 	logger := m.taskLogger(task)
 	collection := m.meta.GetCollection(task.GetCollectionId())
@@ -240,7 +240,11 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 		logger.Warn("allocate the barrier timestamp failed", zap.Error(err))
 		return
 	}
-	startPositions, err := streaming.InitSplitTargetVChannels(m.ctx, m.wal, streaming.InitSplitTargetVChannelsParam{
+	// The target vchannels are ordinary vchannels: their genesis checkpoint is
+	// reported to the channel-checkpoint store by the streamingnode when it opens
+	// the new WAL, so no consume start position needs to be persisted on the task
+	// — the child delegators read it back through the normal recovery seek path.
+	if err := streaming.InitSplitTargetVChannels(m.ctx, m.wal, streaming.InitSplitTargetVChannelsParam{
 		CollectionID:    task.GetCollectionId(),
 		DBID:            collection.DatabaseID,
 		DBName:          collection.DatabaseName,
@@ -251,28 +255,10 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 		SourceVChannel:  task.GetSourceVchannel(),
 		BarrierTimeTick: barrier,
 		Targets:         toMessageSplitTargets(task.GetTargets()),
-	})
-	if err != nil {
+	}); err != nil {
 		logger.Warn("create the target vchannels failed", zap.Error(err))
 		return
 	}
-
-	// Persist the consume start position of each target before the routing
-	// commit, so a crash after the commit still has them for the child delegators.
-	if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
-		for _, target := range task.GetTargets() {
-			if target.GetStartPosition() != "" {
-				continue
-			}
-			if pos, ok := startPositions[target.GetVchannel()]; ok {
-				target.StartPosition = pos
-			}
-		}
-	}); err != nil {
-		logger.Warn("persist the target start positions failed", zap.Error(err))
-		return
-	}
-	task = m.mustGetTask(task.GetTaskId())
 
 	// Routing commit: register the target vchannels into the collection meta and
 	// switch routing. The source shard becomes Splitting (fenced, unroutable for

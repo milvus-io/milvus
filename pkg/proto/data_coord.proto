@@ -1825,10 +1825,11 @@ message SplitShardTaskTarget {
   string vchannel          = 1;
   bytes  routing_key_lower = 2;
   bytes  routing_key_upper = 3;
-  // start_position is the marshaled consume start position (the
-  // LastConfirmedMessageID of the target's CreateVChannel append). The child
-  // delegators consume the new WAL from here. Empty until the target is created.
-  string start_position    = 4;
+  // The target vchannel's consume start position is intentionally not persisted
+  // here: a split target is an ordinary vchannel, so its genesis checkpoint is
+  // reported to the datacoord channel-checkpoint store by the streamingnode when
+  // it opens the new WAL, exactly like any other vchannel. The child delegators
+  // read it back through the normal GetRecoveryInfoV2 seek path.
 }
 
 // SplitShardTask is the persisted state of a shard split task,

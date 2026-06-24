@@ -175,17 +175,17 @@ func (p *InitSplitTargetVChannelsParam) Validate() error {
 // range, and BarrierTimeTick = T_switch (so every message of the new WAL is
 // strictly greater than T_switch, and creation doubles as activation).
 //
-// It returns the marshaled consume start position (the LastConfirmedMessageID
-// of each append) per target vchannel; the child delegators consume the new
-// WAL from there.
+// It does not return any consume start position: a split target is an ordinary
+// vchannel, so its genesis checkpoint reaches the datacoord channel-checkpoint
+// store through the normal streamingnode WAL-open report, and the child
+// delegators read it back via the standard GetRecoveryInfoV2 seek path.
 //
 // The call is idempotent: every consumer of the CreateVChannel message skips an
 // already-known vchannel, so a retry after a partial failure is safe.
-func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSplitTargetVChannelsParam) (map[string]string, error) {
+func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSplitTargetVChannelsParam) error {
 	if err := param.Validate(); err != nil {
-		return nil, err
+		return err
 	}
-	startPositions := make(map[string]string, len(param.Targets))
 	for _, target := range param.Targets {
 		vchannel := target.GetVchannel()
 		msg, err := message.NewCreateVChannelMessageBuilderV2().
@@ -209,13 +209,11 @@ func InitSplitTargetVChannels(ctx context.Context, w WALAccesser, param InitSpli
 			}).
 			BuildMutable()
 		if err != nil {
-			return nil, errors.Wrapf(err, "build create vchannel message for target %s failed", vchannel)
+			return errors.Wrapf(err, "build create vchannel message for target %s failed", vchannel)
 		}
-		result, err := w.RawAppend(ctx, msg, AppendOption{BarrierTimeTick: param.BarrierTimeTick})
-		if err != nil {
-			return nil, errors.Wrapf(err, "create split target vchannel %s failed", vchannel)
+		if _, err := w.RawAppend(ctx, msg, AppendOption{BarrierTimeTick: param.BarrierTimeTick}); err != nil {
+			return errors.Wrapf(err, "create split target vchannel %s failed", vchannel)
 		}
-		startPositions[vchannel] = result.LastConfirmedMessageID.Marshal()
 	}
-	return startPositions, nil
+	return nil
 }
