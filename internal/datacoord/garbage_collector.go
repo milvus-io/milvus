@@ -819,9 +819,9 @@ func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 		return
 	}
 	start := time.Now()
-	logger := log.With(zap.String("gcName", "recycleDataViews"), zap.Time("startAt", start))
-	logger.Info("start recycleDataViews")
-	defer func() { logger.Info("recycleDataViews done", zap.Duration("timeCost", time.Since(start))) }()
+	logger := mlog.With(mlog.String("gcName", "recycleDataViews"), mlog.Time("startAt", start))
+	logger.Info(ctx, "start recycleDataViews")
+	defer func() { logger.Info(ctx, "recycleDataViews done", mlog.Duration("timeCost", time.Since(start))) }()
 
 	for _, collection := range gc.meta.GetCollections() {
 		if ctx.Err() != nil {
@@ -831,7 +831,7 @@ func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 
 		collectionID := collection.ID
 		if gc.collectionGCPaused(collectionID) {
-			logger.Info("skip DataView GC since collection is paused", zap.Int64("collectionID", collectionID))
+			logger.Info(ctx, "skip DataView GC since collection is paused", mlog.FieldCollectionID(collectionID))
 			continue
 		}
 
@@ -840,7 +840,7 @@ func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 			protected = gc.option.dataViewRefs.ReferencedDataVersions(collectionID)
 		}
 		if err := gc.meta.dataViewManager.GarbageCollect(ctx, collectionID, protected, 1); err != nil {
-			logger.Warn("DataView GC failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+			logger.Warn(ctx, "DataView GC failed", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		}
 	}
 }
@@ -963,20 +963,20 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		if gc.meta.dataViewManager != nil {
 			referenced, err := gc.meta.dataViewManager.IsSegmentReferenced(ctx, segment.GetCollectionID(), segmentID)
 			if err != nil {
-				log.Warn("skip GC segment since DataView reference check failed",
-					zap.Int64("collectionID", segment.GetCollectionID()),
-					zap.Int64("partitionID", segment.GetPartitionID()),
-					zap.String("channel", segInsertChannel),
-					zap.Int64("segmentID", segmentID),
-					zap.Error(err))
+				log.Warn(ctx, "skip GC segment since DataView reference check failed",
+					mlog.FieldCollectionID(segment.GetCollectionID()),
+					mlog.FieldPartitionID(segment.GetPartitionID()),
+					mlog.String("channel", segInsertChannel),
+					mlog.FieldSegmentID(segmentID),
+					mlog.Err(err))
 				continue
 			}
 			if referenced {
-				log.Info("skip GC segment since it is referenced by retained DataView",
-					zap.Int64("collectionID", segment.GetCollectionID()),
-					zap.Int64("partitionID", segment.GetPartitionID()),
-					zap.String("channel", segInsertChannel),
-					zap.Int64("segmentID", segmentID))
+				log.Info(ctx, "skip GC segment since it is referenced by retained DataView",
+					mlog.FieldCollectionID(segment.GetCollectionID()),
+					mlog.FieldPartitionID(segment.GetPartitionID()),
+					mlog.String("channel", segInsertChannel),
+					mlog.FieldSegmentID(segmentID))
 				continue
 			}
 		}

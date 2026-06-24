@@ -762,7 +762,7 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	// clean collection info cache when meet drop collection info
 	if h.s.dataViewManager != nil {
 		if _, err := h.s.dataViewManager.OnDropCollection(h.s.ctx, collectionID); err != nil {
-			log.Warn("DropCollection DataView failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+			mlog.Warn(h.s.ctx, "DropCollection DataView failed", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 			return err
 		}
 	}
