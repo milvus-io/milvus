@@ -185,17 +185,39 @@ KnowhereStatusString(knowhere::Status status) {
     return knowhere::Status2String(status);
 }
 
-// Map a knowhere Status to a segcore ErrorCode using the status category
-// exposed by knowhere (see knowhere/expected.h). Input errors are the caller's
-// fault and must stay non-retriable; everything else (engine/internal/transient,
-// including knowhere_inner_error which is the catch-all for swallowed C++
-// exceptions) is a retriable system error. Callers that need a more specific
-// code (e.g. invalid_index_error -> Unsupported, build path -> IndexBuildError)
-// should special-case before falling back to this helper.
+// Map a knowhere Status to a segcore ErrorCode, preserving the three policy
+// buckets the Go classifier (pkg/util/merr/segcore.go) cares about:
+//   - input  : the caller's fault, must stay non-retriable. knowhere flags
+//              these via IsInputError (invalid_args / invalid_metric_type /
+//              out_of_range_in_json / ...). -> InvalidParameter (2042).
+//   - transient: a retry / reroute to another replica can succeed. knowhere
+//              lumps these into its inner_error category, so we pick them out
+//              explicitly by status value:
+//                malloc_error    -> MemAllocateFailed (OOM, genuinely retriable)
+//                disk_file_error -> FileReadFailed (DiskANN file load/read from
+//                                   object storage failed; dominant case is
+//                                   transient, another replica may have it).
+//   - permanent system: everything else, including knowhere_inner_error (the
+//              catch-all for swallowed C++ exceptions). -> KnowhereError (2099).
+//              Note: Status::timeout is intentionally NOT special-cased -- it is
+//              Cardinal-only, raised by BuildAsync's Interrupt on cancel-or-build
+//              -timeout (not a search timeout), and conflates cancellation with
+//              timeout, so it falls here rather than to a retriable code.
+// Callers that need a more specific code (e.g. invalid_index_error -> Unsupported,
+// build path -> IndexBuildError) should special-case before falling back here.
 inline ErrorCode
 KnowhereStatusToErrorCode(knowhere::Status status) {
-    return knowhere::IsInputError(status) ? ErrorCode::InvalidParameter
-                                          : ErrorCode::KnowhereError;
+    if (knowhere::IsInputError(status)) {
+        return ErrorCode::InvalidParameter;
+    }
+    switch (status) {
+        case knowhere::Status::malloc_error:
+            return ErrorCode::MemAllocateFailed;
+        case knowhere::Status::disk_file_error:
+            return ErrorCode::FileReadFailed;
+        default:
+            return ErrorCode::KnowhereError;
+    }
 }
 
 inline std::vector<IndexType>
