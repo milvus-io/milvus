@@ -146,8 +146,8 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 	for _, segID := range at.SegmentIDs {
 		info := segmentsMap[segID]
 		if info == nil {
-			log.Ctx(ctx).Warn("analyze stats task is processing, but segment is nil, delete the task",
-				zap.Int64("taskID", at.GetTaskID()), zap.Int64("segmentID", segID))
+			mlog.Warn(context.TODO(), "analyze stats task is processing, but segment is nil, delete the task",
+				mlog.Int64("taskID", at.GetTaskID()), mlog.Int64("segmentID", segID))
 			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
 			return merr.WrapErrServiceInternalMsg("segmentInfo with ID: %d is nil", segID)
 		}
@@ -168,8 +168,8 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 	collInfo := at.meta.GetCollection(segments[0].GetCollectionID())
 	if collInfo == nil {
 		err := fmt.Errorf("analyze task get collection %d info failed", segments[0].GetCollectionID())
-		log.Ctx(ctx).Warn("analyze task get collection info failed", zap.Int64("collectionID",
-			segments[0].GetCollectionID()), zap.Error(err))
+		mlog.Warn(context.TODO(), "analyze task get collection info failed", mlog.Int64("collectionID",
+			segments[0].GetCollectionID()), mlog.Err(err))
 		at.SetState(indexpb.JobState_JobStateInit, err.Error())
 		return err
 	}
@@ -186,8 +186,8 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 	dim, err := storage.GetDimFromParams(field.TypeParams)
 	if err != nil {
 		err := fmt.Errorf("analyze task get collection %d info failed", segments[0].GetCollectionID())
-		log.Ctx(ctx).Warn("analyze task get dim failed", zap.Int64("collectionID",
-			segments[0].GetCollectionID()), zap.Error(err))
+		mlog.Warn(context.TODO(), "analyze task get dim failed", mlog.Int64("collectionID",
+			segments[0].GetCollectionID()), mlog.Err(err))
 		at.SetState(indexpb.JobState_JobStateInit, err.Error())
 		return err
 	}
@@ -202,7 +202,7 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 	numClusters *= maxCentroids
 	if segmentSize < 1.0 || numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
 		err := fmt.Errorf("the number of clusters %d is lower than minimum %d", numClusters, Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64())
-		log.Ctx(ctx).Info("data size is too small, skip analyze task", zap.Float64("raw data size", totalSegmentsRawDataSize), zap.Int64("num clusters", numClusters), zap.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
+		mlog.Info(context.TODO(), "data size is too small, skip analyze task", mlog.Float64("raw data size", totalSegmentsRawDataSize), mlog.Int64("num clusters", numClusters), mlog.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
 		at.SetState(indexpb.JobState_JobStateFinished, "")
 		return err
 	}
@@ -226,7 +226,6 @@ func (at *analyzeTask) updateAnalyzeInfo(req *workerpb.AnalyzeRequest) error {
 }
 
 func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-	ctx := context.TODO()
 	log := mlog.With(mlog.FieldTaskID(at.GetTaskID()))
 
 	// Check if task still exists in meta
@@ -338,9 +337,9 @@ func (at *analyzeTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 	)
 
 	if err := cluster.DropAnalyze(at.NodeID, at.GetTaskID()); err != nil {
-		log.Warn("failed to drop analyze task", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to drop analyze task", mlog.Err(err))
 		if !strings.Contains(err.Error(), "node not found") && !strings.Contains(err.Error(), "task not found") {
-			log.Warn("failed to drop analyze task on worker", zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to drop analyze task on worker", mlog.Err(err))
 			return err
 		}
 	}
