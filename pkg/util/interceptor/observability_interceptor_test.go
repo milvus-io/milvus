@@ -179,9 +179,23 @@ func TestNewDynamicLogConfig_RegexMethodFilter(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func resetDynamicLogConfigSingletonsForTest() {
+	serverDynamicLogConfigOnce = sync.Once{}
+	serverDynamicLogConfig = nil
+	clientDynamicLogConfigOnce = sync.Once{}
+	clientDynamicLogConfig = nil
+}
+
+func TestObservabilityLogConfigSingletons(t *testing.T) {
+	resetDynamicLogConfigSingletonsForTest()
+	defer resetDynamicLogConfigSingletonsForTest()
+
+	assert.Same(t, getServerDynamicLogConfig(), getServerDynamicLogConfig())
+	assert.Same(t, getClientDynamicLogConfig(), getClientDynamicLogConfig())
+	assert.NotSame(t, getServerDynamicLogConfig(), getClientDynamicLogConfig())
+}
+
 func TestObservabilityInterceptors_ConstructorsDoNotPanic(t *testing.T) {
-	// GRPCServerMetric / GRPCClientMetric must be initialized before the
-	// constructors run.
 	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
 
 	t.Run("server unary", func(t *testing.T) {
