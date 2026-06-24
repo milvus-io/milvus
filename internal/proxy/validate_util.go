@@ -1,17 +1,17 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"reflect"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
@@ -61,8 +61,8 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 	_, ok := (*fieldData).GetScalars().Data.(*schemapb.ScalarField_GeometryWktData)
 	if ok {
 		// Already in WKT format, no conversion needed
-		log.Debug("Geometry field data already contains WKT data, skipping conversion",
-			zap.String("fieldName", (*fieldData).GetFieldName()))
+		mlog.Debug(context.TODO(), "Geometry field data already contains WKT data, skipping conversion",
+			mlog.String("fieldName", (*fieldData).GetFieldName()))
 		return nil
 	}
 	wkbArray := (*fieldData).GetScalars().GetGeometryData().GetData()
@@ -74,7 +74,7 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 		}
 		wktStr, err := common.ConvertWKBToWKT(data)
 		if err != nil {
-			log.Error("translate the geomery  into its wkt failed")
+			mlog.Error(context.TODO(), "translate the geomery  into its wkt failed")
 			return err
 		}
 		wktArray[i] = wktStr
@@ -437,9 +437,9 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			if n != numRows {
-				log.Warn("the num_rows of field is not equal to passed num_rows", zap.String("fieldName", field.GetFieldName()),
-					zap.Int64("fieldNumRows", int64(n)), zap.Int64("passedNumRows", int64(numRows)),
-					zap.Bools("ValidData", field.GetValidData()))
+				mlog.Warn(context.TODO(), "the num_rows of field is not equal to passed num_rows", mlog.String("fieldName", field.GetFieldName()),
+					mlog.Int64("fieldNumRows", int64(n)), mlog.Int64("passedNumRows", int64(numRows)),
+					mlog.Bools("ValidData", field.GetValidData()))
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 		}
@@ -717,7 +717,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 
 		case *schemapb.ScalarField_ArrayData:
 			// Todo: support it
-			log.Error("array type not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+			mlog.Error(context.TODO(), "array type not support default value", mlog.String("fieldSchemaName", field.GetFieldName()))
 			return merr.WrapErrParameterInvalid("not set default value", "", "array type not support default value")
 
 		case *schemapb.ScalarField_JsonData:
@@ -739,7 +739,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 			defaultValue := fieldSchema.GetDefaultValue().GetStringData()
 			defaultValueWkbBytes, err := common.ConvertWKTToWKB(defaultValue)
 			if err != nil {
-				log.Warn("invalid default value for geometry field", zap.Error(err))
+				mlog.Warn(context.TODO(), "invalid default value for geometry field", mlog.Err(err))
 				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
 			}
 			sd.GeometryData.Data, err = fillWithDefaultValueImpl(sd.GeometryData.Data, defaultValueWkbBytes, field.GetValidData())
@@ -752,7 +752,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 		}
 
 	case *schemapb.FieldData_Vectors:
-		log.Error("vector not support default value", zap.String("fieldSchemaName", field.GetFieldName()))
+		mlog.Error(context.TODO(), "vector not support default value", mlog.String("fieldSchemaName", field.GetFieldName()))
 		return merr.WrapErrParameterInvalidMsg("vector type not support default value")
 
 	default:
@@ -957,7 +957,7 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 		// fmt.Println(strings.Trim(string(wktdata), "\""))
 		wkbArray[index], err = common.ConvertWKTToWKB(wktdata)
 		if err != nil {
-			log.Warn("insert invalid Geometry data!! Transform to wkb failed, has errors", zap.Error(err))
+			mlog.Warn(context.TODO(), "insert invalid Geometry data!! Transform to wkb failed, has errors", mlog.Err(err))
 			return merr.WrapErrParameterInvalidMsg("invalid Geometry data, transform to wkb failed: %s", err.Error())
 		}
 	}
@@ -1323,7 +1323,7 @@ func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, time
 	// 1. Structural Check: Data must be present and must be a string array
 	scalarField := field.GetScalars()
 	if scalarField == nil || scalarField.GetStringData() == nil {
-		log.Warn("timestamptz field data is not string array", zap.String("fieldName", field.GetFieldName()))
+		mlog.Warn(context.TODO(), "timestamptz field data is not string array", mlog.String("fieldName", field.GetFieldName()))
 		return merr.WrapErrParameterInvalidMsg("timestamptz field data must be a string array")
 	}
 
@@ -1335,7 +1335,7 @@ func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, time
 		// Use the centralized parser (timestamptz.ParseTimeTz) for validation and parsing.
 		t, err := timestamptz.ParseTimeTz(isoStr, timezone)
 		if err != nil {
-			log.Info("cannot parse timestamptz string", zap.String("timestamp_string", isoStr), zap.String("timezone", timezone), zap.Error(err))
+			mlog.Info(context.TODO(), "cannot parse timestamptz string", mlog.String("timestamp_string", isoStr), mlog.String("timezone", timezone), mlog.Err(err))
 			// Use the recommended refined error message structure
 			const invalidMsg = "invalid timezone name; must be a valid IANA Time Zone ID (e.g., 'Asia/Shanghai' or 'UTC')"
 			return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string '%s': %s", isoStr, invalidMsg)

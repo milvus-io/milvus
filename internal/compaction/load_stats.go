@@ -21,10 +21,8 @@ import (
 	"path"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // LoadBM25StatsFromPaths loads BM25 stats from resolved file paths grouped by field ID.
@@ -34,8 +32,8 @@ func LoadBM25StatsFromPaths(ctx context.Context, chunkManager storage.ChunkManag
 	}
 
 	startTs := time.Now()
-	log := log.With(zap.Int64("segmentID", segmentID))
-	log.Info("begin to reload history BM25 stats")
+	log := mlog.With(mlog.FieldSegmentID(segmentID))
+	log.Info(ctx, "begin to reload history BM25 stats")
 
 	fieldList := make([]int64, 0, len(pathsByField))
 	fieldOffset := make([]int, 0, len(pathsByField))
@@ -47,13 +45,13 @@ func LoadBM25StatsFromPaths(ctx context.Context, chunkManager storage.ChunkManag
 	}
 
 	if len(allPaths) == 0 {
-		log.Warn("no BM25 stats to load")
+		log.Warn(ctx, "no BM25 stats to load")
 		return nil, nil
 	}
 
 	values, err := chunkManager.MultiRead(ctx, allPaths)
 	if err != nil {
-		log.Warn("failed to load BM25 stats files", zap.Error(err))
+		log.Warn(ctx, "failed to load BM25 stats files", mlog.Err(err))
 		return nil, err
 	}
 
@@ -74,7 +72,7 @@ func LoadBM25StatsFromPaths(ctx context.Context, chunkManager storage.ChunkManag
 		cnt += fieldOffset[i]
 	}
 
-	log.Info("Successfully load BM25 stats", zap.Any("time", time.Since(startTs)))
+	log.Info(ctx, "Successfully load BM25 stats", mlog.Any("time", time.Since(startTs)))
 	return result, nil
 }
 
@@ -87,8 +85,8 @@ func LoadStatsFromPaths(ctx context.Context, chunkManager storage.ChunkManager, 
 	}
 
 	startTs := time.Now()
-	log := log.With(zap.Int64("segmentID", segmentID))
-	log.Info("begin to load bloom filter from paths", zap.Int("pathCount", len(paths)))
+	log := mlog.With(mlog.FieldSegmentID(segmentID))
+	log.Info(ctx, "begin to load bloom filter from paths", mlog.Int("pathCount", len(paths)))
 
 	// Detect CompoundStatsType
 	logType := storage.DefaultStatsType
@@ -103,7 +101,7 @@ func LoadStatsFromPaths(ctx context.Context, chunkManager storage.ChunkManager, 
 
 	values, err := chunkManager.MultiRead(ctx, paths)
 	if err != nil {
-		log.Warn("failed to load bloom filter files", zap.Error(err))
+		log.Warn(ctx, "failed to load bloom filter files", mlog.Err(err))
 		return nil, err
 	}
 
@@ -119,7 +117,7 @@ func LoadStatsFromPaths(ctx context.Context, chunkManager storage.ChunkManager, 
 		stats, err = storage.DeserializeStats(blobs)
 	}
 	if err != nil {
-		log.Warn("failed to deserialize bloom filter stats", zap.Error(err))
+		log.Warn(ctx, "failed to deserialize bloom filter stats", mlog.Err(err))
 		return nil, err
 	}
 
@@ -135,6 +133,6 @@ func LoadStatsFromPaths(ctx context.Context, chunkManager storage.ChunkManager, 
 		result = append(result, pkStat)
 	}
 
-	log.Info("Successfully load bloom filter from paths", zap.Any("time", time.Since(startTs)), zap.Uint("size", size))
+	log.Info(ctx, "Successfully load bloom filter from paths", mlog.Any("time", time.Since(startTs)), mlog.Uint("size", size))
 	return result, nil
 }

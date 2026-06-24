@@ -21,7 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -107,7 +107,7 @@ func TestProduceSendArm(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 	}
@@ -138,7 +138,7 @@ func TestProduceSendArm(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 	}
@@ -169,7 +169,7 @@ func TestProduceSendArm(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 	}
@@ -216,7 +216,7 @@ func TestProduceServerRecvArm(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 		metrics:          newProducerMetrics(l.Channel()),
@@ -278,7 +278,7 @@ func TestProduceServerRecvArm(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse),
 		appendWG:         sync.WaitGroup{},
 	}
@@ -331,7 +331,7 @@ func TestProduceServerSendLoop_RateLimitMessage(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:             log.With(),
+		logger:             mlog.With(),
 		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse, 10),
 		rateLimitMessageCh: make(chan ratelimit.RateLimitState, 10),
 		appendWG:           sync.WaitGroup{},
@@ -377,7 +377,7 @@ func TestProduceServerSendLoop_RateLimitMessageError(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:             log.With(),
+		logger:             mlog.With(),
 		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse, 10),
 		rateLimitMessageCh: make(chan ratelimit.RateLimitState, 10),
 		appendWG:           sync.WaitGroup{},
@@ -422,7 +422,7 @@ func TestProduceServerSendLoop_WALUnavailable(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 	}
@@ -468,7 +468,7 @@ func TestProduceServerRecvLoop_InvalidMessage(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 		metrics:          newProducerMetrics(l.Channel()),
@@ -527,7 +527,7 @@ func TestProduceServerRecvLoop_UnknownRequestType(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 		metrics:          newProducerMetrics(l.Channel()),
@@ -578,7 +578,7 @@ func TestProduceServerRecvLoop_WALUnavailable(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 		metrics:          newProducerMetrics(l.Channel()),
@@ -633,7 +633,7 @@ func TestProduceServerUpdateRateLimitState(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:             log.With(),
+		logger:             mlog.With(),
 		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse, 10),
 		rateLimitMessageCh: make(chan ratelimit.RateLimitState, 10),
 		appendWG:           sync.WaitGroup{},
@@ -673,7 +673,7 @@ func TestProduceServerUpdateRateLimitState_NonBlocking(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:             log.With(),
+		logger:             mlog.With(),
 		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse, 10),
 		rateLimitMessageCh: rateLimitCh,
 		appendWG:           sync.WaitGroup{},
@@ -734,7 +734,7 @@ func TestProduceServerUpdateRateLimitState_OnlyKeepLatest(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:             log.With(),
+		logger:             mlog.With(),
 		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse, 10),
 		rateLimitMessageCh: rateLimitCh,
 		appendWG:           sync.WaitGroup{},
@@ -788,7 +788,7 @@ func TestProduceServerUpdateRateLimitState_ContextCanceled(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:             log.With(),
+		logger:             mlog.With(),
 		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse, 10),
 		rateLimitMessageCh: rateLimitCh,
 		appendWG:           sync.WaitGroup{},
@@ -841,7 +841,7 @@ func TestProduceServerUpdateRateLimitState_ContextCanceledDuringDrain(t *testing
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:             log.With(),
+		logger:             mlog.With(),
 		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse, 10),
 		rateLimitMessageCh: rateLimitCh,
 		appendWG:           sync.WaitGroup{},
@@ -901,7 +901,7 @@ func TestProduceServerSendProduceResult_ContextCanceled(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse), // unbuffered
 		appendWG:         sync.WaitGroup{},
 		metrics:          newProducerMetrics(l.Channel()),
@@ -972,7 +972,7 @@ func TestProduceServerExecute(t *testing.T) {
 		produceServer: &produceGrpcServerHelper{
 			StreamingNodeHandlerService_ProduceServer: grpcProduceServer,
 		},
-		logger:           log.With(),
+		logger:           mlog.With(),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse, 10),
 		appendWG:         sync.WaitGroup{},
 		metrics:          newProducerMetrics(l.Channel()),

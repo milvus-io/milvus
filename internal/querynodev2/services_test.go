@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -53,7 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -2121,7 +2120,7 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	mockDelegator := delegator.NewMockShardDelegator(suite.T())
 	mockDelegator.EXPECT().LoadSegments(mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-			log.Info("version", zap.Int64("versionInload", req.GetVersion()))
+			mlog.Info(context.TODO(), "version", mlog.Int64("versionInload", req.GetVersion()))
 			versionMatch = req.GetVersion() == segmentVersion
 			return nil
 		})
@@ -2482,10 +2481,12 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	schema.Version = 100
 	req := &querypb.UpdateSchemaRequest{
-		CollectionID: suite.collectionID,
-		Schema:       suite.schema,
-		Version:      uint64(100),
+		CollectionID:    suite.collectionID,
+		Schema:          schema,
+		SchemaBarrierTs: uint64(100),
 	}
 	manager := suite.node.manager.Collection
 	// reset manager to align default teardown logic
@@ -2496,14 +2497,28 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 	suite.node.manager.Collection = mockManager
 
 	suite.Run("normal", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(100)).Return(nil).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
+
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("passes_barrier_to_collection_manager", func() {
+		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+		schema.Version = 2
+		req := &querypb.UpdateSchemaRequest{
+			CollectionID:    suite.collectionID,
+			Schema:          schema,
+			SchemaBarrierTs: uint64(100),
+		}
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(nil).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.NoError(merr.CheckRPCCall(status, err))
 	})
 
 	suite.Run("manager_returns_error", func() {
-		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, schema, uint64(100)).Return(merr.WrapErrServiceInternal("mocked")).Once()
 
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.Error(merr.CheckRPCCall(status, err))

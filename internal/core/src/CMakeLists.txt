@@ -32,7 +32,6 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
-    ${BSONCXX_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
@@ -71,7 +70,7 @@ set(CONAN_TARGETS
     xsimd
     unordered_dense::unordered_dense
     abseil::abseil
-    rapidjson
+    mongo::bson_shared
     simde::simde
     milvus-common::milvus-common
     LibLZMA::LibLZMA
@@ -164,14 +163,9 @@ set(LINK_TARGETS
     tantivy_binding
     knowhere
     milvus-storage
-    bsoncxx
     ${OpenMP_CXX_FLAGS}
     ${CONAN_TARGETS}
     )
-
-if(USE_OPENDAL)
-    set(LINK_TARGETS ${LINK_TARGETS} opendal)
-endif()
 
 if(ENABLE_AZURE_FS)
     set(AZURE_BUILD_DIR ON)

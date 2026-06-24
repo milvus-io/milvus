@@ -143,17 +143,21 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
 
 bool
 SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
-    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-        load_index_info.field_type,
-        load_index_info.element_type,
-        load_index_info.index_engine_version,
-        load_index_info.index_size,
-        load_index_info.index_params,
-        load_index_info.enable_mmap,
-        load_index_info.num_rows,
-        load_index_info.dim);
-
-    return request.has_raw_data;
+    if (load_index_info.load_resource_request.has_value()) {
+        return load_index_info.load_resource_request->has_raw_data;
+    } else {
+        auto request =
+            milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+                load_index_info.field_type,
+                load_index_info.element_type,
+                load_index_info.index_engine_version,
+                load_index_info.index_size,
+                load_index_info.index_params,
+                load_index_info.enable_mmap,
+                load_index_info.num_rows,
+                load_index_info.dim);
+        return request.has_raw_data;
+    }
 }
 
 std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>

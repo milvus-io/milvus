@@ -6,7 +6,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
@@ -19,7 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -75,7 +74,7 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchanne
 	}
 	defer hc.lifetime.Done()
 
-	logger := log.With(zap.String("pchannel", pchannel), zap.String("handler", "replicate checkpoint"))
+	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "replicate checkpoint"))
 	cp, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
 			return nil, status.NewInvalidArgument("replicate checkpoint can only be read for RW channel")
@@ -112,7 +111,7 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 	}
 	defer hc.lifetime.Done()
 
-	logger := log.With(zap.String("pchannel", pchannel), zap.String("handler", "salvage checkpoint"))
+	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "salvage checkpoint"))
 	cps, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
 			return nil, status.NewInvalidArgument("salvage checkpoint can only be read for RW channel")
@@ -158,17 +157,17 @@ func (hc *handlerClientImpl) PrepareReleaseManualFlush(ctx context.Context, coll
 	defer hc.lifetime.Done()
 
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
-	logger := log.With(
-		zap.String("pchannel", pchannel),
-		zap.String("vchannel", vchannel),
-		zap.Int64("collectionID", collectionID),
-		zap.Int64s("releaseSegmentIDs", releaseSegmentIDs),
-		zap.String("handler", "prepare release manual flush"),
+	logger := mlog.With(
+		mlog.String("pchannel", pchannel),
+		mlog.String("vchannel", vchannel),
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int64s("releaseSegmentIDs", releaseSegmentIDs),
+		mlog.String("handler", "prepare release manual flush"),
 	)
 	result, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
-			logger.Info("skip release manual flush prepare because channel is not RW",
-				zap.String("accessMode", assign.Channel.AccessMode.String()))
+			logger.Info(ctx, "skip release manual flush prepare because channel is not RW",
+				mlog.String("accessMode", assign.Channel.AccessMode.String()))
 			return false, nil
 		}
 
@@ -176,8 +175,8 @@ func (hc *handlerClientImpl) PrepareReleaseManualFlush(ctx context.Context, coll
 		if err != nil {
 			if errors.Is(err, registry.ErrNoStreamingNodeDeployed) ||
 				status.AsStreamingError(err).IsWrongStreamingNode() {
-				logger.Info("skip release manual flush prepare because channel is not owned by local streaming node",
-					zap.Error(err))
+				logger.Info(ctx, "skip release manual flush prepare because channel is not owned by local streaming node",
+					mlog.Err(err))
 				return false, nil
 			}
 			return false, err
@@ -215,7 +214,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 	}
 	defer hc.lifetime.Done()
 
-	logger := log.With(zap.String("pchannel", opts.PChannel), zap.String("handler", "producer"))
+	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.String("handler", "producer"))
 	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
 			return nil, status.NewInvalidArgument("producer can only be created for RW channel")
@@ -256,7 +255,7 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 	}
 	defer hc.lifetime.Done()
 
-	logger := log.With(zap.String("pchannel", opts.PChannel), zap.String("vchannel", opts.VChannel), zap.String("handler", "consumer"))
+	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.FieldVChannel(opts.VChannel), mlog.String("handler", "consumer"))
 	// Use a local variable to track DeliverPolicy, so modifications in the closure don't affect the original opts
 	deliverPolicy := opts.DeliverPolicy
 	c, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
@@ -273,7 +272,7 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 			// If the error is WALNameMismatch, change deliver policy to DeliverPolicyAll for next retry
 			if err != nil && status.AsStreamingError(err).IsWALNameMismatch() {
 				deliverPolicy = options.DeliverPolicyAll()
-				logger.Info("change deliver policy to DeliverPolicyAll because of WALNameMismatch", zap.Error(err))
+				logger.Info(ctx, "change deliver policy to DeliverPolicyAll because of WALNameMismatch", mlog.Err(err))
 				return nil, err
 			}
 			if err != nil {
@@ -302,7 +301,7 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 		// If the error is WALNameMismatch, change deliver policy to DeliverPolicyAll for next retry
 		if err != nil && status.AsStreamingError(err).IsWALNameMismatch() {
 			deliverPolicy = options.DeliverPolicyAll()
-			logger.Info("change deliver policy to DeliverPolicyAll because of WALNameMismatch", zap.Error(err))
+			logger.Info(ctx, "change deliver policy to DeliverPolicyAll because of WALNameMismatch", mlog.Err(err))
 			return nil, err
 		}
 
@@ -321,7 +320,7 @@ type handlerCreateFunc func(ctx context.Context, assign *types.PChannelInfoAssig
 
 // createHandlerAfterStreamingNodeReady creates a handler until streaming node ready.
 // If streaming node is not ready, it will block until new assignment term is coming or context timeout.
-func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Context, logger *log.MLogger, pchannel string, create handlerCreateFunc) (any, error) {
+func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Context, logger *mlog.Logger, pchannel string, create handlerCreateFunc) (any, error) {
 	// TODO: backoff should be configurable.
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
@@ -337,39 +336,39 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 			ctx = contextutil.WithPickServerID(ctx, assign.Node.ServerID)
 			createResult, err := create(ctx, assign)
 			if err == nil {
-				logger.Info("create handler success", zap.Any("assignment", assign), zap.Bool("isLocal", registry.IsLocal(createResult)))
+				logger.Info(ctx, "create handler success", mlog.Any("assignment", assign), mlog.Bool("isLocal", registry.IsLocal(createResult)))
 				return createResult, nil
 			}
-			logger.Warn("create handler failed", zap.Any("assignment", assign), zap.Error(err))
+			logger.Warn(ctx, "create handler failed", mlog.Any("assignment", assign), mlog.Err(err))
 
 			// Unrecoverable errors (e.g. replicate violation when the WAL is no longer
 			// a secondary cluster) won't change by retrying the same WAL role. Surface
 			// them immediately so callers get a typed error within RTT instead of
 			// retrying until their context deadline.
 			if status.AsStreamingError(err).IsUnrecoverable() {
-				logger.Warn("create handler failed with unrecoverable error, stop retrying", zap.Error(err))
+				logger.Warn(ctx, "create handler failed with unrecoverable error, stop retrying", mlog.Err(err))
 				return nil, err
 			}
 
 			// Check if the error is permanent failure until new assignment.
 			if isPermanentFailureUntilNewAssignment(err) {
 				reportErr := hc.rebalanceTrigger.ReportAssignmentError(ctx, assign.Channel, err)
-				logger.Info("report assignment error", zap.NamedError("assignmentError", err), zap.Error(reportErr))
+				logger.Info(ctx, "report assignment error", mlog.NamedError("assignmentError", err), mlog.Err(reportErr))
 			}
 		} else {
-			log.Warn("assignment not found")
+			mlog.Warn(ctx, "assignment not found")
 		}
 
 		start := time.Now()
 		nextBackoff := backoff.NextBackOff()
-		logger.Info("wait for next backoff", zap.Duration("nextBackoff", nextBackoff))
+		logger.Info(ctx, "wait for next backoff", mlog.Duration("nextBackoff", nextBackoff))
 		isAssignemtChange, err := hc.waitForNextBackoff(ctx, pchannel, assign, nextBackoff)
 		cost := time.Since(start)
 		if err != nil {
-			logger.Warn("wait for next backoff failed", zap.Error(err), zap.Duration("cost", cost))
+			logger.Warn(ctx, "wait for next backoff failed", mlog.Err(err), mlog.Duration("cost", cost))
 			return nil, err
 		}
-		logger.Info("wait for next backoff done", zap.Bool("isAssignmentChange", isAssignemtChange), zap.Duration("cost", cost))
+		logger.Info(ctx, "wait for next backoff done", mlog.Bool("isAssignmentChange", isAssignemtChange), mlog.Duration("cost", cost))
 	}
 }
 

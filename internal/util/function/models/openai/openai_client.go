@@ -88,7 +88,7 @@ type EmbedddingError struct {
 
 type OpenAIEmbeddingInterface interface {
 	Check() error
-	Embedding(modelName string, texts []string, dim int, user string, timeoutSec int64) (*EmbeddingResponse, error)
+	Embedding(modelName string, texts []string, dim int, user string, timeoutMs int64) (*EmbeddingResponse, error)
 }
 
 type openAIBase struct {
@@ -121,9 +121,9 @@ func (c *openAIBase) genReq(modelName string, texts []string, dim int, user stri
 	return &r
 }
 
-func (c *openAIBase) embedding(url string, headers map[string]string, modelName string, texts []string, dim int, user string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *openAIBase) embedding(url string, headers map[string]string, modelName string, texts []string, dim int, user string, timeoutMs int64) (*EmbeddingResponse, error) {
 	r := c.genReq(modelName, texts, dim, user)
-	res, err := models.PostRequest[EmbeddingResponse](r, url, headers, timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](r, url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
@@ -146,12 +146,12 @@ func NewOpenAIEmbeddingClient(apiKey string, url string) *OpenAIEmbeddingClient 
 	}
 }
 
-func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutMs int64) (*EmbeddingResponse, error) {
 	headers := map[string]string{
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", c.apiKey),
 	}
-	return c.embedding(c.url, headers, modelName, texts, dim, user, timeoutSec)
+	return c.embedding(c.url, headers, modelName, texts, dim, user, timeoutMs)
 }
 
 type AzureOpenAIEmbeddingClient struct {
@@ -169,7 +169,7 @@ func NewAzureOpenAIEmbeddingClient(apiKey string, url string) *AzureOpenAIEmbedd
 	}
 }
 
-func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutMs int64) (*EmbeddingResponse, error) {
 	base, err := url.Parse(c.url)
 	if err != nil {
 		return nil, err
@@ -185,5 +185,5 @@ func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string,
 		"Content-Type": "application/json",
 		"api-key":      c.apiKey,
 	}
-	return c.embedding(url, headers, modelName, texts, dim, user, timeoutSec)
+	return c.embedding(url, headers, modelName, texts, dim, user, timeoutMs)
 }

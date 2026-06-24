@@ -54,7 +54,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -147,7 +147,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		wg.Wait()
 
 		retry.Do(context.Background(), func() error {
-			log.Info("broadcast message", log.FieldMessage(msg))
+			mlog.Info(context.TODO(), "broadcast message", mlog.FieldMessage(msg))
 			return registry.CallMessageAckCallback(context.Background(), msg, results)
 		}, retry.AttemptAlways())
 		return &types.BroadcastAppendResult{}, nil

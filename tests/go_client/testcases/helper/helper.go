@@ -7,12 +7,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
@@ -226,18 +225,18 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 	case FieldOptions:
 		fields = FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, v)
 	case *GenFieldsOption:
-		log.Warn("CreateCollection", zap.String("", "*GenFieldsOption has been deprecated, it is recommended to use FieldOptions"))
+		mlog.Warn(ctx, "CreateCollection", mlog.String("", "*GenFieldsOption has been deprecated, it is recommended to use FieldOptions"))
 		// Convert *GenFieldsOption to FieldOptions for compatibility with GenFieldsForCollection
 		// First generate fields to get field names, then create FieldOptions
 		tempFields := FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, TNewFieldOptions())
 		fieldOpts := TNewFieldOptions()
 		for _, field := range tempFields {
-			log.Info("CreateCollection", zap.String("name", field.Name))
+			mlog.Info(ctx, "CreateCollection", mlog.String("name", field.Name))
 			fieldOpts = fieldOpts.WithFieldOption(field.Name, v)
 		}
 		fields = FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, fieldOpts)
 	default:
-		log.Fatal("CreateCollection: fieldOpts must be either FieldOptions or *GenFieldsOption")
+		mlog.Fatal(ctx, "CreateCollection: fieldOpts must be either FieldOptions or *GenFieldsOption")
 	}
 
 	schemaOpt.Fields = fields
@@ -268,7 +267,7 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 	ip *InsertParams, columnOpts interface{},
 ) (*CollectionPrepare, client.InsertResult) {
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
-		log.Fatal("[InsertData] Nil Schema is not expected")
+		mlog.Fatal(ctx, "[InsertData] Nil Schema is not expected")
 	}
 
 	var columns []column.Column
@@ -279,7 +278,7 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 	case ColumnOptions:
 		columns, dynamicColumns = GenColumnsBasedSchema(ip.Schema, v)
 	case *GenDataOption:
-		log.Warn("InsertData", zap.String("", "*GenDataOption has been deprecated, it is recommended to use ColumnOptions"))
+		mlog.Warn(ctx, "InsertData", mlog.String("", "*GenDataOption has been deprecated, it is recommended to use ColumnOptions"))
 		// Convert *GenDataOption to ColumnOptions for compatibility
 		columnOpts := TNewColumnOptions()
 		for _, fieldName := range GetAllFieldsName(*ip.Schema) {
@@ -287,7 +286,7 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 		}
 		columns, dynamicColumns = GenColumnsBasedSchema(ip.Schema, columnOpts)
 	default:
-		log.Fatal("InsertData: columnOpts must be either ColumnOptions or *GenDataOption")
+		mlog.Fatal(ctx, "InsertData: columnOpts must be either ColumnOptions or *GenDataOption")
 	}
 
 	insertOpt := client.NewColumnBasedInsertOption(ip.Schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...)
@@ -316,7 +315,7 @@ func (chainTask *CollectionPrepare) FlushData(ctx context.Context, t *testing.T,
 
 func (chainTask *CollectionPrepare) CreateIndex(ctx context.Context, t *testing.T, mc *base.MilvusClient, ip *IndexParams) *CollectionPrepare {
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
-		log.Fatal("[CreateIndex] Empty collection name is not expected")
+		mlog.Fatal(ctx, "[CreateIndex] Empty collection name is not expected")
 	}
 	collName := ip.Schema.CollectionName
 	mFieldIndex := ip.FieldIndexMap
@@ -324,14 +323,14 @@ func (chainTask *CollectionPrepare) CreateIndex(ctx context.Context, t *testing.
 	for _, field := range ip.Schema.Fields {
 		if field.DataType >= 100 {
 			if idx, ok := mFieldIndex[field.Name]; ok {
-				log.Info("CreateIndex", zap.String("indexName", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("indexParams", idx.Params()))
+				mlog.Info(ctx, "CreateIndex", mlog.String("indexName", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("indexParams", idx.Params()))
 				createIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, field.Name, idx))
 				common.CheckErr(t, err, true)
 				err = createIndexTask.Await(ctx)
 				common.CheckErr(t, err, true)
 			} else {
 				idx := GetDefaultVectorIndex(field.DataType)
-				log.Info("CreateIndex", zap.String("indexName", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("indexParams", idx.Params()))
+				mlog.Info(ctx, "CreateIndex", mlog.String("indexName", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("indexParams", idx.Params()))
 				createIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, field.Name, idx))
 				common.CheckErr(t, err, true)
 				err = createIndexTask.Await(ctx)
@@ -344,7 +343,7 @@ func (chainTask *CollectionPrepare) CreateIndex(ctx context.Context, t *testing.
 
 func (chainTask *CollectionPrepare) Load(ctx context.Context, t *testing.T, mc *base.MilvusClient, lp *LoadParams) *CollectionPrepare {
 	if lp.CollectionName == "" {
-		log.Fatal("[Load] Empty collection name is not expected")
+		mlog.Fatal(ctx, "[Load] Empty collection name is not expected")
 	}
 	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(lp.CollectionName).WithReplica(lp.Replica).WithLoadFields(lp.LoadFields...).
 		WithSkipLoadDynamicField(lp.SkipLoadDynamicField).WithResourceGroup(lp.ResourceGroups...).WithRefresh(lp.IsRefresh))

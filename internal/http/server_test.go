@@ -31,13 +31,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -70,14 +72,14 @@ func (suite *HTTPServerTestSuite) TestGetHTTPAddr() {
 }
 
 func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
-	log.SetLevel(zap.DebugLevel)
-	suite.Equal(zap.DebugLevel, log.GetLevel())
+	mlog.SetLevel(mlog.DebugLevel)
+	suite.Equal(mlog.DebugLevel, mlog.GetLevel())
 
 	// replace global logger, log change will not be affected.
-	conf := &log.Config{Level: "info", File: log.FileLogConfig{}, DisableTimestamp: true}
-	logger, p, _ := log.InitLogger(conf)
-	log.ReplaceGlobals(logger, p)
-	suite.Equal(zap.InfoLevel, log.GetLevel())
+	conf := &mlog.Config{Level: "info", File: mlog.FileLogConfig{}, DisableTimestamp: true}
+	logger, p, _ := mlog.InitLogger(conf)
+	mlog.ReplaceGlobals(logger, p)
+	suite.Equal(mlog.InfoLevel, mlog.GetLevel())
 
 	// change log level through http
 	payload, err := json.Marshal(map[string]any{"level": "error"})
@@ -96,7 +98,7 @@ func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
 	body, err := io.ReadAll(resp.Body)
 	suite.Require().NoError(err)
 	suite.Equal("{\"level\":\"error\"}\n", string(body))
-	suite.Equal(zap.ErrorLevel, log.GetLevel())
+	suite.Equal(mlog.ErrorLevel, mlog.GetLevel())
 }
 
 func (suite *HTTPServerTestSuite) TestHealthzHandler() {
@@ -235,15 +237,73 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		suite.True(strings.Contains(string(body), "only available on Proxy nodes"))
 	})
 
-	suite.Run("enabled_on_proxy_requires_root_auth", func() {
-		// When enabled on Proxy node (proxy registered and passwordVerifyFunc set),
-		// it should require root user authentication
+	suite.Run("root_only_requires_root_when_authorization_disabled", func() {
 		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", ExprAuthModeRootOnly)
+		paramtable.Get().Save("common.security.authorizationEnabled", "false")
 		expr.Register("proxy", "mock_proxy")
 
-		// Register a mock password verify function
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("admin", "admin123")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "only root user can access"))
+
+		req, _ = http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("root", "Milvus")
+		resp, err = client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusOK, resp.StatusCode)
+		body, _ = io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "hello"))
+	})
+
+	suite.Run("rbac_mode_requires_authorization_enabled", func() {
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", ExprAuthModeRBAC)
+		paramtable.Get().Save("common.security.authorizationEnabled", "false")
+		expr.Register("proxy", "mock_proxy")
+
 		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
 			return username == "root" && password == "Milvus"
+		})
+
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("root", "Milvus")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "authorization must be enabled"))
+	})
+
+	suite.Run("enabled_on_proxy_with_rbac_root_bypass", func() {
+		// When authorization is enabled but RootShouldBindRole is false,
+		// root user should be able to access via bypass
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", ExprAuthModeRBAC)
+		paramtable.Get().Save("common.security.authorizationEnabled", "true")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+
+		// Register mock functions
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
 		})
 
 		// Without auth header - should fail with 401
@@ -257,16 +317,16 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		body, _ := io.ReadAll(resp.Body)
 		suite.True(strings.Contains(string(body), "authentication required"))
 
-		// With non-root user - should fail with 401
+		// With non-root user (without Expr privilege) - should fail with 401 (invalid credentials)
 		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
 		req, _ = http.NewRequest(http.MethodGet, url, nil)
-		req.SetBasicAuth("admin", "password")
+		req.SetBasicAuth("admin", "wrong_password")
 		resp, err = client.Do(req)
 		suite.Nil(err)
 		defer resp.Body.Close()
 		suite.Equal(http.StatusUnauthorized, resp.StatusCode)
 		body, _ = io.ReadAll(resp.Body)
-		suite.True(strings.Contains(string(body), "only root user"))
+		suite.True(strings.Contains(string(body), "invalid credentials"))
 
 		// With root user but wrong password - should fail with 401
 		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
@@ -277,9 +337,9 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		defer resp.Body.Close()
 		suite.Equal(http.StatusUnauthorized, resp.StatusCode)
 		body, _ = io.ReadAll(resp.Body)
-		suite.True(strings.Contains(string(body), "invalid root password"))
+		suite.True(strings.Contains(string(body), "invalid credentials"))
 
-		// With correct root credentials - should succeed
+		// With correct root credentials - should succeed via root bypass
 		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
 		req, _ = http.NewRequest(http.MethodGet, url, nil)
 		req.SetBasicAuth("root", "Milvus")
@@ -291,8 +351,152 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		suite.True(strings.Contains(string(body), "hello"))
 	})
 
+	suite.Run("invalid_auth_mode_returns_valid_json", func() {
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", "rbca")
+		paramtable.Get().Save("common.security.authorizationEnabled", "true")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("root", "Milvus")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
+
+		body, _ := io.ReadAll(resp.Body)
+		var parsed map[string]string
+		err = json.Unmarshal(body, &parsed)
+		suite.NoError(err)
+		suite.Contains(parsed["msg"], "rbca")
+	})
+
+	suite.Run("exec_error_returns_valid_json", func() {
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", ExprAuthModeRootOnly)
+		paramtable.Get().Save("common.security.authorizationEnabled", "false")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=1%2B"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("root", "Milvus")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusInternalServerError, resp.StatusCode)
+
+		body, _ := io.ReadAll(resp.Body)
+		var parsed map[string]string
+		err = json.Unmarshal(body, &parsed)
+		suite.NoError(err)
+		suite.Contains(parsed["msg"], "failed to execute expression")
+		suite.Contains(parsed["msg"], "unexpected token EOF")
+	})
+
+	suite.Run("enabled_on_proxy_non_root_user_without_privilege", func() {
+		// Non-root user with valid credentials but without PrivilegeExpr privilege
+		// should get 403 Forbidden
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", ExprAuthModeRBAC)
+		paramtable.Get().Save("common.security.authorizationEnabled", "true")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+		privilege.InitPrivilegeGroups()
+
+		// Register mock password verify function
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		// Register mock getUserRoleFunc - admin has role1 but no PrivilegeExpr
+		RegisterGetUserRoleFunc(func(username string) ([]string, error) {
+			if username == "admin" {
+				return []string{"role1"}, nil
+			}
+			return []string{}, nil
+		})
+
+		loadPrivilegePoliciesForTest(suite.T(), []string{
+			funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeLoad.String(), "default"),
+		})
+		defer privilege.CleanPrivilegeCache()
+
+		// Non-root user with valid credentials but without PrivilegeExpr - should fail with 403
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("admin", "admin123")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "permission denied"))
+	})
+
+	suite.Run("enabled_on_proxy_non_root_user_with_privilege", func() {
+		// Non-root user with valid credentials and PrivilegeExpr privilege
+		// should get 200 OK
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.exprAuthMode", ExprAuthModeRBAC)
+		paramtable.Get().Save("common.security.authorizationEnabled", "true")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+		privilege.InitPrivilegeGroups()
+
+		// Register mock password verify function
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		// Register mock getUserRoleFunc - admin has role1 with PrivilegeExpr
+		RegisterGetUserRoleFunc(func(username string) ([]string, error) {
+			if username == "admin" {
+				return []string{"role1"}, nil
+			}
+			return []string{}, nil
+		})
+
+		loadPrivilegePoliciesForTest(suite.T(), []string{
+			funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", util.PrivilegeExpr, "default"),
+		})
+		defer privilege.CleanPrivilegeCache()
+
+		// Non-root user with valid credentials and PrivilegeExpr - should succeed with 200
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("admin", "admin123")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusOK, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "hello"))
+	})
+
 	// Reset config
 	paramtable.Get().Save("common.security.exprEnabled", "false")
+	paramtable.Get().Save("common.security.exprAuthMode", ExprAuthModeRootOnly)
+	paramtable.Get().Save("common.security.authorizationEnabled", "false")
+	paramtable.Get().Save("common.security.rootShouldBindRole", "false")
 }
 
 func TestHTTPServerSuite(t *testing.T) {

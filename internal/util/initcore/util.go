@@ -27,13 +27,13 @@ package initcore
 import "C"
 
 import (
+	"context"
 	"strings"
 	"unsafe"
 
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -91,8 +91,22 @@ func UpdateExprResCacheEnable(enable bool) {
 	C.SetExprResCacheEnable(C.bool(enable))
 }
 
-func UpdateExprResCacheCapacityBytes(capacity int) {
-	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
+func UpdateExprResCacheConfig() {
+	params := paramtable.Get()
+	diskPath := pathutil.GetPath(pathutil.ExprCachePath, paramtable.GetNodeID())
+	cMode := C.CString(params.QueryNodeCfg.ExprResCacheMode.GetValue())
+	cDiskPath := C.CString(diskPath)
+	defer C.free(unsafe.Pointer(cMode))
+	defer C.free(unsafe.Pointer(cDiskPath))
+
+	C.SetExprResCacheConfig(cMode, cDiskPath,
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMemMaxBytes.GetAsInt64()),
+		C.bool(params.QueryNodeCfg.ExprResCacheMemCompressionEnabled.GetAsBool()),
+		C.int32_t(params.QueryNodeCfg.ExprResCacheAdmissionThreshold.GetAsInt32()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMinEvalDurationUs.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheDiskMaxBytes.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheDiskMaxFileSizeBytes.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMinEvalDurationUs.GetAsInt64()))
 }
 
 func UpdateArrowIOThreadPoolCapacity(threads int) {
@@ -132,10 +146,10 @@ func RegisterArrowIOThreadPoolWatchers(pt *paramtable.ComponentParam, source str
 			}
 			newThreads := ResolveArrowIOThreadPoolCapacity()
 			UpdateArrowIOThreadPoolCapacity(newThreads)
-			log.Info("arrow io thread pool capacity updated",
-				zap.String("source", source),
-				zap.String("trigger", key),
-				zap.Int("threads", newThreads))
+			mlog.Info(context.TODO(), "arrow io thread pool capacity updated",
+				mlog.String("source", source),
+				mlog.String("trigger", key),
+				mlog.Int("threads", newThreads))
 		}
 	}
 	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
@@ -156,14 +170,14 @@ func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source str
 			return
 		}
 		if err := InitArrowReaderConfig(pt); err != nil {
-			log.Warn("failed to reconfigure arrow reader params",
-				zap.String("source", source), zap.Error(err))
+			mlog.Warn(context.TODO(), "failed to reconfigure arrow reader params",
+				mlog.String("source", source), mlog.Err(err))
 			return
 		}
-		log.Info("arrow reader params reconfigured",
-			zap.String("source", source),
-			zap.Int64("holeSizeLimitBytes", pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
-			zap.Int64("rangeSizeLimitBytes", pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
+		mlog.Info(context.TODO(), "arrow reader params reconfigured",
+			mlog.String("source", source),
+			mlog.Int64("holeSizeLimitBytes", pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
+			mlog.Int64("rangeSizeLimitBytes", pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
 	}
 	pt.Watch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key,
 		config.NewHandler(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, handler))

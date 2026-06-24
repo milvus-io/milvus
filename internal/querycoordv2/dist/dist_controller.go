@@ -20,12 +20,10 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 type Controller interface {
@@ -51,7 +49,7 @@ func (dc *ControllerImpl) StartDistInstance(ctx context.Context, nodeID int64) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	if _, ok := dc.handlers[nodeID]; ok {
-		log.Info("node has started", zap.Int64("nodeID", nodeID))
+		mlog.Info(ctx, "node has started", mlog.FieldNodeID(nodeID))
 		return
 	}
 	h := newDistHandler(ctx, nodeID, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr, dc.notifyFunc)
@@ -78,9 +76,9 @@ func (dc *ControllerImpl) SyncAll(ctx context.Context) {
 			defer wg.Done()
 			resp, err := handler.getDistribution(ctx)
 			if err != nil {
-				log.Warn("SyncAll come across err when getting data distribution", zap.Error(err))
+				mlog.Warn(ctx, "SyncAll come across err when getting data distribution", mlog.Err(err))
 			} else {
-				handler.handleDistResp(ctx, resp, true)
+				handler.handleDistResp(ctx, resp)
 			}
 		}(h)
 	}

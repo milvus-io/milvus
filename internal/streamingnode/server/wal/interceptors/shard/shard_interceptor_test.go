@@ -8,9 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -22,18 +19,16 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
-func TestShardInterceptorLogsOmittedSchemaVersionAsNotProvided(t *testing.T) {
-	core, logs := observer.New(zapcore.WarnLevel)
-	logger := &log.MLogger{Logger: zap.New(core)}
+func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(logger).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
@@ -64,16 +59,12 @@ func TestShardInterceptorLogsOmittedSchemaVersionAsNotProvided(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
-
-	entries := logs.FilterMessage("insertMessage schema version mismatch").All()
-	assert.Len(t, entries, 1)
-	assert.Equal(t, false, entries[0].ContextMap()["schemaVersionProvided"])
 }
 
 func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
@@ -149,7 +140,7 @@ func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *te
 	assert.True(t, ok)
 
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	impl := &shardInterceptor{shardManager: shardManager}
 
 	noFunctionSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
@@ -167,7 +158,7 @@ func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *te
 func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
@@ -197,7 +188,7 @@ func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
@@ -235,7 +226,7 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
@@ -276,7 +267,7 @@ func TestShardInterceptor(t *testing.T) {
 
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})

@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"sort"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -30,8 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -52,7 +50,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
 		err = merr.Wrap(err, "failed to get primary keys")
-		log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
+		mlog.Error(context.TODO(), err.Error(), mlog.Int64("collectionID", iNode.collectionID), mlog.String("channel", iNode.channel))
 		panic(err)
 	}
 	iData, ok := insertDatas[msg.SegmentID]
@@ -69,32 +67,32 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 	} else {
 		err := typeutil.MergeFieldData(iData.InsertRecord.FieldsData, insertRecord.FieldsData)
 		if err != nil {
-			log.Error("failed to merge field data", zap.String("channel", iNode.channel), zap.Error(err))
+			mlog.Error(context.TODO(), "failed to merge field data", mlog.String("channel", iNode.channel), mlog.Err(err))
 			panic(err)
 		}
 		iData.InsertRecord.NumRows += insertRecord.NumRows
 	}
 
 	if err := iNode.appendBM25Stats(iData, msg, collection.Schema()); err != nil {
-		log.Error("failed to append BM25 stats from insert message", zap.String("channel", iNode.channel), zap.Error(err))
+		mlog.Error(context.TODO(), "failed to append BM25 stats from insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 		panic(err)
 	}
 
 	pks, err := segments.GetPrimaryKeys(msg, collection.Schema())
 	if err != nil {
-		log.Error("failed to get primary keys from insert message", zap.Error(err))
+		mlog.Error(context.TODO(), "failed to get primary keys from insert message", mlog.Err(err))
 		panic(err)
 	}
 
 	iData.PrimaryKeys = append(iData.PrimaryKeys, pks...)
 	iData.RowIDs = append(iData.RowIDs, msg.RowIDs...)
 	iData.Timestamps = append(iData.Timestamps, msg.Timestamps...)
-	log.Ctx(context.TODO()).Debug("pipeline fetch insert msg",
-		zap.Int64("collectionID", iNode.collectionID),
-		zap.Int64("segmentID", msg.SegmentID),
-		zap.Int("insertRowNum", len(pks)),
-		zap.Uint64("timestampMin", msg.BeginTimestamp),
-		zap.Uint64("timestampMax", msg.EndTimestamp))
+	mlog.Debug(context.TODO(), "pipeline fetch insert msg",
+		mlog.Int64("collectionID", iNode.collectionID),
+		mlog.Int64("segmentID", msg.SegmentID),
+		mlog.Int("insertRowNum", len(pks)),
+		mlog.Uint64("timestampMin", msg.BeginTimestamp),
+		mlog.Uint64("timestampMax", msg.EndTimestamp))
 }
 
 // fillEmbeddingData is only used to handle old insert messages that were not embedded before WAL append.
@@ -161,13 +159,13 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 
 		collection := iNode.manager.Collection.Get(iNode.collectionID)
 		if collection == nil {
-			log.Error("insertNode with collection not exist", zap.Int64("collection", iNode.collectionID))
+			mlog.Error(context.TODO(), "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
 			panic("insertNode with collection not exist")
 		}
 		schema := collection.Schema()
 		functionOutputFieldIDs, err := iNode.getEmbeddingOutputFieldIDs(schema)
 		if err != nil {
-			log.Error("failed to get embedding output fields", zap.String("channel", iNode.channel), zap.Error(err))
+			mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
 			panic(err)
 		}
 
@@ -175,7 +173,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		for _, msg := range nodeMsg.insertMsgs {
 			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
 				if err := iNode.fillEmbeddingData(schema, msg); err != nil {
-					log.Error("failed to fill embedding data for insert message", zap.String("channel", iNode.channel), zap.Error(err))
+					mlog.Error(context.TODO(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 					panic(err)
 				}
 			}
@@ -187,10 +185,10 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).Inc()
 
 	return &deleteNodeMsg{
-		deleteMsgs:    nodeMsg.deleteMsgs,
-		timeRange:     nodeMsg.timeRange,
-		schema:        nodeMsg.schema,
-		schemaVersion: nodeMsg.schemaVersion,
+		deleteMsgs:      nodeMsg.deleteMsgs,
+		timeRange:       nodeMsg.timeRange,
+		schema:          nodeMsg.schema,
+		schemaBarrierTs: nodeMsg.schemaBarrierTs,
 	}
 }
 

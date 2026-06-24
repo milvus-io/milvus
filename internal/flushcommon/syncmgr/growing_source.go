@@ -25,7 +25,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -35,8 +34,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -276,6 +275,9 @@ func (r *GrowingSourceRegistry) Resolve(channel string, segmentID int64, targetO
 		}
 		source, state := provider.GetGrowingFlushSource(segmentID, targetOffset, endPos)
 		if source == nil {
+			if state == GrowingSourcePending {
+				hasPending = true
+			}
 			continue
 		}
 		switch state {
@@ -507,11 +509,11 @@ func (t *GrowingSourceSyncTask) ReleaseSource() {
 
 func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	t.tr = timerecord.NewTimeRecorder("growingSourceSyncTask")
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", t.collectionID),
-		zap.Int64("partitionID", t.partitionID),
-		zap.Int64("segmentID", t.segmentID),
-		zap.String("channel", t.channelName),
+	log := mlog.With(
+		mlog.Int64("collectionID", t.collectionID),
+		mlog.Int64("partitionID", t.partitionID),
+		mlog.Int64("segmentID", t.segmentID),
+		mlog.String("channel", t.channelName),
 	)
 	commitSource := false
 	defer func() {
@@ -528,10 +530,10 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	segment, ok := t.metacache.GetSegmentByID(t.segmentID)
 	if !ok {
 		if t.isDrop {
-			log.Info("segment dropped, discard growing source sync task")
+			log.Info(ctx, "segment dropped, discard growing source sync task")
 			return nil
 		}
-		log.Warn("segment not found in metacache")
+		log.Warn(ctx, "segment not found in metacache")
 		return nil
 	}
 	expectedRows := t.targetOffset - segment.FlushedRows()
@@ -595,18 +597,18 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 	if t.isDrop {
 		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segmentID))
-		log.Info("dropped growing source segment removed")
+		log.Info(ctx, "dropped growing source segment removed")
 	}
 	commitSource = true
 
 	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingDataSourceLabel, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
 	metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingDataSourceLabel).Add(float64(t.batchRows))
 	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
-	log.Info("growing source sync task done",
-		zap.Int64("targetOffset", t.targetOffset),
-		zap.Int64("batchRows", t.batchRows),
-		zap.String("manifestPath", t.manifestPath),
-		zap.Duration("timeTaken", t.tr.ElapseSpan()))
+	log.Info(ctx, "growing source sync task done",
+		mlog.Int64("targetOffset", t.targetOffset),
+		mlog.Int64("batchRows", t.batchRows),
+		mlog.String("manifestPath", t.manifestPath),
+		mlog.Duration("timeTaken", t.tr.ElapseSpan()))
 	return nil
 }
 

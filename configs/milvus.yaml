@@ -328,6 +328,7 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
+  maxRoleDescriptionLength: 1024 # Maximum role description length in bytes.
   nameValidation:
     allowedChars: $ # Additional characters allowed in names beyond underscores, letters and numbers. To allow hyphens in names, add '-' here.
   roleNameValidation:
@@ -337,6 +338,7 @@ proxy:
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
+  maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
   maxIndexParamsSize: 102400 # maximum total size of index params in bytes for create index requests
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
@@ -440,6 +442,7 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
+  dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
@@ -594,7 +597,15 @@ queryNode:
   delegatorPostLoadConcurrencyFactor: 1 # delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor
   exprCache:
     enabled: false # enable expression result cache
-    capacityBytes: 268435456 # max capacity in bytes for expression result cache
+    mode: disk # cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)
+    minEvalDurationUs: 1000 # global latency filter: skip expressions that eval faster than this (0=disabled)
+    admissionThreshold: 2 # frequency admission for memory and disk mode: cache after N+ occurrences (1=no gating)
+    memory:
+      maxBytes: 268435456 # max memory for expression cache in memory mode (default 256MB)
+      compressionEnabled: true # enable Roaring/Raw adaptive compression in memory mode
+    disk:
+      maxBytes: 10737418240 # max total disk usage for expression cache in disk mode (default 10GB)
+      maxFileSizeBytes: 268435456 # max file size per sealed segment in disk mode (default 256MB)
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
@@ -990,7 +1001,7 @@ common:
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
     enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
-  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
+  storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
     stv2:
@@ -1039,7 +1050,8 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
-    exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
+    exprEnabled: false # Whether to enable the /expr endpoint for debugging.
+    exprAuthMode: rootOnly # Authentication mode for the /expr endpoint. Valid values: rootOnly, rbac. rootOnly accepts only the root credentials via HTTP Basic Auth. rbac requires common.security.authorizationEnabled=true and grants access to any user holding the Expr privilege.
     internaltlsEnabled: false
     tlsMode: 0
   session:
@@ -1460,6 +1472,8 @@ credential:
 
 # Any configuration related to functions
 function:
+  model:
+    requestTimeout: 30s # Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.
   textEmbedding:
     providers:
       azure_openai:

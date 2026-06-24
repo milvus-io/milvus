@@ -22,12 +22,11 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -94,16 +93,16 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		if label == metrics.FailInputLabel {
 			errType = merr.InputError
 		}
-		logger := log.Ctx(ctx).With(
-			zap.String("method", methodTag),
-			zap.String("error_type", errType.String()),
-			zap.Int32("code", status.GetCode()),
-			zap.String("reason", status.GetReason()),
+		logger := mlog.With(
+			mlog.String("method", methodTag),
+			mlog.String("error_type", errType.String()),
+			mlog.Int32("code", status.GetCode()),
+			mlog.String("reason", status.GetReason()),
 		)
 		if errType == merr.InputError {
-			logger.Info("rpc returned an input error")
+			logger.Info(ctx, "rpc returned an input error")
 		} else {
-			logger.Warn("rpc returned a system error")
+			logger.Warn(ctx, "rpc returned a system error")
 		}
 	}
 

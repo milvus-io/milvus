@@ -9,7 +9,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -26,8 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -613,9 +612,9 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.plan.DynamicFields = t.userDynamicFields
 	}
 
-	log.Ctx(ctx).Debug("translate output fields to field ids",
-		zap.Int64s("OutputFieldsID", t.OutputFieldsId),
-		zap.String("requestType", t.getQueryLabel()))
+	mlog.Debug(ctx, "translate output fields to field ids",
+		mlog.Int64s("OutputFieldsID", t.OutputFieldsId),
+		mlog.String("requestType", t.getQueryLabel()))
 	return nil
 }
 
@@ -640,15 +639,15 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 	} else {
 		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
-			log.Ctx(t.ctx).Warn("query task get collectionID failed, can't skip alloc timestamp",
-				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
+			mlog.Warn(t.ctx, "query task get collectionID failed, can't skip alloc timestamp",
+				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
 
 		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
 		if err2 != nil {
-			log.Ctx(t.ctx).Warn("query task get collection info failed, can't skip alloc timestamp",
-				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
+			mlog.Warn(t.ctx, "query task get collection info failed, can't skip alloc timestamp",
+				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
 		consistencyLevel = collectionInfo.consistencyLevel
@@ -663,38 +662,38 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
 
-	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName),
-		zap.Strings("partitionNames", t.request.GetPartitionNames()),
-		zap.String("requestType", t.getQueryLabel()))
+	log := mlog.With(mlog.String("collectionName", collectionName),
+		mlog.Strings("partitionNames", t.request.GetPartitionNames()),
+		mlog.String("requestType", t.getQueryLabel()))
 
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Warn("Invalid collectionName.")
+		log.Warn(ctx, "Invalid collectionName.")
 		return err
 	}
-	log.Debug("Validate collectionName.")
+	log.Debug(ctx, "Validate collectionName.")
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Warn(ctx, "Failed to get collection id.", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 	t.CollectionID = collID
 
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err != nil {
-		log.Warn("Failed to get collection info.", zap.String("collectionName", collectionName),
-			zap.Int64("collectionID", t.CollectionID), zap.Error(err))
+		log.Warn(ctx, "Failed to get collection info.", mlog.String("collectionName", collectionName),
+			mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 		// The name was already resolved above (GetCollectionID succeeded), so a
 		// not-found here means the collection was concurrently dropped between the
 		// two lookups — a TOCTOU race, not the caller's input error. Leave it as the
 		// default SystemError; do not stamp InputError.
 		return err
 	}
-	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
+	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
 	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
+		log.Warn(ctx, "get collection schema failed", mlog.Err(err))
 		return err
 	}
 	t.schema = schema
@@ -708,7 +707,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID), zap.Error(err))
+		log.Warn(ctx, "check partition key mode failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
@@ -721,11 +720,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	for _, tag := range t.request.PartitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
-			log.Warn("invalid partition name", zap.String("partition name", tag))
+			log.Warn(ctx, "invalid partition name", mlog.String("partition name", tag))
 			return err
 		}
 	}
-	log.Debug("Validate partition names.")
+	log.Debug(ctx, "Validate partition names.")
 
 	// fetch search_growing from query param
 	if t.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
@@ -776,10 +775,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.queryParams.timezone != "" {
 		// validated in queryParams, no need to validate again
 		t.resolvedTimezoneStr = t.queryParams.timezone
-		log.Debug("determine timezone from request", zap.String("user defined timezone", t.resolvedTimezoneStr))
+		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", t.resolvedTimezoneStr))
 	} else {
 		t.resolvedTimezoneStr = getColTimezone(colInfo)
-		log.Debug("determine timezone from collection", zap.Any("collection timezone", t.resolvedTimezoneStr))
+		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", t.resolvedTimezoneStr))
 	}
 
 	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
@@ -841,9 +840,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
-		log.Warn("Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID),
-			zap.Error(err2))
+		log.Warn(ctx, "Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
+			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID),
+			mlog.Err(err2))
 		return err2
 	}
 
@@ -901,20 +900,20 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.DbID = 0 // TODO
-	log.Debug("Query PreExecute done.",
-		zap.Uint64("guarantee_ts", guaranteeTs),
-		zap.Uint64("mvcc_ts", t.GetMvccTimestamp()),
-		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
-		zap.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
+	log.Debug(ctx, "Query PreExecute done.",
+		mlog.Uint64("guarantee_ts", guaranteeTs),
+		mlog.Uint64("mvcc_ts", t.GetMvccTimestamp()),
+		mlog.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
+		mlog.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
 	return nil
 }
 
 func (t *queryTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute query %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
-	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
-		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
-		zap.String("requestType", t.getQueryLabel()))
+	log := mlog.With(mlog.Int64("collection", t.GetCollectionID()),
+		mlog.Int64s("partitionIDs", t.GetPartitionIDs()),
+		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
 	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
@@ -926,11 +925,11 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		PreferredNodes: t.preferredNodes,
 	})
 	if err != nil {
-		log.Warn("fail to execute query", zap.Error(err))
+		log.Warn(ctx, "fail to execute query", mlog.Err(err))
 		return errors.Wrap(err, "failed to query")
 	}
 
-	log.Debug("Query Execute done.")
+	log.Debug(ctx, "Query Execute done.")
 	return nil
 }
 
@@ -940,9 +939,9 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		tr.CtxElapse(ctx, "done")
 	}()
 
-	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
-		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
-		zap.String("requestType", t.getQueryLabel()))
+	log := mlog.With(mlog.Int64("collection", t.GetCollectionID()),
+		mlog.Int64s("partitionIDs", t.GetPartitionIDs()),
+		mlog.String("requestType", t.getQueryLabel()))
 
 	var err error
 
@@ -952,17 +951,17 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	t.storageCost = segcore.StorageCost{}
 	select {
 	case <-t.TraceCtx().Done():
-		log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
+		log.Warn(ctx, "proxy", mlog.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
 		return merr.Wrapf(t.TraceCtx().Err(), "Query wait to finish timeout, msgID=%d", t.ID())
 	default:
-		log.Debug("all queries are finished or canceled")
+		log.Debug(ctx, "all queries are finished or canceled")
 		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
 			toReduceResults = append(toReduceResults, res)
 			t.allQueryCnt += res.GetAllRetrieveCount()
 			t.storageCost.ScannedRemoteBytes += res.GetScannedRemoteBytes()
 			t.storageCost.ScannedTotalBytes += res.GetScannedTotalBytes()
 			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
-			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()))
+			log.Debug(ctx, "proxy receives one query result", mlog.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true
 		})
 	}
@@ -975,14 +974,14 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	if len(t.queryParams.orderByFields) > 0 {
 		orderByFields, err = orderby.ParseOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
 		if err != nil {
-			log.Warn("fail to parse order by fields", zap.Error(err))
+			log.Warn(ctx, "fail to parse order by fields", mlog.Err(err))
 			return err
 		}
 	}
 
 	primaryFieldSchema, err := t.schema.GetPkField()
 	if err != nil {
-		log.Warn("failed to get primary field schema", zap.Error(err))
+		log.Warn(ctx, "failed to get primary field schema", mlog.Err(err))
 		return err
 	}
 
@@ -998,12 +997,12 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		filterSystemFields(t.GetOutputFieldsId()),
 	)
 	if err != nil {
-		log.Warn("fail to create query pipeline", zap.Error(err))
+		log.Warn(ctx, "fail to create query pipeline", mlog.Err(err))
 		return err
 	}
 	t.result, err = pipeline.Execute(ctx, toReduceResults)
 	if err != nil {
-		log.Warn("fail to reduce query result", zap.Error(err))
+		log.Warn(ctx, "fail to reduce query result", mlog.Err(err))
 		return err
 	}
 
@@ -1013,7 +1012,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	for i, fieldData := range t.result.FieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
 			if err := validateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
-				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				log.Warn(ctx, "fail to validate geometry field search result", mlog.Err(err))
 				return err
 			}
 		}
@@ -1033,22 +1032,22 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	}
 	if !t.reQuery {
 		if len(t.queryParams.extractTimeFields) > 0 {
-			log.Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
+			log.Debug(ctx, "extracting fields for timestamptz", mlog.Strings("fields", t.queryParams.extractTimeFields))
 			err = extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields)
 			if err != nil {
-				log.Warn("fail to extract fields for timestamptz", zap.Error(err))
+				log.Warn(ctx, "fail to extract fields for timestamptz", mlog.Err(err))
 				return err
 			}
 		} else {
-			log.Debug("translate timestamp to ISO string", zap.String("user define timezone", t.queryParams.timezone))
+			log.Debug(ctx, "translate timestamp to ISO string", mlog.String("user define timezone", t.queryParams.timezone))
 			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr)
 			if err != nil {
-				log.Warn("fail to translate timestamp", zap.Error(err))
+				log.Warn(ctx, "fail to translate timestamp", mlog.Err(err))
 				return err
 			}
 		}
 	}
-	log.Debug("Query PostExecute done")
+	log.Debug(ctx, "Query PostExecute done")
 	return nil
 }
 
@@ -1080,28 +1079,28 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		Scope:       querypb.DataScope_All,
 	}
 
-	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
-		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
-		zap.Int64("nodeID", nodeID),
-		zap.String("channel", channel))
+	log := mlog.With(mlog.Int64("collection", t.GetCollectionID()),
+		mlog.Int64s("partitionIDs", t.GetPartitionIDs()),
+		mlog.Int64("nodeID", nodeID),
+		mlog.String("channel", channel))
 
 	result, err := qn.Query(ctx, req)
 	if err != nil {
-		log.Warn("QueryNode query return error", zap.Error(err))
+		log.Warn(ctx, "QueryNode query return error", mlog.Err(err))
 		t.shardclientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Warn("QueryNode is not shardLeader")
+		log.Warn(ctx, "QueryNode is not shardLeader")
 		t.shardclientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("QueryNode query result error", zap.Any("errorCode", result.GetStatus().GetErrorCode()), zap.String("reason", result.GetStatus().GetReason()))
+		log.Warn(ctx, "QueryNode query result error", mlog.Any("errorCode", result.GetStatus().GetErrorCode()), mlog.String("reason", result.GetStatus().GetReason()))
 		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to Query on QueryNode %d", nodeID)
 	}
 
-	log.Debug("get query result")
+	log.Debug(ctx, "get query result")
 	t.resultBuf.Insert(result)
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 	return nil
@@ -1124,7 +1123,7 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 }
 
 func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams) (*milvuspb.QueryResults, error) {
-	log.Ctx(ctx).Debug("reduceInternalRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
+	mlog.Debug(ctx, "reduceInternalRetrieveResults", mlog.Int("len(retrieveResults)", len(retrieveResults)))
 	var (
 		ret     = &milvuspb.QueryResults{}
 		loopEnd int

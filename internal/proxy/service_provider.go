@@ -8,14 +8,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -142,15 +141,15 @@ func cloneStructArrayFields(fields []*schemapb.StructArrayFieldSchema) []*schema
 func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	request *milvuspb.DescribeCollectionRequest,
 ) (resp *milvuspb.DescribeCollectionResponse, err error) {
-	log := log.Ctx(ctx).With(
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.GetDbName()),
-		zap.String("collection", request.GetCollectionName()),
-		zap.Int64("collectionID", request.GetCollectionID()),
-		zap.Uint64("timestamp", request.GetTimeStamp()),
+	log := mlog.With(
+		mlog.String("role", typeutil.ProxyRole),
+		mlog.String("db", request.GetDbName()),
+		mlog.String("collection", request.GetCollectionName()),
+		mlog.FieldCollectionID(request.GetCollectionID()),
+		mlog.Uint64("timestamp", request.GetTimeStamp()),
 	)
 
-	log.Debug("DescribeCollection received")
+	log.Debug(ctx, "DescribeCollection received")
 
 	resp = &milvuspb.DescribeCollectionResponse{
 		Status:         merr.Success(),
@@ -219,13 +218,13 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 
 	// Restore struct field names from internal format (structName[fieldName]) to original format
 	if err := restoreStructFieldNames(resp.Schema); err != nil {
-		log.Error("failed to restore struct field names", zap.Error(err))
+		log.Error(ctx, "failed to restore struct field names", mlog.Err(err))
 		return nil, err
 	}
 
 	err = timestamptz.RewriteTimestampTzDefaultValueToString(resp.Schema)
 	if err != nil {
-		log.Info("failed to rewrite timestamp value", zap.Error(err))
+		log.Info(ctx, "failed to rewrite timestamp value", mlog.Err(err))
 		return nil, err
 	}
 
@@ -241,9 +240,9 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	resp.ShardsNum = c.shardsNum
 	resp.Aliases = c.aliases
 	resp.Properties = c.properties
-	log.Debug("DescribeCollection done",
-		zap.Int64("collectionID", resp.GetCollectionID()),
-		zap.Any("schema", resp.GetSchema()),
+	log.Debug(ctx, "DescribeCollection done",
+		mlog.FieldCollectionID(resp.GetCollectionID()),
+		mlog.Any("schema", resp.GetSchema()),
 	)
 	return resp, nil
 }
@@ -262,32 +261,32 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 		mixCoord:                  node.mixCoord,
 	}
 
-	log := log.Ctx(ctx).With(
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
+	log := mlog.With(
+		mlog.String("role", typeutil.ProxyRole),
+		mlog.String("db", request.DbName),
+		mlog.String("collection", request.CollectionName))
 
 	method := "DescribeCollection"
-	log.Debug("DescribeCollection received")
+	log.Debug(ctx, "DescribeCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
-		log.Warn("DescribeCollection failed to enqueue",
-			zap.Error(err))
+		log.Warn(ctx, "DescribeCollection failed to enqueue",
+			mlog.Err(err))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 		return nil, err
 	}
 
-	log.Debug("DescribeCollection enqueued",
-		zap.Uint64("BeginTS", dct.BeginTs()),
-		zap.Uint64("EndTS", dct.EndTs()))
+	log.Debug(ctx, "DescribeCollection enqueued",
+		mlog.Uint64("BeginTS", dct.BeginTs()),
+		mlog.Uint64("EndTS", dct.EndTs()))
 
 	if err := dct.WaitToFinish(); err != nil {
-		log.Warn("DescribeCollection failed to WaitToFinish",
-			zap.Error(err),
-			zap.Uint64("BeginTS", dct.BeginTs()),
-			zap.Uint64("EndTS", dct.EndTs()))
+		log.Warn(ctx, "DescribeCollection failed to WaitToFinish",
+			mlog.Err(err),
+			mlog.Uint64("BeginTS", dct.BeginTs()),
+			mlog.Uint64("EndTS", dct.EndTs()))
 
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			failMetricLabel(err), request.GetDbName(), request.GetCollectionName()).Inc()
@@ -295,9 +294,9 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 		return nil, err
 	}
 
-	log.Debug("DescribeCollection done",
-		zap.Uint64("BeginTS", dct.BeginTs()),
-		zap.Uint64("EndTS", dct.EndTs()),
+	log.Debug(ctx, "DescribeCollection done",
+		mlog.Uint64("BeginTS", dct.BeginTs()),
+		mlog.Uint64("EndTS", dct.EndTs()),
 	)
 
 	return dct.result, nil

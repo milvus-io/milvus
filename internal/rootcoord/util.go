@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -191,9 +190,9 @@ func getRateLimitConfig(properties map[string]string, configKey string, configVa
 	if ok {
 		rate, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			log.Warn("invalid configuration for collection dml rate",
-				zap.String("config item", configKey),
-				zap.String("config value", v))
+			mlog.Warn(context.TODO(), "invalid configuration for collection dml rate",
+				mlog.String("config item", configKey),
+				mlog.String("config value", v))
 			return configValue
 		}
 
@@ -434,9 +433,9 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				defVal := fieldSchema.GetDefaultValue().GetBytesData()
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(defVal, &jsonData); err != nil {
-					log.Info("invalid default json value, milvus only support json map",
-						zap.ByteString("data", defVal),
-						zap.Error(err),
+					mlog.Info(context.TODO(), "invalid default json value, milvus only support json map",
+						mlog.ByteString("data", defVal),
+						mlog.Err(err),
 					)
 					return merr.WrapErrParameterInvalidErr(err, "invalid default json value, milvus only supports json map")
 				}
@@ -604,9 +603,9 @@ func maxAssignedFieldIDFromSchema(schema *schemapb.CollectionSchema) int64 {
 		}
 		v, err := strconv.ParseInt(kv.GetValue(), 10, 64)
 		if err != nil {
-			log.Warn("failed to parse max_field_id property, metadata may be corrupted",
-				zap.String("value", kv.GetValue()),
-				zap.Error(err),
+			mlog.Warn(context.TODO(), "failed to parse max_field_id property, metadata may be corrupted",
+				mlog.String("value", kv.GetValue()),
+				mlog.Err(err),
 			)
 		} else if v > maxFieldID {
 			maxFieldID = v
@@ -625,9 +624,9 @@ func updateMaxFieldIDProperty(properties []*commonpb.KeyValuePair, maxFieldID in
 		if kv.GetKey() == common.MaxFieldIDKey {
 			v, err := strconv.ParseInt(kv.GetValue(), 10, 64)
 			if err != nil {
-				log.Warn("failed to parse max_field_id property, metadata may be corrupted",
-					zap.String("value", kv.GetValue()),
-					zap.Error(err),
+				mlog.Warn(context.TODO(), "failed to parse max_field_id property, metadata may be corrupted",
+					mlog.String("value", kv.GetValue()),
+					mlog.Err(err),
 				)
 			} else if v > maxFieldID {
 				maxFieldID = v

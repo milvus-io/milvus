@@ -19,14 +19,15 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -70,13 +71,13 @@ func (policy *bumpSchemaVersionPolicy) staleFlushedSegments(collectionID int64, 
 			return false
 		}
 		if segment.GetStorageVersion() < storage.StorageV3 || segment.GetManifestPath() == "" {
-			log.RatedWarn(300, "skip schema bump compaction for stale segment without V3 manifest storage",
-				zap.Int64("segmentID", segment.GetID()),
-				zap.Int64("collectionID", collectionID),
-				zap.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
-				zap.Int32("collectionSchemaVersion", collectionSchemaVersion),
-				zap.Int64("storageVersion", segment.GetStorageVersion()),
-				zap.Bool("hasManifest", segment.GetManifestPath() != ""))
+			mlog.RatedWarn(policy.meta.ctx, rate.Limit(300), "skip schema bump compaction for stale segment without V3 manifest storage",
+				mlog.FieldSegmentID(segment.GetID()),
+				mlog.FieldCollectionID(collectionID),
+				mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
+				mlog.Int32("collectionSchemaVersion", collectionSchemaVersion),
+				mlog.Int64("storageVersion", segment.GetStorageVersion()),
+				mlog.Bool("hasManifest", segment.GetManifestPath() != ""))
 			return false
 		}
 		return true
@@ -92,8 +93,8 @@ func (policy *bumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 			continue
 		}
 		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
-			log.Ctx(ctx).Info("skip schema bump compaction for collection due to snapshot compaction block",
-				zap.Int64("collectionID", collection.ID))
+			mlog.Info(ctx, "skip schema bump compaction for collection due to snapshot compaction block",
+				mlog.FieldCollectionID(collection.ID))
 			continue
 		}
 		collectionID := collection.ID
@@ -109,32 +110,32 @@ func (policy *bumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 				segmentID := segment.GetID()
 				segmentViews := GetViewsByInfo(segment)
 				if len(segmentViews) == 0 {
-					log.Ctx(ctx).Warn("GetViewsByInfo returned empty views, skip segment",
-						zap.Int64("segmentID", segmentID))
+					mlog.Warn(ctx, "GetViewsByInfo returned empty views, skip segment",
+						mlog.FieldSegmentID(segmentID))
 					continue
 				}
 				if len(segmentViews) != 1 {
-					log.Ctx(ctx).Warn("GetViewsByInfo returned unexpected view count, using first view only",
-						zap.Int64("segmentID", segmentID),
-						zap.Int("viewCount", len(segmentViews)))
+					mlog.Warn(ctx, "GetViewsByInfo returned unexpected view count, using first view only",
+						mlog.FieldSegmentID(segmentID),
+						mlog.Int("viewCount", len(segmentViews)))
 				}
 
 				if collectionTriggerID == 0 {
 					id, err := policy.allocator.AllocID(ctx)
 					if err != nil {
-						log.Ctx(ctx).Warn("Failed to allocate triggerID for schema version bump, skip remaining segments in current collection",
-							zap.Int64("collectionID", collectionID),
-							zap.Error(err))
+						mlog.Warn(ctx, "Failed to allocate triggerID for schema version bump, skip remaining segments in current collection",
+							mlog.FieldCollectionID(collectionID),
+							mlog.Err(err))
 						break partSegmentsLoop
 					}
 					collectionTriggerID = id
 				}
 
-				log.Ctx(ctx).Info("Found segment needing schema version bump",
-					zap.Int64("segmentID", segmentID),
-					zap.Int64("collectionID", collectionID),
-					zap.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
-					zap.Int32("collectionSchemaVersion", collectionSchemaVersion))
+				mlog.Info(ctx, "Found segment needing schema version bump",
+					mlog.FieldSegmentID(segmentID),
+					mlog.FieldCollectionID(collectionID),
+					mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
+					mlog.Int32("collectionSchemaVersion", collectionSchemaVersion))
 				views = append(views, &BumpSchemaVersionView{
 					label:     segmentViews[0].label,
 					segments:  segmentViews,
@@ -168,6 +169,17 @@ func (v *BumpSchemaVersionView) GetGroupLabel() *CompactionGroupLabel {
 
 func (v *BumpSchemaVersionView) GetSegmentsView() []*SegmentView {
 	return v.segments
+}
+
+func (v *BumpSchemaVersionView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return sumSegmentSize(v.segments)
+}
+
+func (v *BumpSchemaVersionView) GetCollectionTTL() time.Duration {
+	return 0
 }
 
 func (v *BumpSchemaVersionView) Append(segments ...*SegmentView) {

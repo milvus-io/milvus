@@ -4,11 +4,11 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -26,11 +26,11 @@ func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel 
 	}
 	go func() {
 		if err := <-errCh; err != nil {
-			impl.shardManager.Logger().Warn("failed to allocate function runners",
-				zap.Int64("collectionID", collectionID),
-				zap.String("vchannel", vchannel),
-				zap.Int32("schemaVersion", schemaVersion),
-				zap.Error(err))
+			impl.shardManager.Logger().Warn(context.TODO(), "failed to allocate function runners",
+				mlog.Int64("collectionID", collectionID),
+				mlog.String("vchannel", vchannel),
+				mlog.Int32("schemaVersion", schemaVersion),
+				mlog.Err(err))
 		}
 	}()
 }
@@ -50,11 +50,11 @@ func (impl *shardInterceptor) updateFunctionRunners(collectionID int64, vchannel
 	}
 	go func() {
 		if err := <-errCh; err != nil {
-			impl.shardManager.Logger().Warn("failed to update function runners",
-				zap.Int64("collectionID", collectionID),
-				zap.String("vchannel", vchannel),
-				zap.Int32("schemaVersion", schemaVersion),
-				zap.Error(err))
+			impl.shardManager.Logger().Warn(context.TODO(), "failed to update function runners",
+				mlog.Int64("collectionID", collectionID),
+				mlog.String("vchannel", vchannel),
+				mlog.Int32("schemaVersion", schemaVersion),
+				mlog.Err(err))
 		}
 	}()
 }

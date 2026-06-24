@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
 func TestGetReplicateConfigurationPrivilege(t *testing.T) {
@@ -36,4 +37,12 @@ func TestGetReplicateConfigurationPrivilege(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "PrivilegeGetReplicateConfiguration should be in ClusterReadOnlyPrivileges")
+}
+
+func TestExprPrivilegeDefinition(t *testing.T) {
+	assert.Equal(t, "Expr", MetaStore2API(PrivilegeExpr))
+	assert.Equal(t, "Expr", PrivilegeNameForAPI(PrivilegeExpr))
+	assert.Equal(t, PrivilegeExpr, PrivilegeNameForMetastore("Expr"))
+	assert.True(t, IsPrivilegeNameDefined("Expr"))
+	assert.Equal(t, milvuspb.PrivilegeLevel_Cluster.String(), GetPrivilegeLevel("Expr"))
 }

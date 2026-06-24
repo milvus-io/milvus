@@ -24,13 +24,12 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -160,10 +159,10 @@ func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName, cal
 }
 
 func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, database, collectionName string, collectionID int64) (*shardLeaders, error) {
-	log := log.Ctx(ctx).With(
-		zap.String("db", database),
-		zap.String("collectionName", collectionName),
-		zap.Int64("collectionID", collectionID))
+	log := mlog.With(
+		mlog.String("db", database),
+		mlog.FieldCollectionName(collectionName),
+		mlog.FieldCollectionID(collectionID))
 
 	method := "updateShardLocationCache"
 	tr := timerecord.NewTimeRecorder(method)
@@ -180,16 +179,16 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	}
 	resp, err := m.mixCoord.GetShardLeaders(ctx, req)
 	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
-		log.Error("failed to get shard locations",
-			zap.Int64("collectionID", collectionID),
-			zap.Error(err))
+		log.Error(ctx, "failed to get shard locations",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Err(err))
 		return nil, err
 	}
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
 	// convert shards map to string for logging
-	if log.Level() == zap.DebugLevel {
+	if mlog.LevelEnabled(mlog.DebugLevel) {
 		shardStr := make([]string, 0, len(shards))
 		for channel, nodes := range shards {
 			nodeStrs := make([]string, 0, len(nodes))
@@ -198,7 +197,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 			}
 			shardStr = append(shardStr, fmt.Sprintf("%s:[%s]", channel, strings.Join(nodeStrs, ", ")))
 		}
-		log.Debug("update shard leader cache", zap.String("newShardLeaders", strings.Join(shardStr, ", ")))
+		log.Debug(ctx, "update shard leader cache", mlog.String("newShardLeaders", strings.Join(shardStr, ", ")))
 	}
 
 	newShardLeaders := &shardLeaders{
@@ -259,7 +258,7 @@ func (m *shardClientMgrImpl) RemoveDatabase(database string) {
 
 // DeprecateShardCache clear the shard leader cache of a collection
 func (m *shardClientMgrImpl) DeprecateShardCache(database, collectionName string) {
-	log.Info("deprecate shard cache for collection", zap.String("collectionName", collectionName))
+	mlog.Info(context.TODO(), "deprecate shard cache for collection", mlog.FieldCollectionName(collectionName))
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
 	dbInfo, ok := m.collLeader[database]
@@ -273,7 +272,7 @@ func (m *shardClientMgrImpl) DeprecateShardCache(database, collectionName string
 
 // InvalidateShardLeaderCache called when Shard leader balance happened
 func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
-	log.Info("Invalidate shard cache for collections", zap.Int64s("collectionIDs", collections))
+	mlog.Info(context.TODO(), "Invalidate shard cache for collections", mlog.Int64s("collectionIDs", collections))
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
 	collectionSet := typeutil.NewUniqueSet(collections...)
@@ -312,7 +311,7 @@ func (c *shardClientMgrImpl) PurgeClient() {
 						closed := value.Close(false)
 						if closed {
 							c.clients.Remove(key)
-							log.Info("remove idle node client", zap.Int64("nodeID", key))
+							mlog.Info(context.TODO(), "remove idle node client", mlog.FieldNodeID(key))
 						}
 					}
 				}

@@ -18,9 +18,11 @@
 
 #include <iostream>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "common/resource_c.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "index/Index.h"
@@ -61,6 +63,7 @@ struct LoadIndexInfo {
     int64_t dim;
     std::string
         warmup_policy;  // "disable", "sync", or "async"; empty means use global config
+    std::optional<LoadResourceRequest> load_resource_request;
 
     // Default constructor
     LoadIndexInfo() = default;
@@ -95,7 +98,8 @@ struct LoadIndexInfo {
           index_size(other.index_size),
           num_rows(other.num_rows),
           dim(other.dim),
-          warmup_policy(other.warmup_policy) {
+          warmup_policy(other.warmup_policy),
+          load_resource_request(other.load_resource_request) {
     }
 
     // Copy assignment operator
@@ -125,6 +129,7 @@ struct LoadIndexInfo {
             num_rows = other.num_rows;
             dim = other.dim;
             warmup_policy = other.warmup_policy;
+            load_resource_request = other.load_resource_request;
         }
         return *this;
     }

@@ -4,20 +4,19 @@ package balance
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"math/rand"
 	"sort"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -523,18 +522,18 @@ type MultiTargetBalancer struct {
 // It first attempts to balance channels if AutoBalanceChannel is enabled, then balances segments
 // using multiple optimization strategies in sequence.
 func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
-	log := log.With(
-		zap.Int64("collection", replica.GetCollectionID()),
-		zap.Int64("replica id", replica.GetID()),
-		zap.String("replica group", replica.GetResourceGroup()),
+	log := mlog.With(
+		mlog.Int64("collection", replica.GetCollectionID()),
+		mlog.Int64("replica id", replica.GetID()),
+		mlog.String("replica group", replica.GetResourceGroup()),
 	)
 	br := NewBalanceReport()
 	defer func() {
 		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
-			log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
-				RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+			log.
+				RatedDebug(ctx, rate.Limit(60), "no plan generated, balance report", mlog.Stringers("records", br.detailRecords))
 		} else {
-			log.Info("balance plan generated", zap.Stringers("report details", br.records))
+			log.Info(ctx, "balance plan generated", mlog.Stringers("report details", br.records))
 		}
 	}()
 
@@ -544,7 +543,7 @@ func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.
 	if len(channelPlans) == 0 {
 		segmentPlans = b.balanceSegments(ctx, br, replica)
 	}
-	return
+	return segmentPlans, channelPlans
 }
 
 // balanceChannels generates channel balance plans for a replica.

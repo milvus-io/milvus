@@ -11,7 +11,7 @@ from base.testbase import TestBase
 from faker import Faker
 from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, utility
 from sklearn import preprocessing
-from utils.constant import MAX_SUM_OFFSET_AND_LIMIT, default_nb
+from utils.constant import MAX_SUM_OFFSET_AND_LIMIT, CaseLabel, default_nb
 from utils.util_log import test_log as logger
 from utils.utils import (
     analyze_documents,
@@ -34,7 +34,7 @@ patch_faker_text(fake_en, en_vocabularies_distribution)
 patch_faker_text(fake_zh, zh_vocabularies_distribution)
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestInsertVector(TestBase):
     @pytest.mark.parametrize("insert_round", [3])
     @pytest.mark.parametrize("nb", [3000])
@@ -927,7 +927,7 @@ class TestInsertVector(TestBase):
         assert rsp["data"][0]["json"] is None
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestInsertVectorNegative(TestBase):
     def test_insert_vector_with_invalid_collection_name(self):
         """
@@ -1158,7 +1158,7 @@ class TestInsertVectorNegative(TestBase):
         assert rsp["data"]["insertCount"] == 10
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestUpsertVector(TestBase):
     @pytest.mark.parametrize("insert_round", [2])
     @pytest.mark.parametrize("nb", [3000])
@@ -1423,7 +1423,7 @@ class TestUpsertVector(TestBase):
             assert data["book_describe"] is None
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestUpsertVectorNegative(TestBase):
     def test_upsert_vector_with_invalid_collection_name(self):
         """
@@ -1553,7 +1553,7 @@ class TestSearchAggregationVector(TestBase):
         assert "aggTopks" in rsp, rsp
         assert "data" in rsp, rsp
 
-    @pytest.mark.L0
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_aggregation_minimal_parameters(self):
         name, _ = self._create_search_aggregation_collection()
 
@@ -1578,7 +1578,7 @@ class TestSearchAggregationVector(TestBase):
             assert buckets[0]["metrics"] == {}
             assert buckets[0]["hits"] == []
 
-    @pytest.mark.L0
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_aggregation(self):
         name = gen_collection_name()
         payload = {
@@ -1743,7 +1743,7 @@ class TestSearchAggregationVector(TestBase):
         assert rsp["code"] != 0
         assert "searchAggregation is not supported for hybrid search" in rsp["message"]
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_composite_key_metrics_order(self):
         name, data = self._create_search_aggregation_collection()
 
@@ -1790,7 +1790,7 @@ class TestSearchAggregationVector(TestBase):
                 assert hit["brand"] == brand
                 assert hit["color"] == color
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_two_level_nested_with_filter(self):
         name, data = self._create_search_aggregation_collection()
         filtered = [row for row in data if row["in_stock"]]
@@ -1876,7 +1876,7 @@ class TestSearchAggregationVector(TestBase):
             ),
         ],
     )
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_reject_invalid_parameters(self, search_aggregation, message):
         name, _ = self._create_search_aggregation_collection()
 
@@ -1892,7 +1892,7 @@ class TestSearchAggregationVector(TestBase):
         assert rsp["code"] != 0
         assert message in rsp["message"]
 
-    @pytest.mark.L1
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "search_aggregation,message",
         [
@@ -1906,7 +1906,7 @@ class TestSearchAggregationVector(TestBase):
             ),
             (
                 {"fields": ["brand"], "size": 1, "order": [{"key": "_count", "direction": "up"}]},
-                "up",
+                "asc or desc",
             ),
         ],
     )
@@ -1926,7 +1926,7 @@ class TestSearchAggregationVector(TestBase):
         assert message in rsp["message"]
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestSearchVector(TestBase):
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True])
@@ -3285,7 +3285,7 @@ class TestSearchVector(TestBase):
         assert len(rsp["data"]) == 100 * nq
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestSearchVectorNegative(TestBase):
     @pytest.mark.parametrize("metric_type", ["L2"])
     def test_search_vector_without_required_data_param(self, metric_type):
@@ -3345,7 +3345,7 @@ class TestSearchVectorNegative(TestBase):
             "offset": 0,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 1100
+        assert rsp["code"] == 1100
 
     @pytest.mark.parametrize("offset", [-1, 100_001])
     def test_search_vector_with_invalid_offset(self, offset):
@@ -3370,7 +3370,7 @@ class TestSearchVectorNegative(TestBase):
             "offset": offset,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 1100
+        assert rsp["code"] == 1100
 
     def test_search_vector_with_invalid_collection_name(self):
         """
@@ -3397,7 +3397,7 @@ class TestSearchVectorNegative(TestBase):
         assert "can't find collection" in rsp["message"]
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestAdvancedSearchVector(TestBase):
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True])
@@ -3508,7 +3508,7 @@ class TestAdvancedSearchVector(TestBase):
         assert rsp["topks"][0] == 10
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestHybridSearchVector(TestBase):
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True])
@@ -4271,8 +4271,8 @@ class TestHybridSearchVector(TestBase):
         rsp = self.vector_client.vector_hybrid_search(payload)
         # When offset + limit exceeds max allowed
         if large_offset + limit > MAX_SUM_OFFSET_AND_LIMIT:
-            assert rsp['code'] == 1100
-            assert "exceeds" in rsp['message'] or "invalid" in rsp['message'].lower()
+            assert rsp["code"] == 1100
+            assert "exceeds" in rsp["message"] or "invalid" in rsp["message"].lower()
         # When offset is larger than the available results
         elif large_offset >= nb:
             # Should return empty results or handle gracefully
@@ -4286,7 +4286,7 @@ class TestHybridSearchVector(TestBase):
             assert len(rsp["data"]) == expected_count
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestQueryVector(TestBase):
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True])
@@ -5064,7 +5064,7 @@ class TestQueryVector(TestBase):
         assert len(rsp["data"]) == 50
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestQueryVectorNegative(TestBase):
     def test_query_with_wrong_filter_expr(self):
         name = gen_collection_name()
@@ -5086,7 +5086,7 @@ class TestQueryVectorNegative(TestBase):
         assert "failed to create query plan" in rsp["message"]
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestGetVector(TestBase):
     def test_get_vector_with_simple_payload(self):
         """
@@ -5124,7 +5124,7 @@ class TestGetVector(TestBase):
         for item in res:
             assert item["id"] == ids[0]
 
-    @pytest.mark.L0
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("id_field_type", ["list", "one"])
     @pytest.mark.parametrize("include_invalid_id", [True, False])
     @pytest.mark.parametrize("include_output_fields", [True, False])
@@ -5186,7 +5186,7 @@ class TestGetVector(TestBase):
                     assert field in r
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestDeleteVector(TestBase):
     @pytest.mark.xfail(reason="delete by id is not supported")
     def test_delete_vector_by_id(self):
@@ -5459,7 +5459,7 @@ class TestDeleteVector(TestBase):
         assert len(rsp["data"]) == 0
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestDeleteVectorNegative(TestBase):
     def test_delete_vector_with_invalid_collection_name(self):
         """
@@ -5501,7 +5501,7 @@ class TestDeleteVectorNegative(TestBase):
         assert "can't find collection" in rsp["message"]
 
 
-@pytest.mark.L1
+@pytest.mark.tags(CaseLabel.RBAC)
 class TestVectorWithAuth(TestBase):
     def test_upsert_vector_with_invalid_api_key(self):
         """
@@ -5605,7 +5605,7 @@ class TestVectorWithAuth(TestBase):
         assert rsp["code"] == 1800
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestSearchByPK(TestBase):
     """
     Test cases for search by primary key functionality (PR #47260)
@@ -6098,7 +6098,7 @@ class TestSearchByPK(TestBase):
             assert pk in returned_pks
 
 
-@pytest.mark.L0
+@pytest.mark.tags(CaseLabel.L0)
 class TestSearchByPKNegative(TestBase):
     """Negative test cases for search by primary key functionality"""
 

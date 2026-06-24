@@ -28,7 +28,6 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -39,8 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -359,7 +358,7 @@ func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span,
 		if i < len(op.configs) && op.configs[i].Strategy != "" {
 			config = op.configs[i]
 		}
-		collapsed[i], err = collapseElementLevelResult(result, metric.PositivelyRelated(metricType), config)
+		collapsed[i], err = collapseElementLevelResultByMetricType(result, metricType, config)
 		if err != nil {
 			return nil, err
 		}
@@ -404,13 +403,17 @@ func collapseElementLevelResultByBestScore(result *milvuspb.SearchResults, large
 }
 
 func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBetter bool, config elementCollapseConfig) (*milvuspb.SearchResults, error) {
+	return collapseElementLevelResultWithMetricDirection(result, largerScoreIsBetter, true, config)
+}
+
+func collapseElementLevelResultByMetricType(result *milvuspb.SearchResults, metricType string, config elementCollapseConfig) (*milvuspb.SearchResults, error) {
+	metricType = strings.TrimSpace(metricType)
+	return collapseElementLevelResultWithMetricDirection(result, metric.PositivelyRelated(metricType), metricType != "", config)
+}
+
+func collapseElementLevelResultWithMetricDirection(result *milvuspb.SearchResults, largerScoreIsBetter bool, metricKnown bool, config elementCollapseConfig) (*milvuspb.SearchResults, error) {
 	if result == nil || result.GetResults() == nil || result.GetResults().GetElementIndices() == nil {
 		return result, nil
-	}
-	if isElementCollapseSumFamily(config.Strategy) && !largerScoreIsBetter {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"%s.collapse.strategy %s is only supported for positively related metrics",
-			elementScopeKey, config.Strategy)
 	}
 
 	data := result.GetResults()
@@ -418,6 +421,12 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 	totalRows := int64(0)
 	for _, topk := range topks {
 		totalRows += topk
+	}
+
+	if isElementCollapseSumFamily(config.Strategy) && metricKnown && !largerScoreIsBetter {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"%s.collapse.strategy %s is only supported for positively related metrics",
+			elementScopeKey, config.Strategy)
 	}
 	if totalRows == 0 {
 		return copySearchResultsWithData(result, &schemapb.SearchResultData{
@@ -431,6 +440,10 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 			PrimaryFieldName:        data.GetPrimaryFieldName(),
 			SearchIteratorV2Results: data.GetSearchIteratorV2Results(),
 		}), nil
+	}
+
+	if !metricKnown {
+		return nil, merr.WrapErrServiceInternal("element best collapse: missing metric type for element-level result")
 	}
 
 	if typeutil.GetSizeOfIDs(data.GetIds()) < int(totalRows) {
@@ -561,7 +574,7 @@ func aggregateElementHits(hits []bestElementHit, config elementCollapseConfig, l
 		for _, hit := range hits {
 			sum += hit.score
 		}
-		selected := hits[0]
+		selected := bestHits[0]
 		selected.aggregate = sum
 		selected.groupCount = len(hits)
 		if config.Strategy == elementCollapseAvg {
@@ -2138,8 +2151,8 @@ func (op *orderByOperator) sortResultsByOrderByFields(result *milvuspb.SearchRes
 			if field == nil {
 				// This should never happen if validateOrderByFields passed.
 				// Log and skip rather than panic to avoid crashing on edge cases.
-				log.Warn("order_by field not found in fieldMap after validation, skipping",
-					zap.String("fieldName", orderBy.FieldName))
+				mlog.Warn(context.TODO(), "order_by field not found in fieldMap after validation, skipping",
+					mlog.String("fieldName", orderBy.FieldName))
 				continue
 			}
 			cmp, err := compareOrderByField(field, orderBy, idxI, idxJ, cache)
@@ -2224,8 +2237,8 @@ func (op *orderByOperator) sortGroupsByOrderByFields(result *milvuspb.SearchResu
 			if field == nil {
 				// This should never happen if validateOrderByFields passed.
 				// Log and skip rather than panic to avoid crashing on edge cases.
-				log.Warn("order_by field not found in fieldMap after validation, skipping",
-					zap.String("fieldName", orderBy.FieldName))
+				mlog.Warn(context.TODO(), "order_by field not found in fieldMap after validation, skipping",
+					mlog.String("fieldName", orderBy.FieldName))
 				continue
 			}
 			cmp, err := compareOrderByField(field, orderBy, dataIdxI, dataIdxJ, cache)
@@ -2876,17 +2889,17 @@ func (p *pipeline) AddNodes(t *searchTask, nodes ...*nodeDef) error {
 }
 
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
-	log.Ctx(ctx).Debug("SearchPipeline run", zap.Stringer("pipeline", p))
+	mlog.Debug(ctx, "SearchPipeline run", mlog.Stringer("pipeline", p))
 	pTrace := newPipelineTrace(p.traceEnabled)
 	msg := opMsg{}
 	msg[pipelineInput] = toReduceResults
 	msg[pipelineStorageCost] = storageCost
 	for _, node := range p.nodes {
 		var err error
-		log.Ctx(ctx).Debug("SearchPipeline run node", zap.String("node", node.name))
+		mlog.Debug(ctx, "SearchPipeline run node", mlog.String("node", node.name))
 		msg, err = node.Run(ctx, span, msg)
 		if err != nil {
-			log.Ctx(ctx).Error("Run node failed: ", zap.String("err", err.Error()))
+			mlog.Error(ctx, "Run node failed: ", mlog.String("err", err.Error()))
 			return nil, storageCost, err
 		}
 		pTrace.TraceMsg(node.opName, msg)

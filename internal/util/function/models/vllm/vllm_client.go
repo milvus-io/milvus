@@ -62,20 +62,20 @@ func (c *VLLMClient) headers() map[string]string {
 	return headers
 }
 
-func (c *VLLMClient) Embedding(texts []string, params map[string]any, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *VLLMClient) Embedding(texts []string, params map[string]any, timeoutMs int64) (*EmbeddingResponse, error) {
 	embClient, err := newVLLMEmbeddingClient(c.apiKey, c.endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return embClient.Embedding(texts, params, c.headers(), timeoutSec)
+	return embClient.Embedding(texts, params, c.headers(), timeoutMs)
 }
 
-func (c *VLLMClient) Rerank(query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+func (c *VLLMClient) Rerank(query string, texts []string, params map[string]any, timeoutMs int64) (*RerankResponse, error) {
 	rerankClient, err := newVLLMRerankClient(c.apiKey, c.endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return rerankClient.Rerank(query, texts, params, c.headers(), timeoutSec)
+	return rerankClient.Rerank(query, texts, params, c.headers(), timeoutMs)
 }
 
 /*
@@ -157,7 +157,7 @@ func newVLLMEmbeddingClient(apiKey string, endpoint string) (*VLLMEmbedding, err
 	}, nil
 }
 
-func (c *VLLMEmbedding) Embedding(texts []string, params map[string]any, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *VLLMEmbedding) Embedding(texts []string, params map[string]any, headers map[string]string, timeoutMs int64) (*EmbeddingResponse, error) {
 	r := map[string]any{
 		"input":           texts,
 		"encoding_format": "float",
@@ -167,7 +167,7 @@ func (c *VLLMEmbedding) Embedding(texts []string, params map[string]any, headers
 		maps.Copy(r, params)
 	}
 
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func newVLLMRerankClient(apiKey string, endpoint string) (*VLLMRerank, error) {
 	}, nil
 }
 
-func (c *VLLMRerank) Rerank(query string, texts []string, params map[string]any, headers map[string]string, timeoutSec int64) (*RerankResponse, error) {
+func (c *VLLMRerank) Rerank(query string, texts []string, params map[string]any, headers map[string]string, timeoutMs int64) (*RerankResponse, error) {
 	r := map[string]any{
 		"query":     query,
 		"documents": texts,
@@ -229,7 +229,7 @@ func (c *VLLMRerank) Rerank(query string, texts []string, params map[string]any,
 		maps.Copy(r, params)
 	}
 
-	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

@@ -25,13 +25,12 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -123,7 +122,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	r.schema = cloneschema
 
 	validIDs := lo.Keys(r.insertLogs)
-	log.Info("create binlog reader for these fields", zap.Any("validIDs", validIDs))
+	mlog.Info(r.ctx, "create binlog reader for these fields", mlog.Any("validIDs", validIDs))
 
 	rwOptions := []storage.RwOption{
 		storage.WithVersion(r.storageVersion),
@@ -177,10 +176,9 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if err != nil {
 		return err
 	}
-
-	log.Ctx(context.TODO()).Info("read delete done",
-		zap.String("collection", r.schema.GetName()),
-		zap.Int("deleteRows", len(r.deleteData)),
+	mlog.Info(context.TODO(), "read delete done",
+		mlog.String("collection", r.schema.GetName()),
+		mlog.Int("deleteRows", len(r.deleteData)),
 	)
 
 	deleteFilter, err := FilterWithDelete(r)
@@ -223,7 +221,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 				if err == io.EOF {
 					break
 				}
-				log.Error("compose delete wrong, failed to read deltalogs", zap.Error(err))
+				mlog.Error(r.ctx, "compose delete wrong, failed to read deltalogs", mlog.Err(err))
 				return nil, err
 			}
 

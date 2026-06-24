@@ -18,10 +18,8 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -181,8 +179,6 @@ func FetchFragmentsFromExternalSourceWithRange(
 	exploreManifestPath string,
 	opts ExternalFetchOptions,
 ) ([]Fragment, error) {
-	log := log.Ctx(ctx)
-
 	if exploreManifestPath == "" {
 		return nil, merr.WrapErrServiceInternalMsg("explore manifest path is required")
 	}
@@ -208,12 +204,12 @@ func FetchFragmentsFromExternalSourceWithRange(
 	// stay byte-for-byte identical to the DataCoord-side call so both
 	// indexed views agree.
 	fileInfos, skipped := NormalizeFileInfos(fileInfos, format)
-	log.Info("Read file list from explore manifest",
-		zap.String("manifestPath", exploreManifestPath),
-		zap.Int("rawFileCount", rawCount),
-		zap.Int("normalizedFileCount", len(fileInfos)),
-		zap.Int("skippedNonFormat", skipped),
-		zap.Duration("readDuration", time.Since(exploreStart)))
+	mlog.Info(ctx, "Read file list from explore manifest",
+		mlog.String("manifestPath", exploreManifestPath),
+		mlog.Int("rawFileCount", rawCount),
+		mlog.Int("normalizedFileCount", len(fileInfos)),
+		mlog.Int("skippedNonFormat", skipped),
+		mlog.Duration("readDuration", time.Since(exploreStart)))
 
 	// Slice to assigned range.
 	if fileIndexEnd > int64(len(fileInfos)) {
@@ -232,9 +228,9 @@ func FetchFragmentsFromExternalSourceWithRange(
 	if err != nil {
 		return nil, err
 	}
-	log.Info("GetFileInfo phase completed",
-		zap.Int("totalFiles", len(fileInfos)),
-		zap.Duration("getFileInfoDuration", time.Since(getFileInfoStart)))
+	mlog.Info(ctx, "GetFileInfo phase completed",
+		mlog.Int("totalFiles", len(fileInfos)),
+		mlog.Duration("getFileInfoDuration", time.Since(getFileInfoStart)))
 
 	rowLimit := opts.rowLimitOrDefault()
 	fragmentIDGenerator := NewFragmentIDGenerator(0)
@@ -246,11 +242,11 @@ func FetchFragmentsFromExternalSourceWithRange(
 		return nil, merr.WrapErrServiceInternalMsg("no data files in range [%d, %d)", fileIndexBegin, fileIndexEnd)
 	}
 
-	log.Info("Created fragments from file range",
-		zap.Int("totalFragments", len(fragments)),
-		zap.Int("fileCount", len(fileInfos)),
-		zap.Int64("fileIndexBegin", fileIndexBegin),
-		zap.Int64("fileIndexEnd", fileIndexEnd))
+	mlog.Info(ctx, "Created fragments from file range",
+		mlog.Int("totalFragments", len(fragments)),
+		mlog.Int("fileCount", len(fileInfos)),
+		mlog.Int64("fileIndexBegin", fileIndexBegin),
+		mlog.Int64("fileIndexEnd", fileIndexEnd))
 
 	return fragments, nil
 }
@@ -277,9 +273,9 @@ func BuildCurrentSegmentFragments(
 				result[seg.GetID()] = fragments
 				continue
 			}
-			log.Warn("manifest returned 0 fragments, using virtual fragment",
-				zap.Int64("segmentID", seg.GetID()),
-				zap.String("manifestPath", seg.GetManifestPath()))
+			mlog.Warn(context.TODO(), "manifest returned 0 fragments, using virtual fragment",
+				mlog.FieldSegmentID(seg.GetID()),
+				mlog.String("manifestPath", seg.GetManifestPath()))
 		}
 
 		// Virtual fragment for segments without manifest (initial state)

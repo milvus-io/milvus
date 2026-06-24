@@ -352,7 +352,7 @@ message LoadMetaInfo {
     string resource_group = 6; // Only used for metrics label.
     repeated int64 load_fields = 7;
     repeated common.KeyValuePair db_properties = 8;
-    uint64 schema_version = 9; // used for schema change detection.
+    uint64 schema_barrier_ts = 9; // Wire-compatible rename of legacy schema_version; timestamp barrier used to fence stale load results.
 }
 
 message WatchDmChannelsRequest {
@@ -1030,7 +1030,7 @@ message UpdateSchemaRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
-    uint64 version = 4;
+    uint64 schema_barrier_ts = 4; // Wire-compatible rename of legacy version; timestamp barrier used to fence stale load results.
 }
 
 message UpdateIndexRequest {

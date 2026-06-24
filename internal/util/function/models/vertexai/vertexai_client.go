@@ -135,7 +135,7 @@ func (c *VertexAIEmbedding) getAccessToken() (string, error) {
 	return token.AccessToken, nil
 }
 
-func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, taskType string, timeoutSec int64) (*GeminiEmbedContentResponse, error) {
+func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, taskType string, timeoutMs int64) (*GeminiEmbedContentResponse, error) {
 	req := GeminiEmbedContentRequest{
 		Content: GeminiContent{
 			Parts: []GeminiPart{{Text: text}},
@@ -163,14 +163,14 @@ func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, 
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	res, err := models.PostRequest[GeminiEmbedContentResponse](req, url, headers, timeoutSec)
+	res, err := models.PostRequest[GeminiEmbedContentResponse](req, url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	for _, text := range texts {
 		r.Instances = append(r.Instances, Instance{TaskType: taskType, Content: text})
@@ -194,7 +194,7 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
+	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

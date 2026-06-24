@@ -20,13 +20,12 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -322,7 +321,7 @@ func TestSession_Registered(t *testing.T) {
 
 func TestSession_String(t *testing.T) {
 	s := &Session{}
-	log.Debug("log session", zap.Any("session", s))
+	mlog.Debug(context.TODO(), "log session", mlog.Any("session", s))
 }
 
 func TestSesssionMarshal(t *testing.T) {
@@ -523,7 +522,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	})
 	wg.Add(1)
 	s1.ProcessActiveStandBy(func() error {
-		log.Debug("Session 1 become active")
+		mlog.Debug(context.TODO(), "Session 1 become active")
 		wg.Done()
 		return nil
 	})
@@ -539,7 +538,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s2.Register()
 	wg.Add(1)
 	go s2.ProcessActiveStandBy(func() error {
-		log.Debug("Session 2 become active")
+		mlog.Debug(context.TODO(), "Session 2 become active")
 		wg.Done()
 		return nil
 	})
@@ -547,13 +546,13 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// assert.True(t, s2.watchingPrimaryKeyLock)
 	// stop session 1, session 2 will take over primary service
-	log.Debug("Stop session 1, session 2 will take over primary service")
+	mlog.Debug(context.TODO(), "Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)
 
 	s1.Stop()
 
 	wg.Wait()
-	log.Debug("session s2 wait done")
+	mlog.Debug(context.TODO(), "session s2 wait done")
 	assert.False(t, s2.isStandby.Load().(bool))
 	s2.Stop()
 }

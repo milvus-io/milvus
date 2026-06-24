@@ -21,12 +21,11 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -78,11 +77,11 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 				collection, currentChannelCount, currentSegmentCount)
 		}
 
-		log.Ctx(ctx).Info("waitting for release...",
-			zap.Int64("collection", collection),
-			zap.Int64s("partitions", partitions),
-			zap.Int("channel", currentChannelCount),
-			zap.Int("segments", currentSegmentCount),
+		mlog.Info(ctx, "waitting for release...",
+			mlog.Int64("collection", collection),
+			mlog.Int64s("partitions", partitions),
+			mlog.Int("channel", currentChannelCount),
+			mlog.Int("segments", currentSegmentCount),
 		)
 
 		lastChannelCount = currentChannelCount

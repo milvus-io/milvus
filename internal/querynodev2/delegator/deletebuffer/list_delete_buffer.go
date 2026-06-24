@@ -21,11 +21,10 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -73,9 +72,9 @@ func (b *listDeleteBuffer[T]) RegisterL0(segmentList ...segments.Segment) {
 	for _, seg := range segmentList {
 		if seg != nil {
 			b.l0Segments = append(b.l0Segments, seg)
-			log.Info("register l0 from delete buffer",
-				zap.Int64("segmentID", seg.ID()),
-				zap.Time("startPosition", tsoutil.PhysicalTime(seg.StartPosition().GetTimestamp())),
+			mlog.Info(context.TODO(), "register l0 from delete buffer",
+				mlog.FieldSegmentID(seg.ID()),
+				mlog.Time("startPosition", tsoutil.PhysicalTime(seg.StartPosition().GetTimestamp())),
 			)
 		}
 	}
@@ -101,10 +100,10 @@ func (b *listDeleteBuffer[T]) UnRegister(ts uint64) {
 			newSegments = append(newSegments, s)
 		} else {
 			s.Release(context.TODO())
-			log.Info("unregister l0 from delete buffer",
-				zap.Int64("segmentID", s.ID()),
-				zap.Time("startPosition", tsoutil.PhysicalTime(s.StartPosition().GetTimestamp())),
-				zap.Time("cleanTs", tsoutil.PhysicalTime(ts)),
+			mlog.Info(context.TODO(), "unregister l0 from delete buffer",
+				mlog.FieldSegmentID(s.ID()),
+				mlog.Time("startPosition", tsoutil.PhysicalTime(s.StartPosition().GetTimestamp())),
+				mlog.Time("cleanTs", tsoutil.PhysicalTime(ts)),
 			)
 		}
 	}
@@ -219,11 +218,11 @@ func (b *listDeleteBuffer[T]) isPinned(cleanTs uint64) bool {
 	}
 
 	if len(pinnedSegments) > 0 {
-		log.Info("skip cleanup due to pinned timestamp before cleanTs",
-			zap.Time("pinnedPhysicalTime", tsoutil.PhysicalTime(pinnedTimestamp)),
-			zap.Time("cleanPhysicalTime", tsoutil.PhysicalTime(cleanTs)),
-			zap.Int64s("pinningSegmentIDs", pinnedSegments),
-			zap.Int("segmentCount", len(pinnedSegments)),
+		mlog.Info(context.TODO(), "skip cleanup due to pinned timestamp before cleanTs",
+			mlog.Time("pinnedPhysicalTime", tsoutil.PhysicalTime(pinnedTimestamp)),
+			mlog.Time("cleanPhysicalTime", tsoutil.PhysicalTime(cleanTs)),
+			mlog.Int64s("pinningSegmentIDs", pinnedSegments),
+			mlog.Int("segmentCount", len(pinnedSegments)),
 		)
 		return true
 	}
@@ -247,10 +246,10 @@ func (b *listDeleteBuffer[T]) Pin(ts uint64, segmentID int64) {
 	}
 	b.pinnedTimestamps[ts][segmentID] = struct{}{}
 
-	log.Info("pin timestamp for segment",
-		zap.Uint64("timestamp", ts),
-		zap.Int64("segmentID", segmentID),
-		zap.Time("physicalTime", tsoutil.PhysicalTime(ts)),
+	mlog.Info(context.TODO(), "pin timestamp for segment",
+		mlog.Uint64("timestamp", ts),
+		mlog.FieldSegmentID(segmentID),
+		mlog.Time("physicalTime", tsoutil.PhysicalTime(ts)),
 	)
 }
 
@@ -266,9 +265,9 @@ func (b *listDeleteBuffer[T]) Unpin(ts uint64, segmentID int64) {
 		}
 	}
 
-	log.Info("unpin timestamp for segment",
-		zap.Uint64("timestamp", ts),
-		zap.Int64("segmentID", segmentID),
-		zap.Time("physicalTime", tsoutil.PhysicalTime(ts)),
+	mlog.Info(context.TODO(), "unpin timestamp for segment",
+		mlog.Uint64("timestamp", ts),
+		mlog.FieldSegmentID(segmentID),
+		mlog.Time("physicalTime", tsoutil.PhysicalTime(ts)),
 	)
 }

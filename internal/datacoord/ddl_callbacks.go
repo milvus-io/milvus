@@ -20,12 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -105,9 +103,9 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 		return nil, err
 	}
 
-	log.Ctx(ctx).Info("broadcast started for restore snapshot",
-		zap.Int64("collectionID", collectionID),
-		zap.String("snapshotName", snapshotName))
+	mlog.Info(ctx, "broadcast started for restore snapshot",
+		mlog.FieldCollectionID(collectionID),
+		mlog.String("snapshotName", snapshotName))
 	return b, nil
 }
 
@@ -143,18 +141,18 @@ func (s *Server) startRestoreSnapshotLock(
 		return nil, err
 	}
 
-	log.Ctx(ctx).Info("phase 0 restore lock acquired",
-		zap.Int64("sourceCollectionID", sourceCollectionID),
-		zap.String("snapshotName", snapshotName),
-		zap.String("targetDbName", targetDbName),
-		zap.String("targetCollectionName", targetCollectionName))
+	mlog.Info(ctx, "phase 0 restore lock acquired",
+		mlog.Int64("sourceCollectionID", sourceCollectionID),
+		mlog.String("snapshotName", snapshotName),
+		mlog.String("targetDbName", targetDbName),
+		mlog.String("targetCollectionName", targetCollectionName))
 	return b, nil
 }
 
 // validateRestoreSnapshotResources validates that all required resources exist for restore.
 // This includes snapshot, collection, partitions, and indexes.
 func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	// ========== Validate Snapshot Exists ==========
 	// Use source collection ID from snapshot data (not the target collectionID parameter)
@@ -165,7 +163,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 		return merr.Wrapf(err, "snapshot %s does not exist for collection %d",
 			snapshotData.SnapshotInfo.GetName(), sourceCollectionID)
 	}
-	log.Info("snapshot validated", zap.String("snapshotName", snapshot.GetName()))
+	log.Info(ctx, "snapshot validated", mlog.String("snapshotName", snapshot.GetName()))
 
 	// ========== Validate Collection Exists ==========
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
@@ -174,9 +172,9 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
-	log.Info("collection validated",
-		zap.String("dbName", dbName),
-		zap.String("collectionName", collectionName))
+	log.Info(ctx, "collection validated",
+		mlog.FieldDbName(dbName),
+		mlog.FieldCollectionName(collectionName))
 
 	// ========== Validate Partitions Exist ==========
 	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
@@ -196,7 +194,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 			return merr.WrapErrPartitionNotFound(partName, fmt.Sprintf("partition does not exist in collection %d", collectionID))
 		}
 	}
-	log.Info("partitions validated", zap.Int("count", len(existingPartitions)))
+	log.Info(ctx, "partitions validated", mlog.Int("count", len(existingPartitions)))
 
 	// ========== Validate Indexes Exist ==========
 	for _, indexInfo := range snapshotData.Indexes {
@@ -214,7 +212,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 			return merr.WrapErrIndexNotFound(indexInfo.GetIndexName(), fmt.Sprintf("index for field %d does not exist in collection %d", indexInfo.GetFieldID(), collectionID))
 		}
 	}
-	log.Info("indexes validated", zap.Int("count", len(snapshotData.Indexes)))
+	log.Info(ctx, "indexes validated", mlog.Int("count", len(snapshotData.Indexes)))
 
 	return nil
 }

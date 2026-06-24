@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,7 +10,6 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -18,7 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -90,7 +90,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	}
 
 	if parser.GetCurrentToken().GetTokenType() != antlr.TokenEOF {
-		log.Info("invalid expression", zap.String("expr", exprStr))
+		mlog.Info(context.TODO(), "invalid expression", mlog.String("expr", exprStr))
 		err = merr.WrapErrQueryPlanMsg("invalid expression: %s", exprStr)
 		return
 	}
@@ -227,12 +227,12 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 
 	expr, err := parse()
 	if err != nil {
-		log.Info("CreateSearchPlan failed", zap.Error(err))
+		mlog.Info(context.TODO(), "CreateSearchPlan failed", mlog.Err(err))
 		return nil, err
 	}
 	vectorField, err := schema.GetFieldFromName(vectorFieldName)
 	if err != nil {
-		log.Info("CreateSearchPlan failed", zap.Error(err))
+		mlog.Info(context.TODO(), "CreateSearchPlan failed", mlog.Err(err))
 		return nil, err
 	}
 	// plan ok with schema, check ann field
@@ -270,12 +270,12 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 		case schemapb.DataType_Int8Vector:
 			vectorType = planpb.VectorType_EmbListInt8Vector
 		default:
-			log.Error("Invalid elementType for ArrayOfVector", zap.Any("elementType", elementType))
+			mlog.Error(context.TODO(), "Invalid elementType for ArrayOfVector", mlog.Any("elementType", elementType))
 			return nil, merr.WrapErrQueryPlanMsg("unsupported element type for ArrayOfVector: %v", elementType)
 		}
 
 	default:
-		log.Error("Invalid dataType", zap.Any("dataType", dataType))
+		mlog.Error(context.TODO(), "Invalid dataType", mlog.Any("dataType", dataType))
 		return nil, merr.WrapErrQueryPlanMsg("unsupported vector data type: %v", dataType)
 	}
 

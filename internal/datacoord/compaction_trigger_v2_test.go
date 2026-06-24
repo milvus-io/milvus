@@ -2,7 +2,9 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +13,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -19,7 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -27,6 +28,134 @@ import (
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTriggerManagerSuite))
+}
+
+func TestEstimateResultSegmentCount(t *testing.T) {
+	tests := []struct {
+		name       string
+		totalSize  float64
+		targetSize float64
+		want       int64
+	}{
+		{name: "exact multiple", totalSize: 300, targetSize: 100, want: 3},
+		{name: "fractional rounds up", totalSize: 301, targetSize: 100, want: 4},
+		{name: "zero total size", totalSize: 0, targetSize: 100, want: 1},
+		{name: "zero target size", totalSize: 100, targetSize: 0, want: 1},
+		{name: "large ratio", totalSize: 10_000, targetSize: 64, want: 157},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := estimateResultSegmentCount(test.totalSize, test.targetSize)
+			if got != test.want {
+				t.Fatalf("estimateResultSegmentCount(%v, %v) = %d, want %d", test.totalSize, test.targetSize, got, test.want)
+			}
+		})
+	}
+}
+
+func TestCompactionIDBlockTakeFromMetadataTail(t *testing.T) {
+	t.Run("returns fixed segment ID range", func(t *testing.T) {
+		block := &compactionIDBlock{
+			segments: &datapb.IDRange{Begin: 100, End: 103},
+			next:     103,
+			end:      104,
+		}
+
+		planID, err := block.take()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		segmentIDRange := block.segmentIDRange()
+
+		if planID != 103 {
+			t.Fatalf("planID = %d, want 103", planID)
+		}
+		if segmentIDRange.GetBegin() != 100 || segmentIDRange.GetEnd() != 103 {
+			t.Fatalf("segment ID range = [%d, %d), want [100, 103)", segmentIDRange.GetBegin(), segmentIDRange.GetEnd())
+		}
+	})
+
+	t.Run("rejects future metadata over-consumption", func(t *testing.T) {
+		block := &compactionIDBlock{
+			segments: &datapb.IDRange{Begin: 100, End: 103},
+			next:     103,
+			end:      104,
+		}
+
+		_, err := block.take()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		_, err = block.take()
+		if err == nil {
+			t.Fatal("expected metadata ID exhaustion error")
+		}
+		segmentIDRange := block.segmentIDRange()
+		if segmentIDRange.GetBegin() != 100 || segmentIDRange.GetEnd() != 103 {
+			t.Fatalf("segment ID range = [%d, %d), want [100, 103)", segmentIDRange.GetBegin(), segmentIDRange.GetEnd())
+		}
+	})
+}
+
+func TestCreateCompactionIDBlockRejectsTooLargeBatch(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "10")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	_, err := createCompactionIDBlock(mockAlloc, math.MaxUint32/10+1, 1)
+	if err == nil {
+		t.Fatal("expected too-large allocation error")
+	}
+	if !strings.Contains(err.Error(), "compaction too large to allocate IDs in a single batch") {
+		t.Fatalf("error = %q, want too-large allocation message", err.Error())
+	}
+}
+
+func TestCreateCompactionIDBlockUsesIDExpansionFactor(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "2")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocN(int64(7)).Return(int64(100), int64(107), nil).Once()
+
+	block, err := createCompactionIDBlock(mockAlloc, 3, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	segmentIDRange := block.segmentIDRange()
+	if segmentIDRange.GetBegin() != 100 || segmentIDRange.GetEnd() != 106 {
+		t.Fatalf("segment ID range = [%d, %d), want [100, 106)", segmentIDRange.GetBegin(), segmentIDRange.GetEnd())
+	}
+}
+
+func TestCompactionViewsExposeTotalSizeAndCollectionTTL(t *testing.T) {
+	ttl := 3 * time.Hour
+	segments := []*SegmentView{{ID: 1, Size: 10}, {ID: 2, Size: 2.5}}
+	tests := []struct {
+		name    string
+		view    CompactionView
+		wantTTL time.Duration
+	}{
+		{name: "single", view: &MixSegmentView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
+		{name: "clustering", view: &ClusteringSegmentsView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
+		{name: "force merge", view: &ForceMergeSegmentView{segments: segments, collectionTTL: ttl}, wantTTL: ttl},
+		{name: "level zero", view: &LevelZeroCompactionView{l0Segments: segments}},
+		{name: "bump schema version", view: &BumpSchemaVersionView{segments: segments}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.view.GetTotalSize(); got != 12.5 {
+				t.Fatalf("GetTotalSize() = %v, want 12.5", got)
+			}
+			if got := test.view.GetCollectionTTL(); got != test.wantTTL {
+				t.Fatalf("GetCollectionTTL() = %v, want %v", got, test.wantTTL)
+			}
+		})
+	}
 }
 
 // testCompactionPolicy is a minimal CompactionPolicy stub for handleTicker tests.
@@ -59,6 +188,8 @@ func (stubDispatchableView) Trigger() (CompactionView, string)           { retur
 func (stubDispatchableView) ForceTrigger() (CompactionView, string)      { return nil, "" }
 func (stubDispatchableView) ForceTriggerAll() ([]CompactionView, string) { return nil, "" }
 func (stubDispatchableView) GetTriggerID() int64                         { return 0 }
+func (stubDispatchableView) GetTotalSize() float64                       { return 0 }
+func (stubDispatchableView) GetCollectionTTL() time.Duration             { return 0 }
 
 type CompactionTriggerManagerSuite struct {
 	suite.Suite
@@ -127,7 +258,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	cView, ok := levelZeroViews[0].(*LevelZeroCompactionView)
 	s.True(ok)
 	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
+	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
@@ -170,7 +301,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	cView, ok := levelZeroViews[0].(*LevelZeroCompactionView)
 	s.True(ok)
 	s.NotNil(cView)
-	log.Info("view", zap.Any("cView", cView))
+	mlog.Info(context.TODO(), "view", mlog.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
@@ -467,7 +598,380 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerInvalidParams() {
 	s.Equal(int64(0), triggerID)
 }
 
+func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
+	makeMixView := func(segments []*SegmentView) *MixSegmentView {
+		return &MixSegmentView{
+			label:         s.testLabel,
+			segments:      segments,
+			collectionTTL: 100,
+			triggerID:     1001,
+		}
+	}
+
+	s.Run("mix compaction allocates estimated result segments", func() {
+		s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
+		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
+
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		collectionSchema := &schemapb.CollectionSchema{
+			Name: "test_coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+		s.triggerManager.handler = handler
+
+		const (
+			startID = int64(500)
+			endID   = int64(504)
+			planID  = int64(503)
+		)
+		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+			RunAndReturn(func(task *datapb.CompactionTask) error {
+				s.EqualValues(planID, task.GetPlanID())
+				s.EqualValues(1001, task.GetTriggerID())
+				s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
+				s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
+				s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
+				s.Equal(s.testLabel.Channel, task.GetChannel())
+				s.Equal(collectionSchema, task.GetSchema())
+				s.ElementsMatch([]int64{200, 201}, task.GetInputSegments())
+				s.EqualValues(300, task.GetTotalRows())
+				s.Equal(&datapb.IDRange{Begin: startID, End: planID}, task.GetPreAllocatedSegmentIDs())
+				s.Equal(task.GetStartTime(), task.GetLastStateStartTime())
+				return nil
+			}).Return(nil).Once()
+
+		view := makeMixView([]*SegmentView{
+			{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024},
+			{ID: 201, label: s.testLabel, NumOfRows: 200, Size: 150 * 1024 * 1024},
+		})
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), view, TriggerTypeSingle)
+	})
+
+	s.Run("sort compaction allocates estimated result segments", func() {
+		s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
+		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
+
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		collectionSchema := &schemapb.CollectionSchema{
+			Name: "test_coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+		s.triggerManager.handler = handler
+
+		const (
+			startID = int64(600)
+			endID   = int64(604)
+			planID  = int64(603)
+		)
+		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+			RunAndReturn(func(task *datapb.CompactionTask) error {
+				s.Equal(datapb.CompactionType_SortCompaction, task.GetType())
+				s.Equal(&datapb.IDRange{Begin: startID, End: planID}, task.GetPreAllocatedSegmentIDs())
+				return nil
+			}).Return(nil).Once()
+
+		view := makeMixView([]*SegmentView{
+			{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 300 * 1024 * 1024},
+		})
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), view, TriggerTypeSort)
+	})
+
+	s.Run("storage version upgrade keeps size based estimation", func() {
+		s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+		defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+		pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
+		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
+
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		collectionSchema := &schemapb.CollectionSchema{
+			Name: "test_coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+		s.triggerManager.handler = handler
+
+		const (
+			startID = int64(700)
+			endID   = int64(704)
+			planID  = int64(703)
+		)
+		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+			RunAndReturn(func(task *datapb.CompactionTask) error {
+				s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
+				s.Equal(&datapb.IDRange{Begin: startID, End: planID}, task.GetPreAllocatedSegmentIDs())
+				return nil
+			}).Return(nil).Once()
+
+		view := makeMixView([]*SegmentView{
+			{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 300 * 1024 * 1024},
+		})
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), view, TriggerTypeStorageVersionUpgrade)
+	})
+}
+
+func (s *CompactionTriggerManagerSuite) TestSubmitClusteringViewToScheduler() {
+	s.SetupTest()
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "2")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+	pt.Save(pt.DataCoordCfg.SegmentMaxSize.Key, "100")
+	defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
+	pt.Save(pt.DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
+
+	s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+	clusteringKey := &schemapb.FieldSchema{FieldID: 2, Name: "cluster_key", DataType: schemapb.DataType_Int64, IsClusteringKey: true}
+	collectionSchema := &schemapb.CollectionSchema{
+		Name: "test_coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			clusteringKey,
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+		Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+	s.triggerManager.handler = handler
+
+	const (
+		startID       = int64(800)
+		segmentIDEnd  = int64(806)
+		planID        = int64(806)
+		analyzeTaskID = int64(807)
+		endID         = int64(808)
+	)
+	s.mockAlloc.EXPECT().AllocN(int64(8)).Return(startID, endID, nil).Once()
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+		RunAndReturn(func(task *datapb.CompactionTask) error {
+			s.Equal(datapb.CompactionType_ClusteringCompaction, task.GetType())
+			s.EqualValues(planID, task.GetPlanID())
+			s.EqualValues(analyzeTaskID, task.GetAnalyzeTaskID())
+			s.Equal(&datapb.IDRange{Begin: startID, End: segmentIDEnd}, task.GetPreAllocatedSegmentIDs())
+			s.Equal(task.GetStartTime(), task.GetLastStateStartTime())
+			return nil
+		}).Return(nil).Once()
+
+	view := &ClusteringSegmentsView{
+		label:              s.testLabel,
+		segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}, {ID: 201, label: s.testLabel, NumOfRows: 200, Size: 150 * 1024 * 1024}},
+		clusteringKeyField: clusteringKey,
+		collectionTTL:      100,
+		triggerID:          1001,
+	}
+	s.triggerManager.SubmitClusteringViewToScheduler(context.Background(), view)
+}
+
+func (s *CompactionTriggerManagerSuite) TestSubmitForceMergeViewToScheduler() {
+	s.SetupTest()
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+
+	collectionSchema := &schemapb.CollectionSchema{
+		Name: "test_coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+		Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+	s.triggerManager.handler = handler
+
+	const (
+		startID      = int64(500)
+		segmentIDEnd = int64(502)
+		planID       = int64(502)
+		endID        = int64(503)
+	)
+	s.mockAlloc.EXPECT().AllocN(int64(3)).Return(startID, endID, nil).Once()
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+		RunAndReturn(func(task *datapb.CompactionTask) error {
+			s.EqualValues(planID, task.GetPlanID())
+			s.Equal(datapb.CompactionType_MixCompaction, task.GetType())
+			s.Equal(&datapb.IDRange{Begin: startID, End: segmentIDEnd}, task.GetPreAllocatedSegmentIDs())
+			return nil
+		}).Return(nil).Once()
+
+	view := &ForceMergeSegmentView{
+		label:              s.testLabel,
+		segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}},
+		triggerID:          1001,
+		targetSegmentSize:  100 * 1024 * 1024,
+		targetSegmentCount: 999,
+	}
+	s.triggerManager.SubmitForceMergeViewToScheduler(context.Background(), view)
+}
+
+func (s *CompactionTriggerManagerSuite) TestSubmitViewToSchedulerDefensiveReturns() {
+	makeCollectionSchema := func(external bool) *schemapb.CollectionSchema {
+		field := &schemapb.FieldSchema{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+		if external {
+			field.ExternalField = "pk_col"
+		}
+		return &schemapb.CollectionSchema{
+			Name:   "test_coll",
+			Fields: []*schemapb.FieldSchema{field},
+		}
+	}
+
+	makeMixView := func() *MixSegmentView {
+		return &MixSegmentView{
+			label:         s.testLabel,
+			segments:      []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}},
+			collectionTTL: 100,
+			triggerID:     1001,
+		}
+	}
+
+	makeClusteringView := func(clusteringKey *schemapb.FieldSchema) *ClusteringSegmentsView {
+		return &ClusteringSegmentsView{
+			label:              s.testLabel,
+			segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}},
+			clusteringKeyField: clusteringKey,
+			collectionTTL:      100,
+			triggerID:          1001,
+		}
+	}
+
+	makeForceMergeView := func() *ForceMergeSegmentView {
+		return &ForceMergeSegmentView{
+			label:              s.testLabel,
+			segments:           []*SegmentView{{ID: 200, label: s.testLabel, NumOfRows: 100, Size: 150 * 1024 * 1024}},
+			triggerID:          1001,
+			targetSegmentSize:  100 * 1024 * 1024,
+			targetSegmentCount: 999,
+		}
+	}
+
+	s.Run("single GetCollection error returns before allocation", func() {
+		s.SetupTest()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(nil, errors.New("get collection error")).Once()
+		s.triggerManager.handler = handler
+
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), makeMixView(), TriggerTypeSingle)
+	})
+
+	s.Run("single AllocN error returns before enqueue", func() {
+		s.SetupTest()
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: makeCollectionSchema(false)}, nil).Once()
+		s.triggerManager.handler = handler
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), errors.New("alloc error")).Once()
+
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), makeMixView(), TriggerTypeSingle)
+	})
+
+	s.Run("clustering GetCollection error returns before allocation", func() {
+		s.SetupTest()
+		clusteringKey := &schemapb.FieldSchema{FieldID: 2, Name: "cluster_key", DataType: schemapb.DataType_Int64, IsClusteringKey: true}
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(nil, errors.New("get collection error")).Once()
+		s.triggerManager.handler = handler
+
+		s.triggerManager.SubmitClusteringViewToScheduler(context.Background(), makeClusteringView(clusteringKey))
+	})
+
+	s.Run("clustering AllocN error returns before enqueue", func() {
+		s.SetupTest()
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		clusteringKey := &schemapb.FieldSchema{FieldID: 2, Name: "cluster_key", DataType: schemapb.DataType_Int64, IsClusteringKey: true}
+		collectionSchema := makeCollectionSchema(false)
+		collectionSchema.Fields = append(collectionSchema.Fields, clusteringKey)
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+		s.triggerManager.handler = handler
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), errors.New("alloc error")).Once()
+
+		s.triggerManager.SubmitClusteringViewToScheduler(context.Background(), makeClusteringView(clusteringKey))
+	})
+
+	s.Run("force merge GetCollection error returns before allocation", func() {
+		s.SetupTest()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(nil, errors.New("get collection error")).Once()
+		s.triggerManager.handler = handler
+
+		s.triggerManager.SubmitForceMergeViewToScheduler(context.Background(), makeForceMergeView())
+	})
+
+	s.Run("force merge nil collection returns before allocation", func() {
+		s.SetupTest()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).Return(nil, nil).Once()
+		s.triggerManager.handler = handler
+
+		s.triggerManager.SubmitForceMergeViewToScheduler(context.Background(), makeForceMergeView())
+	})
+
+	s.Run("force merge external collection returns before allocation", func() {
+		s.SetupTest()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: makeCollectionSchema(true)}, nil).Once()
+		s.triggerManager.handler = handler
+
+		s.triggerManager.SubmitForceMergeViewToScheduler(context.Background(), makeForceMergeView())
+	})
+
+	s.Run("force merge AllocN error returns before enqueue", func() {
+		s.SetupTest()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: makeCollectionSchema(false)}, nil).Once()
+		s.triggerManager.handler = handler
+		s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), errors.New("alloc error")).Once()
+
+		s.triggerManager.SubmitForceMergeViewToScheduler(context.Background(), makeForceMergeView())
+	})
+}
+
 func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToScheduler() {
+	Params.Save(Params.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
+	Params.Save(Params.DataCoordCfg.SegmentMaxSize.Key, "100")
+	defer Params.Reset(Params.DataCoordCfg.SegmentMaxSize.Key)
+	Params.Save(Params.DataCoordCfg.DiskSegmentMaxSize.Key, "100")
+	defer Params.Reset(Params.DataCoordCfg.DiskSegmentMaxSize.Key)
+
 	collectionSchema := &schemapb.CollectionSchema{
 		Name: "test_coll",
 		Fields: []*schemapb.FieldSchema{
@@ -482,6 +986,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 			ID:        200,
 			label:     s.testLabel,
 			NumOfRows: 1000,
+			Size:      300 * 1024 * 1024,
 		}
 		return &BumpSchemaVersionView{
 			label:     s.testLabel,
@@ -493,16 +998,18 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 
 	s.Run("AllocN fails", func() {
 		s.SetupTest()
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(int64(0), int64(0), errors.New("alloc error")).Once()
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+		s.triggerManager.handler = handler
+		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(int64(0), int64(0), errors.New("alloc error")).Once()
 		view := makeBumpSchemaVersionView(111)
-		// Should return early with no panic — no other mock calls expected.
 		s.triggerManager.SubmitBumpSchemaVersionViewToScheduler(context.Background(), view)
 	})
 
 	s.Run("GetCollection fails", func() {
 		s.SetupTest()
-		const planID = int64(500)
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(nil, errors.New("get collection error")).Once()
@@ -514,8 +1021,6 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 
 	s.Run("collection is nil", func() {
 		s.SetupTest()
-		const planID = int64(501)
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(nil, nil).Once()
@@ -527,8 +1032,6 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 
 	s.Run("collection is external", func() {
 		s.SetupTest()
-		const planID = int64(502)
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(&collectionInfo{
@@ -561,10 +1064,11 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 		s.SetupTest()
 		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
 		const (
-			planID    = int64(504)
+			startID   = int64(504)
+			endID     = int64(508)
 			triggerID = int64(999)
 		)
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
+		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(&collectionInfo{
@@ -582,10 +1086,12 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 		s.SetupTest()
 		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
 		const (
-			planID    = int64(600)
+			startID   = int64(600)
+			endID     = int64(604)
+			planID    = int64(603)
 			triggerID = int64(1001)
 		)
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
+		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(&collectionInfo{
@@ -608,8 +1114,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 				s.NotZero(task.GetStartTime())
 				s.NotZero(task.GetLastStateStartTime())
 				s.NotNil(task.GetPreAllocatedSegmentIDs())
-				s.EqualValues(planID+1, task.GetPreAllocatedSegmentIDs().GetBegin())
-				s.EqualValues(planID+2, task.GetPreAllocatedSegmentIDs().GetEnd())
+				s.EqualValues(startID, task.GetPreAllocatedSegmentIDs().GetBegin())
+				s.EqualValues(planID, task.GetPreAllocatedSegmentIDs().GetEnd())
 				s.EqualValues(time.Hour.Nanoseconds(), task.GetCollectionTtl())
 				return nil
 			}).Once()
@@ -622,7 +1128,9 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 		s.SetupTest()
 		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
 		const (
-			planID    = int64(601)
+			startID   = int64(601)
+			endID     = int64(605)
+			planID    = int64(604)
 			triggerID = int64(1002)
 		)
 		frozenSchema := &schemapb.CollectionSchema{
@@ -635,7 +1143,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 			Version: 3,
 			Fields:  []*schemapb.FieldSchema{{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
 		}
-		s.mockAlloc.EXPECT().AllocN(int64(2)).Return(planID, planID+2, nil).Once()
+		s.mockAlloc.EXPECT().AllocN(int64(4)).Return(startID, endID, nil).Once()
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
 			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: liveSchema}, nil).Once()
@@ -646,7 +1154,8 @@ func (s *CompactionTriggerManagerSuite) TestSubmitBumpSchemaVersionViewToSchedul
 				s.EqualValues(2, task.GetSchema().GetVersion())
 				s.Equal(frozenSchema, task.GetSchema())
 				s.NotNil(task.GetPreAllocatedSegmentIDs())
-				s.EqualValues(task.GetPreAllocatedSegmentIDs().GetBegin()+1, task.GetPreAllocatedSegmentIDs().GetEnd())
+				s.EqualValues(startID, task.GetPreAllocatedSegmentIDs().GetBegin())
+				s.EqualValues(planID, task.GetPreAllocatedSegmentIDs().GetEnd())
 				return nil
 			}).Once()
 

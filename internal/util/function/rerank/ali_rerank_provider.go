@@ -35,6 +35,7 @@ type aliProvider struct {
 	url       string
 	modelName string
 	params    map[string]any
+	timeoutMs int64
 }
 
 func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
@@ -63,18 +64,21 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 	if modelName == "" {
 		return nil, merr.WrapErrParameterMissingMsg("ali rerank model name is required")
 	}
+	timeoutMs := models.ResolveTimeoutMs(params)
+
 	provider := aliProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
 		client:       client,
 		url:          url,
 		modelName:    modelName,
 		params:       truncateParams,
+		timeoutMs:    timeoutMs,
 	}
 	return &provider, nil
 }
 
 func (provider *aliProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(provider.url, provider.modelName, query, docs, provider.params, 30)
+	rerankResp, err := provider.client.Rerank(provider.url, provider.modelName, query, docs, provider.params, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

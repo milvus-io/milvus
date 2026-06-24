@@ -22,11 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -295,7 +293,7 @@ func (t *CopySegmentTask) GetSegmentResults() map[int64]*datapb.CopySegmentResul
 // Returns:
 //   - []*conc.Future[any]: Futures for all segment copy operations (nil if validation fails)
 func (t *CopySegmentTask) Execute() []*conc.Future[any] {
-	log.Info("start copy segment task", WrapLogFields(t)...)
+	mlog.Info(t.ctx, "start copy segment task", WrapLogFields(t)...)
 
 	// Step 1: Update task state to InProgress
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
@@ -360,27 +358,28 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 //   - error: Error if validation fails or copy operation fails
 func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (any, error) {
 	logFields := WrapLogFields(t,
-		zap.Int64("sourceCollectionID", source.GetCollectionId()),
-		zap.Int64("sourcePartitionID", source.GetPartitionId()),
-		zap.Int64("sourceSegmentID", source.GetSegmentId()),
-		zap.Int64("targetCollectionID", target.GetCollectionId()),
-		zap.Int64("targetPartitionID", target.GetPartitionId()),
-		zap.Int64("targetSegmentID", target.GetSegmentId()),
-		zap.Int("insertBinlogFields", len(source.GetInsertBinlogs())),
-		zap.Int("statsBinlogFields", len(source.GetStatsBinlogs())),
-		zap.Int("deltaBinlogFields", len(source.GetDeltaBinlogs())),
-		zap.Int("bm25BinlogFields", len(source.GetBm25Binlogs())),
-		zap.Int("vectorScalarIndexInfoCount", len(source.GetIndexFiles())),
-		zap.Int("textIndexFieldCount", len(source.GetTextIndexFiles())),
-		zap.Int("jsonKeyIndexFieldCount", len(source.GetJsonKeyIndexFiles())),
+		mlog.Int64("sourceCollectionID", source.GetCollectionId()),
+		mlog.Int64("sourcePartitionID", source.GetPartitionId()),
+		mlog.Int64("sourceSegmentID", source.GetSegmentId()),
+		mlog.Int64("targetCollectionID", target.GetCollectionId()),
+		mlog.Int64("targetPartitionID", target.GetPartitionId()),
+		mlog.Int64("targetSegmentID", target.GetSegmentId()),
+		mlog.Int("insertBinlogFields", len(source.GetInsertBinlogs())),
+		mlog.Int("statsBinlogFields", len(source.GetStatsBinlogs())),
+		mlog.Int("deltaBinlogFields", len(source.GetDeltaBinlogs())),
+		mlog.Int("bm25BinlogFields", len(source.GetBm25Binlogs())),
+		mlog.Int("vectorScalarIndexInfoCount", len(source.GetIndexFiles())),
+		mlog.Int("textIndexFieldCount", len(source.GetTextIndexFiles())),
+		mlog.Int("jsonKeyIndexFieldCount", len(source.GetJsonKeyIndexFiles())),
 	)
 
-	log.Info("start copying single segment", logFields...)
+	mlog.Info(t.ctx, "start copying single segment", logFields...)
 
 	// Step 1: Validate source has required binlogs
 	if len(source.GetInsertBinlogs()) == 0 && len(source.GetDeltaBinlogs()) == 0 {
 		reason := "no insert/delete binlogs for segment"
-		log.Error(reason, logFields...)
+		mlog.Error(t.ctx,
+			reason, logFields...)
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 		return nil, merr.WrapErrParameterInvalidMsg(reason)
 	}
@@ -401,7 +400,8 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 
 	if err != nil {
 		reason := fmt.Sprintf("failed to copy segment files: %v", err)
-		log.Error(reason, logFields...)
+		mlog.Error(t.ctx,
+			reason, logFields...)
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 		return nil, err
 	}
@@ -409,8 +409,8 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 	// Step 4: Update segment result in task with complete metadata (binlogs + indexes)
 	t.manager.Update(t.GetTaskID(), UpdateSegmentResult(segmentResult))
 
-	log.Info("successfully copied single segment",
-		append(logFields, zap.Int("copiedFileCount", len(copiedFiles)))...)
+	mlog.Info(t.ctx, "successfully copied single segment",
+		append(logFields, mlog.Int("copiedFileCount", len(copiedFiles)))...)
 	return nil, nil
 }
 
@@ -474,14 +474,14 @@ func (t *CopySegmentTask) CleanupCopiedFiles() {
 
 	// Step 2: Early return if no files to cleanup
 	if len(files) == 0 {
-		log.Info("no files to cleanup", zap.Int64("taskID", t.taskID))
+		mlog.Info(t.ctx, "no files to cleanup", mlog.Int64("taskID", t.taskID))
 		return
 	}
 
-	log.Info("cleaning up copied files for failed task",
-		zap.Int64("taskID", t.taskID),
-		zap.Int64("jobID", t.jobID),
-		zap.Int("fileCount", len(files)))
+	mlog.Info(t.ctx, "cleaning up copied files for failed task",
+		mlog.Int64("taskID", t.taskID),
+		mlog.Int64("jobID", t.jobID),
+		mlog.Int("fileCount", len(files)))
 
 	// Step 3: Delete all copied files with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -489,15 +489,15 @@ func (t *CopySegmentTask) CleanupCopiedFiles() {
 
 	if err := t.cm.MultiRemove(ctx, files); err != nil {
 		// Cleanup failure is logged but doesn't block task removal
-		log.Error("failed to cleanup copied files",
-			zap.Int64("taskID", t.taskID),
-			zap.Int64("jobID", t.jobID),
-			zap.Int("fileCount", len(files)),
-			zap.Error(err))
+		mlog.Error(t.ctx, "failed to cleanup copied files",
+			mlog.Int64("taskID", t.taskID),
+			mlog.Int64("jobID", t.jobID),
+			mlog.Int("fileCount", len(files)),
+			mlog.Err(err))
 	} else {
-		log.Info("successfully cleaned up copied files",
-			zap.Int64("taskID", t.taskID),
-			zap.Int64("jobID", t.jobID),
-			zap.Int("fileCount", len(files)))
+		mlog.Info(t.ctx, "successfully cleaned up copied files",
+			mlog.Int64("taskID", t.taskID),
+			mlog.Int64("jobID", t.jobID),
+			mlog.Int("fileCount", len(files)))
 	}
 }

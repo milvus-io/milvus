@@ -34,7 +34,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type TextEmbeddingMode int
@@ -63,6 +65,7 @@ const (
 	TruncateParamKey           string = "truncate"
 	MaxClientBatchSizeParamKey string = "max_client_batch_size"
 	IntegrationIDKey           string = "integration_id"
+	TimeoutMsParamKey          string = "timeout_ms"
 )
 
 // ali text embedding
@@ -221,6 +224,37 @@ func ParseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int
 	return dim, nil
 }
 
+// ParseTimeoutMs resolves the request timeout in milliseconds from the function
+// params, falling back to defaultTimeoutMs (and to 30000 when that is also
+// non-positive). An invalid timeout_ms override is logged and ignored rather
+// than failing, so a misconfigured param never breaks provider construction.
+func ParseTimeoutMs(params []*commonpb.KeyValuePair, defaultTimeoutMs int64) int64 {
+	if defaultTimeoutMs <= 0 {
+		defaultTimeoutMs = 30000
+	}
+	for _, param := range params {
+		if strings.ToLower(param.Key) != TimeoutMsParamKey {
+			continue
+		}
+
+		timeoutMs, err := strconv.ParseInt(param.Value, 10, 64)
+		if err != nil || timeoutMs <= 0 {
+			mlog.Warn(context.TODO(), "invalid function timeout_ms param, falling back to default",
+				mlog.String("value", param.Value),
+				mlog.Int64("defaultMs", defaultTimeoutMs))
+			return defaultTimeoutMs
+		}
+		return timeoutMs
+	}
+
+	return defaultTimeoutMs
+}
+
+func ResolveTimeoutMs(params []*commonpb.KeyValuePair) int64 {
+	defaultTimeout := paramtable.Get().FunctionCfg.ModelRequestTimeout.GetAsDurationByParse()
+	return ParseTimeoutMs(params, defaultTimeout.Milliseconds())
+}
+
 func GetEmbdType(dtype schemapb.DataType) EmbeddingType {
 	switch dtype {
 	case schemapb.DataType_FloatVector:
@@ -284,17 +318,17 @@ func IsEnable(conf map[string]string) bool {
 
 type Response any
 
-func PostRequest[T Response](req any, url string, headers map[string]string, timeoutSec int64) (*T, error) {
+func PostRequest[T Response](req any, url string, headers map[string]string, timeoutMs int64) (*T, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
 
-	if timeoutSec <= 0 {
-		timeoutSec = 30
+	if timeoutMs <= 0 {
+		timeoutMs = 30000
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
 	body, err := retrySend(ctx, data, http.MethodPost, url, headers, 3)

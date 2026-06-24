@@ -493,16 +493,21 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info, bool is_replace) {
         info.field_id,
         id_);
     auto& field_meta = schema_->operator[](field_id);
-    LoadResourceRequest request =
-        milvus::index::IndexFactory::GetInstance().VecIndexLoadResource(
-            field_meta.get_data_type(),
-            info.element_type,
-            info.index_engine_version,
-            info.index_size,
-            info.index_params,
-            info.enable_mmap,
-            info.num_rows,
-            info.dim);
+    LoadResourceRequest request{};
+    if (info.load_resource_request.has_value()) {
+        request = *info.load_resource_request;
+    } else {
+        request =
+            milvus::index::IndexFactory::GetInstance().VecIndexLoadResource(
+                field_meta.get_data_type(),
+                info.element_type,
+                info.index_engine_version,
+                info.index_size,
+                info.index_params,
+                info.enable_mmap,
+                info.num_rows,
+                info.dim);
+    }
 
     // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff + ApplyLoadDiff,
     // not here. This avoids unsafe ManualEvictCache on column groups.
@@ -600,14 +605,19 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
             {field_id, std::move(info.cache_index)});
     }
 
-    LoadResourceRequest request =
-        milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-            field_meta.get_data_type(),
-            info.index_engine_version,
-            info.index_size,
-            info.index_params,
-            info.enable_mmap,
-            num_rows_.value_or(0));
+    LoadResourceRequest request{};
+    if (info.load_resource_request.has_value()) {
+        request = *info.load_resource_request;
+    } else {
+        request =
+            milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+                field_meta.get_data_type(),
+                info.index_engine_version,
+                info.index_size,
+                info.index_params,
+                info.enable_mmap,
+                num_rows_.value_or(0));
+    }
 
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
@@ -1387,37 +1397,7 @@ ChunkedSegmentSealedImpl::ApplyFieldValidData(
         return;
     }
 
-    auto data_type = schema_->operator[](field_id).get_data_type();
-    if (ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
-        auto pw = column->Span(op_ctx, chunk_id);
-        auto span = pw.get();
-        const bool* valid_data = span.valid_data();
-        if (valid_data == nullptr) {
-            return;
-        }
-        valid_data += offset;
-        for (int64_t i = 0; i < size; ++i) {
-            if (!valid_data[i]) {
-                valid_result[i] = false;
-            }
-        }
-        return;
-    }
-
-    auto row_offset = column->GetNumRowsUntilChunk(chunk_id) + offset;
-    std::vector<int64_t> offsets(size);
-    for (int64_t i = 0; i < size; ++i) {
-        offsets[i] = row_offset + i;
-    }
-    column->BulkIsValid(
-        op_ctx,
-        [&valid_result](bool is_valid, size_t i) {
-            if (!is_valid) {
-                valid_result[i] = false;
-            }
-        },
-        offsets.data(),
-        size);
+    column->ApplyValidDataInChunk(op_ctx, chunk_id, offset, size, valid_result);
 }
 
 void
@@ -3064,11 +3044,6 @@ ReadTextLobBatch(
     return cache.ReadBatch(lob_base_path, fs, *properties, encoded_refs);
 }
 
-static milvus_storage::lob_column::EncodedRef
-MakeTextLobEncodedRef(const void* data, size_t size) {
-    return {static_cast<const uint8_t*>(data), size};
-}
-
 void
 ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
     milvus::OpContext* op_ctx,
@@ -3219,7 +3194,6 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
                     bool is_valid;
                     size_t text_index;
                 };
-                constexpr size_t kTextLobIndexBuildBatchSize = 1024;
                 std::vector<TextIndexEntry> entries;
                 std::vector<milvus_storage::lob_column::EncodedRef>
                     encoded_refs;
@@ -5582,7 +5556,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
             .get_prefer_field_data_when_index_has_raw_data();
 
     auto load_info_snapshot = std::atomic_load(&segment_load_info_);
-    std::map<FieldId, LoadFieldDataInfo> field_data_to_load;
+    std::vector<std::pair<FieldId, LoadFieldDataInfo>> field_data_to_load;
     for (auto& [field_ids, field_binlog] : field_binlog_to_load) {
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
@@ -5671,6 +5645,11 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
             total_entries += binlog.entries_num();
         }
         field_binlog_info.row_count = total_entries;
+        field_binlog_info.child_field_ids.resize(field_ids.size());
+        std::transform(field_ids.begin(),
+                       field_ids.end(),
+                       field_binlog_info.child_field_ids.begin(),
+                       [](FieldId field_id) { return field_id.get(); });
 
         auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
         auto global_use_mmap = is_vector
@@ -5687,7 +5666,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;
 
-        field_data_to_load[FieldId(group_id)] = load_field_data_info;
+        field_data_to_load.emplace_back(group_id, load_field_data_info);
     }
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);

@@ -70,7 +70,7 @@ ExecPlanNodeVisitor::ExecuteTask(
                 AssertInfo(first_column,
                            "first column must be a column vector");
                 if (first_column->IsBitmap()) {
-                    if (query_context->get_active_element_count() > 0) {
+                    if (query_context->bitset_is_element_level()) {
                         Assert(processed_num ==
                                query_context->get_active_element_count());
                     } else {

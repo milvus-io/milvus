@@ -37,7 +37,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -55,7 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
@@ -157,14 +156,14 @@ func waitForGrpcReady(opt *WaitOption) {
 	select {
 	case err := <-ch:
 		if err != nil {
-			log.Error("grpc service not ready",
-				zap.Error(err),
-				zap.Any("option", opt))
+			mlog.Error(context.TODO(), "grpc service not ready",
+				mlog.Err(err),
+				mlog.Any("option", opt))
 			panic(err)
 		}
 	case <-timer.C:
-		log.Error("grpc service not ready",
-			zap.Any("option", opt))
+		mlog.Error(context.TODO(), "grpc service not ready",
+			mlog.Any("option", opt))
 		panic("grpc service not ready")
 	}
 }
@@ -560,6 +559,12 @@ func Test_NewServer(t *testing.T) {
 	t.Run("CreateRole", func(t *testing.T) {
 		mockProxy.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.CreateRole(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("AlterRole", func(t *testing.T) {
+		mockProxy.EXPECT().AlterRole(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.AlterRole(ctx, nil)
 		assert.NoError(t, err)
 	})
 

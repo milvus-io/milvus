@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -36,7 +36,7 @@ func TestWALLifetime(t *testing.T) {
 			return l, nil
 		})
 
-	wlt := newWALLifetime(opener, channel, log.With())
+	wlt := newWALLifetime(opener, channel, mlog.With())
 	assert.Nil(t, wlt.GetWAL())
 
 	// Test open.

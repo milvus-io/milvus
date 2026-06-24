@@ -22,6 +22,7 @@ import (
 
 type functionConfig struct {
 	BatchFactor                   ParamItem  `refreshable:"true"`
+	ModelRequestTimeout           ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
 	RerankModelProviders          ParamGroup `refreshable:"true"`
 	LocalResourcePath             ParamItem  `refreshable:"true"`
@@ -38,6 +39,15 @@ func (p *functionConfig) init(base *BaseTable) {
 		DefaultValue: "5",
 	}
 	p.BatchFactor.Init(base.mgr)
+
+	p.ModelRequestTimeout = ParamItem{
+		Key:          "function.model.requestTimeout",
+		Version:      "2.6.12",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.",
+	}
+	p.ModelRequestTimeout.Init(base.mgr)
 
 	p.TextEmbeddingProviders = ParamGroup{
 		KeyPrefix: "function.textEmbedding.providers.",

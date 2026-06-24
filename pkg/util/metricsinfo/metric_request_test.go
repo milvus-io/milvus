@@ -12,15 +12,15 @@
 package metricsinfo
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -76,8 +76,8 @@ func Test_ConstructRequestByMetricType(t *testing.T) {
 		got, err := ConstructRequestByMetricType(test.metricType)
 		assert.Equal(t, test.errIsNil, err == nil)
 		if test.errIsNil {
-			log.Info("TestConstructRequestByMetricType",
-				zap.String("request", got.Request))
+			mlog.Info(context.TODO(), "TestConstructRequestByMetricType",
+				mlog.String("request", got.Request))
 		}
 	}
 }

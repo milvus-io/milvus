@@ -37,6 +37,10 @@ type RBACChecker interface {
 	// if the role already exists, it will return errRoleAlreadyExists.
 	CheckIfCreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) error
 
+	// CheckIfAlterRole checks if the role can be altered.
+	// if the role not exists, it will return errRoleNotExists.
+	CheckIfAlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) error
+
 	// CheckIfDropRole checks if the role can be dropped.
 	// if the role not exists, it will return errRoleNotExists.
 	CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error

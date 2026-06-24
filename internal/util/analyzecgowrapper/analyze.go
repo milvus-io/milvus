@@ -29,11 +29,10 @@ import (
 	"runtime"
 	"unsafe"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 )
 
@@ -45,9 +44,9 @@ type CodecAnalyze interface {
 func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecAnalyze, error) {
 	analyzeInfoBlob, err := proto.Marshal(analyzeInfo)
 	if err != nil {
-		log.Ctx(ctx).Warn("marshal analyzeInfo failed",
-			zap.Int64("buildID", analyzeInfo.GetBuildID()),
-			zap.Error(err))
+		mlog.Warn(ctx, "marshal analyzeInfo failed",
+			mlog.FieldBuildID(analyzeInfo.GetBuildID()),
+			mlog.Err(err))
 		return nil, err
 	}
 	var analyzePtr C.CAnalyze
@@ -63,7 +62,7 @@ func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecA
 
 	runtime.SetFinalizer(analyze, func(ca *CgoAnalyze) {
 		if ca != nil && !ca.close {
-			log.Error("there is leakage in analyze object, please check.")
+			mlog.Error(ctx, "there is leakage in analyze object, please check.")
 		}
 	})
 

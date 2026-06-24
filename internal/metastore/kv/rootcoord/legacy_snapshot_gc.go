@@ -7,10 +7,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -40,11 +39,10 @@ func StartLegacySnapshotGC(ctx context.Context, metaKV kv.MetaKv) {
 }
 
 func runLegacySnapshotGC(ctx context.Context, metaKV kv.MetaKv) {
-	logger := log.Ctx(ctx)
-	logger.Info("legacy snapshot GC started",
-		zap.String("prefix", SnapshotPrefix+"/"),
-		zap.Int("batchSize", legacyGCBatchSize),
-		zap.Duration("interval", legacyGCInterval))
+	mlog.Info(ctx, "legacy snapshot GC started",
+		mlog.String("prefix", SnapshotPrefix+"/"),
+		mlog.Int("batchSize", legacyGCBatchSize),
+		mlog.Duration("interval", legacyGCInterval))
 
 	ticker := time.NewTicker(legacyGCInterval)
 	defer ticker.Stop()
@@ -55,29 +53,29 @@ func runLegacySnapshotGC(ctx context.Context, metaKV kv.MetaKv) {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("legacy snapshot GC stopped (context canceled)",
-				zap.Int("totalDeleted", totalDeleted),
-				zap.Duration("totalElapsed", time.Since(startTime)))
+			mlog.Info(ctx, "legacy snapshot GC stopped (context canceled)",
+				mlog.Int("totalDeleted", totalDeleted),
+				mlog.Duration("totalElapsed", time.Since(startTime)))
 			return
 		case <-ticker.C:
 			deleted, err := gcLegacySnapshotBatch(ctx, metaKV)
 			if err != nil {
-				logger.Warn("legacy snapshot GC batch error",
-					zap.Error(err),
-					zap.Int("totalDeleted", totalDeleted))
+				mlog.Warn(ctx, "legacy snapshot GC batch error",
+					mlog.Err(err),
+					mlog.Int("totalDeleted", totalDeleted))
 				continue
 			}
 			if deleted == 0 {
-				logger.Info("legacy snapshot GC complete",
-					zap.Int("totalDeleted", totalDeleted),
-					zap.Duration("totalElapsed", time.Since(startTime)))
+				mlog.Info(ctx, "legacy snapshot GC complete",
+					mlog.Int("totalDeleted", totalDeleted),
+					mlog.Duration("totalElapsed", time.Since(startTime)))
 				return
 			}
 			totalDeleted += deleted
-			logger.Info("legacy snapshot GC batch done",
-				zap.Int("deleted", deleted),
-				zap.Int("totalDeleted", totalDeleted),
-				zap.Duration("elapsed", time.Since(startTime)))
+			mlog.Info(ctx, "legacy snapshot GC batch done",
+				mlog.Int("deleted", deleted),
+				mlog.Int("totalDeleted", totalDeleted),
+				mlog.Duration("elapsed", time.Since(startTime)))
 		}
 	}
 }
@@ -116,8 +114,8 @@ func gcLegacySnapshotBatch(ctx context.Context, metaKV kv.MetaKv) (int, error) {
 	relativeKeys := make([]string, 0, len(keys))
 	for _, key := range keys {
 		if !strings.HasPrefix(key, snapshotFullPrefix) {
-			log.Warn("legacy snapshot GC: key not under expected prefix, skipping",
-				zap.String("key", key), zap.String("expectedPrefix", snapshotFullPrefix))
+			mlog.Warn(ctx, "legacy snapshot GC: key not under expected prefix, skipping",
+				mlog.String("key", key), mlog.String("expectedPrefix", snapshotFullPrefix))
 			continue
 		}
 		// Reconstruct relative key: "snapshots/" + suffix after full prefix

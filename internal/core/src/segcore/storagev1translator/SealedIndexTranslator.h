@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <cstdint>
+#include <optional>
+
 #include "cachinglayer/Translator.h"
 #include "common/resource_c.h"
 #include "index/Index.h"
@@ -77,6 +79,7 @@ class SealedIndexTranslator
         std::vector<std::string> index_files;
         std::string
             warmup_policy;  // "disable", "sync", or "async"; empty means use global config
+        std::optional<LoadResourceRequest> load_resource_request;
     };
 
     milvus::index::CreateIndexInfo index_info_;

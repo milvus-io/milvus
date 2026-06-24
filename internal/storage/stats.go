@@ -18,19 +18,18 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"maps"
 	"math"
 	"path"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -130,7 +129,7 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
 		bf, err := bloomfilter.UnmarshalJSON(*bfMessage, bfType)
 		if err != nil {
-			log.Warn("Failed to unmarshal bloom filter, use AlwaysTrueBloomFilter instead of return err", zap.Error(err))
+			mlog.Warn(context.TODO(), "Failed to unmarshal bloom filter, use AlwaysTrueBloomFilter instead of return err", mlog.Err(err))
 			bf = bloomfilter.AlwaysTrueBloomFilter
 		}
 		stats.BF = bf
@@ -184,7 +183,7 @@ func (stats *PrimaryKeyStats) Update(pk PrimaryKey) {
 		data := pk.GetValue().(string)
 		stats.BF.AddString(data)
 	default:
-		log.Warn("Update pk stats with invalid data type")
+		mlog.Warn(context.TODO(), "Update pk stats with invalid data type")
 	}
 }
 
@@ -484,7 +483,7 @@ func (m *BM25Stats) BuildIDF(tf []byte) (idf []byte) {
 		nq := m.rowsWithToken[key]
 		typeutil.SparseFloatRowSetAt(idf, idx, key, value*float32(math.Log(1+(float64(m.numRow)-float64(nq)+0.5)/(float64(nq)+0.5))))
 	}
-	return
+	return idf
 }
 
 func (m *BM25Stats) GetAvgdl() float64 {

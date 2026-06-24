@@ -1,16 +1,16 @@
 package stats
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -32,7 +32,7 @@ var (
 // It manages the insert stats of all segments, used to check if a segment has enough space to insert or should be sealed.
 // If there will be a lock contention, we can optimize it by apply lock per segment.
 type StatsManager struct {
-	log.Binder
+	mlog.Binder
 	worker                     *sealWorker
 	mu                         sync.Mutex
 	cfg                        statsConfig
@@ -518,7 +518,9 @@ func (m *StatsManager) updateConfig() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cfg != cfg {
-		m.Logger().Info("update stats manager config", zap.Any("newConfig", cfg), zap.Any("oldConfig", m.cfg))
+		m.Logger().Info(context.TODO(),
+
+			"update stats manager config", mlog.Any("newConfig", cfg), mlog.Any("oldConfig", m.cfg))
 		m.cfg = cfg
 	}
 }

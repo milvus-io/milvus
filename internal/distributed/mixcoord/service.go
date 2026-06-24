@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
@@ -38,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -50,10 +49,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Server grpc wrapper
@@ -77,7 +76,7 @@ type Server struct {
 }
 
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
-	ctx1, cancel := context.WithCancel(ctx)
+	ctx1, cancel := context.WithCancel(ctx) //nolint:gosec
 	s := &Server{
 		ctx:         ctx1,
 		cancel:      cancel,
@@ -95,16 +94,15 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func (s *Server) Prepare() error {
-	log := log.Ctx(s.ctx)
 	listener, err := netutil.NewListener(
 		netutil.OptIP(paramtable.Get().RootCoordGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().RootCoordGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		log.Warn("MixCoord fail to create net listener", zap.Error(err))
+		mlog.Warn(s.ctx, "MixCoord fail to create net listener", mlog.Err(err))
 		return err
 	}
-	log.Info("MixCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	mlog.Info(s.ctx, "MixCoord listen on", mlog.String("address", listener.Addr().String()), mlog.Int("port", listener.Port()))
 	s.listener = listener
 	return nil
 }
@@ -114,12 +112,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Ctx(s.ctx).Info("MixCoord init done ...")
+	mlog.Info(s.ctx, "MixCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Ctx(s.ctx).Info("MixCoord start done ...")
+	mlog.Info(s.ctx, "MixCoord start done ...")
 	return nil
 }
 
@@ -128,8 +126,8 @@ var getTiKVClient = tikv.GetTiKVClient
 func (s *Server) init() error {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
-	log := log.Ctx(s.ctx)
-	log.Info("init params done..")
+
+	mlog.Info(s.ctx, "init params done..")
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -144,36 +142,36 @@ func (s *Server) init() error {
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
 		etcdConfig.ClientOptions()...)
 	if err != nil {
-		log.Warn("MixCoord connect to etcd failed", zap.Error(err))
+		mlog.Warn(s.ctx, "MixCoord connect to etcd failed", mlog.Err(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.mixCoord.SetEtcdClient(s.etcdCli)
 	s.mixCoord.SetAddress(s.listener.Address())
 	s.mixCoord.SetMixCoordClient(s.mixCoordClient)
-	log.Info("etcd connect done ...")
+	mlog.Info(s.ctx, "etcd connect done ...")
 
 	if params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
-		log.Info("Connecting to tikv metadata storage.")
+		mlog.Info(s.ctx, "Connecting to tikv metadata storage.")
 		s.tikvCli, err = getTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
-			log.Warn("MixCoord failed to connect to tikv", zap.Error(err))
+			mlog.Warn(s.ctx, "MixCoord failed to connect to tikv", mlog.Err(err))
 			return err
 		}
 		s.mixCoord.SetTiKVClient(s.tikvCli)
-		log.Info("Connected to tikv. Using tikv as metadata storage.")
+		mlog.Info(s.ctx, "Connected to tikv. Using tikv as metadata storage.")
 	}
 
 	if err := s.mixCoord.Init(); err != nil {
 		return err
 	}
-	log.Info("MixCoord init done ...")
+	mlog.Info(s.ctx, "MixCoord init done ...")
 
 	err = s.startGrpc()
 	if err != nil {
 		return err
 	}
-	log.Info("grpc init done ...")
+	mlog.Info(s.ctx, "grpc init done ...")
 	return nil
 }
 
@@ -197,8 +195,8 @@ func (s *Server) startGrpcLoop() {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-	log := log.Ctx(s.ctx)
-	log.Info("start grpc ", zap.Int("port", s.listener.Port()))
+
+	mlog.Info(s.ctx, "start grpc ", mlog.Int("port", s.listener.Port()))
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
@@ -209,7 +207,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			logutil.UnaryTraceLoggerInterceptor,
+			mlog.UnaryServerInterceptor(typeutil.MixCoordRole),
 			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
@@ -220,7 +218,7 @@ func (s *Server) startGrpcLoop() {
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			logutil.StreamTraceLoggerInterceptor,
+			mlog.StreamServerInterceptor(typeutil.MixCoordRole),
 			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
@@ -246,15 +244,14 @@ func (s *Server) startGrpcLoop() {
 }
 
 func (s *Server) start() error {
-	log := log.Ctx(s.ctx)
-	log.Info("MixCoord Core start ...")
+	mlog.Info(s.ctx, "MixCoord Core start ...")
 	if err := s.mixCoord.Register(); err != nil {
-		log.Error("MixCoord registers service failed", zap.Error(err))
+		mlog.Error(s.ctx, "MixCoord registers service failed", mlog.Err(err))
 		return err
 	}
 
 	if err := s.mixCoord.Start(); err != nil {
-		log.Error("MixCoord start service failed", zap.Error(err))
+		mlog.Error(s.ctx, "MixCoord start service failed", mlog.Err(err))
 		return err
 	}
 
@@ -262,13 +259,13 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() (err error) {
-	logger := log.Ctx(s.ctx)
+	logger := mlog.With()
 	if s.listener != nil {
-		logger = logger.With(zap.String("address", s.listener.Address()))
+		logger = logger.With(mlog.String("address", s.listener.Address()))
 	}
-	logger.Info("MixCoord stopping")
+	logger.Info(s.ctx, "MixCoord stopping")
 	defer func() {
-		logger.Info("MixCoord stopped", zap.Error(err))
+		logger.Info(s.ctx, "MixCoord stopped", mlog.Err(err))
 	}()
 
 	if s.etcdCli != nil {
@@ -279,9 +276,9 @@ func (s *Server) Stop() (err error) {
 	}
 
 	if s.mixCoord != nil {
-		log.Info("graceful stop rootCoord")
+		mlog.Info(s.ctx, "graceful stop rootCoord")
 		s.mixCoord.GracefulStop()
-		log.Info("graceful stop rootCoord done")
+		mlog.Info(s.ctx, "graceful stop rootCoord done")
 	}
 
 	if s.grpcServer != nil {
@@ -290,9 +287,9 @@ func (s *Server) Stop() (err error) {
 	s.grpcWG.Wait()
 
 	if s.mixCoord != nil {
-		logger.Info("internal server[rootCoord] start to stop")
+		logger.Info(s.ctx, "internal server[rootCoord] start to stop")
 		if err := s.mixCoord.Stop(); err != nil {
-			log.Error("Failed to close rootCoord", zap.Error(err))
+			mlog.Error(s.ctx, "Failed to close rootCoord", mlog.Err(err))
 		}
 	}
 
@@ -505,6 +502,10 @@ func (s *Server) ListCredUsers(ctx context.Context, request *milvuspb.ListCredUs
 
 func (s *Server) CreateRole(ctx context.Context, request *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	return s.mixCoord.CreateRole(ctx, request)
+}
+
+func (s *Server) AlterRole(ctx context.Context, request *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AlterRole(ctx, request)
 }
 
 func (s *Server) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {

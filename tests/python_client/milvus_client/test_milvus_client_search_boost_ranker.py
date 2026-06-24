@@ -1,15 +1,11 @@
-import pytest
-from pymilvus import (
-    DataType,
-    Function, FunctionType, FunctionScore
-)
+import math
 
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from pymilvus import DataType, Function, FunctionScore, FunctionType
 
 default_nb = ct.default_nb
 default_nq = ct.default_nq
@@ -56,9 +52,7 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
 
         # Create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=self.vector_field_name,
-                               metric_type="COSINE",
-                               index_type="AUTOINDEX")
+        index_params.add_index(field_name=self.vector_field_name, metric_type="COSINE", index_type="AUTOINDEX")
         self.create_index(client, self.collection_name, index_params=index_params)
 
         # Load collection
@@ -88,6 +82,79 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
             functions = [functions]
         return FunctionScore(functions=functions, params=params)
 
+    def _prepare_deterministic_collection(self, client, metric_type="COSINE"):
+        collection_name = "TestSearchBoostRankerCorrectness" + cf.gen_unique_str("_")
+        dim = 2
+        rows = [
+            {
+                self.pk_field_name: 1,
+                self.vector_field_name: [1.0, 0.0],
+                self.int64_field_name: 1,
+                self.float_field_name: 0.1,
+                self.varchar_field_name: "odd",
+            },
+            {
+                self.pk_field_name: 2,
+                self.vector_field_name: [0.8, 0.6],
+                self.int64_field_name: 2,
+                self.float_field_name: 0.2,
+                self.varchar_field_name: "even",
+            },
+            {
+                self.pk_field_name: 3,
+                self.vector_field_name: [0.6, 0.8],
+                self.int64_field_name: 3,
+                self.float_field_name: 0.3,
+                self.varchar_field_name: "odd",
+            },
+            {
+                self.pk_field_name: 4,
+                self.vector_field_name: [0.0, 1.0],
+                self.int64_field_name: 4,
+                self.float_field_name: 0.4,
+                self.varchar_field_name: "even",
+            },
+        ]
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(self.pk_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(self.vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(self.int64_field_name, DataType.INT64)
+        schema.add_field(self.float_field_name, DataType.FLOAT)
+        schema.add_field(self.varchar_field_name, DataType.VARCHAR, max_length=256)
+
+        self.create_collection(client, collection_name, schema=schema)
+        self.insert(client, collection_name, data=rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=self.vector_field_name, metric_type=metric_type, index_type="FLAT", params={})
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+        return collection_name, dim
+
+    def _search_boost_correctness(self, client, collection_name, ranker):
+        res, _ = self.search(
+            client,
+            collection_name,
+            [[1.0, 0.0]],
+            anns_field=self.vector_field_name,
+            search_params={},
+            limit=4,
+            ranker=ranker,
+            output_fields=[self.pk_field_name],
+        )
+        hits = res[0]
+        return [hit[self.pk_field_name] for hit in hits], [hit["distance"] for hit in hits]
+
+    def _assert_boost_scores(self, actual_ids, actual_scores, expected_scores):
+        expected_ids = [pk for pk, _ in sorted(expected_scores.items(), key=lambda item: (-item[1], item[0]))]
+        assert actual_ids == expected_ids
+        for pk, score in zip(actual_ids, actual_scores):
+            assert math.isclose(score, expected_scores[pk], rel_tol=1e-5, abs_tol=1e-5), (
+                f"expected score for pk {pk} to be {expected_scores[pk]}, got {score}"
+            )
+
     # ==================== Positive Tests ====================
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -103,15 +170,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -128,15 +199,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -149,22 +224,24 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         """
         client = self._client()
         vectors = cf.gen_vectors(default_nq, self.dim)
-        boost_fn1 = self._make_boost_function(
-            name="boost1", weight="2.0", filter_expr=f"{self.int64_field_name} > 0")
-        boost_fn2 = self._make_boost_function(
-            name="boost2", weight="0.5", filter_expr=f"{self.int64_field_name} <= 0")
+        boost_fn1 = self._make_boost_function(name="boost1", weight="2.0", filter_expr=f"{self.int64_field_name} > 0")
+        boost_fn2 = self._make_boost_function(name="boost2", weight="0.5", filter_expr=f"{self.int64_field_name} <= 0")
         fs = self._make_function_score([boost_fn1, boost_fn2])
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -181,15 +258,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn, params={"boost_mode": "sum"})
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -206,15 +287,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn, params={"boost_mode": "multiply"})
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -227,22 +312,24 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         """
         client = self._client()
         vectors = cf.gen_vectors(default_nq, self.dim)
-        boost_fn1 = self._make_boost_function(
-            name="boost1", weight="1.5", filter_expr=f"{self.int64_field_name} > 0")
-        boost_fn2 = self._make_boost_function(
-            name="boost2", weight="0.8", filter_expr=f"{self.float_field_name} > 0")
+        boost_fn1 = self._make_boost_function(name="boost1", weight="1.5", filter_expr=f"{self.int64_field_name} > 0")
+        boost_fn2 = self._make_boost_function(name="boost2", weight="0.8", filter_expr=f"{self.float_field_name} > 0")
         fs = self._make_function_score([boost_fn1, boost_fn2], params={"function_mode": "sum"})
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -260,16 +347,20 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
 
         search_filter = f"{self.int64_field_name} >= 0"
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             filter=search_filter,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -287,16 +378,20 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
 
         output_fields = [self.int64_field_name, self.float_field_name, self.varchar_field_name]
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             output_fields=output_fields,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
         # Verify output fields are present in the entity sub-dict
@@ -320,15 +415,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -344,7 +443,9 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
 
         # Search without ranker
         res_no_ranker, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
         )
@@ -353,7 +454,9 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         boost_fn = self._make_boost_function(weight="10.0")
         fs = self._make_function_score(boost_fn, params={"boost_mode": "multiply"})
         res_with_ranker, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
@@ -362,8 +465,251 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         # Verify scores are different (boost should affect scores)
         scores_no_ranker = [hit["distance"] for hit in res_no_ranker[0]]
         scores_with_ranker = [hit["distance"] for hit in res_with_ranker[0]]
-        assert scores_no_ranker != scores_with_ranker, \
+        assert scores_no_ranker != scores_with_ranker, (
             "Boost ranker should change scores compared to search without ranker"
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_boost_ranker_multiply_correctness(self):
+        """
+        target: verify boost_mode=multiply applies only matching filter rows and sorts by boosted score
+        method: use deterministic vectors and scalar filter with known COSINE base scores
+        expected: returned IDs and distances match base_score * boost_weight for matched rows
+        """
+        client = self._client()
+        collection_name, _ = self._prepare_deterministic_collection(client)
+        try:
+            boost_fn = self._make_boost_function(weight="2.0", filter_expr=f"{self.int64_field_name} in [2, 4]")
+            fs = self._make_function_score(boost_fn, params={"boost_mode": "multiply"})
+
+            actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)
+            self._assert_boost_scores(
+                actual_ids,
+                actual_scores,
+                {
+                    1: 1.0,
+                    2: 1.6,
+                    3: 0.6,
+                    4: 0.0,
+                },
+            )
+        finally:
+            self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_boost_ranker_sum_correctness(self):
+        """
+        target: verify boost_mode=sum adds boost scores only to rows matching the scorer filter
+        method: use deterministic vectors and scalar filter with known COSINE base scores
+        expected: returned IDs and distances match base_score + boost_weight for matched rows
+        """
+        client = self._client()
+        collection_name, _ = self._prepare_deterministic_collection(client)
+        try:
+            boost_fn = self._make_boost_function(weight="0.5", filter_expr=f"{self.int64_field_name} in [2, 4]")
+            fs = self._make_function_score(boost_fn, params={"boost_mode": "sum"})
+
+            actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)
+            self._assert_boost_scores(
+                actual_ids,
+                actual_scores,
+                {
+                    1: 1.0,
+                    2: 1.3,
+                    3: 0.6,
+                    4: 0.5,
+                },
+            )
+        finally:
+            self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_boost_ranker_all_boost_functions_miss_keep_base_scores(self):
+        """
+        target: verify null boost scores are skipped when all boost function filters miss
+        method: use two boost functions whose filters match no row in a deterministic collection
+        expected: every row keeps its original base score and ordering
+        """
+        client = self._client()
+        collection_name, _ = self._prepare_deterministic_collection(client)
+        try:
+            boost_fn1 = self._make_boost_function(
+                name="boost_none_int", weight="2.0", filter_expr=f"{self.int64_field_name} > 100"
+            )
+            boost_fn2 = self._make_boost_function(
+                name="boost_none_string", weight="3.0", filter_expr=f"{self.varchar_field_name} == 'missing'"
+            )
+            fs = self._make_function_score([boost_fn1, boost_fn2], params={"function_mode": "sum", "boost_mode": "sum"})
+
+            actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)
+            self._assert_boost_scores(
+                actual_ids,
+                actual_scores,
+                {
+                    1: 1.0,
+                    2: 0.8,
+                    3: 0.6,
+                    4: 0.0,
+                },
+            )
+        finally:
+            self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_boost_ranker_function_mode_sum_correctness(self):
+        """
+        target: verify multiple boost functions combine with function_mode=sum before final boost
+        method: use overlapping deterministic filters and boost_mode=sum
+        expected: rows receive the sum of matching function scores and are sorted by final score
+        """
+        client = self._client()
+        collection_name, _ = self._prepare_deterministic_collection(client)
+        try:
+            boost_fn1 = self._make_boost_function(
+                name="boost_even", weight="0.5", filter_expr=f"{self.int64_field_name} in [2, 4]"
+            )
+            boost_fn2 = self._make_boost_function(
+                name="boost_high", weight="0.25", filter_expr=f"{self.int64_field_name} >= 3"
+            )
+            fs = self._make_function_score([boost_fn1, boost_fn2], params={"function_mode": "sum", "boost_mode": "sum"})
+
+            actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)
+            self._assert_boost_scores(
+                actual_ids,
+                actual_scores,
+                {
+                    1: 1.0,
+                    2: 1.3,
+                    3: 0.85,
+                    4: 0.75,
+                },
+            )
+        finally:
+            self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_boost_ranker_function_mode_multiply_correctness(self):
+        """
+        target: verify multiple boost functions combine with function_mode=multiply before final boost
+        method: use overlapping deterministic filters and boost_mode=multiply
+        expected: rows matching one or more functions use the multiplied function score; unmatched rows keep base score
+        """
+        client = self._client()
+        collection_name, _ = self._prepare_deterministic_collection(client)
+        try:
+            boost_fn1 = self._make_boost_function(
+                name="boost_even", weight="2.0", filter_expr=f"{self.int64_field_name} in [2, 4]"
+            )
+            boost_fn2 = self._make_boost_function(
+                name="boost_high", weight="3.0", filter_expr=f"{self.int64_field_name} >= 3"
+            )
+            fs = self._make_function_score(
+                [boost_fn1, boost_fn2], params={"function_mode": "multiply", "boost_mode": "multiply"}
+            )
+
+            actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)
+            self._assert_boost_scores(
+                actual_ids,
+                actual_scores,
+                {
+                    1: 1.0,
+                    2: 1.6,
+                    3: 1.8,
+                    4: 0.0,
+                },
+            )
+        finally:
+            self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_boost_ranker_function_multiply_boost_sum_correctness(self):
+        """
+        target: verify function_mode=multiply and boost_mode=sum produce exact boosted scores
+        method: use overlapping deterministic filters so one row matches both functions and one row matches none
+        expected: matching function scores are multiplied, then added to the base score; unmatched rows keep base score
+        """
+        client = self._client()
+        collection_name, _ = self._prepare_deterministic_collection(client)
+        try:
+            boost_fn1 = self._make_boost_function(
+                name="boost_even", weight="2.0", filter_expr=f"{self.int64_field_name} in [2, 4]"
+            )
+            boost_fn2 = self._make_boost_function(
+                name="boost_high", weight="3.0", filter_expr=f"{self.int64_field_name} >= 3"
+            )
+            fs = self._make_function_score(
+                [boost_fn1, boost_fn2], params={"function_mode": "multiply", "boost_mode": "sum"}
+            )
+
+            actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)
+            self._assert_boost_scores(
+                actual_ids,
+                actual_scores,
+                {
+                    1: 1.0,
+                    2: 2.8,
+                    3: 3.6,
+                    4: 6.0,
+                },
+            )
+        finally:
+            self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_boost_ranker_l2_multiply_correctness(self):
+        """
+        target: verify boost_mode=multiply can improve a deterministic L2 result
+        method: multiply row 3's L2 distance by 0.25 to move it ahead of row 2
+        expected: returned distances match boosted L2 distances and are sorted ascending
+        """
+        client = self._client()
+        collection_name, _ = self._prepare_deterministic_collection(client, metric_type="L2")
+        try:
+            boost_fn = self._make_boost_function(weight="0.25", filter_expr=f"{self.int64_field_name} == 3")
+            fs = self._make_function_score(boost_fn, params={"boost_mode": "multiply"})
+
+            actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)
+            assert actual_ids == [1, 3, 2, 4]
+            expected_scores = {
+                1: 0.0,
+                2: 0.4,
+                3: 0.2,
+                4: 2.0,
+            }
+            for pk, score in zip(actual_ids, actual_scores):
+                assert math.isclose(score, expected_scores[pk], rel_tol=1e-5, abs_tol=1e-5), (
+                    f"expected score for pk {pk} to be {expected_scores[pk]}, got {score}"
+                )
+        finally:
+            self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_boost_ranker_l2_sum_correctness(self):
+        """
+        target: verify boost_mode=sum applies to deterministic L2 internal scores
+        method: add 0.7 to row 3's internal score to move it ahead of row 2
+        expected: returned distances match proxy-restored scores and are sorted ascending
+        """
+        client = self._client()
+        collection_name, _ = self._prepare_deterministic_collection(client, metric_type="L2")
+        try:
+            boost_fn = self._make_boost_function(weight="0.7", filter_expr=f"{self.int64_field_name} == 3")
+            fs = self._make_function_score(boost_fn, params={"boost_mode": "sum"})
+
+            actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)
+            assert actual_ids == [1, 3, 2, 4]
+            expected_scores = {
+                1: 0.0,
+                2: 0.4,
+                3: 0.1,
+                4: 2.0,
+            }
+            for pk, score in zip(actual_ids, actual_scores):
+                assert math.isclose(score, expected_scores[pk], rel_tol=1e-5, abs_tol=1e-5), (
+                    f"expected score for pk {pk} to be {expected_scores[pk]}, got {score}"
+                )
+        finally:
+            self.drop_collection(client, collection_name)
 
     # ==================== Negative Tests ====================
 
@@ -380,13 +726,14 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "invalid parameter"}
+            check_items={"err_code": 1100, "err_msg": "invalid parameter"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -408,13 +755,14 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "must set weight params"}
+            check_items={"err_code": 1100, "err_msg": "must set weight params"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -430,14 +778,15 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             group_by_field=self.int64_field_name,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "segment scorer with group_by"}
+            check_items={"err_code": 1100, "err_msg": "segment scorer with group_by"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -453,11 +802,12 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "parse expr failed"}
+            check_items={"err_code": 1100, "err_msg": "parse expr failed"},
         )

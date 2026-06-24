@@ -15,23 +15,32 @@
 // limitations under the License.
 
 #pragma once
-#include <bsoncxx/builder/basic/document.hpp>
-#include <bsoncxx/types/bson_value/value.hpp>
+#include <bson/bson.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <iostream>
 #include <map>
 #include <optional>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "bsoncxx/document/view.hpp"
 #include "common/protobuf_utils.h"
 #include "index/json_stats/utils.h"
 
 namespace milvus::index {
+
+// An owned scalar (or pre-serialized array) value held by a DomNode. Replaces
+// the former bsoncxx::types::bson_value::value: we keep the raw payload here and
+// append it to a libbson document at conversion time.
+struct DomScalar {
+    JSONType type{JSONType::NONE};
+    bool b{false};
+    int32_t i32{0};
+    int64_t i64{0};
+    double d{0.0};
+    std::string str;                 // STRING payload
+    std::vector<uint8_t> arr_bytes;  // ARRAY payload: raw BSON array bytes
+};
 
 class DomNode {
  public:
@@ -39,13 +48,43 @@ class DomNode {
     Type type;
 
     std::map<std::string, DomNode> document_children;
-    std::optional<bsoncxx::types::bson_value::value> bson_value;
+    std::optional<DomScalar> value;
 
     DomNode(Type t = Type::DOCUMENT) : type(t) {
     }
-    DomNode(bsoncxx::types::bson_value::value v)
-        : type(Type::VALUE), bson_value(std::move(v)) {
+    DomNode(DomScalar v) : type(Type::VALUE), value(std::move(v)) {
     }
+};
+
+// RAII owner of a libbson document buffer, replacing the former
+// bsoncxx::builder::basic::document. Exposes the serialized BSON bytes.
+class BsonDocument {
+ public:
+    BsonDocument() {
+        bson_init(&bson_);
+    }
+    ~BsonDocument() {
+        bson_destroy(&bson_);
+    }
+    BsonDocument(const BsonDocument&) = delete;
+    BsonDocument&
+    operator=(const BsonDocument&) = delete;
+
+    bson_t*
+    get() {
+        return &bson_;
+    }
+    const uint8_t*
+    data() const {
+        return bson_get_data(&bson_);
+    }
+    uint32_t
+    length() const {
+        return bson_.len;
+    }
+
+ private:
+    bson_t bson_;
 };
 
 // Parse a JSON array string and return a self-owned buffer containing the
@@ -66,8 +105,7 @@ class BsonBuilder {
     CreateValueNode(const std::string& value, JSONType type);
 
     static void
-    ConvertDomToBson(const DomNode& node,
-                     bsoncxx::builder::basic::document& builder);
+    ConvertDomToBson(const DomNode& node, bson_t* builder);
 
     // helper function to recursively extract keys with offset
     static void
@@ -76,15 +114,6 @@ class BsonBuilder {
         const uint8_t* current_base_ptr,
         const std::string& current_path,
         std::vector<std::pair<std::string, size_t>>& result);
-
-    static std::vector<std::pair<std::string, size_t>>
-    ExtractBsonKeyOffsets(const bsoncxx::document::view& view) {
-        std::vector<std::pair<std::string, size_t>> result;
-        const uint8_t* raw_data = view.data();
-
-        ExtractOffsetsRecursive(raw_data, raw_data, "", result);
-        return result;
-    }
 
     static std::vector<std::pair<std::string, size_t>>
     ExtractBsonKeyOffsets(const uint8_t* data, size_t size) {

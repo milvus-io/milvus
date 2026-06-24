@@ -47,7 +47,8 @@ SealedIndexTranslator::SealedIndexTranslator(
                         load_index_info->num_rows,
                         load_index_info->dim,
                         load_index_info->index_files,
-                        load_index_info->warmup_policy}),
+                        load_index_info->warmup_policy,
+                        load_index_info->load_resource_request}),
       meta_(
           load_index_info->enable_mmap
               ? milvus::cachinglayer::StorageType::DISK
@@ -93,6 +94,9 @@ SealedIndexTranslator::SealedIndexTranslator(
 
 LoadResourceRequest
 SealedIndexTranslator::EstimateLoadResource() const {
+    if (index_load_info_.load_resource_request.has_value()) {
+        return *index_load_info_.load_resource_request;
+    }
     return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
         index_load_info_.field_type,
         index_load_info_.element_type,

@@ -3660,6 +3660,47 @@ MakeNullableElementSearchWithNullAndEmptyRowsFixture() {
     return f;
 }
 
+inline NullableElementSearchFixture
+MakeNullableElementSearchWithOnlyNullRowsFixture() {
+    NullableElementSearchFixture f;
+    f.schema = std::make_shared<Schema>();
+    f.vec_fid = f.schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                   DataType::VECTOR_FLOAT,
+                                                   kNullableElemDim,
+                                                   knowhere::metric::L2,
+                                                   /*nullable=*/true);
+    f.int64_fid = f.schema->AddDebugField("id", DataType::INT64);
+    f.schema->set_primary_field_id(f.int64_fid);
+
+    f.raw_data =
+        DataGen(f.schema, kNullableElemN, 42, 0, 1, kNullableElemArrayLen);
+
+    for (int i = 0; i < f.raw_data.raw_->fields_data_size(); ++i) {
+        auto* fd = f.raw_data.raw_->mutable_fields_data(i);
+        if (fd->field_id() != f.vec_fid.get()) {
+            continue;
+        }
+
+        auto* vec_array = fd->mutable_vectors()->mutable_vector_array();
+        for (int row = 0; row < kNullableElemN; ++row) {
+            vec_array->mutable_data(row)
+                ->mutable_float_vector()
+                ->mutable_data()
+                ->Clear();
+        }
+
+        auto* valid_data = fd->mutable_valid_data();
+        valid_data->Clear();
+        for (int row = 0; row < kNullableElemN; ++row) {
+            valid_data->Add(false);
+        }
+        break;
+    }
+
+    f.query_data.assign(kNullableElemDim, 0.0F);
+    return f;
+}
+
 inline proto::common::PlaceholderGroup
 MakeElementLevelPlaceholder(const std::vector<float>& query_data) {
     auto raw = CreatePlaceholderGroupFromBlob<milvus::FloatVector>(
@@ -3891,6 +3932,29 @@ TEST(ElementVectorSearch, NullableSealedBruteForce_ElementBitset) {
 
     auto sr = RunNullableElementSearch(segment.get(), f);
     ASSERT_NE(sr, nullptr);
+    ExpectNullableTargetTopOne(*sr);
+}
+
+TEST(ElementVectorSearch, DirectSearchWithOnlyNullRowsReturnsEmpty) {
+    auto f = MakeNullableElementSearchWithOnlyNullRowsFixture();
+    auto segment = CreateNullableSealedSegment(f);
+
+    std::unique_ptr<SearchResult> sr;
+    ASSERT_NO_THROW(sr = RunNullableElementSearch(segment.get(), f));
+    ASSERT_NE(sr, nullptr);
+    EXPECT_TRUE(sr->element_level_);
+    EXPECT_TRUE(sr->seg_offsets_.empty());
+    EXPECT_EQ(sr->total_data_cnt_, 0);
+}
+
+TEST(ElementVectorSearch, DirectSearchMarksConvertedBitsetElementLevel) {
+    auto f = MakeNullableElementSearchFixture();
+    auto segment = CreateNullableSealedSegment(f);
+
+    std::unique_ptr<SearchResult> sr;
+    ASSERT_NO_THROW(sr = RunNullableElementSearch(segment.get(), f));
+    ASSERT_NE(sr, nullptr);
+    EXPECT_EQ(sr->total_data_cnt_, kNullableElemN * kNullableElemArrayLen);
     ExpectNullableTargetTopOne(*sr);
 }
 

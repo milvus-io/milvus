@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -70,7 +70,7 @@ func Init(opts ...optResourceInit) {
 		opt(newR)
 	}
 
-	newR.logger = log.With(log.FieldModule(typeutil.StreamingNodeRole))
+	newR.logger = mlog.With(mlog.FieldModule(typeutil.StreamingNodeRole))
 	newR.segmentStatsManager = stats.NewStatsManager()
 	newR.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 	newR.syncMgr = syncmgr.NewSyncManager(newR.chunkManager)
@@ -101,7 +101,7 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	logger               *log.MLogger
+	logger               *mlog.Logger
 	timestampAllocator   idalloc.Allocator
 	idAllocator          idalloc.Allocator
 	etcdClient           *clientv3.Client
@@ -170,7 +170,7 @@ func (r *resourceImpl) VChannelTempStorage() *vchantempstore.VChannelTempStorage
 	return r.vchannelTempStorage
 }
 
-func (r *resourceImpl) Logger() *log.MLogger {
+func (r *resourceImpl) Logger() *mlog.Logger {
 	return r.logger
 }
 

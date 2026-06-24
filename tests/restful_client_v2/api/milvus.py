@@ -1,3 +1,4 @@
+import copy
 import json
 import time
 import urllib.parse
@@ -450,13 +451,15 @@ class CollectionClient(Requests):
 
     def collection_create(self, payload, db_name="default"):
         time.sleep(1)  # wait for collection created and in case of rate limit
+        payload = copy.deepcopy(payload)
         c_name = payload.get("collectionName", None)
-        db_name = payload.get("dbName", db_name)
+        if self.db_name is not None:
+            db_name = self.db_name
+        elif db_name == "default":
+            db_name = payload.get("dbName", db_name)
         self.name_list.append((db_name, c_name))
 
         url = f"{self.endpoint}/v2/vectordb/collections/create"
-        if self.db_name is not None:
-            payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
         if not ("params" in payload and "consistencyLevel" in payload["params"]):
@@ -563,10 +566,13 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
-    def compact(self, collection_name, db_name="default"):
+    def compact(self, collection_name, db_name="default", is_clustering=False):
         """Compact collection"""
         url = f"{self.endpoint}/v2/vectordb/collections/compact"
-        payload = {"collectionName": collection_name}
+        payload = {
+            "collectionName": collection_name,
+            "isClustering": is_clustering,
+        }
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -574,10 +580,10 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
-    def get_compaction_state(self, collection_name, db_name="default"):
+    def get_compaction_state(self, job_id, db_name="default"):
         """Get compaction state"""
         url = f"{self.endpoint}/v2/vectordb/collections/get_compaction_state"
-        payload = {"collectionName": collection_name}
+        payload = {"jobID": job_id}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -913,6 +919,56 @@ class ImportJobClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
+
+    def describe_import_job(self, job_id, db_name="default"):
+        if self.db_name is not None:
+            db_name = self.db_name
+        payload = {"dbName": db_name, "jobId": job_id}
+        if db_name is None:
+            payload.pop("dbName")
+        if job_id is None:
+            payload.pop("jobId")
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/describe"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def commit_import_job(self, job_id, db_name="default"):
+        if self.db_name is not None:
+            db_name = self.db_name
+        payload = {"dbName": db_name, "jobId": job_id}
+        if db_name is None:
+            payload.pop("dbName")
+        if job_id is None:
+            payload.pop("jobId")
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/commit"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def abort_import_job(self, job_id, db_name="default"):
+        if self.db_name is not None:
+            db_name = self.db_name
+        payload = {"dbName": db_name, "jobId": job_id}
+        if db_name is None:
+            payload.pop("dbName")
+        if job_id is None:
+            payload.pop("jobId")
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/abort"
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def wait_import_job_state(self, job_id, expected_state, timeout=120, db_name="default", interval=2):
+        t0 = time.time()
+        last_rsp = self.get_import_job_progress(job_id, db_name=db_name)
+        while time.time() - t0 < timeout:
+            last_rsp = self.get_import_job_progress(job_id, db_name=db_name)
+            if last_rsp.get("code") == 0:
+                state = last_rsp.get("data", {}).get("state")
+                if state == expected_state:
+                    return last_rsp, True
+                if state in ("Completed", "Failed"):
+                    return last_rsp, False
+            time.sleep(interval)
+        return last_rsp, False
 
     def wait_import_job_completed(self, job_id):
         finished = False

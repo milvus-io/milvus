@@ -1030,6 +1030,77 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		}
 		err := task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
+		properties := common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()
+		assert.Equal(t, "false", properties[common.NamespaceShardingEnabledKey])
+		enabled, err := common.IsNamespaceShardingEnabled(task.Req.Properties...)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("keeps explicit namespace sharding setting", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     field1,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceShardingEnabledKey, Value: "true"},
+				},
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+		properties := common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()
+		assert.Equal(t, "true", properties[common.NamespaceShardingEnabledKey])
+		enabled, err := common.IsNamespaceShardingEnabled(task.Req.Properties...)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("rejects invalid namespace sharding setting", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     field1,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceShardingEnabledKey, Value: "invalid"},
+				},
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+		err := task.prepareSchema(context.TODO())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid namespace.sharding.enabled")
 	})
 
 	t.Run("invalid data type", func(t *testing.T) {
@@ -1750,9 +1821,110 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		task.Req.ShardsNum = common.DefaultShardsNum
 		err := task.Prepare(context.Background())
 		require.NoError(t, err)
-		assert.Len(t, task.body.CollectionSchema.Properties, 3)
+		assert.Len(t, task.body.CollectionSchema.Properties, 4)
 		assert.Equal(t, "100", common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()[common.MaxFieldIDKey])
-		assert.Len(t, task.Req.Properties, 2)
+		assert.Equal(t, "false", common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()[common.NamespaceShardingEnabledKey])
+		assert.Len(t, task.Req.Properties, 3)
+	})
+
+	t.Run("reject invalid namespace mode", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			Name: "foo",
+			ID:   1,
+		}, nil).Twice()
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
+			util.DefaultDBID: {1, 2},
+		}).Once()
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		ticker := newRocksMqTtSynchronizer()
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
+
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{Name: field1, DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		task := createCollectionTask{
+			Core: core,
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				ShardsNum:      common.DefaultShardsNum,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: "invalid"},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.Prepare(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid namespace.mode")
+	})
+
+	t.Run("persist valid namespace mode", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			Name: "foo",
+			ID:   1,
+		}, nil).Twice()
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
+			util.DefaultDBID: {1, 2},
+		}).Once()
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		ticker := newRocksMqTtSynchronizer()
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
+
+		schema := &schemapb.CollectionSchema{
+			Name:            collectionName,
+			EnableNamespace: true,
+			Fields: []*schemapb.FieldSchema{
+				{Name: field1, DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		task := createCollectionTask{
+			Core: core,
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				ShardsNum:      common.DefaultShardsNum,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.Prepare(context.Background())
+		require.NoError(t, err)
+		props := common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()
+		assert.Equal(t, common.NamespaceModePartition, props[common.NamespaceModeKey])
+		assert.NotContains(t, props, common.PartitionKeyIsolationKey)
+		for _, field := range task.body.CollectionSchema.GetFields() {
+			assert.NotEqual(t, common.NamespaceFieldName, field.GetName())
+		}
 	})
 }
 
@@ -1973,6 +2145,27 @@ func TestNamespaceProperty(t *testing.T) {
 
 		err := task.handleNamespaceField(ctx, schema)
 		assert.Error(t, err)
+	})
+
+	t.Run("test namespace partition mode", func(t *testing.T) {
+		schema := initSchema()
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.handleNamespaceField(ctx, schema)
+		assert.NoError(t, err)
+		assert.False(t, hasNamespaceField(schema))
+		assert.False(t, hasIsolationProperty(task.Req.Properties...))
 	})
 
 	t.Run("test namespace enabled with external collection", func(t *testing.T) {

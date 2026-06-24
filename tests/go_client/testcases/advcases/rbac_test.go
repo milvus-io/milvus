@@ -5,17 +5,17 @@ package advcases
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -70,8 +70,9 @@ func TestRbacDefault(t *testing.T) {
 	// create user & list user
 	userName := common.GenRandomString("user", 6)
 	pwd := common.GenRandomString("pwd", 6)
-	log.Info(t.Name(), zap.String("pwd", pwd))
-	err := mc.CreateUser(ctx, client.NewCreateUserOption(userName, pwd))
+	userDescription := "go client user description"
+	mlog.Info(ctx, t.Name(), mlog.String("pwd", pwd))
+	err := mc.CreateUser(ctx, client.NewCreateUserOption(userName, pwd).WithDescription(userDescription))
 	common.CheckErr(t, err, true)
 	users, err := mc.ListUsers(ctx, client.NewListUserOption())
 	common.CheckErr(t, err, true)
@@ -91,13 +92,13 @@ func TestRbacDefault(t *testing.T) {
 	// create index not permission deny
 	mcUser := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: userName, Password: pwd})
 	_, errIndex := mcUser.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.COSINE)))
-	log.Info("TestRbacDefault", zap.Error(errIndex))
+	mlog.Info(ctx, "TestRbacDefault", mlog.Err(errIndex))
 	common.CheckErr(t, errIndex, false, fmt.Sprintf("permission deny to %s in the `default` database", userName))
 
 	// grant privilege to role
 	errGrant = mc.GrantPrivilege(ctx, client.NewGrantPrivilegeOption(roleName, CollectionObjectType, "CreateIndex", AllObjectName))
 	common.CheckErr(t, errGrant, true)
-	log.Info("TestRbacDefault", zap.Error(errGrant))
+	mlog.Info(ctx, "TestRbacDefault", mlog.Err(errGrant))
 
 	// describe role
 	role, _ := mc.DescribeRole(ctx, client.NewDescribeRoleOption(roleName))
@@ -113,9 +114,11 @@ func TestRbacDefault(t *testing.T) {
 	require.ElementsMatch(t, []entity.GrantItem{expPrivilege}, role.Privileges)
 
 	// describe user
-	user, _ := mc.DescribeUser(ctx, client.NewDescribeUserOption(userName))
+	user, err := mc.DescribeUser(ctx, client.NewDescribeUserOption(userName))
 	common.CheckErr(t, err, true)
-	require.Equal(t, &entity.User{UserName: userName, Roles: []string{roleName}}, user)
+	require.Equal(t, userName, user.UserName)
+	require.ElementsMatch(t, []string{roleName}, user.Roles)
+	require.Equal(t, userDescription, user.Description)
 
 	// check privilege effect
 	require.Eventuallyf(t, func() bool {
@@ -163,7 +166,7 @@ func TestRbacDefaultV2(t *testing.T) {
 	// describe collection but permission deny
 	mcUser := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: userName, Password: pwd})
 	_, errFlush := mcUser.Flush(ctx, client.NewFlushOption(schema.CollectionName))
-	log.Info("TestRbacDefault", zap.Error(errFlush))
+	mlog.Info(ctx, "TestRbacDefault", mlog.Err(errFlush))
 	common.CheckErr(t, errFlush, false, fmt.Sprintf("permission deny to %s in the `default` database", userName))
 
 	// grant privilege to role
@@ -216,7 +219,7 @@ func TestCreateInvalidUser(t *testing.T) {
 	invalidUserNames = append(invalidUserNames, common.RootUser)
 	// create user & list user
 	for _, invalidName := range invalidUserNames {
-		log.Info("name", zap.String("name", invalidName))
+		mlog.Info(ctx, "name", mlog.String("name", invalidName))
 		err := mc.CreateUser(ctx, client.NewCreateUserOption(invalidName, "ccccccc"))
 		common.CheckErr(t, err, false,
 			"username must contain only numbers, letters and underscores",
@@ -272,18 +275,22 @@ func TestUpdatePassword(t *testing.T) {
 	err := mc.CreateUser(ctx, client.NewCreateUserOption(userName, pwd))
 	common.CheckErr(t, err, true)
 
-	err = mc.UpdatePassword(ctx, client.NewUpdatePasswordOption(userName, pwd, newPwd))
+	updatedDescription := "go client updated user description"
+	err = mc.UpdatePassword(ctx, client.NewUpdatePasswordOption(userName, pwd, newPwd).WithDescription(updatedDescription))
 	common.CheckErr(t, err, true)
 
 	mcUser := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: userName, Password: newPwd})
 	_, err = mcUser.ListCollections(ctx, client.NewListCollectionOption())
 	common.CheckErr(t, err, true)
+	user, err := mc.DescribeUser(ctx, client.NewDescribeUserOption(userName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, updatedDescription, user.Description)
 
 	// update multi times with multi language
 	oldPwd := newPwd
 	passwords := []string{"中文", "シャオミン", "샤오밍", "ಸೂರ್ಯ", "myPwd@aa.com", "φεγγάρι", "mặt trăng"}
 	for i := 0; i < len(passwords); i++ {
-		log.Info(t.Name(), zap.String("pwd", passwords[i]))
+		mlog.Info(ctx, t.Name(), mlog.String("pwd", passwords[i]))
 		err = mc.UpdatePassword(ctx, client.NewUpdatePasswordOption(userName, oldPwd, passwords[i]))
 		common.CheckErr(t, err, true)
 		oldPwd = passwords[i]
@@ -292,6 +299,9 @@ func TestUpdatePassword(t *testing.T) {
 	mcNewClient := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: userName, Password: passwords[len(passwords)-1]})
 	_, err = mcNewClient.ListCollections(ctx, client.NewListCollectionOption())
 	common.CheckErr(t, err, true)
+	user, err = mc.DescribeUser(ctx, client.NewDescribeUserOption(userName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, updatedDescription, user.Description)
 }
 
 func TestUpdatePasswordInvalid(t *testing.T) {
@@ -381,7 +391,7 @@ func TestCreateInvalidRole(t *testing.T) {
 
 	// create user & list user
 	for _, invalidName := range invalidNames {
-		log.Info("name", zap.String("name", invalidName))
+		mlog.Info(ctx, "name", mlog.String("name", invalidName))
 		err := mc.CreateRole(ctx, client.NewCreateRoleOption(invalidName))
 		common.CheckErr(t, err, false,
 			"role name can only contain numbers, letters, dollars and underscores",
@@ -452,6 +462,51 @@ func TestDropRoleBindPrivilege(t *testing.T) {
 
 	err = mc.DropRole(ctx, client.NewDropRoleOption(roleName))
 	common.CheckErr(t, err, true)
+}
+
+func TestRoleDescription(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
+	setupTest(t, ctx, mc)
+
+	// create role with description -> read back
+	roleName := common.GenRandomString("role", 6)
+	err := mc.CreateRole(ctx, client.NewCreateRoleOption(roleName).WithDescription("e2e role description"))
+	common.CheckErr(t, err, true)
+	role, err := mc.DescribeRole(ctx, client.NewDescribeRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, "e2e role description", role.Description)
+
+	// alter description -> read back
+	err = mc.AlterRole(ctx, client.NewAlterRoleOption(roleName).WithDescription("updated description"))
+	common.CheckErr(t, err, true)
+	role, err = mc.DescribeRole(ctx, client.NewDescribeRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, "updated description", role.Description)
+
+	// alter with empty description clears it
+	err = mc.AlterRole(ctx, client.NewAlterRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	role, err = mc.DescribeRole(ctx, client.NewDescribeRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	require.Empty(t, role.Description)
+
+	// description over limit is rejected on both create and alter
+	overLimit := strings.Repeat("a", 1025)
+	err = mc.CreateRole(ctx, client.NewCreateRoleOption(common.GenRandomString("role", 6)).WithDescription(overLimit))
+	common.CheckErr(t, err, false, "the length of role description must be not greater than limit")
+	err = mc.AlterRole(ctx, client.NewAlterRoleOption(roleName).WithDescription(overLimit))
+	common.CheckErr(t, err, false, "the length of role description must be not greater than limit")
+
+	// alter a not existed role
+	err = mc.AlterRole(ctx, client.NewAlterRoleOption(common.GenRandomString("role", 6)).WithDescription("desc"))
+	common.CheckErr(t, err, false, "role not exists")
+
+	// alter builtin roles is not permitted
+	for _, builtinRole := range []string{common.AdminRole, common.PublicRole} {
+		err = mc.AlterRole(ctx, client.NewAlterRoleOption(builtinRole).WithDescription("desc"))
+		common.CheckErr(t, err, false, "can't be altered")
+	}
 }
 
 func TestDescribeRole(t *testing.T) {

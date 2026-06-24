@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -170,11 +170,11 @@ func TestWALFlusher_DispatchObservesTruncateCollectionBeforeHandlingWithoutAckSy
 func newTestWALFlusher(rs recovery.RecoveryStorage) *WALFlusherImpl {
 	return &WALFlusherImpl{
 		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
-		logger:          log.With(),
+		logger:          mlog.With(),
 		RecoveryStorage: rs,
 		flusherComponents: &flusherComponents{
 			dataServices: make(map[string]*dataSyncServiceWrapper),
-			logger:       log.With(),
+			logger:       mlog.With(),
 			rs:           rs,
 		},
 	}
@@ -321,7 +321,7 @@ func TestDispatch_CommitImportMessage(t *testing.T) {
 	// Build a minimal WALFlusherImpl for dispatch testing.
 	impl := &WALFlusherImpl{
 		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
-		logger:          log.With(log.FieldComponent("test-flusher")),
+		logger:          mlog.With(mlog.FieldComponent("test-flusher")),
 		RecoveryStorage: rs,
 	}
 
@@ -375,7 +375,7 @@ func TestDispatch_CommitImportMessage_ChannelNotFoundStillCommitsVchannelNoPanic
 
 	impl := &WALFlusherImpl{
 		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
-		logger:          log.With(log.FieldComponent("test-flusher")),
+		logger:          mlog.With(mlog.FieldComponent("test-flusher")),
 		RecoveryStorage: rs,
 	}
 
@@ -420,7 +420,7 @@ func TestDispatch_CommitImportMessage_FlushUnexpectedErrorPanics(t *testing.T) {
 
 	impl := &WALFlusherImpl{
 		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
-		logger:          log.With(log.FieldComponent("test-flusher")),
+		logger:          mlog.With(mlog.FieldComponent("test-flusher")),
 		RecoveryStorage: rs,
 	}
 
@@ -466,7 +466,7 @@ func TestDispatch_RollbackImportMessage_NoOp(t *testing.T) {
 
 			impl := &WALFlusherImpl{
 				notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
-				logger:          log.With(log.FieldComponent("test-flusher")),
+				logger:          mlog.With(mlog.FieldComponent("test-flusher")),
 				RecoveryStorage: rs,
 			}
 

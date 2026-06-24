@@ -20,7 +20,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 
 - **AlterUser**: Creates or updates a user credential.
 - **DropUser**: Deletes a user and cleans up associated role bindings.
-- **AlterRole**: Creates a new role.
+- **AlterRole**: Creates a role or updates mutable role metadata such as description.
 - **DropRole**: Deletes a role, its grants, and refreshes proxy policy caches.
 - **AlterUserRole**: Binds a user to a role.
 - **DropUserRole**: Unbinds a user from a role.

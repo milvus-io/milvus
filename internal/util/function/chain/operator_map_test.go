@@ -335,3 +335,46 @@ func (s *MapOpTestSuite) TestNewMapOpFromReprNoOutputs() {
 	s.Error(err)
 	s.Contains(err.Error(), "requires outputs")
 }
+
+func (s *MapOpTestSuite) TestBuildOutputDataFrameReleasesOutputsOnCopyError() {
+	builder := NewDataFrameBuilder()
+	builder.SetChunkSizes([]int64{1})
+	idBuilder := array.NewInt64Builder(s.pool)
+	idBuilder.Append(1)
+	idChunk := idBuilder.NewArray()
+	idBuilder.Release()
+	s.Require().NoError(builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{idChunk}))
+	df := builder.Build()
+	defer df.Release()
+
+	// Corrupt schema-only metadata to exercise the defensive AddColumnFrom error path.
+	df.schema = arrow.NewSchema([]arrow.Field{
+		{Name: types.IDFieldName, Type: arrow.PrimitiveTypes.Int64},
+		{Name: "missing", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	outBuilder := array.NewFloat32Builder(s.pool)
+	outBuilder.Append(2.0)
+	outArray := outBuilder.NewArray()
+	outBuilder.Release()
+	out := arrow.NewChunked(arrow.PrimitiveTypes.Float32, []arrow.Array{outArray})
+	outArray.Release()
+
+	op, err := NewMapOp(&doubleScoreExpr{}, []string{types.ScoreFieldName}, []string{types.ScoreFieldName})
+	s.Require().NoError(err)
+	_, err = op.buildOutputDataFrame(df, []*arrow.Chunked{out})
+	s.Error(err)
+	s.Contains(err.Error(), "missing")
+}
+
+func (s *MapOpTestSuite) TestBuildOutputDataFrameWrapsAddColumnsError() {
+	df := s.createTestDF([]int64{1}, []float32{1.0}, []int64{1})
+	defer df.Release()
+
+	op, err := NewMapOp(&doubleScoreExpr{}, []string{types.ScoreFieldName}, []string{types.ScoreFieldName})
+	s.Require().NoError(err)
+	_, err = op.buildOutputDataFrame(df, []*arrow.Chunked{nil})
+	s.Error(err)
+	s.Contains(err.Error(), "map_op")
+	s.Contains(err.Error(), "is nil")
+}

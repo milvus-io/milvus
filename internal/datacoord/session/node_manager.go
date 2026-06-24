@@ -20,11 +20,10 @@ import (
 	"context"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -63,11 +62,11 @@ func NewNodeManager(nodeCreator DataNodeCreatorFunc) NodeManager {
 }
 
 func (m *nodeManager) AddNode(nodeID int64, address string) error {
-	log := log.Ctx(context.Background()).With(zap.Int64("nodeID", nodeID), zap.String("address", address))
-	log.Info("adding node...")
+	log := mlog.With(mlog.FieldNodeID(nodeID), mlog.String("address", address))
+	log.Info(context.TODO(), "adding node...")
 	nodeClient, err := m.nodeCreator(context.Background(), address, nodeID)
 	if err != nil {
-		log.Error("create client fail", zap.Error(err))
+		log.Error(context.TODO(), "create client fail", mlog.Err(err))
 		return err
 	}
 	m.mu.Lock()
@@ -76,24 +75,24 @@ func (m *nodeManager) AddNode(nodeID int64, address string) error {
 	numNodes := len(m.nodeClients)
 	metrics.IndexNodeNum.WithLabelValues().Set(float64(numNodes))
 	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(numNodes))
-	log.Info("node added", zap.Int("numNodes", numNodes))
+	log.Info(context.TODO(), "node added", mlog.Int("numNodes", numNodes))
 	return nil
 }
 
 func (m *nodeManager) RemoveNode(nodeID int64) {
-	log := log.Ctx(context.Background()).With(zap.Int64("nodeID", nodeID))
-	log.Info("removing node...")
+	log := mlog.With(mlog.FieldNodeID(nodeID))
+	log.Info(context.TODO(), "removing node...")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if client, ok := m.nodeClients[nodeID]; ok {
 		if err := client.Close(); err != nil {
-			log.Warn("failed to close client", zap.Error(err))
+			log.Warn(context.TODO(), "failed to close client", mlog.Err(err))
 		}
 		delete(m.nodeClients, nodeID)
 		numNodes := len(m.nodeClients)
 		metrics.IndexNodeNum.WithLabelValues().Set(float64(numNodes))
 		metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64(numNodes))
-		log.Info("node removed", zap.Int("numNodes", numNodes))
+		log.Info(context.TODO(), "node removed", mlog.Int("numNodes", numNodes))
 	}
 }
 

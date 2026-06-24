@@ -90,6 +90,22 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
+	// namespace.sharding.enabled is immutable after collection creation.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.NamespaceShardingEnabledKey, Value: "true"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// namespace.sharding.enabled cannot be deleted after collection creation.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{common.NamespaceShardingEnabledKey},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
 	// Alter a database that does not exist should return error.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,

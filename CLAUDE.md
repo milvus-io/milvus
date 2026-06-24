@@ -57,7 +57,7 @@ scripts/standalone_embed.sh    # embedded standalone (no external deps)
 ## Code Conventions
 
 - Error handling: use `merr` package, not fmt.Errorf — see mandatory procedure below
-- Logging: use `pkg/v2/log`, not standard `"log"` or fmt.Println
+- Logging: use `github.com/milvus-io/milvus/pkg/v3/mlog` only; do not use `pkg/log`, standard `"log"`, direct `zap`, or `fmt.Println`. Every log call must pass a real `ctx` by priority: function parameter ctx > struct ctx > `context.TODO()`. Refer to [logging.md](docs/agent_guides/observability/logging.md).
 - Import order: standard → third-party → github.com/milvus-io (enforced by gci)
 - Config params: paramtable (`pkg/v2/util/paramtable`), config in `configs/milvus.yaml`
 

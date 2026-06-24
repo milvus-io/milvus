@@ -24,9 +24,8 @@ import (
 	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -51,7 +50,6 @@ func (pc *Consumer) Subscription() string {
 
 // Chan returns a message channel
 func (pc *Consumer) Chan() <-chan common.Message {
-	log := log.Ctx(context.TODO())
 	if pc.msgChannel == nil {
 		pc.once.Do(func() {
 			pc.msgChannel = make(chan common.Message, 256)
@@ -77,7 +75,7 @@ func (pc *Consumer) Chan() <-chan common.Message {
 					select {
 					case msg, ok := <-pc.c.Chan():
 						if !ok {
-							log.Debug("pulsar consumer channel closed")
+							mlog.Debug(context.TODO(), "pulsar consumer channel closed")
 							return
 						}
 
@@ -105,7 +103,7 @@ func (pc *Consumer) Chan() <-chan common.Message {
 func (pc *Consumer) Seek(id common.MessageID, inclusive bool) error {
 	// If it is the earliest message ID, skip the seek to prevent failure.
 	if id.AtEarliestPosition() {
-		log.Info("seek from earliest position", zap.String("id", string(id.Serialize())), zap.String("sub", pc.Subscription()))
+		mlog.Info(context.TODO(), "seek from earliest position", mlog.String("id", string(id.Serialize())), mlog.String("sub", pc.Subscription()))
 		return nil
 	}
 	messageID := id.(*pulsarID).messageID
@@ -133,16 +131,16 @@ func (pc *Consumer) Close() {
 			if err != nil {
 				// this is the hack due to pulsar didn't handle error as expected
 				if strings.Contains(err.Error(), "Consumer not found") {
-					log.Warn("failed to find consumer, skip unsubscribe",
-						zap.String("subscription", pc.Subscription()),
-						zap.Error(err))
+					mlog.Warn(context.TODO(), "failed to find consumer, skip unsubscribe",
+						mlog.String("subscription", pc.Subscription()),
+						mlog.Err(err))
 					return nil
 				}
 				// Pulsar will automatically clean up subscriptions without consumers, so we can ignore this type of error.
 				if strings.Contains(err.Error(), "connection closed") {
-					log.Warn("connection closed, skip unsubscribe",
-						zap.String("subscription", pc.Subscription()),
-						zap.Error(err))
+					mlog.Warn(context.TODO(), "connection closed, skip unsubscribe",
+						mlog.String("subscription", pc.Subscription()),
+						mlog.Err(err))
 					return nil
 				}
 				return err
@@ -154,7 +152,7 @@ func (pc *Consumer) Close() {
 
 		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
-			log.Error("failed to unsubscribe", zap.String("subscription", pc.Subscription()), zap.Error(err))
+			mlog.Error(context.TODO(), "failed to unsubscribe", mlog.String("subscription", pc.Subscription()), mlog.Err(err))
 			panic(err)
 		}
 		close(pc.closeCh)

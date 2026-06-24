@@ -11,14 +11,13 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -54,12 +53,12 @@ func ExecuteFunctionsForSegment(
 	basePath string,
 	clusterID string,
 ) (string, error) {
-	log := log.Ctx(ctx)
-	log.Info("executing functions for external table segment",
-		zap.Int64("segmentID", segmentID),
-		zap.String("basePath", basePath),
-		zap.Int("numFragments", len(fragments)),
-		zap.Int("numFunctions", len(schema.GetFunctions())))
+	log := mlog.With()
+	log.Info(ctx, "executing functions for external table segment",
+		mlog.FieldSegmentID(segmentID),
+		mlog.String("basePath", basePath),
+		mlog.Int("numFragments", len(fragments)),
+		mlog.Int("numFunctions", len(schema.GetFunctions())))
 
 	sourceColumns := packed.GetColumnNamesFromSchema(schema)
 
@@ -124,10 +123,10 @@ func ExecuteFunctionsForSegment(
 		return "", merr.Wrap(err, "commit function output manifest")
 	}
 
-	log.Info("function execution completed",
-		zap.Int64("segmentID", segmentID),
-		zap.Int64("rows", totalRows),
-		zap.String("manifestPath", manifestPath))
+	log.Info(ctx, "function execution completed",
+		mlog.FieldSegmentID(segmentID),
+		mlog.Int64("rows", totalRows),
+		mlog.String("manifestPath", manifestPath))
 	return manifestPath, nil
 }
 
@@ -430,7 +429,7 @@ func appendBM25Stats(
 	if len(acc) == 0 {
 		return nil
 	}
-	log := log.Ctx(ctx)
+	log := mlog.With()
 	if updates == nil {
 		return merr.WrapErrServiceInternalMsg("manifest updates is nil")
 	}
@@ -452,10 +451,10 @@ func appendBM25Stats(
 				"memory_size": strconv.FormatInt(int64(len(blob)), 10),
 			},
 		})
-		log.Info("registered bm25 stats",
-			zap.Int64("fieldID", outID),
-			zap.Int("bytes", len(blob)),
-			zap.Int64("numRow", stats.NumRow()))
+		log.Info(ctx, "registered bm25 stats",
+			mlog.FieldFieldID(outID),
+			mlog.Int("bytes", len(blob)),
+			mlog.Int64("numRow", stats.NumRow()))
 	}
 	updates.Stats = append(updates.Stats, entries...)
 	return nil

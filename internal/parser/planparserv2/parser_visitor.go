@@ -1151,6 +1151,11 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 	// In element-level context, data_type should be the element type
 	elementType := field.GetElementType()
 
+	nullable := field.GetNullable()
+	if structField := v.schema.GetStructArrayFieldFromName(v.currentStructArrayField); structField != nil {
+		nullable = nullable || structField.GetNullable()
+	}
+
 	return &planpb.ColumnInfo{
 		FieldId:         field.FieldID,
 		DataType:        elementType, // Use element type, not storage type
@@ -1159,7 +1164,7 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 		IsPartitionKey:  field.IsPartitionKey,
 		IsClusteringKey: field.IsClusteringKey,
 		ElementType:     elementType,
-		Nullable:        field.GetNullable(),
+		Nullable:        nullable,
 		IsElementLevel:  true, // Mark as element-level access
 	}, nil
 }
@@ -1181,11 +1186,17 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 		return nil, merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", structFieldName, err)
 	}
 
+	nullable := field.GetNullable()
+	if structField := v.schema.GetStructArrayFieldFromName(fieldName); structField != nil {
+		nullable = nullable || structField.GetNullable()
+	}
+
 	return &planpb.ColumnInfo{
 		FieldId:     field.FieldID,
 		DataType:    field.DataType,
 		NestedPath:  []string{index},
 		ElementType: field.GetElementType(),
+		Nullable:    nullable,
 	}, nil
 }
 
@@ -1815,6 +1826,7 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 		DataType:    field.DataType,
 		NestedPath:  nestedPath,
 		ElementType: field.GetElementType(),
+		Nullable:    field.GetNullable(),
 	}, nil
 }
 
@@ -1832,6 +1844,7 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 						DataType:    field.GetDataType(),
 						NestedPath:  field.GetNestedPath(),
 						ElementType: field.GetElementType(),
+						Nullable:    field.GetNullable(),
 					},
 				},
 			},
@@ -2268,17 +2281,28 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			FieldId:     field.FieldID,
 			DataType:    field.DataType,
 			ElementType: field.GetElementType(),
+			Nullable:    field.GetNullable(),
 		}
 	} else {
-		columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+		if ctx.Identifier() != nil {
+			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.Identifier().GetText()); ok || parentErr != nil {
+				columnInfo = parentColumnInfo
+				err = parentErr
+			}
+		}
+		if columnInfo == nil && err == nil {
+			columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+		}
 		if err != nil {
 			return err
 		}
 	}
 	if columnInfo == nil ||
-		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
+		(!typeutil.IsJSONType(columnInfo.GetDataType()) &&
+			!typeutil.IsArrayType(columnInfo.GetDataType()) &&
+			!typeutil.IsVectorArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
-			"array_length operation are only supported on json or array fields now, got: %s", ctx.GetText())
+			"array_length operation are only supported on json, array or array-of-vector fields now, got: %s", ctx.GetText())
 	}
 
 	expr := &planpb.Expr{
@@ -2734,6 +2758,10 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 
 	// In element-level context, use Array as storage type, element type for operations
 	elementType := field.GetElementType()
+	nullable := field.GetNullable()
+	if structField := v.schema.GetStructArrayFieldFromName(v.currentStructArrayField); structField != nil {
+		nullable = nullable || structField.GetNullable()
+	}
 
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -2747,7 +2775,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 						IsPartitionKey:  field.IsPartitionKey,
 						IsClusteringKey: field.IsClusteringKey,
 						ElementType:     elementType, // Element type for operations
-						Nullable:        field.GetNullable(),
+						Nullable:        nullable,
 						IsElementLevel:  true, // Mark as element-level access
 					},
 				},

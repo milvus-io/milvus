@@ -1,12 +1,11 @@
 package hookutil
 
 import (
+	"context"
 	"plugin"
 	"sync"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -21,7 +20,7 @@ func LoadPlugin[T any](path string, symbol string) (T, error) {
 		return zero, merr.WrapErrParameterInvalidMsg("empty plugin path for symbol %q", symbol)
 	}
 
-	log.Info("loading plugin", zap.String("path", path), zap.String("symbol", symbol))
+	mlog.Info(context.TODO(), "loading plugin", mlog.String("path", path), mlog.String("symbol", symbol))
 
 	pluginMutex.Lock()
 	defer pluginMutex.Unlock()

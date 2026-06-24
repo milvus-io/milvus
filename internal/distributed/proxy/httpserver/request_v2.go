@@ -22,12 +22,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -537,14 +536,19 @@ type UserRoleReq struct {
 }
 
 type RoleReq struct {
-	DbName   string `json:"dbName"`
-	RoleName string `json:"roleName" binding:"required"`
+	DbName      string `json:"dbName"`
+	RoleName    string `json:"roleName" binding:"required"`
+	Description string `json:"description"`
 }
 
 func (req *RoleReq) GetDbName() string { return req.DbName }
 
 func (req *RoleReq) GetRoleName() string {
 	return req.RoleName
+}
+
+func (req *RoleReq) GetDescription() string {
+	return req.Description
 }
 
 type PrivilegeGroupReq struct {
@@ -662,7 +666,7 @@ type FieldSchema struct {
 func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, error) {
 	fieldDataType, ok := schemapb.DataType_value[field.DataType]
 	if !ok {
-		log.Ctx(ctx).Warn("field's data type is invalid(case sensitive).", zap.Any("fieldDataType", field.DataType), zap.Any("field", field))
+		mlog.Warn(ctx, "field's data type is invalid(case sensitive).", mlog.Any("fieldDataType", field.DataType), mlog.Any("field", field))
 		return nil, merr.WrapErrParameterInvalidMsg("data type %s is invalid(case sensitive)", field.DataType)
 	}
 	dataType := schemapb.DataType(fieldDataType)
@@ -681,12 +685,12 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 	var err error
 	fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
 	if err != nil {
-		log.Ctx(ctx).Warn("convert defaultValue fail", zap.Any("defaultValue", field.DefaultValue), zap.Error(err))
+		mlog.Warn(ctx, "convert defaultValue fail", mlog.Any("defaultValue", field.DefaultValue), mlog.Err(err))
 		return nil, merr.WrapErrParameterInvalidMsg("convert defaultValue fail, err: %s", err.Error())
 	}
 	if dataType == schemapb.DataType_Array || dataType == schemapb.DataType_ArrayOfVector {
 		if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {
-			log.Ctx(ctx).Warn("element's data type is invalid(case sensitive).", zap.Any("elementDataType", field.ElementDataType), zap.Any("field", field))
+			mlog.Warn(ctx, "element's data type is invalid(case sensitive).", mlog.Any("elementDataType", field.ElementDataType), mlog.Any("field", field))
 			return nil, merr.WrapErrParameterInvalidMsg("element data type %s is invalid(case sensitive)", field.ElementDataType)
 		}
 		fieldSchema.ElementType = schemapb.DataType(schemapb.DataType_value[field.ElementDataType])

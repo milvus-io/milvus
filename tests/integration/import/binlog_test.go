@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -34,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -87,13 +86,13 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(merr.CheckRPCCall(showCollectionsResp, err))
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	showPartitionsResp, err := c.MilvusClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(merr.CheckRPCCall(showPartitionsResp, err))
-	log.Info("ShowPartitions result", zap.Any("showPartitionsResp", showPartitionsResp))
+	mlog.Info(context.TODO(), "ShowPartitions result", mlog.Any("showPartitionsResp", showPartitionsResp))
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -189,7 +188,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		s.NoError(err)
 		s.NotEmpty(segments)
 		for _, segment := range segments {
-			log.Info("ShowSegments result", zap.String("segment", segment.String()))
+			mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 		}
 	}
 
@@ -319,11 +318,11 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	segmentIDs := sourceCollectionInfo.SegmentIDs
 	insertedIDs := sourceCollectionInfo.insertedIDs
 
-	log.Info("prepare source collection done",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("partitionID", partitionID),
-		zap.Int64s("segments", segmentIDs),
-		zap.Int64s("l0 segments", l0SegmentIDs))
+	mlog.Info(context.TODO(), "prepare source collection done",
+		mlog.FieldCollectionID(collectionID),
+		mlog.FieldPartitionID(partitionID),
+		mlog.Int64s("segments", segmentIDs),
+		mlog.Int64s("l0 segments", l0SegmentIDs))
 
 	c := s.Cluster
 	ctx := c.GetContext()
@@ -382,7 +381,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		},
 	})
 	s.NoError(merr.CheckRPCCall(importResp, err))
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -394,7 +393,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 		return segment.GetCollectionID() == newCollectionID
 	})
-	log.Info("Show segments", zap.Any("segments", segments))
+	mlog.Info(context.TODO(), "Show segments", mlog.Any("segments", segments))
 	s.Equal(2, len(segments))
 	segment, ok := lo.Find(segments, func(segment *datapb.SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushed
@@ -413,7 +412,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		"L1 segment StartPosition should match actual min timestamp from source binlogs")
 	s.Equal(sourceCollectionInfo.l1MaxTs, segment.GetDmlPosition().GetTimestamp(),
 		"L1 segment DmlPosition should match actual max timestamp from source binlogs")
-	log.Info("L1 segment position verification passed")
+	mlog.Info(context.TODO(), "L1 segment position verification passed")
 
 	// l0 import
 	if totalDeleteRowNum > 0 {
@@ -431,7 +430,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 			},
 		})
 		s.NoError(merr.CheckRPCCall(importResp, err))
-		log.Info("Import result", zap.Any("importResp", importResp))
+		mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 		jobID = importResp.GetJobID()
 		err = WaitForImportDone(ctx, c, jobID)
@@ -440,7 +439,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
-		log.Info("Show segments", zap.Any("segments", segments))
+		mlog.Info(context.TODO(), "Show segments", mlog.Any("segments", segments))
 		l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetLevel() == datapb.SegmentLevel_L0
 		})
@@ -458,7 +457,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 			"L0 segment StartPosition should match actual min timestamp from source deltalogs")
 		s.Equal(sourceCollectionInfo.l0MaxTs, segment.GetDmlPosition().GetTimestamp(),
 			"L0 segment DmlPosition should match actual max timestamp from source deltalogs")
-		log.Info("L0 segment position verification passed")
+		mlog.Info(context.TODO(), "L0 segment position verification passed")
 	}
 
 	// load
@@ -568,7 +567,7 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 	err = merr.CheckRPCCall(importResp, err)
 	s.True(strings.Contains(err.Error(), "too many input paths for binlog import"))
 	s.Error(err)
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 }
 
 func (s *BulkInsertSuite) TestBinlogImport() {

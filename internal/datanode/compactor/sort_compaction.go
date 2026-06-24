@@ -25,7 +25,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -35,8 +34,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -122,14 +121,14 @@ func (t *sortCompactionTask) preCompact() error {
 	if err := binlog.DecompressBinLogWithRootPath(t.compactionParams.StorageConfig.GetRootPath(),
 		storage.InsertBinlog, t.collectionID, t.partitionID,
 		t.segmentID, segment.GetFieldBinlogs()); err != nil {
-		log.Ctx(t.ctx).Warn("Decompress insert binlog error", zap.Error(err))
+		mlog.Warn(t.ctx, "Decompress insert binlog error", mlog.Err(err))
 		return err
 	}
 
 	if err := binlog.DecompressBinLogWithRootPath(t.compactionParams.StorageConfig.GetRootPath(),
 		storage.DeleteBinlog, t.collectionID, t.partitionID,
 		t.segmentID, segment.GetDeltalogs()); err != nil {
-		log.Ctx(t.ctx).Warn("Decompress delta binlog error", zap.Error(err))
+		mlog.Warn(t.ctx, "Decompress delta binlog error", mlog.Err(err))
 		return err
 	}
 
@@ -140,25 +139,25 @@ func (t *sortCompactionTask) preCompact() error {
 	t.useLoonFFI = t.compactionParams.UseLoonFFI
 	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 
-	log.Ctx(t.ctx).Info("preCompaction analyze",
-		zap.Int64("planID", t.GetPlanID()),
-		zap.Int64("collectionID", t.collectionID),
-		zap.Int64("partitionID", t.partitionID),
-		zap.Int64("segmentID", t.segmentID),
-		zap.Int64("storageVersion", t.storageVersion),
-		zap.Bool("useLoonFFI", t.useLoonFFI),
-		zap.Any("compactionParams", t.compactionParams),
+	mlog.Info(t.ctx, "preCompaction analyze",
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.FieldCollectionID(t.collectionID),
+		mlog.FieldPartitionID(t.partitionID),
+		mlog.FieldSegmentID(t.segmentID),
+		mlog.Int64("storageVersion", t.storageVersion),
+		mlog.Bool("useLoonFFI", t.useLoonFFI),
+		mlog.Any("compactionParams", t.compactionParams),
 	)
 
 	return nil
 }
 
 func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.CompactionPlanResult, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("planID", t.plan.GetPlanID()),
-		zap.Int64("collectionID", t.collectionID),
-		zap.Int64("partitionID", t.partitionID),
-		zap.Int64("segmentID", t.segmentID),
+	log := mlog.With(
+		mlog.Int64("planID", t.plan.GetPlanID()),
+		mlog.FieldCollectionID(t.collectionID),
+		mlog.FieldPartitionID(t.partitionID),
+		mlog.FieldSegmentID(t.segmentID),
 	)
 	sortStartTime := time.Now()
 	numRows := t.plan.GetTotalRows()
@@ -190,8 +189,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithUseLoonFFI(t.useLoonFFI),
 	)
 	if err != nil {
-		log.Warn("sort segment wrong, unable to init segment writer",
-			zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
+		log.Warn(ctx, "sort segment wrong, unable to init segment writer",
+			mlog.Int64("planID", t.plan.GetPlanID()), mlog.Err(err))
 		return nil, err
 	}
 	initWriterCost := time.Since(phaseStart)
@@ -201,7 +200,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
-		log.Warn("load deletePKs failed", zap.Error(err))
+		log.Warn(ctx, "load deletePKs failed", mlog.Err(err))
 		srw.Close()
 		return nil, err
 	}
@@ -238,7 +237,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
 		}
 	default:
-		log.Warn("sort task only support int64 and varchar pk field")
+		log.Warn(ctx, "sort task only support int64 and varchar pk field")
 	}
 
 	phaseStart = time.Now()
@@ -249,13 +248,13 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithCollectionID(t.collectionID),
 	)
 	if err != nil {
-		log.Warn("error creating insert binlog reader", zap.Error(err))
+		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))
 		srw.Close()
 		return nil, err
 	}
 	materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
 	if err != nil {
-		log.Warn("error creating record materializer", zap.Error(err))
+		log.Warn(ctx, "error creating record materializer", mlog.Err(err))
 		rr.Close()
 		srw.Close()
 		return nil, err
@@ -268,7 +267,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	rrs := []storage.RecordReader{rr}
 	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
-		log.Warn("sort failed", zap.Error(err))
+		log.Warn(ctx, "sort failed", mlog.Err(err))
 		srw.Close()
 		return nil, err
 	}
@@ -323,34 +322,34 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	debug.FreeOSMemory()
 
 	if numValidRows != int(numRows)-entityFilter.GetDeletedCount()-entityFilter.GetExpiredCount() {
-		log.Warn("unexpected row count after sort compaction",
-			zap.Int64("target segmentID", targetSegmentID),
-			zap.Int64("old rows", numRows),
-			zap.Int("valid rows", numValidRows),
-			zap.Int("deleted rows", entityFilter.GetDeletedCount()),
-			zap.Int("expired rows", entityFilter.GetExpiredCount()))
+		log.Warn(ctx, "unexpected row count after sort compaction",
+			mlog.Int64("target segmentID", targetSegmentID),
+			mlog.Int64("old rows", numRows),
+			mlog.Int("valid rows", numValidRows),
+			mlog.Int("deleted rows", entityFilter.GetDeletedCount()),
+			mlog.Int("expired rows", entityFilter.GetExpiredCount()))
 		return nil, merr.WrapErrServiceInternal("unexpected row count")
 	}
 
-	log.Info("sort segment end",
-		zap.Int64("target segmentID", targetSegmentID),
-		zap.Int64("old rows", numRows),
-		zap.Int("valid rows", numValidRows),
-		zap.Int("deleted rows", entityFilter.GetDeletedCount()),
-		zap.Int("expired rows", entityFilter.GetExpiredCount()),
-		zap.Int("deltaLogCount", len(t.plan.SegmentBinlogs[0].GetDeltalogs())),
-		zap.Int("deletePKCount", len(deletePKs)),
-		zap.Bool("useManifest", t.manifest != ""),
-		zap.Duration("initWriterCost", initWriterCost),
-		zap.Duration("loadDeltaCost", loadDeltaCost),
-		zap.Duration("initReaderCost", initReaderCost),
-		zap.Int("sortBatches", sortTimings.NumBatches),
-		zap.Duration("sortReadCost", sortTimings.ReadCost),
-		zap.Duration("sortSortCost", sortTimings.SortCost),
-		zap.Duration("sortWriteCost", sortTimings.WriteCost),
-		zap.Duration("flushCost", flushCost),
-		zap.Duration("compressCost", compressCost),
-		zap.Duration("total elapse", time.Since(sortStartTime)))
+	log.Info(ctx, "sort segment end",
+		mlog.Int64("target segmentID", targetSegmentID),
+		mlog.Int64("old rows", numRows),
+		mlog.Int("valid rows", numValidRows),
+		mlog.Int("deleted rows", entityFilter.GetDeletedCount()),
+		mlog.Int("expired rows", entityFilter.GetExpiredCount()),
+		mlog.Int("deltaLogCount", len(t.plan.SegmentBinlogs[0].GetDeltalogs())),
+		mlog.Int("deletePKCount", len(deletePKs)),
+		mlog.Bool("useManifest", t.manifest != ""),
+		mlog.Duration("initWriterCost", initWriterCost),
+		mlog.Duration("loadDeltaCost", loadDeltaCost),
+		mlog.Duration("initReaderCost", initReaderCost),
+		mlog.Int("sortBatches", sortTimings.NumBatches),
+		mlog.Duration("sortReadCost", sortTimings.ReadCost),
+		mlog.Duration("sortSortCost", sortTimings.SortCost),
+		mlog.Duration("sortWriteCost", sortTimings.WriteCost),
+		mlog.Duration("flushCost", flushCost),
+		mlog.Duration("compressCost", compressCost),
+		mlog.Duration("total elapse", time.Since(sortStartTime)))
 
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 	compType := t.plan.GetType().String()
@@ -398,7 +397,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("MixCompact-%d", t.GetPlanID()))
 	defer span.End()
 	if err := t.preCompact(); err != nil {
-		log.Warn("failed to preCompact", zap.Error(err))
+		mlog.Warn(t.ctx, "failed to preCompact", mlog.Err(err))
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,
@@ -407,7 +406,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	// init LOB compaction context for TEXT columns (if any)
 	if err := t.initLOBCompactionContext(ctx); err != nil {
-		log.Ctx(ctx).Warn("failed to init LOB compaction context", zap.Error(err))
+		mlog.Warn(ctx, "failed to init LOB compaction context", mlog.Err(err))
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,
@@ -416,20 +415,20 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	compactStart := time.Now()
 
-	log := log.Ctx(ctx).With(zap.Int64("planID", t.GetPlanID()),
-		zap.Int64("collectionID", t.collectionID),
-		zap.Int64("partitionID", t.partitionID),
-		zap.Int64("segmentID", t.segmentID),
-		zap.Int64("totalRows", t.plan.GetTotalRows()),
-		zap.Int64("slotUsage", t.plan.GetSlotUsage()))
+	log := mlog.With(mlog.Int64("planID", t.GetPlanID()),
+		mlog.FieldCollectionID(t.collectionID),
+		mlog.FieldPartitionID(t.partitionID),
+		mlog.FieldSegmentID(t.segmentID),
+		mlog.Int64("totalRows", t.plan.GetTotalRows()),
+		mlog.Int64("slotUsage", t.plan.GetSlotUsage()))
 
-	log.Info("compact start")
+	log.Info(t.ctx, "compact start")
 
 	stepStart := time.Now()
 	res, err := t.sortSegment(ctx)
 	if err != nil {
-		log.Warn("failed to sort segment",
-			zap.Error(err))
+		log.Warn(t.ctx, "failed to sort segment",
+			mlog.Err(err))
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,
@@ -439,16 +438,16 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	targetSegemntID := res.GetSegments()[0].GetSegmentID()
 	insertLogs := res.GetSegments()[0].GetInsertLogs()
 	if len(insertLogs) == 0 || res.GetSegments()[0].GetNumOfRows() == 0 {
-		log.Info("compact done, but target segment is zero num rows",
-			zap.Int64("targetSegmentID", targetSegemntID),
-			zap.Duration("sortSegmentCost", sortSegmentCost),
-			zap.Duration("compact cost", time.Since(compactStart)))
+		log.Info(t.ctx, "compact done, but target segment is zero num rows",
+			mlog.Int64("targetSegmentID", targetSegemntID),
+			mlog.Duration("sortSegmentCost", sortSegmentCost),
+			mlog.Duration("compact cost", time.Since(compactStart)))
 		return res, nil
 	}
 
 	// apply LOB compaction: merge LOB file references to output manifest (REUSE_ALL)
 	if err := t.applyLOBCompaction(ctx, res.GetSegments()); err != nil {
-		log.Warn("failed to apply LOB compaction", zap.Error(err))
+		log.Warn(t.ctx, "failed to apply LOB compaction", mlog.Err(err))
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,
@@ -461,8 +460,8 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			t.collectionID, t.partitionID, targetSegemntID, t.GetPlanID(),
 			resultSegment)
 		if err != nil {
-			log.Warn("failed to create text indexes", zap.Int64("targetSegmentID", targetSegemntID),
-				zap.Error(err))
+			log.Warn(t.ctx, "failed to create text indexes", mlog.Int64("targetSegmentID", targetSegemntID),
+				mlog.Err(err))
 			return &datapb.CompactionPlanResult{
 				PlanID: t.GetPlanID(),
 				State:  datapb.CompactionTaskState_failed,
@@ -476,8 +475,8 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			newManifest, mErr := packed.AddStatsToManifest(
 				resultSegment.GetManifest(), t.compactionParams.StorageConfig, statEntries)
 			if mErr != nil {
-				log.Warn("failed to add text index stats to manifest",
-					zap.Int64("targetSegmentID", targetSegemntID), zap.Error(mErr))
+				log.Warn(t.ctx, "failed to add text index stats to manifest",
+					mlog.Int64("targetSegmentID", targetSegemntID), mlog.Err(mErr))
 				return &datapb.CompactionPlanResult{
 					PlanID: t.GetPlanID(),
 					State:  datapb.CompactionTaskState_failed,
@@ -493,10 +492,10 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	createTextIndexCost := time.Since(stepStart)
 
 	totalCost := time.Since(compactStart)
-	log.Info("compact done", zap.Int64("targetSegmentID", targetSegemntID),
-		zap.Duration("sortSegmentCost", sortSegmentCost),
-		zap.Duration("createTextIndexCost", createTextIndexCost),
-		zap.Duration("compact cost", totalCost))
+	log.Info(t.ctx, "compact done", mlog.Int64("targetSegmentID", targetSegemntID),
+		mlog.Duration("sortSegmentCost", sortSegmentCost),
+		mlog.Duration("createTextIndexCost", createTextIndexCost),
+		mlog.Duration("compact cost", totalCost))
 
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 	compType := t.plan.GetType().String()
@@ -564,12 +563,12 @@ func (t *sortCompactionTask) initLOBCompactionContext(ctx context.Context) error
 		return nil // no manifest-based segment, nothing to do
 	}
 
-	log := log.Ctx(ctx).With(
-		zap.Int64("planID", t.GetPlanID()),
-		zap.Int64("segmentID", t.segmentID),
-		zap.Int64s("textFieldIDs", textFieldIDs),
+	log := mlog.With(
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.FieldSegmentID(t.segmentID),
+		mlog.Int64s("textFieldIDs", textFieldIDs),
 	)
-	log.Info("initializing LOB compaction context for TEXT columns (sort compaction)")
+	log.Info(ctx, "initializing LOB compaction context for TEXT columns (sort compaction)")
 
 	// collect LOB files from source manifest
 	sourceManifests := map[int64]string{t.segmentID: t.manifest}
@@ -587,7 +586,7 @@ func (t *sortCompactionTask) initLOBCompactionContext(ctx context.Context) error
 		}
 	}
 	if !hasLobFiles {
-		log.Info("no LOB files found in source segment")
+		log.Info(ctx, "no LOB files found in source segment")
 		return nil
 	}
 
@@ -606,11 +605,11 @@ func (t *sortCompactionTask) initLOBCompactionContext(ctx context.Context) error
 
 	// log strategy decisions
 	for fieldID, decision := range t.lobContext.Decisions {
-		log.Info("LOB compaction strategy decided",
-			zap.Int64("fieldID", fieldID),
-			zap.String("strategy", "REUSE_ALL"),
-			zap.Bool("isForced", t.lobContext.IsForced),
-			zap.Float64("holeRatio", decision.OverallHoleRatio),
+		log.Info(ctx, "LOB compaction strategy decided",
+			mlog.FieldFieldID(fieldID),
+			mlog.String("strategy", "REUSE_ALL"),
+			mlog.Bool("isForced", t.lobContext.IsForced),
+			mlog.Float64("holeRatio", decision.OverallHoleRatio),
 		)
 	}
 
@@ -651,9 +650,9 @@ func (t *sortCompactionTask) applyLOBCompaction(ctx context.Context, outputSegme
 		}
 	}
 
-	log.Ctx(ctx).Info("sort compaction: LOB file references merged to output manifest",
-		zap.Int64("planID", t.GetPlanID()),
-		zap.Int("outputSegmentCount", len(outputManifests)),
+	mlog.Info(ctx, "sort compaction: LOB file references merged to output manifest",
+		mlog.Int64("planID", t.GetPlanID()),
+		mlog.Int("outputSegmentCount", len(outputManifests)),
 	)
 
 	return nil

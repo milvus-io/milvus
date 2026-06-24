@@ -24,11 +24,10 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -76,26 +75,26 @@ func (inNode *InputNode) Name() string {
 
 func (inNode *InputNode) SetCloseMethod(gracefully bool) {
 	inNode.closeGracefully.Store(gracefully)
-	log.Info("input node close method set",
-		zap.String("node", inNode.Name()),
-		zap.Int64("collection", inNode.collectionID),
-		zap.Bool("gracefully", gracefully))
+	mlog.Info(context.TODO(), "input node close method set",
+		mlog.String("node", inNode.Name()),
+		mlog.Int64("collection", inNode.collectionID),
+		mlog.Bool("gracefully", gracefully))
 }
 
 // Operate consume a message pack from msgstream and return
 func (inNode *InputNode) Operate(in []Msg) []Msg {
 	msgPack, ok := <-inNode.input
 	if !ok {
-		log := log.With(
-			zap.String("node", inNode.Name()),
-			zap.Int64("collection", inNode.collectionID),
+		log := mlog.With(
+			mlog.String("node", inNode.Name()),
+			mlog.Int64("collection", inNode.collectionID),
 		)
-		log.Info("input node message stream closed",
-			zap.Bool("closeGracefully", inNode.closeGracefully.Load()),
+		log.Info(context.TODO(), "input node message stream closed",
+			mlog.Bool("closeGracefully", inNode.closeGracefully.Load()),
 		)
 		if inNode.lastMsg != nil && inNode.closeGracefully.Load() {
-			log.Info("input node trigger force sync",
-				zap.Any("position", inNode.lastMsg.EndPositions))
+			log.Info(context.TODO(), "input node trigger force sync",
+				mlog.Any("position", inNode.lastMsg.EndPositions))
 			return []Msg{&MsgStreamMsg{
 				BaseMsg:        NewBaseMsg(true),
 				tsMessages:     []msgstream.TsMsg{},

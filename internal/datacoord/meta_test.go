@@ -1045,19 +1045,21 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "sort compaction normalizes commit_timestamp after rewriting row timestamps")
 	})
 
-	suite.Run("mix compaction rejects stale import fallback start position", func() {
+	suite.Run("mix compaction preserves fallback start while normalizing fallback dml", func() {
 		latestSegments := NewSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 			NumOfRows: 2, CommitTimestamp: 5000,
 			StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1000},
+			DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1500},
 		}})
 		latestSegments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 2, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 			NumOfRows: 3, CommitTimestamp: 0,
 			StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2000},
+			DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 3000},
 		}})
 
 		result := &datapb.CompactionPlanResult{
@@ -1075,9 +1077,11 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
-		suite.Error(err)
-		suite.Contains(err.Error(), "earlier than max input commit timestamp")
-		suite.Nil(infos)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+		suite.EqualValues(1000, infos[0].GetStartPosition().GetTimestamp())
+		suite.EqualValues(5000, infos[0].GetDmlPosition().GetTimestamp())
+		suite.EqualValues(0, infos[0].GetCommitTimestamp())
 	})
 }
 
@@ -1424,6 +1428,68 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 		suite.Equal(uint64(100), infos[0].GetStartPosition().GetTimestamp())
 		suite.Equal(uint64(500), infos[0].GetDmlPosition().GetTimestamp())
 		suite.Equal("ch-1", infos[0].GetStartPosition().GetChannelName())
+	})
+
+	suite.Run("mix_compaction_uses_output_timestamps_when_normal_segment_precedes_import_commit", func() {
+		latestSegments := NewSegmentsInfo()
+		for segID, segment := range map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:              1,
+				CollectionID:    100,
+				PartitionID:     10,
+				State:           commonpb.SegmentState_Flushed,
+				Level:           datapb.SegmentLevel_L1,
+				Binlogs:         []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+				Statslogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+				NumOfRows:       2,
+				CommitTimestamp: 0,
+				StartPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1000},
+				DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1500},
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:              2,
+				CollectionID:    100,
+				PartitionID:     10,
+				State:           commonpb.SegmentState_Flushed,
+				Level:           datapb.SegmentLevel_L1,
+				Binlogs:         []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+				Statslogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+				NumOfRows:       3,
+				CommitTimestamp: 5000,
+				StartPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2000},
+				DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2500},
+			}},
+		} {
+			latestSegments.SetSegment(segID, segment)
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{fieldBinlogWithTimestamps(0, 50000, 1000, 5000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           5,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+
+		suite.EqualValues(0, infos[0].GetCommitTimestamp())
+		suite.Equal(uint64(1000), infos[0].GetStartPosition().GetTimestamp())
+		suite.Equal(uint64(5000), infos[0].GetDmlPosition().GetTimestamp())
 	})
 
 	suite.Run("mix_compaction_fallback_when_no_timestamps", func() {

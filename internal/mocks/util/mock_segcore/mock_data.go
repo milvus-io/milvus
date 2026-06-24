@@ -30,7 +30,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
@@ -41,7 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -440,7 +439,7 @@ func GenTestIndexMeta(collectionID int64, schema *schemapb.CollectionSchema) *se
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
 	maxIndexRecordPerSegment := int64(0)
 	if err != nil || sizePerRecord == 0 {
-		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to transfer segment size to collection, because failed to estimate size per record", mlog.Err(err))
 	} else {
 		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
 		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
@@ -496,21 +495,20 @@ func SaveBinLogWithData(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	chunkManager storage.ChunkManager,
 ) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
-	log := log.Ctx(ctx)
 	binLogs, statsLogs, err := serializeInsertData(collectionID, partitionID, segmentID, insertData, schema)
 	if err != nil {
-		log.Warn("serializeInsertData return error", zap.Error(err))
+		mlog.Warn(ctx, "serializeInsertData return error", mlog.Err(err))
 		return nil, nil, err
 	}
 
-	log.Debug(".. [query node unittest] Saving bin logs to MinIO ..", zap.Int("number", len(binLogs)))
+	mlog.Debug(ctx, ".. [query node unittest] Saving bin logs to MinIO ..", mlog.Int("number", len(binLogs)))
 	kvs := make(map[string][]byte, len(binLogs))
 
 	// write insert binlog
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
 	for _, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		log.Debug("[query node unittest] save binlog", zap.Int64("fieldID", fieldID))
+		mlog.Debug(ctx, "[query node unittest] save binlog", mlog.FieldFieldID(fieldID))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -526,13 +524,13 @@ func SaveBinLogWithData(ctx context.Context,
 			}},
 		})
 	}
-	log.Debug("[query node unittest] save binlog file to MinIO/S3")
+	mlog.Debug(ctx, "[query node unittest] save binlog file to MinIO/S3")
 
 	// write insert binlog
 	statsBinlog := make([]*datapb.FieldBinlog, 0)
 	for _, blob := range statsLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		log.Debug("[query node unittest] save statLog", zap.Int64("fieldID", fieldID))
+		mlog.Debug(ctx, "[query node unittest] save statLog", mlog.FieldFieldID(fieldID))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -545,7 +543,7 @@ func SaveBinLogWithData(ctx context.Context,
 			Binlogs: []*datapb.Binlog{{LogPath: key}},
 		})
 	}
-	log.Debug("[query node unittest] save statsLog file to MinIO/S3")
+	mlog.Debug(ctx, "[query node unittest] save statsLog file to MinIO/S3")
 
 	err = chunkManager.MultiWrite(ctx, kvs)
 	return fieldBinlog, statsBinlog, err
@@ -782,7 +780,6 @@ func SaveDeltaLog(collectionID int64,
 	segmentID int64,
 	cm storage.ChunkManager,
 ) ([]*datapb.FieldBinlog, error) {
-	log := log.Ctx(context.TODO())
 	binlogWriter := storage.NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
 	eventWriter, _ := binlogWriter.NextDeleteEventWriter()
 	dData := &storage.DeleteData{
@@ -812,7 +809,7 @@ func SaveDeltaLog(collectionID int64,
 	// write delta log
 	pkFieldID := int64(106)
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
-	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
+	mlog.Debug(context.TODO(), "[query node unittest] save delta log", mlog.FieldFieldID(pkFieldID))
 	key := metautil.JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
 	// keyPath := path.Join(defaultLocalStorage, "delta-log", key)
 	keyPath := path.Join(cm.RootPath(), "delta-log", key)
@@ -825,7 +822,7 @@ func SaveDeltaLog(collectionID int64,
 			TimestampTo:   200,
 		}},
 	})
-	log.Debug("[query node unittest] save delta log file to MinIO/S3")
+	mlog.Debug(context.TODO(), "[query node unittest] save delta log file to MinIO/S3")
 
 	return fieldBinlog, cm.MultiWrite(context.Background(), kvs)
 }

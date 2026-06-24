@@ -18,14 +18,13 @@ import (
 	"strings"
 	"unsafe"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -480,10 +479,10 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 	if src.GetStorageVersion() == storage.StorageV3 {
 		result := packed.NewStatsResolverFromLoadInfo(src).TextAndJSONIndexStatsWithBasePaths()
 		if result.Err() != nil {
-			log.Warn("failed to resolve stats from manifest for segcore load info",
-				zap.Int64("segmentID", src.GetSegmentID()),
-				zap.String("manifestPath", src.GetManifestPath()),
-				zap.Error(result.Err()))
+			mlog.Warn(context.TODO(), "failed to resolve stats from manifest for segcore load info",
+				mlog.Int64("segmentID", src.GetSegmentID()),
+				mlog.String("manifestPath", src.GetManifestPath()),
+				mlog.Err(result.Err()))
 		} else {
 			return result.TextIndexStats, result.JSONKeyStats, result.TextBasePaths, result.JSONBasePaths
 		}
@@ -612,13 +611,13 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[i
 			}
 			files = stripped
 		}
-		log.Info("convertTextIndexStats",
-			zap.Int64("fieldID", v.GetFieldID()),
-			zap.Int64("buildID", v.GetBuildID()),
-			zap.Int64("version", v.GetVersion()),
-			zap.String("basePath", basePath),
-			zap.Int("fileCount", len(files)),
-			zap.Strings("files", files),
+		mlog.Info(context.TODO(), "convertTextIndexStats",
+			mlog.Int64("fieldID", v.GetFieldID()),
+			mlog.Int64("buildID", v.GetBuildID()),
+			mlog.Int64("version", v.GetVersion()),
+			mlog.String("basePath", basePath),
+			mlog.Int("fileCount", len(files)),
+			mlog.Strings("files", files),
 		)
 
 		result[k] = &segcorepb.TextIndexStats{
@@ -660,13 +659,13 @@ func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats, basePaths map[int64
 			}
 			files = stripped
 		}
-		log.Info("convertJSONKeyStats",
-			zap.Int64("fieldID", v.GetFieldID()),
-			zap.Int64("buildID", v.GetBuildID()),
-			zap.Int64("version", v.GetVersion()),
-			zap.String("basePath", basePath),
-			zap.Int("fileCount", len(files)),
-			zap.Strings("files", files),
+		mlog.Info(context.TODO(), "convertJSONKeyStats",
+			mlog.Int64("fieldID", v.GetFieldID()),
+			mlog.Int64("buildID", v.GetBuildID()),
+			mlog.Int64("version", v.GetVersion()),
+			mlog.String("basePath", basePath),
+			mlog.Int("fileCount", len(files)),
+			mlog.Strings("files", files),
 		)
 
 		result[k] = &segcorepb.JsonKeyStats{

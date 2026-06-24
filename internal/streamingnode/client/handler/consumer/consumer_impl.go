@@ -6,12 +6,11 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -74,11 +73,11 @@ func CreateConsumer(
 		opts:             opts,
 		grpcStreamClient: streamClient,
 		handlerClient:    handlerClient,
-		logger: log.With(
-			zap.String("walName", createResp.GetWalName()),
-			zap.String("pchannel", opts.Assignment.Channel.Name),
-			zap.Int64("term", opts.Assignment.Channel.Term),
-			zap.Int64("streamingNodeID", opts.Assignment.Node.ServerID)),
+		logger: mlog.With(
+			mlog.String("walName", createResp.GetWalName()),
+			mlog.String("pchannel", opts.Assignment.Channel.Name),
+			mlog.Int64("term", opts.Assignment.Channel.Term),
+			mlog.Int64("streamingNodeID", opts.Assignment.Node.ServerID)),
 		msgHandler: opts.MessageHandler,
 		finishErr:  syncutil.NewFuture[error](),
 	}
@@ -92,7 +91,7 @@ type consumerImpl struct {
 	opts             *ConsumerOptions
 	grpcStreamClient streamingpb.StreamingNodeHandlerService_ConsumeClient
 	handlerClient    streamingpb.StreamingNodeHandlerServiceClient
-	logger           *log.MLogger
+	logger           *mlog.Logger
 	msgHandler       message.Handler
 	finishErr        *syncutil.Future[error]
 	txnBuilder       *message.ImmutableTxnMessageBuilder
@@ -104,11 +103,11 @@ func (c *consumerImpl) Close() error {
 	if err := c.grpcStreamClient.Send(&streamingpb.ConsumeRequest{
 		Request: &streamingpb.ConsumeRequest_Close{},
 	}); err != nil {
-		c.logger.Warn("send close request failed", zap.Error(err))
+		c.logger.Warn(c.ctx, "send close request failed", mlog.Err(err))
 	}
 	// close the grpc client stream.
 	if err := c.grpcStreamClient.CloseSend(); err != nil {
-		c.logger.Warn("close grpc stream failed", zap.Error(err))
+		c.logger.Warn(c.ctx, "close grpc stream failed", mlog.Err(err))
 	}
 	return c.finishErr.Get()
 }
@@ -144,9 +143,9 @@ func (c *consumerImpl) execute() {
 func (c *consumerImpl) recvLoop() (err error) {
 	defer func() {
 		if err != nil {
-			c.logger.Warn("recv arm of stream closed with unexpected error", zap.Error(err))
+			c.logger.Warn(c.ctx, "recv arm of stream closed with unexpected error", mlog.Err(err))
 		} else {
-			c.logger.Info("recv arm of stream closed")
+			c.logger.Info(c.ctx, "recv arm of stream closed")
 		}
 		c.finishErr.Set(err)
 		c.msgHandler.Close()
@@ -185,7 +184,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 					Ctx:     c.ctx,
 					Message: newImmutableMsg,
 				}); result.Error != nil {
-					c.logger.Warn("message handle canceled", zap.Error(err))
+					c.logger.Warn(c.ctx, "message handle canceled", mlog.Err(err))
 					return errors.Wrapf(result.Error, "At Handler")
 				}
 			}
@@ -193,7 +192,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 			// Should receive io.EOF after that.
 			// Do nothing at current implementation.
 		default:
-			c.logger.Warn("unknown response type", zap.Any("response", resp))
+			c.logger.Warn(c.ctx, "unknown response type", mlog.Any("response", resp))
 		}
 	}
 }
@@ -231,7 +230,7 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 		}
 		beginMsg, err := message.AsImmutableBeginTxnMessageV2(msg)
 		if err != nil {
-			c.logger.Warn("failed to convert message to begin txn message", zap.Any("messageID", beginMsg.MessageID()), zap.Error(err))
+			c.logger.Warn(c.ctx, "failed to convert message to begin txn message", mlog.Any("messageID", beginMsg.MessageID()), mlog.Err(err))
 			return nil
 		}
 		c.txnBuilder = message.NewImmutableTxnMessageBuilder(beginMsg)
@@ -241,21 +240,21 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 		}
 		commitMsg, err := message.AsImmutableCommitTxnMessageV2(msg)
 		if err != nil {
-			c.logger.Warn("failed to convert message to commit txn message", zap.Any("messageID", commitMsg.MessageID()), zap.Error(err))
+			c.logger.Warn(c.ctx, "failed to convert message to commit txn message", mlog.Any("messageID", commitMsg.MessageID()), mlog.Err(err))
 			c.txnBuilder = nil
 			return nil
 		}
 		msg, err := c.txnBuilder.Build(commitMsg)
 		c.txnBuilder = nil
 		if err != nil {
-			c.logger.Warn("failed to build txn message", zap.Any("messageID", commitMsg.MessageID()), zap.Error(err))
+			c.logger.Warn(c.ctx, "failed to build txn message", mlog.Any("messageID", commitMsg.MessageID()), mlog.Err(err))
 			return nil
 		}
 		if result := c.msgHandler.Handle(message.HandleParam{
 			Ctx:     c.ctx,
 			Message: msg,
 		}); result.Error != nil {
-			c.logger.Warn("message handle canceled at txn", zap.Error(result.Error))
+			c.logger.Warn(c.ctx, "message handle canceled at txn", mlog.Err(result.Error))
 			return errors.Wrapf(result.Error, "At Handler Of Txn")
 		}
 	default:

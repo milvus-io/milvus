@@ -18,6 +18,8 @@
 
 #include <arrow/filesystem/filesystem.h>
 #include <google/protobuf/repeated_ptr_field.h>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,6 +32,13 @@
 #include "milvus-storage/lob_column/lob_column_manager.h"
 
 namespace milvus::segcore {
+
+inline constexpr size_t kTextLobIndexBuildBatchSize = 1024;
+
+inline milvus_storage::lob_column::EncodedRef
+MakeTextLobEncodedRef(const void* data, size_t size) {
+    return {static_cast<const uint8_t*>(data), size};
+}
 
 struct TextColumnCacheConfig {
     size_t max_file_readers = 64;  // Maximum number of cached file readers

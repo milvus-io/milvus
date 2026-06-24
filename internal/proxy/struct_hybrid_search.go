@@ -11,6 +11,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -158,12 +160,26 @@ func isElementCollapseSumFamily(strategy string) bool {
 }
 
 func validateElementCollapseMetricType(config elementCollapseConfig, metricType string) error {
-	if config.Strategy == "" || !isElementCollapseSumFamily(config.Strategy) || metric.PositivelyRelated(metricType) {
+	if config.Strategy == "" ||
+		!isElementCollapseSumFamily(config.Strategy) ||
+		strings.TrimSpace(metricType) == "" ||
+		metric.PositivelyRelated(metricType) {
 		return nil
 	}
 	return merr.WrapErrParameterInvalidMsg(
 		"%s.collapse.strategy %s is only supported for positively related metrics",
 		elementScopeKey, config.Strategy)
+}
+
+func resolveElementCollapseMetricType(requestMetricType string, field *schemapb.FieldSchema) string {
+	if strings.TrimSpace(requestMetricType) != "" || field == nil {
+		return requestMetricType
+	}
+	indexMetricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, field.GetIndexParams())
+	if err != nil {
+		return ""
+	}
+	return indexMetricType
 }
 
 func getStructParentFieldName(schema *schemapb.CollectionSchema, fieldID int64) (string, bool) {

@@ -6,11 +6,10 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -36,7 +35,7 @@ func (m *partitionManager) asyncFlushSegment(
 
 // segmentFlusherWorker is the worker that flushes segments into the WAL.
 type segmentFlushWorker struct {
-	log.Binder
+	mlog.Binder
 	txnManager   TxnManager
 	ctx          context.Context
 	collectionID int64
@@ -59,7 +58,9 @@ func (w *segmentFlushWorker) do() {
 	// Otherwise, the flush message may be sent into wal before the txn is done.
 	// Break the wal consistency: All insert message is written into wal before the flush message.
 	if err := w.waitForTxnManagerRecoverDone(); err != nil {
-		w.Logger().Error("failed to wait for txn manager recover ready", zap.Error(err))
+		w.Logger().Error(w.ctx,
+
+			"failed to wait for txn manager recover ready", mlog.Err(err))
 		return
 	}
 
@@ -69,19 +70,27 @@ func (w *segmentFlushWorker) do() {
 			return
 		}
 		if e := status.AsStreamingError(err); e.IsUnrecoverable() {
-			w.Logger().Warn("flush growing segement with unrecoverable error, stop retrying", zap.Error(err))
+			w.Logger().Warn(w.ctx,
+
+				"flush growing segement with unrecoverable error, stop retrying", mlog.Err(err))
 			return
 		}
 
 		nextInterval := backoff.NextBackOff()
-		w.Logger().Info("failed to flush new growing segment, retrying", zap.Duration("nextInterval", nextInterval), zap.Error(err))
+		w.Logger().Info(w.ctx,
+
+			"failed to flush new growing segment, retrying", mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
 		select {
 		case <-w.ctx.Done():
-			w.Logger().Info("flush segment canceled", zap.Error(w.ctx.Err()))
+			w.Logger().Info(w.ctx,
+
+				"flush segment canceled", mlog.Err(w.ctx.Err()))
 			return
 		case <-w.wal.Available():
 			// wal is unavailable, stop the worker.
-			w.Logger().Warn("wal is unavailable, stop flush segment")
+			w.Logger().Warn(w.ctx,
+
+				"wal is unavailable, stop flush segment")
 			return
 		case <-time.After(backoff.NextBackOff()):
 		}
@@ -95,7 +104,9 @@ func (w *segmentFlushWorker) waitForTxnManagerRecoverDone() error {
 		// txn manager is ready, continue to do the flush.
 		return nil
 	case <-w.ctx.Done():
-		w.Logger().Info("flush segment canceled", zap.Error(w.ctx.Err()))
+		w.Logger().Info(w.ctx,
+
+			"flush segment canceled", mlog.Err(w.ctx.Err()))
 		return w.ctx.Err()
 	case <-w.wal.Available():
 		return status.NewOnShutdownError("wal is unavailable")
@@ -122,17 +133,21 @@ func (w *segmentFlushWorker) doOnce() error {
 
 	result, err := w.wal.Append(w.ctx, msg)
 	if err != nil {
-		w.Logger().Error("failed to append flush message", log.FieldMessage(msg), zap.Error(err))
+		w.Logger().Error(w.ctx,
+
+			"failed to append flush message", mlog.FieldMessage(msg), mlog.Err(err))
 		return err
 	}
 	policy := w.segment.SealPolicy()
-	w.Logger().Info("segment has been flushed",
-		log.FieldMessage(msg),
-		zap.String("policy", string(policy.Policy)),
-		zap.Any("extras", policy.Extra),
-		zap.Any("stats", w.segment.GetFlushedStat()),
-		zap.String("messageID", result.MessageID.String()),
-		zap.Uint64("timetick", result.TimeTick))
+	w.Logger().Info(w.ctx,
+
+		"segment has been flushed",
+		mlog.FieldMessage(msg),
+		mlog.String("policy", string(policy.Policy)),
+		mlog.Any("extras", policy.Extra),
+		mlog.Any("stats", w.segment.GetFlushedStat()),
+		mlog.String("messageID", result.MessageID.String()),
+		mlog.Uint64("timetick", result.TimeTick))
 	return nil
 }
 
@@ -140,12 +155,16 @@ func (w *segmentFlushWorker) doOnce() error {
 func (w *segmentFlushWorker) checkIfReady() bool {
 	// if there're flying acks, wait them acked, delay the flush at next retry.
 	if ackSem := w.segment.AckSem(); ackSem > 0 {
-		w.Logger().Info("segment has flying insert operation, delay it", zap.Int32("ackSem", ackSem), zap.Int64("segmentID", w.segment.GetSegmentID()))
+		w.Logger().Info(w.ctx,
+
+			"segment has flying insert operation, delay it", mlog.Int32("ackSem", ackSem), mlog.FieldSegmentID(w.segment.GetSegmentID()))
 		return false
 	}
 	// if there're flying txns, wait them committed, delay the flush at next retry.
 	if txnSem := w.segment.TxnSem(); txnSem > 0 {
-		w.Logger().Info("segment has flying txns, delay it", zap.Int32("txnSem", txnSem), zap.Int64("segmentID", w.segment.GetSegmentID()))
+		w.Logger().Info(w.ctx,
+
+			"segment has flying txns, delay it", mlog.Int32("txnSem", txnSem), mlog.FieldSegmentID(w.segment.GetSegmentID()))
 		return false
 	}
 	return true

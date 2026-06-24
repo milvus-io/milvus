@@ -24,14 +24,13 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -121,7 +120,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -138,7 +137,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
-	log.Info("Show segments", zap.Any("segments", segments))
+	mlog.Info(context.TODO(), "Show segments", mlog.Any("segments", segments))
 
 	// load refresh
 	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -291,7 +290,7 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	})
 	s.NoError(err)
 	s.Equal(int32(0), importResp.GetStatus().GetCode())
-	log.Info("Import result", zap.Any("importResp", importResp))
+	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
@@ -308,7 +307,7 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
-	log.Info("Show segments", zap.Any("segments", segments))
+	mlog.Info(context.TODO(), "Show segments", mlog.Any("segments", segments))
 
 	// load refresh
 	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{

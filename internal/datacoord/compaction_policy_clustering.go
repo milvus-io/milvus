@@ -22,14 +22,13 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -59,7 +58,7 @@ func (policy *clusteringCompactionPolicy) Name() string {
 }
 
 func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	log.Info("start trigger clusteringCompactionPolicy...")
+	mlog.Info(ctx, "start trigger clusteringCompactionPolicy...")
 	collections := policy.meta.GetCollections()
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
@@ -69,18 +68,18 @@ func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 			continue
 		}
 		if collection.IsExternal() {
-			log.Info("skip clustering compaction for external collection", zap.Int64("collectionID", collection.ID))
+			mlog.Info(ctx, "skip clustering compaction for external collection", mlog.FieldCollectionID(collection.ID))
 			continue
 		}
 		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
-			log.Info("skip clustering compaction for collection due to unloaded protected snapshot RefIndex",
-				zap.Int64("collectionID", collection.ID))
+			mlog.Info(ctx, "skip clustering compaction for collection due to unloaded protected snapshot RefIndex",
+				mlog.FieldCollectionID(collection.ID))
 			continue
 		}
 		collectionViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
-			log.Warn("fail to trigger collection clustering compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
+			mlog.Warn(ctx, "fail to trigger collection clustering compaction", mlog.FieldCollectionID(collection.ID), mlog.Err(err))
 		}
 		views = append(views, collectionViews...)
 	}
@@ -100,9 +99,9 @@ func (policy *clusteringCompactionPolicy) checkAllL2SegmentsContains(ctx context
 	}
 	segments := policy.meta.SelectSegments(ctx, SegmentFilterFunc(getCompactingL2Segment))
 	if len(segments) > 0 {
-		log.Ctx(ctx).Info("there are some segments are compacting",
-			zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
-			zap.String("channel", channel), zap.Int64s("compacting segment", lo.Map(segments, func(segment *SegmentInfo, i int) int64 {
+		mlog.Info(ctx, "there are some segments are compacting",
+			mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(partitionID),
+			mlog.String("channel", channel), mlog.Int64s("compacting segment", lo.Map(segments, func(segment *SegmentInfo, i int) int64 {
 				return segment.GetID()
 			})))
 		return false
@@ -111,36 +110,36 @@ func (policy *clusteringCompactionPolicy) checkAllL2SegmentsContains(ctx context
 }
 
 func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, int64, error) {
-	log := log.With(zap.Int64("collectionID", collectionID))
-	log.Info("start trigger collection clustering compaction")
+	log := mlog.With(mlog.FieldCollectionID(collectionID))
+	log.Info(ctx, "start trigger collection clustering compaction")
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		log.Warn("fail to get collection from handler")
+		log.Warn(ctx, "fail to get collection from handler")
 		return nil, 0, err
 	}
 	if collection == nil {
-		log.Warn("collection not exist")
+		log.Warn(ctx, "collection not exist")
 		return nil, 0, nil
 	}
 	if collection.IsExternal() {
-		log.Info("skip clustering compaction for external collection")
+		log.Info(ctx, "skip clustering compaction for external collection")
 		return nil, 0, nil
 	}
 	clusteringKeyField := clustering.GetClusteringKeyField(collection.Schema)
 	if clusteringKeyField == nil {
-		log.Info("the collection has no clustering key, skip tigger clustering compaction")
+		log.Info(ctx, "the collection has no clustering key, skip tigger clustering compaction")
 		return nil, 0, nil
 	}
 
 	compacting, triggerID := policy.collectionIsClusteringCompacting(collection.ID)
 	if compacting {
-		log.Info("collection is clustering compacting", zap.Int64("triggerID", triggerID))
+		log.Info(ctx, "collection is clustering compacting", mlog.Int64("triggerID", triggerID))
 		return nil, triggerID, nil
 	}
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
-		log.Warn("fail to allocate triggerID", zap.Error(err))
+		log.Warn(ctx, "fail to allocate triggerID", mlog.Err(err))
 		return nil, 0, err
 	}
 
@@ -159,28 +158,28 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	views := make([]CompactionView, 0)
 	// partSegments is list of chanPartSegments, which is channel-partition organized segments
 	for _, group := range partSegments {
-		log := log.With(zap.Int64("partitionID", group.partitionID), zap.String("channel", group.channelName))
+		log := mlog.With(mlog.FieldPartitionID(group.partitionID), mlog.String("channel", group.channelName))
 
 		if !policy.checkAllL2SegmentsContains(ctx, group.collectionID, group.partitionID, group.channelName) {
-			log.Warn("clustering compaction cannot be done, otherwise the performance will fall back")
+			log.Warn(ctx, "clustering compaction cannot be done, otherwise the performance will fall back")
 			continue
 		}
 
 		collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 		if err != nil {
-			log.Warn("get collection ttl failed, skip to handle compaction")
+			log.Warn(ctx, "get collection ttl failed, skip to handle compaction")
 			return make([]CompactionView, 0), 0, err
 		}
 
 		if len(group.segments) == 0 {
-			log.Info("the length of SegmentsChanPart is 0, skip to handle compaction")
+			log.Info(ctx, "the length of SegmentsChanPart is 0, skip to handle compaction")
 			continue
 		}
 
 		if !manual {
 			execute, err := triggerClusteringCompactionPolicy(ctx, policy.meta, group.collectionID, group.partitionID, group.channelName, group.segments)
 			if err != nil {
-				log.Warn("failed to trigger clustering compaction", zap.Error(err))
+				log.Warn(ctx, "failed to trigger clustering compaction", mlog.Err(err))
 				continue
 			}
 			if !execute {
@@ -199,7 +198,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		views = append(views, view)
 	}
 
-	log.Info("finish trigger collection clustering compaction", zap.Int("viewNum", len(views)))
+	log.Info(ctx, "finish trigger collection clustering compaction", mlog.Int("viewNum", len(views)))
 	return views, newTriggerID, nil
 }
 
@@ -237,7 +236,7 @@ func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionVi
 	}
 	maxSegmentRows = int64(float64(segmentRows) * clusteringMaxSegmentSizeRatio)
 	preferSegmentRows = int64(float64(segmentRows) * clusteringPreferSegmentSizeRatio)
-	return
+	return totalRows, maxSegmentRows, preferSegmentRows, err
 }
 
 func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int64) (int64, error) {
@@ -276,7 +275,7 @@ func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int6
 }
 
 func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collectionID int64, partitionID int64, channel string, segments []*SegmentInfo) (bool, error) {
-	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
+	log := mlog.With(mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(partitionID))
 	currentVersion := meta.partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
 	if currentVersion == 0 {
 		var newDataSize int64 = 0
@@ -284,26 +283,26 @@ func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collecti
 			newDataSize += seg.getSegmentSize()
 		}
 		if newDataSize > Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.GetAsSize() {
-			log.Info("New data is larger than threshold, do compaction", zap.Int64("newDataSize", newDataSize))
+			log.Info(ctx, "New data is larger than threshold, do compaction", mlog.Int64("newDataSize", newDataSize))
 			return true, nil
 		}
-		log.Info("No partition stats and no enough new data, skip compaction", zap.Int64("newDataSize", newDataSize))
+		log.Info(ctx, "No partition stats and no enough new data, skip compaction", mlog.Int64("newDataSize", newDataSize))
 		return false, nil
 	}
 
 	partitionStats := meta.GetPartitionStatsMeta().GetPartitionStats(collectionID, partitionID, channel, currentVersion)
 	if partitionStats == nil {
-		log.Info("partition stats not found")
+		log.Info(ctx, "partition stats not found")
 		return false, nil
 	}
 	timestampSeconds := partitionStats.GetCommitTime()
 	pTime := time.Unix(timestampSeconds, 0)
 	if time.Since(pTime) < Params.DataCoordCfg.ClusteringCompactionMinInterval.GetAsDuration(time.Second) {
-		log.Info("Too short time before last clustering compaction, skip compaction")
+		log.Info(ctx, "Too short time before last clustering compaction, skip compaction")
 		return false, nil
 	}
 	if time.Since(pTime) > Params.DataCoordCfg.ClusteringCompactionMaxInterval.GetAsDuration(time.Second) {
-		log.Info("It is a long time after last clustering compaction, do compaction")
+		log.Info(ctx, "It is a long time after last clustering compaction, do compaction")
 		return true, nil
 	}
 
@@ -319,10 +318,10 @@ func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collecti
 
 	// size based
 	if uncompactedSegmentSize > Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.GetAsSize() {
-		log.Info("New data is larger than threshold, do compaction", zap.Int64("newDataSize", uncompactedSegmentSize))
+		log.Info(ctx, "New data is larger than threshold, do compaction", mlog.Int64("newDataSize", uncompactedSegmentSize))
 		return true, nil
 	}
-	log.Info("New data is smaller than threshold, skip compaction", zap.Int64("newDataSize", uncompactedSegmentSize))
+	log.Info(ctx, "New data is smaller than threshold, skip compaction", mlog.Int64("newDataSize", uncompactedSegmentSize))
 	return false, nil
 }
 
@@ -348,6 +347,20 @@ func (v *ClusteringSegmentsView) GetSegmentsView() []*SegmentView {
 		return nil
 	}
 	return v.segments
+}
+
+func (v *ClusteringSegmentsView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return sumSegmentSize(v.segments)
+}
+
+func (v *ClusteringSegmentsView) GetCollectionTTL() time.Duration {
+	if v == nil {
+		return 0
+	}
+	return v.collectionTTL
 }
 
 func (v *ClusteringSegmentsView) Append(segments ...*SegmentView) {

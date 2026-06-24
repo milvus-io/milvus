@@ -22,12 +22,11 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -65,16 +64,16 @@ func (m *compactionTargetMeta) reloadFromKV() error {
 	for _, target := range targets {
 		runtimeTarget, err := newCompactionTarget(target)
 		if err != nil {
-			log.Warn("materialize inert compaction target",
-				zap.Int64("targetID", target.GetTargetID()),
-				zap.Int64("collectionID", target.GetCollectionID()),
-				zap.String("intent", target.GetIntent().String()),
-				zap.Error(err))
+			mlog.Warn(m.ctx, "materialize inert compaction target",
+				mlog.Int64("targetID", target.GetTargetID()),
+				mlog.FieldCollectionID(target.GetCollectionID()),
+				mlog.String("intent", target.GetIntent().String()),
+				mlog.Err(err))
 		}
 		loadedTargets[target.GetTargetID()] = runtimeTarget
 	}
 	m.targets = loadedTargets
-	log.Info("DataCoord compactionTargetMeta reloadFromKV done", zap.Duration("duration", tr.ElapseSpan()))
+	mlog.Info(m.ctx, "DataCoord compactionTargetMeta reloadFromKV done", mlog.Duration("duration", tr.ElapseSpan()))
 	return nil
 }
 
@@ -125,18 +124,18 @@ func (m *compactionTargetMeta) SaveCompactionTarget(ctx context.Context, target 
 	defer m.Unlock()
 
 	if err := m.catalog.SaveCompactionTarget(ctx, target); err != nil {
-		log.Error("meta update: save compaction target failed",
-			zap.Int64("targetID", target.GetTargetID()),
-			zap.Int64("collectionID", target.GetCollectionID()),
-			zap.Error(err))
+		mlog.Error(ctx, "meta update: save compaction target failed",
+			mlog.Int64("targetID", target.GetTargetID()),
+			mlog.FieldCollectionID(target.GetCollectionID()),
+			mlog.Err(err))
 		return err
 	}
 	m.upsertCompactionTargetLocked(target)
-	log.Info("meta update: save compaction target done",
-		zap.Int64("targetID", target.GetTargetID()),
-		zap.Int64("collectionID", target.GetCollectionID()),
-		zap.String("intent", target.GetIntent().String()),
-		zap.String("state", target.GetState().String()))
+	mlog.Info(ctx, "meta update: save compaction target done",
+		mlog.Int64("targetID", target.GetTargetID()),
+		mlog.FieldCollectionID(target.GetCollectionID()),
+		mlog.String("intent", target.GetIntent().String()),
+		mlog.String("state", target.GetState().String()))
 	return nil
 }
 
@@ -152,19 +151,19 @@ func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, 
 		var changed bool
 		inactivatedAtTS, changed = compactionTargetStateUpdate(target, state)
 		if !changed {
-			log.Info("meta update: skip unchanged compaction target state",
-				zap.Int64("targetID", targetID),
-				zap.String("state", state.String()))
+			mlog.Info(ctx, "meta update: skip unchanged compaction target state",
+				mlog.Int64("targetID", targetID),
+				mlog.String("state", state.String()))
 			return nil
 		}
 	} else {
 		inactivatedAtTS = compactionTargetInactivatedAtTS(state)
 	}
 	if err := m.catalog.UpdateCompactionTargetState(ctx, targetID, state, inactivatedAtTS); err != nil {
-		log.Error("meta update: update compaction target state failed",
-			zap.Int64("targetID", targetID),
-			zap.String("state", state.String()),
-			zap.Error(err))
+		mlog.Error(ctx, "meta update: update compaction target state failed",
+			mlog.Int64("targetID", targetID),
+			mlog.String("state", state.String()),
+			mlog.Err(err))
 		return err
 	}
 	if loaded {
@@ -173,10 +172,10 @@ func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, 
 		updated.InactivatedAtTS = inactivatedAtTS
 		m.upsertCompactionTargetLocked(updated)
 	}
-	log.Info("meta update: update compaction target state done",
-		zap.Int64("targetID", targetID),
-		zap.String("state", state.String()),
-		zap.Uint64("inactivatedAtTS", inactivatedAtTS))
+	mlog.Info(ctx, "meta update: update compaction target state done",
+		mlog.Int64("targetID", targetID),
+		mlog.String("state", state.String()),
+		mlog.Uint64("inactivatedAtTS", inactivatedAtTS))
 	return nil
 }
 
@@ -193,16 +192,16 @@ func (m *compactionTargetMeta) DropCompactionTarget(ctx context.Context, targetI
 		record = target.Clone()
 	}
 	if err := m.catalog.DropCompactionTarget(ctx, record); err != nil {
-		log.Error("meta update: drop compaction target failed",
-			zap.Int64("targetID", targetID),
-			zap.Int64("collectionID", record.GetCollectionID()),
-			zap.Error(err))
+		mlog.Error(ctx, "meta update: drop compaction target failed",
+			mlog.Int64("targetID", targetID),
+			mlog.FieldCollectionID(record.GetCollectionID()),
+			mlog.Err(err))
 		return err
 	}
 	delete(m.targets, targetID)
-	log.Info("meta update: drop compaction target done",
-		zap.Int64("targetID", targetID),
-		zap.Int64("collectionID", record.GetCollectionID()))
+	mlog.Info(ctx, "meta update: drop compaction target done",
+		mlog.Int64("targetID", targetID),
+		mlog.FieldCollectionID(record.GetCollectionID()))
 	return nil
 }
 
@@ -212,11 +211,11 @@ func (m *compactionTargetMeta) upsertCompactionTargetLocked(target *datapb.Compa
 	}
 	runtimeTarget, err := newCompactionTarget(target)
 	if err != nil {
-		log.Warn("materialize inert compaction target",
-			zap.Int64("targetID", target.GetTargetID()),
-			zap.Int64("collectionID", target.GetCollectionID()),
-			zap.String("intent", target.GetIntent().String()),
-			zap.Error(err))
+		mlog.Warn(m.ctx, "materialize inert compaction target",
+			mlog.Int64("targetID", target.GetTargetID()),
+			mlog.FieldCollectionID(target.GetCollectionID()),
+			mlog.String("intent", target.GetIntent().String()),
+			mlog.Err(err))
 	}
 	m.targets[target.GetTargetID()] = runtimeTarget
 }
