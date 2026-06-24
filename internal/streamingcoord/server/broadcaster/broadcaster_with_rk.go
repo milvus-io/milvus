@@ -14,9 +14,8 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	// Inject the caller's trace context into the broadcast message so that
-	// the DDL ack callback (which may run post-restart after the original
-	// caller span is long gone) can still extract and parent its span.
+	// Keep a trace context in the broadcast message so that the DDL ack callback
+	// can still extract it after the original caller span is long gone.
 	message.InjectTraceContext(ctx, msg)
 
 	// consume the guards after the broadcast is called to avoid double unlock.

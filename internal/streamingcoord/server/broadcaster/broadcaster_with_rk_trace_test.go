@@ -58,6 +58,46 @@ func TestBroadcasterWithRK_InjectsTraceContextBeforeTaskPersist(t *testing.T) {
 	assert.Equal(t, expectedTraceID, sc.TraceID())
 }
 
+func TestBroadcasterWithRK_KeepsExistingTraceContext(t *testing.T) {
+	defer mockey.UnPatchAll()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	var capturedMsg message.BroadcastMutableMessage
+	mockey.Mock((*broadcastTaskManager).broadcast).To(
+		func(_ *broadcastTaskManager, _ context.Context, msg message.BroadcastMutableMessage, _ uint64, _ *lockGuards) (*types.BroadcastAppendResult, error) {
+			capturedMsg = msg
+			return &types.BroadcastAppendResult{}, nil
+		}).Build()
+
+	msg := buildTestBroadcastMessageForTrace(t)
+	originCtx, originSpan := otel.Tracer("test").Start(context.Background(), "origin.ddl")
+	originSC := trace.SpanContextFromContext(originCtx)
+	originSpan.End()
+	message.InjectTraceContext(originCtx, msg)
+
+	callerCtx, callerSpan := otel.Tracer("test").Start(context.Background(), "caller.ddl")
+	defer callerSpan.End()
+
+	b := &broadcasterWithRK{
+		broadcaster: &broadcastTaskManager{},
+	}
+	_, err := b.Broadcast(callerCtx, msg)
+	assert.NoError(t, err)
+
+	sc := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsg))
+	assert.True(t, sc.IsValid(), "_tc should still be present after Broadcast")
+	assert.Equal(t, originSC.TraceID(), sc.TraceID())
+	assert.Equal(t, originSC.SpanID(), sc.SpanID())
+}
+
 // buildTestBroadcastMessageForTrace builds a minimal BroadcastMutableMessage for tests.
 func buildTestBroadcastMessageForTrace(t *testing.T) message.BroadcastMutableMessage {
 	t.Helper()

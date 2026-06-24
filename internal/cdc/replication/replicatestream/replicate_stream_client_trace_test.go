@@ -72,7 +72,7 @@ func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
 	capturedReq := <-client.ch
 
 	// Outgoing _tc is still the primary span context. The replicate server owns
-	// the next WAL span and will overwrite _tc after it starts that span.
+	// the next WAL span, but keeps the existing message trace context.
 	outProps := capturedReq.GetReplicateMessage().GetMessage().GetProperties()
 	outMsg := message.MilvusMessageToImmutableMessage(capturedReq.GetReplicateMessage().GetMessage())
 	outSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), outMsg))

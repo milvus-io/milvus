@@ -50,6 +50,21 @@ func TestInjectTraceContext_NoActiveSpan_NoOp(t *testing.T) {
 	assert.False(t, ok, "InjectTraceContext should be a no-op without an active span")
 }
 
+func TestInjectTraceContext_ExistingTraceContext_NoOp(t *testing.T) {
+	existingSC := makeSpanContext(t, "0102030405060708090a0b0c0d0e0f10", "1112131415161718", 0x01)
+	nextSC := makeSpanContext(t, "2122232425262728292a2b2c2d2e2f30", "3132333435363738", 0x01)
+
+	msg := CreateTestEmptyInsertMesage(1, nil)
+	InjectTraceContext(trace.ContextWithRemoteSpanContext(context.Background(), existingSC), msg)
+	InjectTraceContext(trace.ContextWithRemoteSpanContext(context.Background(), nextSC), msg)
+
+	got := trace.SpanContextFromContext(ExtractTraceContext(context.Background(), msg))
+	assert.True(t, got.IsValid())
+	assert.Equal(t, existingSC.TraceID(), got.TraceID())
+	assert.Equal(t, existingSC.SpanID(), got.SpanID())
+	assert.Equal(t, existingSC.TraceFlags(), got.TraceFlags())
+}
+
 func TestExtractTraceContext_MissingKey_ReturnsOriginalCtx(t *testing.T) {
 	msg := CreateTestEmptyInsertMesage(1, nil)
 	baseCtx := context.Background()

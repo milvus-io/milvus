@@ -18,7 +18,7 @@ var (
 )
 
 // TraceContextInjector injects the current ctx's W3C trace span context into
-// the message under the reserved _tc property.
+// the message under the reserved _tc property when it is absent.
 type TraceContextInjector interface {
 	WithTraceContext(ctx context.Context)
 }
