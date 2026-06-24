@@ -18,6 +18,7 @@ package interceptor
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -58,24 +59,46 @@ func parseZapLevel(s string) zapcore.Level {
 	}
 }
 
-// parseMethodList parses a comma-separated full-method allowlist into a set.
+const regexMethodPrefix = "re:"
+
+type methodFilter struct {
+	exact  map[string]struct{}
+	regexs []*regexp.Regexp
+}
+
+// parseMethodFilter parses a comma-separated full-method allowlist. Plain
+// entries are matched exactly; entries prefixed with "re:" are Go regexps.
 // Returns nil for empty input so the hot path can exit on a nil check.
-func parseMethodList(methods string) map[string]struct{} {
+func parseMethodFilter(methods string) (*methodFilter, []string) {
 	methods = strings.TrimSpace(methods)
 	if methods == "" {
-		return nil
+		return nil, nil
 	}
-	result := make(map[string]struct{})
+	filter := &methodFilter{}
+	var invalidRegexs []string
 	for _, m := range strings.Split(methods, ",") {
 		m = strings.TrimSpace(m)
-		if m != "" {
-			result[m] = struct{}{}
+		if m == "" {
+			continue
 		}
+		if pattern, ok := strings.CutPrefix(m, regexMethodPrefix); ok {
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				invalidRegexs = append(invalidRegexs, m)
+				continue
+			}
+			filter.regexs = append(filter.regexs, re)
+			continue
+		}
+		if filter.exact == nil {
+			filter.exact = make(map[string]struct{})
+		}
+		filter.exact[m] = struct{}{}
 	}
-	if len(result) == 0 {
-		return nil
+	if len(filter.exact) == 0 && len(filter.regexs) == 0 {
+		return nil, invalidRegexs
 	}
-	return result
+	return filter, invalidRegexs
 }
 
 // dynamicLogConfig carries the hot-reloadable log level + method allowlist.
@@ -83,7 +106,20 @@ func parseMethodList(methods string) map[string]struct{} {
 // load and a map lookup per RPC on the hot path.
 type dynamicLogConfig struct {
 	level   atomic.Int32 // zapcore.Level stored as int32
-	methods atomic.Pointer[map[string]struct{}]
+	methods atomic.Pointer[methodFilter]
+}
+
+func (c *dynamicLogConfig) updateMethods(methodsKey string, methods string) bool {
+	filter, invalidRegexs := parseMethodFilter(methods)
+	if len(invalidRegexs) > 0 {
+		mlog.Warn(context.TODO(), "ignore invalid gRPC log method regex",
+			mlog.String("key", methodsKey),
+			mlog.Strings("methods", invalidRegexs),
+		)
+		return false
+	}
+	c.methods.Store(filter)
+	return true
 }
 
 // newDynamicLogConfig seeds the level and allowlist from paramtable and
@@ -91,8 +127,14 @@ type dynamicLogConfig struct {
 func newDynamicLogConfig(levelKey, methodsKey, initialLevel, initialMethods string) *dynamicLogConfig {
 	c := &dynamicLogConfig{}
 	c.level.Store(int32(parseZapLevel(initialLevel)))
-	set := parseMethodList(initialMethods)
-	c.methods.Store(&set)
+	filter, invalidRegexs := parseMethodFilter(initialMethods)
+	c.methods.Store(filter)
+	if len(invalidRegexs) > 0 {
+		mlog.Warn(context.TODO(), "ignore invalid gRPC log method regex",
+			mlog.String("key", methodsKey),
+			mlog.Strings("methods", invalidRegexs),
+		)
+	}
 
 	pt := paramtable.Get()
 	pt.Watch(levelKey, config.NewHandler("grpc.log."+levelKey, func(evt *config.Event) {
@@ -106,8 +148,9 @@ func newDynamicLogConfig(levelKey, methodsKey, initialLevel, initialMethods stri
 		if !evt.HasUpdated {
 			return
 		}
-		s := parseMethodList(evt.Value)
-		c.methods.Store(&s)
+		if !c.updateMethods(methodsKey, evt.Value) {
+			return
+		}
 		mlog.Info(context.TODO(), "gRPC log method filter updated", mlog.String("key", methodsKey), mlog.String("value", evt.Value))
 	}))
 	return c
@@ -116,14 +159,19 @@ func newDynamicLogConfig(levelKey, methodsKey, initialLevel, initialMethods stri
 // shouldLog is the fast allowlist check. Returns ok=false when no methods are
 // allow-listed or the current method is not in the allowlist — the default state.
 func (c *dynamicLogConfig) shouldLog(fullMethod string) (zapcore.Level, bool) {
-	set := c.methods.Load()
-	if set == nil || *set == nil {
+	filter := c.methods.Load()
+	if filter == nil {
 		return 0, false
 	}
-	if _, ok := (*set)[fullMethod]; !ok {
-		return 0, false
+	if _, ok := filter.exact[fullMethod]; ok {
+		return zapcore.Level(c.level.Load()), true
 	}
-	return zapcore.Level(c.level.Load()), true
+	for _, re := range filter.regexs {
+		if re.MatchString(fullMethod) {
+			return zapcore.Level(c.level.Load()), true
+		}
+	}
+	return 0, false
 }
 
 // emitServerAccessLog writes one structured line via zap using pre-captured
