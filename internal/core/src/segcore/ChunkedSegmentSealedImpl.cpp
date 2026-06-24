@@ -257,16 +257,14 @@ static void
 cancel_and_erase_json_indices(std::vector<JsonIndexT>& json_indices,
                               FieldId field_id,
                               std::string_view nested_path) {
-    auto new_end = std::remove_if(
-        json_indices.begin(), json_indices.end(), [&](auto& index) {
-            auto matched =
-                index.field_id == field_id && index.nested_path == nested_path;
-            if (matched) {
-                cancel_warmup(index.index);
-            }
-            return matched;
-        });
-    json_indices.erase(new_end, json_indices.end());
+    std::erase_if(json_indices, [&](auto& index) {
+        auto matched =
+            index.field_id == field_id && index.nested_path == nested_path;
+        if (matched) {
+            cancel_warmup(index.index);
+        }
+        return matched;
+    });
 }
 
 template <typename JsonIndexT>
@@ -4358,12 +4356,9 @@ ChunkedSegmentSealedImpl::HasJsonIndex(FieldId field_id) const {
     // HasIndex() preserves its narrower "scalar/vector/binlog index exists"
     // semantics for ReorderConjunctExpr and other consumers.
     return json_indices.withRLock([&](const auto& vec) {
-        for (const auto& index : vec) {
-            if (index.field_id == field_id) {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(vec, [field_id](const auto& index) {
+            return index.field_id == field_id;
+        });
     });
 }
 
