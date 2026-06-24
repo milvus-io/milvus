@@ -20,6 +20,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -108,6 +109,13 @@ type dynamicLogConfig struct {
 	methods atomic.Pointer[methodFilter]
 }
 
+var (
+	serverDynamicLogConfigOnce sync.Once
+	serverDynamicLogConfig     *dynamicLogConfig
+	clientDynamicLogConfigOnce sync.Once
+	clientDynamicLogConfig     *dynamicLogConfig
+)
+
 func (c *dynamicLogConfig) updateMethods(methodsKey string, methods string) bool {
 	filter, invalidRegexs := parseMethodFilter(methods)
 	if len(invalidRegexs) > 0 {
@@ -153,6 +161,32 @@ func newDynamicLogConfig(levelKey, methodsKey, initialLevel, initialMethods stri
 		mlog.Info(context.TODO(), "gRPC log method filter updated", mlog.String("key", methodsKey), mlog.String("value", evt.Value))
 	}))
 	return c
+}
+
+func getServerDynamicLogConfig() *dynamicLogConfig {
+	serverDynamicLogConfigOnce.Do(func() {
+		pt := paramtable.Get()
+		serverDynamicLogConfig = newDynamicLogConfig(
+			pt.LogCfg.GrpcServerLogLevel.Key,
+			pt.LogCfg.GrpcServerLogMethods.Key,
+			pt.LogCfg.GrpcServerLogLevel.GetValue(),
+			pt.LogCfg.GrpcServerLogMethods.GetValue(),
+		)
+	})
+	return serverDynamicLogConfig
+}
+
+func getClientDynamicLogConfig() *dynamicLogConfig {
+	clientDynamicLogConfigOnce.Do(func() {
+		pt := paramtable.Get()
+		clientDynamicLogConfig = newDynamicLogConfig(
+			pt.LogCfg.GrpcClientLogLevel.Key,
+			pt.LogCfg.GrpcClientLogMethods.Key,
+			pt.LogCfg.GrpcClientLogLevel.GetValue(),
+			pt.LogCfg.GrpcClientLogMethods.GetValue(),
+		)
+	})
+	return clientDynamicLogConfig
 }
 
 // shouldLog is the fast allowlist check. Returns ok=false when no methods are
@@ -220,13 +254,7 @@ func emitClientAccessLog(ctx context.Context, lvl mlog.Level, method string, err
 // log. When no methods are allow-listed (the default), this interceptor is
 // equivalent to the bare metrics interceptor plus a single branch.
 func NewObservabilityServerUnaryInterceptor() grpc.UnaryServerInterceptor {
-	pt := paramtable.Get()
-	logCfg := newDynamicLogConfig(
-		pt.LogCfg.GrpcServerLogLevel.Key,
-		pt.LogCfg.GrpcServerLogMethods.Key,
-		pt.LogCfg.GrpcServerLogLevel.GetValue(),
-		pt.LogCfg.GrpcServerLogMethods.GetValue(),
-	)
+	logCfg := getServerDynamicLogConfig()
 	metricsIntercept := metrics.GRPCServerMetric.UnaryServerInterceptor(
 		grpcprom.WithLabelsFromContext(nodeIDLabels),
 	)
@@ -254,13 +282,7 @@ func NewObservabilityServerUnaryInterceptor() grpc.UnaryServerInterceptor {
 // NewObservabilityServerStreamInterceptor is the stream counterpart.
 // Duration measures the whole stream lifetime, not per message.
 func NewObservabilityServerStreamInterceptor() grpc.StreamServerInterceptor {
-	pt := paramtable.Get()
-	logCfg := newDynamicLogConfig(
-		pt.LogCfg.GrpcServerLogLevel.Key,
-		pt.LogCfg.GrpcServerLogMethods.Key,
-		pt.LogCfg.GrpcServerLogLevel.GetValue(),
-		pt.LogCfg.GrpcServerLogMethods.GetValue(),
-	)
+	logCfg := getServerDynamicLogConfig()
 	metricsIntercept := metrics.GRPCServerMetric.StreamServerInterceptor(
 		grpcprom.WithLabelsFromContext(nodeIDLabels),
 	)
@@ -285,16 +307,8 @@ func NewObservabilityServerStreamInterceptor() grpc.StreamServerInterceptor {
 
 // NewObservabilityClientUnaryInterceptor is the unary client counterpart.
 func NewObservabilityClientUnaryInterceptor() grpc.UnaryClientInterceptor {
-	pt := paramtable.Get()
-	logCfg := newDynamicLogConfig(
-		pt.LogCfg.GrpcClientLogLevel.Key,
-		pt.LogCfg.GrpcClientLogMethods.Key,
-		pt.LogCfg.GrpcClientLogLevel.GetValue(),
-		pt.LogCfg.GrpcClientLogMethods.GetValue(),
-	)
-	metricsIntercept := metrics.GRPCClientMetric.UnaryClientInterceptor(
-		grpcprom.WithLabelsFromContext(nodeIDLabels),
-	)
+	logCfg := getClientDynamicLogConfig()
+	metricsIntercept := metrics.GRPCClientMetric.UnaryClientInterceptor()
 
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		lvl, shouldLog := logCfg.shouldLog(method)
@@ -318,16 +332,8 @@ func NewObservabilityClientUnaryInterceptor() grpc.UnaryClientInterceptor {
 // Duration measures the time to obtain the stream handle, not the stream's
 // full lifetime — stream lifetime is not knowable from the interceptor alone.
 func NewObservabilityClientStreamInterceptor() grpc.StreamClientInterceptor {
-	pt := paramtable.Get()
-	logCfg := newDynamicLogConfig(
-		pt.LogCfg.GrpcClientLogLevel.Key,
-		pt.LogCfg.GrpcClientLogMethods.Key,
-		pt.LogCfg.GrpcClientLogLevel.GetValue(),
-		pt.LogCfg.GrpcClientLogMethods.GetValue(),
-	)
-	metricsIntercept := metrics.GRPCClientMetric.StreamClientInterceptor(
-		grpcprom.WithLabelsFromContext(nodeIDLabels),
-	)
+	logCfg := getClientDynamicLogConfig()
+	metricsIntercept := metrics.GRPCClientMetric.StreamClientInterceptor()
 
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		lvl, shouldLog := logCfg.shouldLog(method)

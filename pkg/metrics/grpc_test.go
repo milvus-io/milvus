@@ -23,6 +23,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestGRPCMetricsStaticInitialization(t *testing.T) {
+	assert.NotNil(t, GRPCServerMetric)
+	assert.NotNil(t, GRPCClientMetric)
+}
+
 func TestRegisterGRPCMetrics(t *testing.T) {
 	t.Run("registration does not panic and populates both collectors", func(t *testing.T) {
 		r := prometheus.NewRegistry()
