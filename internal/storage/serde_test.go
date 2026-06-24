@@ -398,6 +398,139 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 	}
 }
 
+func TestArrayOfVectorSerializationRejectsInvalidPayloadLength(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         int
+		vector      *schemapb.VectorField
+	}{
+		{
+			name:        "FloatVector",
+			elementType: schemapb.DataType_FloatVector,
+			dim:         4,
+			vector: &schemapb.VectorField{
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5}},
+				},
+			},
+		},
+		{
+			name:        "BinaryVector",
+			elementType: schemapb.DataType_BinaryVector,
+			dim:         16,
+			vector: &schemapb.VectorField{
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: []byte{1, 2, 3},
+				},
+			},
+		},
+		{
+			name:        "Float16Vector",
+			elementType: schemapb.DataType_Float16Vector,
+			dim:         4,
+			vector: &schemapb.VectorField{
+				Data: &schemapb.VectorField_Float16Vector{
+					Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
+				},
+			},
+		},
+		{
+			name:        "BFloat16Vector",
+			elementType: schemapb.DataType_BFloat16Vector,
+			dim:         4,
+			vector: &schemapb.VectorField{
+				Data: &schemapb.VectorField_Bfloat16Vector{
+					Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
+				},
+			},
+		},
+		{
+			name:        "Int8Vector",
+			elementType: schemapb.DataType_Int8Vector,
+			dim:         4,
+			vector: &schemapb.VectorField{
+				Data: &schemapb.VectorField_Int8Vector{
+					Int8Vector: []byte{1, 2, 3, 4, 5},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := serdeMap[schemapb.DataType_ArrayOfVector]
+			arrowType := entry.arrowType(tt.dim, tt.elementType)
+			builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+			defer builder.Release()
+
+			err := entry.serialize(builder, tt.vector, tt.elementType)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "not divisible")
+		})
+	}
+}
+
+func TestArrayOfVectorDeserializationRejectsByteWidthMismatch(t *testing.T) {
+	tests := []struct {
+		name            string
+		elementType     schemapb.DataType
+		dim             int64
+		actualByteWidth int
+	}{
+		{
+			name:            "FloatVector",
+			elementType:     schemapb.DataType_FloatVector,
+			dim:             4,
+			actualByteWidth: 8,
+		},
+		{
+			name:            "BinaryVector",
+			elementType:     schemapb.DataType_BinaryVector,
+			dim:             16,
+			actualByteWidth: 1,
+		},
+		{
+			name:            "Float16Vector",
+			elementType:     schemapb.DataType_Float16Vector,
+			dim:             4,
+			actualByteWidth: 4,
+		},
+		{
+			name:            "BFloat16Vector",
+			elementType:     schemapb.DataType_BFloat16Vector,
+			dim:             4,
+			actualByteWidth: 4,
+		},
+		{
+			name:            "Int8Vector",
+			elementType:     schemapb.DataType_Int8Vector,
+			dim:             4,
+			actualByteWidth: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arrowType := arrow.ListOf(&arrow.FixedSizeBinaryType{ByteWidth: tt.actualByteWidth})
+			builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+			defer builder.Release()
+
+			listBuilder := builder.(*array.ListBuilder)
+			valueBuilder := listBuilder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+			listBuilder.Append(true)
+			valueBuilder.Append(make([]byte, tt.actualByteWidth))
+
+			arr := builder.NewArray()
+			defer arr.Release()
+
+			_, err := deserializeArrayOfVector(arr, 0, tt.elementType, tt.dim, true)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "byte width mismatch")
+		})
+	}
+}
+
 func TestArrayOfVectorIntegration(t *testing.T) {
 	// Test the full integration with BuildRecord
 	schema := &schemapb.CollectionSchema{

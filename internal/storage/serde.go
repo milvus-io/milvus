@@ -56,6 +56,36 @@ type (
 	Deserializer[T any] func(Record, []T) error
 )
 
+func validateVectorArrayElementCount(payloadLength int, elementsPerVector int) (int, error) {
+	if elementsPerVector <= 0 {
+		return 0, merr.WrapErrStorageMsg("invalid vector width %d for ArrayOfVector", elementsPerVector)
+	}
+	if payloadLength%elementsPerVector != 0 {
+		return 0, merr.WrapErrStorageMsg("ArrayOfVector payload length %d is not divisible by vector width %d", payloadLength, elementsPerVector)
+	}
+	return payloadLength / elementsPerVector, nil
+}
+
+func expectedVectorArrayByteWidth(elementType schemapb.DataType, dim int64) (int64, error) {
+	if dim <= 0 {
+		return 0, merr.WrapErrStorageMsg("invalid dim %d for ArrayOfVector", dim)
+	}
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		return dim * 4, nil
+	case schemapb.DataType_BinaryVector:
+		return (dim + 7) / 8, nil
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return dim * 2, nil
+	case schemapb.DataType_Int8Vector:
+		return dim, nil
+	case schemapb.DataType_SparseFloatVector:
+		return 0, merr.WrapErrServiceInternalMsg("SparseFloatVector in VectorArray deserialization not implemented yet")
+	default:
+		return 0, merr.WrapErrServiceInternalMsg("unsupported element type for ArrayOfVector deserialization: %s", elementType.String())
+	}
+}
+
 // compositeRecord is a record being composed of multiple records, in which each only have 1 column
 type compositeRecord struct {
 	index map[FieldID]int16
@@ -485,12 +515,15 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return merr.WrapErrServiceInternalMsg("expected *array.ListBuilder, got %T", b)
 			}
 
-			builder.Append(true)
 			valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
-			dim := vf.GetDim()
+			bytesPerVector := valueBuilder.Type().(*arrow.FixedSizeBinaryType).ByteWidth
 
-			appendVectorChunks := func(data []byte, bytesPerVector int) error {
-				numVectors := len(data) / bytesPerVector
+			appendVectorChunks := func(data []byte) error {
+				numVectors, err := validateVectorArrayElementCount(len(data), bytesPerVector)
+				if err != nil {
+					return err
+				}
+				builder.Append(true)
 				for i := 0; i < numVectors; i++ {
 					start := i * bytesPerVector
 					end := start + bytesPerVector
@@ -505,14 +538,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					return merr.WrapErrServiceInternalMsg("FloatVector data is nil for elementType FloatVector")
 				}
 				floatData := vf.GetFloatVector().GetData()
-				numVectors := len(floatData) / int(dim)
+				floatsPerVector := bytesPerVector / 4
+				numVectors, err := validateVectorArrayElementCount(len(floatData), floatsPerVector)
+				if err != nil {
+					return err
+				}
+				builder.Append(true)
 				// Convert float data to binary
 				for i := 0; i < numVectors; i++ {
-					start := i * int(dim)
-					end := start + int(dim)
+					start := i * floatsPerVector
+					end := start + floatsPerVector
 					vectorSlice := floatData[start:end]
 
-					bytes := make([]byte, dim*4)
+					bytes := make([]byte, bytesPerVector)
 					for j, f := range vectorSlice {
 						binary.LittleEndian.PutUint32(bytes[j*4:], math.Float32bits(f))
 					}
@@ -524,25 +562,25 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				if vf.GetBinaryVector() == nil {
 					return merr.WrapErrServiceInternalMsg("BinaryVector data is nil for elementType BinaryVector")
 				}
-				return appendVectorChunks(vf.GetBinaryVector(), int((dim+7)/8))
+				return appendVectorChunks(vf.GetBinaryVector())
 
 			case schemapb.DataType_Float16Vector:
 				if vf.GetFloat16Vector() == nil {
 					return merr.WrapErrServiceInternalMsg("Float16Vector data is nil for elementType Float16Vector")
 				}
-				return appendVectorChunks(vf.GetFloat16Vector(), int(dim)*2)
+				return appendVectorChunks(vf.GetFloat16Vector())
 
 			case schemapb.DataType_BFloat16Vector:
 				if vf.GetBfloat16Vector() == nil {
 					return merr.WrapErrServiceInternalMsg("BFloat16Vector data is nil for elementType BFloat16Vector")
 				}
-				return appendVectorChunks(vf.GetBfloat16Vector(), int(dim)*2)
+				return appendVectorChunks(vf.GetBfloat16Vector())
 
 			case schemapb.DataType_Int8Vector:
 				if vf.GetInt8Vector() == nil {
 					return merr.WrapErrServiceInternalMsg("Int8Vector data is nil for elementType Int8Vector")
 				}
-				return appendVectorChunks(vf.GetInt8Vector(), int(dim))
+				return appendVectorChunks(vf.GetInt8Vector())
 
 			case schemapb.DataType_SparseFloatVector:
 				return merr.WrapErrServiceInternalMsg("SparseFloatVector in VectorArray not implemented yet")
@@ -987,15 +1025,27 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 
 	start, end := arr.ValueOffsets(i)
 	totalElements := end - start
-	if totalElements == 0 {
-		// empty array, return empty VectorField with correct Data type
-		return createEmptyVectorField(elementType, dim)
-	}
 
 	valuesArray := arr.ListValues()
 	binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary for ArrayOfVector values, got %T", valuesArray)
+	}
+
+	expectedByteWidth, err := expectedVectorArrayByteWidth(elementType, dim)
+	if err != nil {
+		return nil, err
+	}
+	actualByteWidth := int64(binaryArray.DataType().(*arrow.FixedSizeBinaryType).ByteWidth)
+	if actualByteWidth != expectedByteWidth {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"ArrayOfVector byte width mismatch for elementType %s: dim=%d, expected=%d, actual=%d",
+			elementType.String(), dim, expectedByteWidth, actualByteWidth)
+	}
+
+	if totalElements == 0 {
+		// empty array, return empty VectorField with correct Data type
+		return createEmptyVectorField(elementType, dim)
 	}
 
 	numVectors := int(totalElements)

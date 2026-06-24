@@ -27,6 +27,7 @@ package segcore
 import "C"
 
 import (
+	"errors"
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
