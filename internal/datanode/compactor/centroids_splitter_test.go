@@ -3,18 +3,19 @@
 package compactor
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 type CentroidsSplitterSuite struct {
 	suite.Suite
-	log *zap.Logger
 }
 
 func TestCentroidsSplitterSuite(t *testing.T) {
@@ -23,14 +24,10 @@ func TestCentroidsSplitterSuite(t *testing.T) {
 
 func (s *CentroidsSplitterSuite) SetupSuite() {
 	var err error
-	s.log, err = zap.NewDevelopment()
 	s.Require().NoError(err)
 }
 
 func (s *CentroidsSplitterSuite) TearDownSuite() {
-	if s.log != nil {
-		_ = s.log.Sync() // Ignore sync errors
-	}
 }
 
 // ===========================================================================
@@ -68,11 +65,11 @@ func (s *CentroidsSplitterSuite) TestSelectsBestBalanceLargeInput() {
 	imbalance := float64(actualDiff) / float64(maxSum)
 	s.LessOrEqual(imbalance, 0.10,
 		"imbalance should be <= 10%%, got %.2f%%", imbalance*100)
-	s.log.Info("Large input optimal balance test",
-		zap.Int("numCentroids", len(counts)),
-		zap.Int("numGroups", len(groups)),
-		zap.Int64("actualDiff", actualDiff),
-		zap.Float64("imbalance%", imbalance*100))
+	mlog.Info(context.TODO(), "Large input optimal balance test",
+		mlog.Int("numCentroids", len(counts)),
+		mlog.Int("numGroups", len(groups)),
+		mlog.Int64("actualDiff", actualDiff),
+		mlog.Float64("imbalance%", imbalance*100))
 	s.logGroups(counts, groups)
 }
 
@@ -89,8 +86,8 @@ func (s *CentroidsSplitterSuite) calculateBestPossibleDiff(
 	n := len(counts)
 	// Safety check: brute force only feasible for very small inputs
 	if n > 12 {
-		s.log.Warn("Input too large for brute force, skipping",
-			zap.Int("n", n))
+		mlog.Warn(context.TODO(), "Input too large for brute force, skipping",
+			mlog.Int("n", n))
 		return -1, nil, nil // Signal to skip validation
 	}
 	bestDiff := int64(^uint64(0) >> 1) // max int64
@@ -107,11 +104,11 @@ func (s *CentroidsSplitterSuite) calculateBestPossibleDiff(
 			bestDiff = diff
 			bestGroups = groups
 			bestAssignment = assignment
-			s.log.Debug("Found better k (brute force)",
-				zap.Int("k", k),
-				zap.Int("numGroups", numGroups),
-				zap.Int64("diff", diff),
-				zap.Any("groups", groups))
+			mlog.Debug(context.TODO(), "Found better k (brute force)",
+				mlog.Int("k", k),
+				mlog.Int("numGroups", numGroups),
+				mlog.Int64("diff", diff),
+				mlog.Any("groups", groups))
 		}
 	}
 	return bestDiff, bestGroups, bestAssignment
@@ -487,9 +484,9 @@ func (s *CentroidsSplitterSuite) TestComparesAllKValues() {
 func (s *CentroidsSplitterSuite) runSplitTest(counts []int64, maxCentroidsPerGroup int, minSegments int, name string) {
 	cs := CentroidsSplitter{Counts: counts}
 	groups, assign := cs.splitCentroids(maxCentroidsPerGroup, minSegments, false)
-	s.log.Debug(fmt.Sprintf("==== TEST: %s ====", name),
-		zap.Any("groups", groups),
-		zap.Any("assign", assign),
+	mlog.Debug(context.TODO(), fmt.Sprintf("==== TEST: %s ====", name),
+		mlog.Any("groups", groups),
+		mlog.Any("assign", assign),
 	)
 	// Validate that the algorithm didn’t return nil and there are at least
 	// minSegments groups
@@ -550,7 +547,7 @@ func (s *CentroidsSplitterSuite) runSplitTest(counts []int64, maxCentroidsPerGro
 	// Returns a slice sums of total vectors counts per group.
 	maxSum, minSum := maxMin(sums)
 	for i, sum := range sums {
-		s.log.Debug("Group sum", zap.Int("group", i), zap.Int64("sum", sum), zap.Int("size", len(groups[i])))
+		mlog.Debug(context.TODO(), "Group sum", mlog.Int("group", i), mlog.Int64("sum", sum), mlog.Int("size", len(groups[i])))
 	}
 	totalSum := int64(0)
 	for _, sum := range sums {
@@ -558,9 +555,9 @@ func (s *CentroidsSplitterSuite) runSplitTest(counts []int64, maxCentroidsPerGro
 	}
 	avgSum := totalSum / int64(len(groups))
 	imbalance := float64(maxSum-minSum) / float64(maxSum)
-	s.log.Debug("Balance metrics",
-		zap.Int64("maxSum", maxSum), zap.Int64("minSum", minSum), zap.Int64("avgSum", avgSum),
-		zap.Int64("diff", maxSum-minSum), zap.Float64("imbalance%", imbalance*100))
+	mlog.Debug(context.TODO(), "Balance metrics",
+		mlog.Int64("maxSum", maxSum), mlog.Int64("minSum", minSum), mlog.Int64("avgSum", avgSum),
+		mlog.Int64("diff", maxSum-minSum), mlog.Float64("imbalance%", imbalance*100))
 	// balance should be <= 15% (Using 15% instead of 10% to allow some edge cases)
 	s.Require().LessOrEqual(imbalance, 0.15,
 		"%s: imbalance too high: %.2f%% (max=%d, min=%d)", name, imbalance*100, maxSum, minSum)
@@ -583,9 +580,9 @@ func (s *CentroidsSplitterSuite) runSplitTest(counts []int64, maxCentroidsPerGro
 		"%s: created %d groups but optimal would be around %d (inefficient)",
 		name, len(groups), optimalGroups)
 
-	s.log.Info("Test passed", zap.String("name", name), zap.Int("numCentroids", len(counts)),
-		zap.Int("numGroups", len(groups)), zap.Int("avgGroupSize", k),
-		zap.Float64("imbalance%", imbalance*100))
+	mlog.Info(context.TODO(), "Test passed", mlog.String("name", name), mlog.Int("numCentroids", len(counts)),
+		mlog.Int("numGroups", len(groups)), mlog.Int("avgGroupSize", k),
+		mlog.Float64("imbalance%", imbalance*100))
 }
 
 /*
@@ -1180,18 +1177,18 @@ func (s *CentroidsSplitterSuite) logGroups(counts []int64, groups [][]int) {
 		for j, idx := range g {
 			groupCounts[j] = counts[idx]
 		}
-		s.log.Info("Group details",
-			zap.Int("group", i),
-			zap.Ints("centroidIndices", g),
-			zap.Int64s("counts", groupCounts),
-			zap.Int64("sum", sums[i]),
+		mlog.Info(context.TODO(), "Group details",
+			mlog.Int("group", i),
+			mlog.Ints("centroidIndices", g),
+			mlog.Int64s("counts", groupCounts),
+			mlog.Int64("sum", sums[i]),
 		)
 	}
 	maxSum, minSum := maxMin(sums)
-	s.log.Info("Groups summary",
-		zap.Int("numGroups", len(groups)),
-		zap.Int64("maxSum", maxSum),
-		zap.Int64("minSum", minSum),
-		zap.Int64("diff", maxSum-minSum),
+	mlog.Info(context.TODO(), "Groups summary",
+		mlog.Int("numGroups", len(groups)),
+		mlog.Int64("maxSum", maxSum),
+		mlog.Int64("minSum", minSum),
+		mlog.Int64("diff", maxSum-minSum),
 	)
 }

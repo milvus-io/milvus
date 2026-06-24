@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
@@ -26,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/distance"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -92,7 +90,7 @@ func PruneSegments(ctx context.Context,
 			return
 		}
 		for _, partStats := range partitionStats {
-			log.Debug("partStats segment IDS", zap.Int64s("segmentIDs", maps.Keys(partStats.SegmentStats)))
+			mlog.Debug(context.TODO(), "partStats segment IDS", mlog.Int64s("segmentIDs", maps.Keys(partStats.SegmentStats)))
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
 		}
 		pruneType = "vector"
@@ -160,7 +158,7 @@ func PruneSegments(ctx context.Context,
 				} else {
 					newSegments = append(newSegments, segment)
 				}
-				log.Debug("Filter segment id", zap.Int64("segmentID", segment.SegmentID), zap.Int64("NodeID", item.NodeID), zap.Bool("exist", exist))
+				mlog.Debug(context.TODO(), "Filter segment id", mlog.Int64("segmentID", segment.SegmentID), mlog.Int64("NodeID", item.NodeID), mlog.Bool("exist", exist))
 			}
 			item.Segments = newSegments
 			sealedSegments[idx] = item
@@ -247,7 +245,7 @@ func DistanceToCentroid(vectorFloat []float32,
 			computeDistance = distance.CosineImpl
 		}
 	default:
-		log.Error("unsupported metric type", zap.String("metricType", metricType))
+		mlog.Error(context.TODO(), "unsupported metric type", mlog.String("metricType", metricType))
 		lock1.Lock()
 		neededSegments[segId] = struct{}{}
 		lock1.Unlock()
@@ -257,7 +255,7 @@ func DistanceToCentroid(vectorFloat []float32,
 	var dis float32
 	for i := 0; i < len(fieldStat.Centroids); i++ {
 		dis = computeDistance(vectorFloat, fieldStat.Centroids[i].GetValue().([]float32))
-		log.Debug("Segment distance", zap.Int64("segId", segId), zap.Int("i", i), zap.Float32("distance", dis))
+		mlog.Debug(context.TODO(), "Segment distance", mlog.Int64("segId", segId), mlog.Int("i", i), mlog.Float32("distance", dis))
 		lock2.Lock()
 		key := fmt.Sprintf("%d%d", segId, i)
 		segmentsToSearch[key] = segmentDisStruct{
@@ -320,14 +318,14 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 			targetSegNum = 1
 		}
 		if targetSegNum > segmentCount {
-			log.Ctx(context.TODO()).Debug("Warn! targetSegNum is larger or equal than segmentCount, no prune effect at all",
-				zap.Int("targetSegNum", targetSegNum),
-				zap.Int("segmentCount", segmentCount),
-				zap.Float64("filterRatio", filterRatio))
+			mlog.Debug(context.TODO(), "Warn! targetSegNum is larger or equal than segmentCount, no prune effect at all",
+				mlog.Int("targetSegNum", targetSegNum),
+				mlog.Int("segmentCount", segmentCount),
+				mlog.Float64("filterRatio", filterRatio))
 			targetSegNum = segmentCount
 		}
 		if !gPrunePrinted {
-			log.Warn("Pruning segments", zap.Int("targetSegNum", targetSegNum), zap.Int("segmentCount", segmentCount))
+			mlog.Warn(context.TODO(), "Pruning segments", mlog.Int("targetSegNum", targetSegNum), mlog.Int("segmentCount", segmentCount))
 			gPrunePrinted = true
 		}
 		optimizedRowCount := 0
@@ -351,7 +349,7 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 			added++
 		}
 
-		log.Debug("Needed Segments", zap.Int("count", len(neededSegments)), zap.Any("segments", maps.Keys(neededSegments)))
+		mlog.Debug(context.TODO(), "Needed Segments", mlog.Int("count", len(neededSegments)), mlog.Any("segments", maps.Keys(neededSegments)))
 	}
 
 	// 3. set unnecessary segments as removed

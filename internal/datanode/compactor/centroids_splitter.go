@@ -3,11 +3,10 @@
 package compactor
 
 import (
+	"context"
 	"sort"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 type CentroidsSplitter struct {
@@ -26,7 +25,7 @@ func (ci *CentroidsSplitter) splitCentroids(
 ) ([][]int, map[int]int) {
 	n := len(ci.Counts)
 
-	log.Debug("Initial counts", zap.Int64s("counts", ci.Counts))
+	mlog.Debug(context.TODO(), "Initial counts", mlog.Int64s("counts", ci.Counts))
 
 	bestBalance := int64(^uint64(0) >> 1)
 	var bestBalanceRatio float64
@@ -42,12 +41,12 @@ func (ci *CentroidsSplitter) splitCentroids(
 			break
 		}
 		if k > maxCentroidsPerGroup && bestBalanceRatio <= 0.1 {
-			log.Debug("balance is good enough, dont exceed max centroids", zap.Float64("bestBalanceRatio", bestBalanceRatio))
+			mlog.Debug(context.TODO(), "balance is good enough, dont exceed max centroids", mlog.Float64("bestBalanceRatio", bestBalanceRatio))
 			break
 		}
-		log.Debug("Evaluating k",
-			zap.Int("k", k),
-			zap.Int("numGroups", numGroups),
+		mlog.Debug(context.TODO(), "Evaluating k",
+			mlog.Int("k", k),
+			mlog.Int("numGroups", numGroups),
 		)
 
 		groups, assignment, groupCounts := ci.initialAssign(numGroups)
@@ -64,11 +63,11 @@ func (ci *CentroidsSplitter) splitCentroids(
 		maxC, minC := maxMin(groupCounts)
 		diff := maxC - minC
 
-		log.Debug("Balance factor for k",
-			zap.Int("k", k),
-			zap.Int64("maxCount", maxC),
-			zap.Int64("minCount", minC),
-			zap.Int64("diff", diff),
+		mlog.Debug(context.TODO(), "Balance factor for k",
+			mlog.Int("k", k),
+			mlog.Int64("maxCount", maxC),
+			mlog.Int64("minCount", minC),
+			mlog.Int64("diff", diff),
 		)
 
 		if diff < bestBalance {
@@ -79,10 +78,10 @@ func (ci *CentroidsSplitter) splitCentroids(
 		}
 	}
 
-	log.Debug("Best assignment completed",
-		zap.Float64("bestBalanceRatio", bestBalanceRatio),
-		zap.Any("groups", bestGroups),
-		zap.Any("assignment", bestAssignment),
+	mlog.Debug(context.TODO(), "Best assignment completed",
+		mlog.Float64("bestBalanceRatio", bestBalanceRatio),
+		mlog.Any("groups", bestGroups),
+		mlog.Any("assignment", bestAssignment),
 	)
 
 	return bestGroups, bestAssignment
@@ -145,7 +144,7 @@ func (ci *CentroidsSplitter) initialAssign(
 
 		// Safety fallback (should never happen if capacity is correct)
 		if bestGroup == -1 {
-			log.Debug("no available group capacity during LPT assignment")
+			mlog.Debug(context.TODO(), "no available group capacity during LPT assignment")
 			return nil, nil, nil
 		}
 
@@ -183,7 +182,7 @@ func (ci *CentroidsSplitter) balanceGroups(
 		}
 
 		if !changed {
-			log.Debug("Balance converged", zap.Int("iters", iter))
+			mlog.Debug(context.TODO(), "Balance converged", mlog.Int("iters", iter))
 			return
 		}
 	}
