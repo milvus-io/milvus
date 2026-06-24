@@ -175,6 +175,50 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 	return s.loadInfo.Load()
 }
 
+func cloneMsgPosition(position *msgpb.MsgPosition) *msgpb.MsgPosition {
+	if position == nil {
+		return nil
+	}
+	return proto.Clone(position).(*msgpb.MsgPosition)
+}
+
+func compactSegmentLoadInfoForRuntime(loadInfo *querypb.SegmentLoadInfo) *querypb.SegmentLoadInfo {
+	if loadInfo == nil {
+		return nil
+	}
+	return &querypb.SegmentLoadInfo{
+		SegmentID:            loadInfo.GetSegmentID(),
+		PartitionID:          loadInfo.GetPartitionID(),
+		CollectionID:         loadInfo.GetCollectionID(),
+		DbID:                 loadInfo.GetDbID(),
+		FlushTime:            loadInfo.GetFlushTime(),
+		NumOfRows:            loadInfo.GetNumOfRows(),
+		Deltalogs:            loadInfo.GetDeltalogs(),
+		CompactionFrom:       append([]int64(nil), loadInfo.GetCompactionFrom()...),
+		SegmentSize:          loadInfo.GetSegmentSize(),
+		InsertChannel:        loadInfo.GetInsertChannel(),
+		StartPosition:        cloneMsgPosition(loadInfo.GetStartPosition()),
+		DeltaPosition:        cloneMsgPosition(loadInfo.GetDeltaPosition()),
+		ReadableVersion:      loadInfo.GetReadableVersion(),
+		Level:                loadInfo.GetLevel(),
+		StorageVersion:       loadInfo.GetStorageVersion(),
+		IsSorted:             loadInfo.GetIsSorted(),
+		Priority:             loadInfo.GetPriority(),
+		ManifestPath:         loadInfo.GetManifestPath(),
+		DataVersion:          loadInfo.GetDataVersion(),
+		UseTakeForOutput:     loadInfo.GetUseTakeForOutput(),
+		CommitTimestamp:      loadInfo.GetCommitTimestamp(),
+		EstimatedBytesPerRow: loadInfo.GetEstimatedBytesPerRow(),
+	}
+}
+
+func (s *baseSegment) compactLoadInfoForRuntime() {
+	if s.segmentType != SegmentTypeSealed || s.Level() == datapb.SegmentLevel_L0 {
+		return
+	}
+	s.loadInfo.Store(compactSegmentLoadInfoForRuntime(s.LoadInfo()))
+}
+
 func (s *baseSegment) SetPKCandidate(candidate pkoracle.Candidate) {
 	s.pkCandidate = candidate
 }
@@ -355,6 +399,7 @@ func (s *baseSegment) NeedUpdatedVersion() int64 {
 }
 
 func (s *baseSegment) SetLoadInfo(loadInfo *querypb.SegmentLoadInfo) {
+	s.resourceUsageCache.Store(nil)
 	s.loadInfo.Store(loadInfo)
 }
 
@@ -381,10 +426,11 @@ type LocalSegment struct {
 	csegment segcore.CSegment
 
 	// cached results, to avoid too many CGO calls
-	memSize     *atomic.Int64
-	binlogSize  *atomic.Int64
-	rowNum      *atomic.Int64
-	insertCount *atomic.Int64
+	memSize         *atomic.Int64
+	binlogSize      *atomic.Int64
+	relatedDataSize *atomic.Int64
+	rowNum          *atomic.Int64
+	insertCount     *atomic.Int64
 
 	deltaMut           sync.Mutex
 	lastDeltaTimestamp *atomic.Uint64
@@ -460,10 +506,11 @@ func NewSegment(ctx context.Context,
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
 
-		memSize:     atomic.NewInt64(-1),
-		binlogSize:  atomic.NewInt64(0),
-		rowNum:      atomic.NewInt64(-1),
-		insertCount: atomic.NewInt64(0),
+		memSize:         atomic.NewInt64(-1),
+		binlogSize:      atomic.NewInt64(0),
+		relatedDataSize: atomic.NewInt64(0),
+		rowNum:          atomic.NewInt64(-1),
+		insertCount:     atomic.NewInt64(0),
 	}
 
 	if err := segment.initializeSegment(); err != nil {
@@ -1402,8 +1449,12 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
+	if s.relatedDataSize != nil {
+		s.relatedDataSize.Store(calculateSegmentLogSize(newLoadInfo))
+	}
 	s.loadInfo.Store(newLoadInfo)
 	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
+	s.compactLoadInfoForRuntime()
 	return nil
 }
 
