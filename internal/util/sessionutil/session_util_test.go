@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -299,6 +300,22 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		})
 	})
 
+	t.Run("error during shutdown does not panic", func(t *testing.T) {
+		// When the session ctx is canceled (graceful shutdown), the etcd watch
+		// delivers a final error response; handling it must exit quietly instead
+		// of crashing the process.
+		cctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		downSession := NewSessionWithEtcd(cctx, metaRoot, etcdCli)
+		w := getWatcher(downSession, nil)
+		wresp := clientv3.WatchResponse{
+			Canceled: true,
+		}
+		assert.NotPanics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
+	})
+
 	t.Run("err handled but rewatch failed", func(t *testing.T) {
 		w := getWatcher(s, func(sessions map[string]*Session) error {
 			return errors.New("mocked")
@@ -309,6 +326,27 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.Panics(t, func() {
 			w.handleWatchResponse(wresp)
 		})
+	})
+
+	t.Run("invalid auth token triggers rewatch instead of close", func(t *testing.T) {
+		rewatched := false
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			rewatched = true
+			return nil
+		})
+		// An Unauthenticated watch error is recoverable: the watcher must
+		// re-establish the watch (which refreshes the etcd auth token via the
+		// unary path) rather than close the channel and panic.
+		err := w.handleWatchErr(v3rpc.ErrInvalidAuthToken)
+		assert.NoError(t, err)
+		assert.True(t, rewatched)
+		assert.NotNil(t, w.rch)
+	})
+
+	t.Run("non-retriable error closes channel", func(t *testing.T) {
+		w := getWatcher(s, nil)
+		err := w.handleWatchErr(errors.New("some fatal error"))
+		assert.Error(t, err)
 	})
 }
 
@@ -1036,7 +1074,13 @@ func testForceKill(t *testing.T, serverName string) {
 	// trigger a force kill
 	_, err := etcdCli.Revoke(context.Background(), *session.LeaseID)
 	require.NoError(t, err)
-	time.Sleep(5 * time.Second)
+
+	// The force kill is asynchronous: the keepalive loop must observe the lost
+	// lease and call os.Exit(ExitCodeEtcd). Block long enough for that to fire,
+	// otherwise this function returns and the subprocess exits 0, racing (and
+	// usually beating) the force kill. The sleep is only paid in full on a
+	// regression; on success os.Exit terminates the process well before it ends.
+	time.Sleep(30 * time.Second)
 }
 
 func TestGetResourceGroupName(t *testing.T) {
