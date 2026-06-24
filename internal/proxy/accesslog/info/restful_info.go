@@ -19,6 +19,7 @@ package info
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
@@ -194,10 +196,26 @@ func (i *RestfulInfo) DbName() string {
 
 func (i *RestfulInfo) CollectionName() string {
 	name, ok := requestutil.GetCollectionNameFromRequest(i.req)
-	if !ok {
-		return Unknown
+	if ok {
+		return name.(string)
 	}
-	return name.(string)
+
+	// requests such as Flush/ShowCollections carry a list of collection names
+	names, ok := requestutil.GetCollectionNamesFromRequest(i.req)
+	if ok {
+		return fmt.Sprint(names.([]string))
+	}
+
+	// requests that reference collections via non-standard fields
+	switch req := i.req.(type) {
+	case *milvuspb.RenameCollectionRequest:
+		// rename references both the source and target collection
+		return fmt.Sprintf("%s->%s", req.GetOldName(), req.GetNewName())
+	case *milvuspb.BatchDescribeCollectionRequest:
+		return fmt.Sprint(req.GetCollectionName())
+	}
+
+	return Unknown
 }
 
 func (i *RestfulInfo) PartitionName() string {
@@ -291,8 +309,21 @@ func (i *RestfulInfo) QueryParams() string {
 	return Unknown
 }
 
+// ClientRequestTime returns client-side request time string.
+// REST clients pass it via the same key as gRPC metadata, but as an HTTP header.
 func (i *RestfulInfo) ClientRequestTime() string {
-	return Unknown
+	if i.ctx == nil || i.ctx.Request == nil {
+		return Unknown
+	}
+	timestamp := i.ctx.GetHeader(common.ClientRequestMsecKey)
+	if timestamp == "" {
+		return Unknown
+	}
+	unixmsec, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return Unknown
+	}
+	return time.UnixMilli(unixmsec).Format(timeFormat)
 }
 
 func (i *RestfulInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {

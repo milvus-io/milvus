@@ -247,10 +247,26 @@ func (i *GrpcAccessInfo) DbName() string {
 
 func (i *GrpcAccessInfo) CollectionName() string {
 	name, ok := requestutil.GetCollectionNameFromRequest(i.req)
-	if !ok {
-		return Unknown
+	if ok {
+		return name.(string)
 	}
-	return name.(string)
+
+	// requests such as Flush/ShowCollections carry a list of collection names
+	names, ok := requestutil.GetCollectionNamesFromRequest(i.req)
+	if ok {
+		return fmt.Sprint(names.([]string))
+	}
+
+	// requests that reference collections via non-standard fields
+	switch req := i.req.(type) {
+	case *milvuspb.RenameCollectionRequest:
+		// rename references both the source and target collection
+		return fmt.Sprintf("%s->%s", req.GetOldName(), req.GetNewName())
+	case *milvuspb.BatchDescribeCollectionRequest:
+		return fmt.Sprint(req.GetCollectionName())
+	}
+
+	return Unknown
 }
 
 func (i *GrpcAccessInfo) PartitionName() string {
