@@ -32,21 +32,34 @@ TEST(KnowhereStatusMapping, InputErrorsMapToInvalidParameter) {
               milvus::ErrorCode::InvalidParameter);
 }
 
-TEST(KnowhereStatusMapping, InnerErrorsMapToKnowhereError) {
+// Engine/internal failures with no retry value map to the permanent
+// KnowhereError(2099), including knowhere_inner_error -- the catch-all for
+// swallowed C++ exceptions at the knowhere facade.
+TEST(KnowhereStatusMapping, PermanentInnerErrorsMapToKnowhereError) {
     EXPECT_EQ(
         milvus::KnowhereStatusToErrorCode(knowhere::Status::faiss_inner_error),
         milvus::ErrorCode::KnowhereError);
     EXPECT_EQ(milvus::KnowhereStatusToErrorCode(
                   knowhere::Status::diskann_inner_error),
               milvus::ErrorCode::KnowhereError);
-    EXPECT_EQ(milvus::KnowhereStatusToErrorCode(knowhere::Status::malloc_error),
-              milvus::ErrorCode::KnowhereError);
-    EXPECT_EQ(milvus::KnowhereStatusToErrorCode(knowhere::Status::timeout),
-              milvus::ErrorCode::KnowhereError);
-    // knowhere_inner_error is the catch-all for swallowed C++ exceptions at the
-    // knowhere facade; it must be treated as a retriable system error, never as
-    // user input.
     EXPECT_EQ(milvus::KnowhereStatusToErrorCode(
                   knowhere::Status::knowhere_inner_error),
               milvus::ErrorCode::KnowhereError);
+    // timeout is Cardinal-only (BuildAsync cancel-or-timeout) and conflates
+    // cancellation with timeout, so it stays a permanent system error rather
+    // than mapping to a retriable code.
+    EXPECT_EQ(milvus::KnowhereStatusToErrorCode(knowhere::Status::timeout),
+              milvus::ErrorCode::KnowhereError);
+}
+
+// Transient failures must map to retriable segcore codes so a retry / reroute
+// to another replica can succeed, instead of being lumped into the permanent
+// KnowhereError. knowhere keeps these in its inner_error category, so the
+// segcore mapper picks them out by status value.
+TEST(KnowhereStatusMapping, TransientErrorsMapToRetriableCodes) {
+    EXPECT_EQ(milvus::KnowhereStatusToErrorCode(knowhere::Status::malloc_error),
+              milvus::ErrorCode::MemAllocateFailed);
+    EXPECT_EQ(
+        milvus::KnowhereStatusToErrorCode(knowhere::Status::disk_file_error),
+        milvus::ErrorCode::FileReadFailed);
 }
