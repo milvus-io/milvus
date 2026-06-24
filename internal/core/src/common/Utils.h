@@ -213,6 +213,19 @@ KnowhereStatusString(knowhere::Status status) {
     return knowhere::Status2String(status);
 }
 
+// Map a knowhere Status to a segcore ErrorCode using the status category
+// exposed by knowhere (see knowhere/expected.h). Input errors are the caller's
+// fault and must stay non-retriable; everything else (engine/internal/transient,
+// including knowhere_inner_error which is the catch-all for swallowed C++
+// exceptions) is a retriable system error. Callers that need a more specific
+// code (e.g. invalid_index_error -> Unsupported, build path -> IndexBuildError)
+// should special-case before falling back to this helper.
+inline ErrorCode
+KnowhereStatusToErrorCode(knowhere::Status status) {
+    return knowhere::IsInputError(status) ? ErrorCode::InvalidParameter
+                                          : ErrorCode::KnowhereError;
+}
+
 template <typename T>
 inline bool
 is_in_list(const T& t, std::function<std::vector<T>()> list_func) {
