@@ -294,6 +294,43 @@ dispatch_pk_type(DataType data_type, Func&& func) {
     }
 }
 
+template <sealed_segment_detail::PrimaryKey PK, typename Callback>
+void
+for_each_sorted_pk_match(
+    const std::vector<PkType>& pks,
+    const ChunkedColumnInterface* pk_column,
+    const std::vector<PinWrapper<Chunk*>>& all_chunk_pins,
+    Callback&& callback) {
+    const auto num_chunk = pk_column->num_chunks();
+    for (int64_t i = 0; i < num_chunk; ++i) {
+        auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+        const auto& pw = all_chunk_pins[i];
+        if constexpr (std::same_as<PK, int64_t>) {
+            auto src = reinterpret_cast<const int64_t*>(pw.get()->RawData());
+            auto chunk_row_num = pk_column->chunk_row_nums(i);
+            for (size_t j = 0; j < pks.size(); ++j) {
+                auto target = std::get<int64_t>(pks[j]);
+                auto it = std::lower_bound(src, src + chunk_row_num, target);
+                for (; it != src + chunk_row_num && *it == target; ++it) {
+                    callback(j, it - src + num_rows_until_chunk);
+                }
+            }
+        } else {
+            // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+            auto string_chunk = static_cast<StringChunk*>(pw.get());
+            for (size_t j = 0; j < pks.size(); ++j) {
+                auto& target = std::get<std::string>(pks[j]);
+                auto offset = string_chunk->binary_search_string(target);
+                for (; offset != -1 && offset < string_chunk->RowNums() &&
+                       string_chunk->operator[](offset) == target;
+                     ++offset) {
+                    callback(j, offset + num_rows_until_chunk);
+                }
+            }
+        }
+    }
+}
+
 template <sealed_segment_detail::PrimaryKey PK>
 void
 ChunkedSegmentSealedImpl::search_sorted_pk_range_impl(
@@ -2606,72 +2643,21 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                                    return ts1 < ts2;
                                };
 
-    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-        case DataType::INT64: {
-            auto num_chunk = pk_column->num_chunks();
-            for (int i = 0; i < num_chunk; ++i) {
-                const auto& pw = all_chunk_pins[i];
-                auto src =
-                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
-                auto chunk_row_num = pk_column->chunk_row_nums(i);
-                for (size_t j = 0; j < pks.size(); j++) {
-                    // get int64 pks
-                    auto target = std::get<int64_t>(pks[j]);
-                    auto timestamp = get_timestamp(j);
-                    auto it = std::lower_bound(
-                        src,
-                        src + chunk_row_num,
-                        target,
-                        [](const int64_t& elem, const int64_t& value) {
-                            return elem < value;
-                        });
-                    auto num_rows_until_chunk =
-                        pk_column->GetNumRowsUntilChunk(i);
-                    for (; it != src + chunk_row_num && *it == target; ++it) {
-                        auto offset = it - src + num_rows_until_chunk;
-                        auto insert_ts = read_ts(offset);
-                        if (timestamp_hit(insert_ts, timestamp)) {
-                            callback(SegOffset(offset), timestamp);
-                        }
+    dispatch_pk_type(
+        schema_->get_fields().at(pk_field_id).get_data_type(),
+        [&]<sealed_segment_detail::PrimaryKey PK>() {
+            for_each_sorted_pk_match<PK>(
+                pks,
+                pk_column.get(),
+                all_chunk_pins,
+                [&](size_t pk_index, int64_t offset) {
+                    auto timestamp = get_timestamp(pk_index);
+                    auto insert_ts = read_ts(offset);
+                    if (timestamp_hit(insert_ts, timestamp)) {
+                        callback(SegOffset(offset), timestamp);
                     }
-                }
-            }
-
-            break;
-        }
-        case DataType::VARCHAR: {
-            auto num_chunk = pk_column->num_chunks();
-            for (int i = 0; i < num_chunk; ++i) {
-                // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
-                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-                const auto& pw = all_chunk_pins[i];
-                auto string_chunk = static_cast<StringChunk*>(pw.get());
-                for (size_t j = 0; j < pks.size(); ++j) {
-                    // get varchar pks
-                    auto& target = std::get<std::string>(pks[j]);
-                    auto timestamp = get_timestamp(j);
-                    auto offset = string_chunk->binary_search_string(target);
-                    for (; offset != -1 && offset < string_chunk->RowNums() &&
-                           string_chunk->operator[](offset) == target;
-                         ++offset) {
-                        auto segment_offset = offset + num_rows_until_chunk;
-                        auto insert_ts = read_ts(segment_offset);
-                        if (timestamp_hit(insert_ts, timestamp)) {
-                            callback(SegOffset(segment_offset), timestamp);
-                        }
-                    }
-                }
-            }
-            break;
-        }
-        default: {
-            ThrowInfo(
-                DataTypeInvalid,
-                fmt::format(
-                    "unsupported type {}",
-                    schema_->get_fields().at(pk_field_id).get_data_type()));
-        }
-    }
+                });
+        });
 }
 
 void
@@ -2950,70 +2936,18 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                                  "primary key column not loaded");
                       auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
 
-                      switch (schema_->get_fields()
-                                  .at(pk_field_id)
-                                  .get_data_type()) {
-                          case DataType::INT64: {
-                              auto num_chunk = pk_column->num_chunks();
-                              for (int i = 0; i < num_chunk; ++i) {
-                                  const auto& pw = all_chunk_pins[i];
-                                  auto src = reinterpret_cast<const int64_t*>(
-                                      pw.get()->RawData());
-                                  auto chunk_row_num =
-                                      pk_column->chunk_row_nums(i);
-                                  auto num_rows_until_chunk =
-                                      pk_column->GetNumRowsUntilChunk(i);
-                                  for (size_t j = 0; j < pks.size(); j++) {
-                                      auto target = std::get<int64_t>(pks[j]);
-                                      auto it = std::lower_bound(
-                                          src, src + chunk_row_num, target);
-                                      for (; it != src + chunk_row_num &&
-                                             *it == target;
-                                           ++it) {
-                                          callback(
-                                              SegOffset(it - src +
-                                                        num_rows_until_chunk),
-                                              timestamps[j]);
-                                      }
-                                  }
-                              }
-                              break;
-                          }
-                          case DataType::VARCHAR: {
-                              auto num_chunk = pk_column->num_chunks();
-                              for (int i = 0; i < num_chunk; ++i) {
-                                  auto num_rows_until_chunk =
-                                      pk_column->GetNumRowsUntilChunk(i);
-                                  const auto& pw = all_chunk_pins[i];
-                                  auto string_chunk =
-                                      static_cast<StringChunk*>(pw.get());
-                                  for (size_t j = 0; j < pks.size(); ++j) {
-                                      auto& target =
-                                          std::get<std::string>(pks[j]);
-                                      auto offset =
-                                          string_chunk->binary_search_string(
-                                              target);
-                                      for (; offset != -1 &&
-                                             offset < string_chunk->RowNums() &&
-                                             string_chunk->operator[](offset) ==
-                                                 target;
-                                           ++offset) {
-                                          callback(
-                                              SegOffset(offset +
-                                                        num_rows_until_chunk),
-                                              timestamps[j]);
-                                      }
-                                  }
-                              }
-                              break;
-                          }
-                          default:
-                              ThrowInfo(DataTypeInvalid,
-                                        fmt::format("unsupported type {}",
-                                                    schema_->get_fields()
-                                                        .at(pk_field_id)
-                                                        .get_data_type()));
-                      }
+                      dispatch_pk_type(
+                          schema_->get_fields().at(pk_field_id).get_data_type(),
+                          [&]<sealed_segment_detail::PrimaryKey PK>() {
+                              for_each_sorted_pk_match<PK>(
+                                  pks,
+                                  pk_column.get(),
+                                  all_chunk_pins,
+                                  [&](size_t pk_index, int64_t offset) {
+                                      callback(SegOffset(offset),
+                                               timestamps[pk_index]);
+                                  });
+                          });
                   }
               } else {
                   this->search_batch_pks(
