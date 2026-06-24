@@ -107,6 +107,10 @@ template <PrimaryKey PK>
 using PrimaryKeyView =
     std::conditional_t<std::same_as<PK, int64_t>, int64_t, std::string_view>;
 
+template <typename T>
+concept PrimitiveBulkSubscriptValue =
+    std::integral<T> || std::floating_point<T>;
+
 }  // namespace sealed_segment_detail
 
 // Test-only accessor that pokes private members to simulate v2/v3 segment
@@ -743,7 +747,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         T* dst_raw);
 
-    template <typename S, typename T = S>
+    template <sealed_segment_detail::PrimitiveBulkSubscriptValue T>
     static void
     bulk_subscript_impl(milvus::OpContext* op_ctx,
                         ChunkedColumnInterface* field,
