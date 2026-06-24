@@ -535,15 +535,14 @@ ChunkedSegmentSealedImpl::search_pks_with_two_pointers_impl(
         sorted_pks.push_back(std::get<PK>(pk));
     }
     std::ranges::sort(sorted_pks);
+    auto duplicate_pks = std::ranges::unique(sorted_pks);
+    sorted_pks.erase(duplicate_pks.begin(), duplicate_pks.end());
 
     auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
 
-    size_t pk_idx = 0;
     int last_chunk_id = 0;
 
-    while (pk_idx < sorted_pks.size()) {
-        const auto& target_pk = sorted_pks[pk_idx];
-
+    for (const auto& target_pk : sorted_pks) {
         // find the first occurrence of target_pk
         auto [chunk_id, in_chunk_offset, exact_match] =
             this->pk_lower_bound<PK>(
@@ -572,11 +571,6 @@ ChunkedSegmentSealedImpl::search_pks_with_two_pointers_impl(
 
             bitset.set(start_idx, end_idx - start_idx + 1, true);
             last_chunk_id = last_chunk_id_found;
-        }
-
-        while (pk_idx < sorted_pks.size() &&
-               sorted_pks[pk_idx] == target_pk) {
-            pk_idx++;
         }
     }
 }
