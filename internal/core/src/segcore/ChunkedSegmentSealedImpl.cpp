@@ -744,38 +744,13 @@ ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
         AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
         auto pk_column = get_column(pk_field_id);
         if (pk_column != nullptr) {
-            auto num_chunks = pk_column->num_chunks();
-            auto all_chunks = pk_column->GetAllChunks(nullptr);
-            switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-                case DataType::INT64: {
-                    auto target = std::get<int64_t>(pk);
-                    for (int64_t i = 0; i < num_chunks; ++i) {
-                        auto* src = reinterpret_cast<const int64_t*>(
-                            all_chunks[i].get()->RawData());
-                        auto rows = pk_column->chunk_row_nums(i);
-                        auto it = std::lower_bound(src, src + rows, target);
-                        if (it != src + rows && *it == target) {
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                case DataType::VARCHAR: {
-                    auto& target = std::get<std::string>(pk);
-                    for (int64_t i = 0; i < num_chunks; ++i) {
-                        auto* chunk =
-                            static_cast<StringChunk*>(all_chunks[i].get());
-                        auto offset = chunk->binary_search_string(target);
-                        if (offset != -1 && offset < chunk->RowNums() &&
-                            chunk->operator[](offset) == target) {
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                default:
-                    break;
-            }
+            return dispatch_pk_type(
+                schema_->get_fields().at(pk_field_id).get_data_type(),
+                [&]<sealed_segment_detail::PrimaryKey PK>() {
+                    return find_sorted_pk_doc_offset<PK>(
+                               std::get<PK>(pk), pk_column)
+                        .has_value();
+                });
         }
     }
     return insert_record_.contain(pk);
