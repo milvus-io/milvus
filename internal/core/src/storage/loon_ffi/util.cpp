@@ -55,10 +55,19 @@ LoonResultToErrorCode(int err_code) {
             return milvus::ErrorCode::InvalidParameter;  // input, non-retriable
         case LOON_MEMORY_ERROR:
             return milvus::ErrorCode::MemAllocateFailed;  // retriable
+        case LOON_IO_ERROR:
+            // Transient object-storage IO failure; another replica / a retry may
+            // succeed.
+            return milvus::ErrorCode::FileReadFailed;  // retriable
+        case LOON_DATA_ERROR:
+            // Malformed/corrupt data on disk; permanent.
+            return milvus::ErrorCode::DataFormatBroken;
+        case LOON_FILE_NOT_FOUND:
+            // Object missing in shared storage; rerouting will not help.
+            return milvus::ErrorCode::ObjectNotExist;
         default:
-            // ARROW / LOGICAL / GOT_EXCEPTION / UNREACHABLE / FILE_NOT_FOUND /
-            // TXN_* collapse to a non-retriable system error by design; the
-            // finer storage-side arrow->LOON routing lands with the Go reader.
+            // ARROW / LOGICAL / GOT_EXCEPTION / UNREACHABLE / TXN_* collapse to a
+            // non-retriable system error by design.
             return milvus::ErrorCode::UnexpectedError;
     }
 }
