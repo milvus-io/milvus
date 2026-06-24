@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <any>
 #include <atomic>
+#include <concepts>
 #include <cstddef>
 #include <functional>
 #include <map>
@@ -96,6 +97,17 @@ class PkIndexCell;
 }  // namespace storagev2translator
 
 using namespace milvus::cachinglayer;
+
+namespace sealed_segment_detail {
+
+template <typename T>
+concept PrimaryKey = std::same_as<T, int64_t> || std::same_as<T, std::string>;
+
+template <PrimaryKey PK>
+using PrimaryKeyView =
+    std::conditional_t<std::same_as<PK, int64_t>, int64_t, std::string_view>;
+
+}  // namespace sealed_segment_detail
 
 // Test-only accessor that pokes private members to simulate v2/v3 segment
 // state (raw timestamp column emplaced into fields_ alongside an overwritten
@@ -649,7 +661,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     init_storage_v1_timestamp_index(std::vector<Timestamp> timestamps,
                                     size_t num_rows);
 
-    template <typename PK>
+    template <sealed_segment_detail::PrimaryKey PK>
     void
     search_sorted_pk_range_impl(
         proto::plan::OpType op,
@@ -739,7 +751,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
     }
 
-    template <typename PK>
+    template <sealed_segment_detail::PrimaryKey PK>
     void
     search_sorted_pk_binary_range_impl(
         const PK& lower_val,
@@ -813,7 +825,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
     }
 
-    template <typename PK>
+    template <sealed_segment_detail::PrimaryKey PK>
     std::optional<int64_t>
     find_sorted_pk_doc_offset(
         const PK& pk,
@@ -827,7 +839,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return pk_column->GetNumRowsUntilChunk(chunk_id) + in_chunk_offset;
     }
 
-    template <typename PK>
+    template <sealed_segment_detail::PrimaryKey PK>
     void
     search_pks_with_two_pointers_impl(
         BitsetTypeView& bitset,
@@ -893,8 +905,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     //   - exists: true if found an exact match (value == pk), false otherwise
     //   - If pk doesn't exist, returns the position of first value > pk with exists=false
     //   - If pk is greater than all values, returns {-1, -1, false}
-    template <typename PK>
-    std::tuple<int, int, bool>
+    struct PkLowerBoundResult {
+        int chunk_id = -1;
+        int in_chunk_offset = -1;
+        bool exact_match = false;
+    };
+
+    template <sealed_segment_detail::PrimaryKey PK>
+    PkLowerBoundResult
     pk_lower_bound(const PK& pk,
                    const ChunkedColumnInterface* pk_column,
                    const std::vector<PinWrapper<Chunk*>>& all_chunk_pins,
@@ -902,17 +920,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const auto num_chunk = pk_column->num_chunks();
 
         if (from_chunk_id >= num_chunk) {
-            return {-1, -1, false};  // Invalid starting chunk
+            return {};  // Invalid starting chunk
         }
 
-        using PKViewType = std::conditional_t<std::is_same_v<PK, int64_t>,
-                                              int64_t,
-                                              std::string_view>;
+        using PKViewType = sealed_segment_detail::PrimaryKeyView<PK>;
 
         auto get_val_view = [&](int chunk_id,
                                 int in_chunk_offset) -> PKViewType {
             auto& pw = all_chunk_pins[chunk_id];
-            if constexpr (std::is_same_v<PK, int64_t>) {
+            if constexpr (std::same_as<PK, int64_t>) {
                 auto src =
                     reinterpret_cast<const int64_t*>(pw.get()->RawData());
                 return src[in_chunk_offset];
@@ -953,7 +969,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         if (target_chunk_id == -1) {
             if (left_chunk_id >= num_chunk) {
                 // pk is greater than all values
-                return {-1, -1, false};
+                return {};
             }
             target_chunk_id = left_chunk_id;
         }
@@ -990,7 +1006,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 return {target_chunk_id + 1, 0, exact_match};
             } else {
                 // No more chunks, pk is greater than all values
-                return {-1, -1, false};
+                return {};
             }
         }
     }
@@ -1005,8 +1021,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     //   - The position of the last occurrence of pk
     // Note: This function assumes pk exists and linearly scans forward.
     //       It's efficient when pk has few duplicates.
-    template <typename PK>
-    std::tuple<int, int>
+    struct PkPosition {
+        int chunk_id = -1;
+        int in_chunk_offset = -1;
+    };
+
+    template <sealed_segment_detail::PrimaryKey PK>
+    PkPosition
     find_last_pk_position(const PK& pk,
                           const ChunkedColumnInterface* pk_column,
                           const std::vector<PinWrapper<Chunk*>>& all_chunk_pins,
@@ -1014,14 +1035,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                           int first_in_chunk_offset) const {
         const auto num_chunk = pk_column->num_chunks();
 
-        using PKViewType = std::conditional_t<std::is_same_v<PK, int64_t>,
-                                              int64_t,
-                                              std::string_view>;
+        using PKViewType = sealed_segment_detail::PrimaryKeyView<PK>;
 
         auto get_val_view = [&](int chunk_id,
                                 int in_chunk_offset) -> PKViewType {
             auto pw = all_chunk_pins[chunk_id];
-            if constexpr (std::is_same_v<PK, int64_t>) {
+            if constexpr (std::same_as<PK, int64_t>) {
                 auto src =
                     reinterpret_cast<const int64_t*>(pw.get()->RawData());
                 return src[in_chunk_offset];
