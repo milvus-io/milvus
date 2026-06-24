@@ -24,7 +24,6 @@
 #include "IndexConfigGenerator.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
-#include "common/OffsetMapping.h"
 #include "common/TypeTraits.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -236,6 +235,9 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             knowhere::Version::GetCurrentVersion().VersionNumber(),
             view_data);
     }
+    if (index_ != nullptr) {
+        index_->SetIdMapUseLock(true);
+    }
 }
 
 // for sparse float vector:
@@ -254,13 +256,15 @@ VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
     if (IsSparseFloatVectorDataType(get_data_type())) {
         auto vector = index_->GetSparseVector(ids_ds);
         SparseRowsToProto(
-            [vec_ptr = vector.get()](size_t i) { return vec_ptr + i; },
+            [vec_ptr = vector.sparse_data.get()](size_t i) {
+                return vec_ptr + i;
+            },
             count,
             reinterpret_cast<milvus::proto::schema::SparseFloatArray*>(output));
     } else {
         auto vector = index_->GetVector(ids_ds);
         milvus::fastmem::FastMemcpy(
-            output, vector.data(), count * element_size);
+            output, vector.raw_data.data(), count * element_size);
     }
 }
 
@@ -324,14 +328,14 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
 
         auto dataset = knowhere::GenDataSet(build_threshold, dim, data_ptr);
         dataset->SetIsSparse(true);
+        if (is_mapping_storage) {
+            auto logical_offset =
+                field_raw_data->get_logical_offset(build_threshold - 1);
+            auto update_count = logical_offset + 1;
+            index_->GetIdMap().SetValidBitmap(valid_data.data(), update_count);
+        }
         try {
             index_->BuildWithDataset(dataset, conf);
-            if (is_mapping_storage) {
-                auto logical_offset =
-                    field_raw_data->get_logical_offset(build_threshold - 1);
-                auto update_count = logical_offset + 1;
-                index_->UpdateValidData(valid_data.data(), update_count);
-            }
             built_ = true;
             index_cur_.fetch_add(build_threshold);
         } catch (SegcoreError& error) {
@@ -365,7 +369,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
         }
     } else {
         // Nullable case: only add valid rows (matching dense vector approach)
-        auto index_total_count = index_->GetOffsetMapping().GetTotalCount();
+        auto index_total_count = index_->GetIdMap().GetSnapshot().GetCount();
         auto add_valid_data_count = reserved_offset + size - index_total_count;
         for (auto i = reserved_offset; i < reserved_offset + size; i++) {
             if (valid_data[i]) {
@@ -379,6 +383,10 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
             sync_with_index_.store(true);
             return;
         }
+        if (add_valid_data_count > 0) {
+            index_->GetIdMap().AddIdsAndBitmap(
+                valid_data.data() + index_total_count, add_valid_data_count);
+        }
         if (add_count > 0) {
             auto data_ptr = source + (total_count - add_count);
             auto dataset = knowhere::GenDataSet(add_count, dim, data_ptr);
@@ -389,10 +397,6 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                 LOG_ERROR("growing sparse index add error: {}", error.what());
                 recreate_index(get_data_type(), field_raw_data);
             }
-        }
-        if (add_valid_data_count > 0) {
-            index_->UpdateValidData(valid_data.data() + index_total_count,
-                                    add_valid_data_count);
         }
         index_cur_.fetch_add(add_count);
         sync_with_index_.store(true);
@@ -462,14 +466,14 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
         }
 
         auto dataset = knowhere::GenDataSet(build_threshold, dim, data_ptr);
+        if (is_mapping_storage) {
+            auto logical_offset =
+                field_raw_data->get_logical_offset(build_threshold - 1);
+            auto update_count = logical_offset + 1;
+            index_->GetIdMap().SetValidBitmap(valid_data.data(), update_count);
+        }
         try {
             index_->BuildWithDataset(dataset, conf);
-            if (is_mapping_storage) {
-                auto logical_offset =
-                    field_raw_data->get_logical_offset(build_threshold - 1);
-                auto update_count = logical_offset + 1;
-                index_->UpdateValidData(valid_data.data(), update_count);
-            }
             built_ = true;
             index_cur_.fetch_add(build_threshold);
         } catch (SegcoreError& error) {
@@ -501,7 +505,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
         }
     } else {
         // Nullable dense vectors: data_source (proto) contains valid vectors compactly
-        auto index_total_count = index_->GetOffsetMapping().GetTotalCount();
+        auto index_total_count = index_->GetIdMap().GetSnapshot().GetCount();
         auto add_valid_data_count = reserved_offset + size - index_total_count;
         // Count valid vectors in this batch range
         for (auto i = reserved_offset; i < reserved_offset + size; i++) {
@@ -516,6 +520,10 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             sync_with_index_.store(true);
             return;
         }
+        if (add_valid_data_count > 0) {
+            index_->GetIdMap().AddIdsAndBitmap(
+                valid_data.data() + index_total_count, add_valid_data_count);
+        }
         if (add_count > 0) {
             // data_source contains valid vectors compactly, skip already indexed ones
             auto data_ptr = static_cast<const char*>(data_source) +
@@ -527,10 +535,6 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                 LOG_ERROR("growing index add error: {}", error.what());
                 recreate_index(get_data_type(), field_raw_data);
             }
-        }
-        if (add_valid_data_count > 0) {
-            index_->UpdateValidData(valid_data.data() + index_total_count,
-                                    add_valid_data_count);
         }
         index_cur_.fetch_add(add_count);
         sync_with_index_.store(true);

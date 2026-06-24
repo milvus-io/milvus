@@ -820,7 +820,7 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
 
     auto valid_data_path =
         local_index_prefix + "/" + milvus::index::VALID_DATA_KEY;
-    auto wire_count = milvus::index::ToValidDataCount(total_count);
+    auto wire_count = static_cast<uint64_t>(total_count);
     auto bitmap_size = milvus::index::GetValidDataBitmapSize(total_count);
     std::vector<uint8_t> valid_data(sizeof(uint64_t) + bitmap_size, 0);
     std::memcpy(valid_data.data(), &wire_count, sizeof(uint64_t));
@@ -871,17 +871,18 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
 
     uint64_t cached_wire_count = 0;
     std::memcpy(&cached_wire_count, cached_valid_data.data(), sizeof(uint64_t));
-    ASSERT_EQ(milvus::index::FromValidDataCount(cached_wire_count),
-              total_count);
-    milvus::index::BuildValidDataFromBitmap(
-        &loaded_index,
-        total_count,
-        cached_valid_data.data() + sizeof(uint64_t));
+    ASSERT_EQ(cached_wire_count, static_cast<uint64_t>(total_count));
+    loaded_index.GetIdMap().SetValidBitmap(
+        cached_valid_data.data() + sizeof(uint64_t), total_count);
     loaded_index.SetDim(128);
 
-    ASSERT_TRUE(loaded_index.GetOffsetMapping().IsEnabled());
-    EXPECT_EQ(loaded_index.GetOffsetMapping().GetTotalCount(), total_count);
-    EXPECT_EQ(loaded_index.GetOffsetMapping().GetValidCount(), valid_count);
+    const auto id_map_snapshot = loaded_index.GetIdMap().GetSnapshot();
+    const auto& valid_bitmap = id_map_snapshot.GetValidBitmap();
+    ASSERT_EQ(valid_bitmap.size(), total_count);
+    EXPECT_EQ(milvus::index::CountValidDataBitmap(valid_bitmap.size(),
+                                                  valid_bitmap.data()),
+              valid_count);
+    EXPECT_EQ(loaded_index.Count(), total_count);
     EXPECT_EQ(loaded_index.GetDim(), 128);
 
     local_chunk_manager->Remove(valid_data_path);
@@ -1380,13 +1381,10 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
 
     std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
     std::fill_n(valid_data.get(), num_rows, false);
-    index.UpdateValidData(valid_data.get(), num_rows);
-    ASSERT_TRUE(index.GetOffsetMapping().IsEnabled());
-    ASSERT_EQ(index.GetOffsetMapping().GetTotalCount(), num_rows);
-    ASSERT_EQ(index.GetOffsetMapping().GetValidCount(), 0);
 
     std::vector<float> vec_data(dim, 0.0f);
     auto dataset = knowhere::GenDataSet(0, dim, vec_data.data());
+    index.GetIdMap().SetValidBitmap(valid_data.get(), num_rows);
 
     milvus::Config config;
     config[DIM_KEY] = dim;
@@ -1394,15 +1392,18 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
 
     index.BuildWithDataset(dataset, config);
 
-    ASSERT_TRUE(index.GetOffsetMapping().IsEnabled());
-    EXPECT_EQ(index.GetOffsetMapping().GetTotalCount(), num_rows);
-    EXPECT_EQ(index.GetOffsetMapping().GetValidCount(), 0);
+    EXPECT_EQ(index.Count(), 0);
     EXPECT_EQ(index.GetDim(), dim);
 
     auto stats = index.Upload(config);
     auto files = stats->GetIndexFiles();
-    ASSERT_EQ(files.size(), 1);
-    EXPECT_NE(files[0].find(milvus::index::VALID_DATA_KEY), std::string::npos);
+    ASSERT_FALSE(files.empty());
+    EXPECT_TRUE(std::none_of(files.begin(), files.end(), [](const auto& file) {
+        return file.find("_id_map") != std::string::npos;
+    }));
+    EXPECT_TRUE(std::any_of(files.begin(), files.end(), [](const auto& file) {
+        return file.find(milvus::index::VALID_DATA_KEY) != std::string::npos;
+    }));
 
     for (const auto& file : files) {
         cm_->Remove(file);
@@ -1443,13 +1444,17 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
 
         std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
         std::fill_n(valid_data.get(), num_rows, false);
-        index.UpdateValidData(valid_data.get(), num_rows);
 
         std::vector<float> vec_data(dim, 0.0f);
         auto dataset = knowhere::GenDataSet(0, dim, vec_data.data());
+        index.GetIdMap().SetValidBitmap(valid_data.get(), num_rows);
 
         milvus::Config config;
         config[DIM_KEY] = dim;
+        config[milvus::index::DISK_ANN_MAX_DEGREE] = std::to_string(24);
+        config[milvus::index::DISK_ANN_SEARCH_LIST_SIZE] = std::to_string(56);
+        config[milvus::index::DISK_ANN_PQ_CODE_BUDGET] = std::to_string(0.001);
+        config[milvus::index::DISK_ANN_BUILD_DRAM_BUDGET] = std::to_string(2);
         config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
 
         index.BuildWithDataset(dataset, config);
@@ -1457,8 +1462,13 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
         files = stats->GetIndexFiles();
     }
 
-    ASSERT_EQ(files.size(), 1);
-    EXPECT_NE(files[0].find(milvus::index::VALID_DATA_KEY), std::string::npos);
+    ASSERT_FALSE(files.empty());
+    EXPECT_TRUE(std::none_of(files.begin(), files.end(), [](const auto& file) {
+        return file.find("_id_map") != std::string::npos;
+    }));
+    EXPECT_TRUE(std::any_of(files.begin(), files.end(), [](const auto& file) {
+        return file.find(milvus::index::VALID_DATA_KEY) != std::string::npos;
+    }));
 
     milvus::index::VectorDiskAnnIndex<float> loaded_index(
         DataType::NONE,
@@ -1473,9 +1483,95 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     load_config["index_files"] = files;
 
     loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
-    ASSERT_TRUE(loaded_index.GetOffsetMapping().IsEnabled());
-    EXPECT_EQ(loaded_index.GetOffsetMapping().GetTotalCount(), num_rows);
-    EXPECT_EQ(loaded_index.GetOffsetMapping().GetValidCount(), 0);
+    EXPECT_EQ(loaded_index.Count(), 0);
+    EXPECT_EQ(loaded_index.GetDim(), dim);
+
+    for (const auto& file : files) {
+        cm_->Remove(file);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest,
+       LoadPartialNullableDiskVectorIndexRestoresValidData) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3005;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 100;
+    const int64_t valid_count = 70;
+
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+    field_data_meta.field_schema.set_nullable(true);
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vec_field",
+                            DataType::VECTOR_FLOAT,
+                            dim};
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, cm_, fs_);
+
+    std::vector<uint8_t> valid_data((num_rows + 7) / 8, 0);
+    for (int64_t i = 0; i < valid_count; ++i) {
+        valid_data[i >> 3] |= static_cast<uint8_t>(1U << (i & 0x07));
+    }
+
+    std::vector<float> vec_data(valid_count * dim);
+    for (size_t i = 0; i < vec_data.size(); ++i) {
+        vec_data[i] = static_cast<float>(i % 1024) / 1024.0F;
+    }
+
+    std::vector<std::string> files;
+    {
+        milvus::index::VectorDiskAnnIndex<float> index(
+            DataType::NONE,
+            knowhere::IndexEnum::INDEX_DISKANN,
+            knowhere::metric::L2,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            file_manager_context);
+
+        auto dataset = knowhere::GenDataSet(valid_count, dim, vec_data.data());
+        index.GetIdMap().SetValidBitmap(valid_data.data(), num_rows);
+
+        milvus::Config config;
+        config[DIM_KEY] = dim;
+        config[milvus::index::DISK_ANN_MAX_DEGREE] = std::to_string(24);
+        config[milvus::index::DISK_ANN_SEARCH_LIST_SIZE] = std::to_string(56);
+        config[milvus::index::DISK_ANN_PQ_CODE_BUDGET] = std::to_string(0.001);
+        config[milvus::index::DISK_ANN_BUILD_DRAM_BUDGET] = std::to_string(2);
+        config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+
+        index.BuildWithDataset(dataset, config);
+        auto stats = index.Upload(config);
+        files = stats->GetIndexFiles();
+    }
+
+    EXPECT_TRUE(std::none_of(files.begin(), files.end(), [](const auto& file) {
+        return file.find("_id_map") != std::string::npos;
+    }));
+    ASSERT_TRUE(std::any_of(files.begin(), files.end(), [](const auto& file) {
+        return file.find(milvus::index::VALID_DATA_KEY) != std::string::npos;
+    }));
+
+    milvus::index::VectorDiskAnnIndex<float> loaded_index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    milvus::Config load_config;
+    load_config[DIM_KEY] = dim;
+    load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
+    load_config["index_files"] = files;
+
+    loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
+    EXPECT_EQ(loaded_index.Count(), num_rows);
     EXPECT_EQ(loaded_index.GetDim(), dim);
 
     for (const auto& file : files) {

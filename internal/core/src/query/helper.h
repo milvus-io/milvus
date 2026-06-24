@@ -17,6 +17,9 @@
 #pragma once
 #include "common/Types.h"
 
+#include <cstddef>
+#include <cstdint>
+
 namespace milvus::query {
 namespace dataset {
 struct RawDataset {
@@ -25,6 +28,16 @@ struct RawDataset {
     int64_t num_raw_data;
     const void* raw_data;
     const size_t* raw_data_offsets = nullptr;
+};
+
+struct RawIdMapView {
+    const int32_t* internal_to_external_ids = nullptr;
+    size_t internal_to_external_ids_count = 0;
+
+    bool
+    empty() const {
+        return internal_to_external_ids_count == 0;
+    }
 };
 struct SearchDataset {
     knowhere::MetricType metric_type;

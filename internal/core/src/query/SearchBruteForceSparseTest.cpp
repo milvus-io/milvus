@@ -132,6 +132,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
         if (!is_supported_sparse_float_metric(metric_type)) {
             ASSERT_ANY_THROW(BruteForceSearch(query_dataset,
                                               raw_dataset,
+                                              query::dataset::RawIdMapView{},
                                               search_info,
                                               index_info,
                                               bitset_view,
@@ -142,6 +143,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
         }
         auto result = BruteForceSearch(query_dataset,
                                        raw_dataset,
+                                       query::dataset::RawIdMapView{},
                                        search_info,
                                        index_info,
                                        bitset_view,
@@ -158,6 +160,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
         search_info.search_params_[RANGE_FILTER] = 0.5;
         auto result2 = BruteForceSearch(query_dataset,
                                         raw_dataset,
+                                        query::dataset::RawIdMapView{},
                                         search_info,
                                         index_info,
                                         bitset_view,
@@ -174,6 +177,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
         auto result3 = PackBruteForceSearchIteratorsIntoSubResult(
             query_dataset,
             raw_dataset,
+            query::dataset::RawIdMapView{},
             search_info,
             index_info,
             bitset_view,

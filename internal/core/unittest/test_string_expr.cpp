@@ -1586,6 +1586,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     auto raw_dataset = query::dataset::RawDataset{0, dim, N, vec_col.data()};
     auto sub_result = BruteForceSearch(search_dataset,
                                        raw_dataset,
+                                       query::dataset::RawIdMapView{},
                                        search_info,
                                        index_info,
                                        nullptr,

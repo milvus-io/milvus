@@ -70,20 +70,8 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             if (iterators_val.has_value()) {
                 bool larger_is_closer =
                     PositivelyRelated(search_info.metric_type_);
-                // Element-level search skips row-level mapping (element IDs
-                // are not row-aligned); see ChunkMergeIterator ctor.
-                const auto& offset_mapping = index.GetOffsetMapping();
-                const milvus::OffsetMapping* iter_offset_mapping =
-                    (search_info.array_offsets_ != nullptr ||
-                     !offset_mapping.IsEnabled())
-                        ? nullptr
-                        : &offset_mapping;
                 search_result.AssembleChunkVectorIterators(
-                    nq,
-                    1,
-                    iterators_val.value(),
-                    iter_offset_mapping,
-                    larger_is_closer);
+                    nq, 1, iterators_val.value(), larger_is_closer);
             } else {
                 std::string operator_type = "";
                 if (search_info.has_group_by()) {

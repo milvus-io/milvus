@@ -16,185 +16,79 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <shared_mutex>
-#include <unordered_map>
-#include <vector>
-
-#include "common/BitsetView.h"
-#include "common/Types.h"
 
 namespace milvus {
 
-// Bidirectional offset mapping for nullable vector storage
-// Maps between logical offsets (with nulls) and physical offsets (only valid
-// data). This base class is a read-only no-op mapping; real storage is split
-// between sealed and growing subclasses.
-class OffsetMapping {
+struct OffsetMappingP2LBuffer;
+
+class OffsetMappingSnapshot final {
  public:
-    enum class BitsetTransformStatus {
-        NoFilter,
-        AllFiltered,
-        Transformed,
-    };
+    OffsetMappingSnapshot() = default;
 
-    OffsetMapping() = default;
-    virtual ~OffsetMapping() = default;
-
-    // Get physical offset from logical offset. Returns -1 if null.
-    virtual int64_t
-    GetPhysicalOffset(int64_t logical_offset) const;
-
-    // Get logical offset from physical offset. Returns -1 if not found.
-    virtual int64_t
-    GetLogicalOffset(int64_t physical_offset) const;
-
-    // Check if a logical offset is valid (not null)
-    virtual bool
-    IsValid(int64_t logical_offset) const;
-
-    // Get count of valid (non-null) elements
-    virtual int64_t
-    GetValidCount() const;
-
-    // Check if mapping is enabled
-    virtual bool
+    bool
     IsEnabled() const;
 
-    // Get total logical count (including nulls)
-    virtual int64_t
+    int64_t
+    GetValidCount() const;
+
+    int64_t
     GetTotalCount() const;
 
-    virtual BitsetTransformStatus
-    TransformBitset(const BitsetView& bitset, TargetBitmap& result) const;
-
-    virtual void
-    TransformOffsets(std::vector<int64_t>& offsets) const;
-
-    virtual void
-    TransformLogicalOffsets(std::vector<int64_t>& offsets) const;
-
-    virtual void
-    FilterValidLogicalOffsets(const int64_t* logical_offsets,
-                              int64_t count,
-                              bool* valid_data,
-                              std::vector<int64_t>& physical_offsets) const;
-};
-
-class SealedOffsetMapping final : public OffsetMapping {
- public:
-    void
-    Build(const bool* valid_data, int64_t total_count);
+    int64_t
+    GetVisiblePhysicalCount(int64_t logical_count) const;
 
     int64_t
-    GetPhysicalOffset(int64_t logical_offset) const override;
+    GetPhysicalOffset(int64_t logical_offset) const;
 
     int64_t
-    GetLogicalOffset(int64_t physical_offset) const override;
-
-    int64_t
-    GetValidCount() const override;
+    GetLogicalOffset(int64_t physical_offset) const;
 
     bool
-    IsEnabled() const override;
+    IsValid(int64_t logical_offset) const;
 
-    int64_t
-    GetTotalCount() const override;
-
-    BitsetTransformStatus
-    TransformBitset(const BitsetView& bitset,
-                    TargetBitmap& result) const override;
-
-    void
-    TransformOffsets(std::vector<int64_t>& offsets) const override;
-
-    void
-    TransformLogicalOffsets(std::vector<int64_t>& offsets) const override;
-
-    void
-    FilterValidLogicalOffsets(
-        const int64_t* logical_offsets,
-        int64_t count,
-        bool* valid_data,
-        std::vector<int64_t>& physical_offsets) const override;
+    const int32_t*
+    GetLogicalOffsets(int64_t physical_offset, size_t count) const;
 
  private:
-    int64_t
-    GetPhysicalOffsetInternal(int64_t logical_offset) const;
+    friend class OffsetMapping;
 
-    int64_t
-    GetLogicalOffsetInternal(int64_t physical_offset) const;
+    OffsetMappingSnapshot(std::shared_ptr<const OffsetMappingP2LBuffer> p2l,
+                          bool enabled,
+                          int64_t valid_count,
+                          int64_t total_count);
 
+    std::shared_ptr<const OffsetMappingP2LBuffer> p2l_;
     bool enabled_{false};
-    bool use_map_{false};
-    // Sealed vec mode storage (uses int32_t to save memory)
-    std::vector<int32_t> l2p_vec_;  // logical -> physical, -1 means null
-    std::vector<int32_t> p2l_vec_;  // physical -> logical
-
-    // Sealed map mode storage (for sparse valid data)
-    std::unordered_map<int32_t, int32_t> l2p_map_;  // logical -> physical
-    std::unordered_map<int32_t, int32_t> p2l_map_;  // physical -> logical
-
     int64_t valid_count_{0};
-    int64_t total_count_{0};  // total logical count (including nulls)
+    int64_t total_count_{0};
 };
 
-class GrowingOffsetMapping final : public OffsetMapping {
+struct OffsetMappingAppendResult {
+    int64_t physical_offset = 0;
+    int64_t valid_count = 0;
+};
+
+class OffsetMapping final {
  public:
-    void
-    Append(const bool* valid_data,
-           int64_t count,
-           int64_t start_logical = -1,
-           int64_t start_physical = -1);
+    OffsetMapping() = default;
 
-    int64_t
-    GetPhysicalOffset(int64_t logical_offset) const override;
+    OffsetMappingAppendResult
+    Append(const bool* valid_data, int64_t count, int64_t start_logical = -1);
 
-    int64_t
-    GetLogicalOffset(int64_t physical_offset) const override;
-
-    int64_t
-    GetValidCount() const override;
-
-    bool
-    IsEnabled() const override;
-
-    int64_t
-    GetTotalCount() const override;
-
-    BitsetTransformStatus
-    TransformBitset(const BitsetView& bitset,
-                    TargetBitmap& result) const override;
-
-    void
-    TransformOffsets(std::vector<int64_t>& offsets) const override;
-
-    void
-    TransformLogicalOffsets(std::vector<int64_t>& offsets) const override;
-
-    void
-    FilterValidLogicalOffsets(
-        const int64_t* logical_offsets,
-        int64_t count,
-        bool* valid_data,
-        std::vector<int64_t>& physical_offsets) const override;
+    OffsetMappingSnapshot
+    GetSnapshot() const;
 
  private:
-    int64_t
-    GetPhysicalOffsetInternal(int64_t logical_offset,
-                              int64_t total_count) const;
-
-    int64_t
-    GetLogicalOffsetInternal(int64_t physical_offset,
-                             int64_t valid_count) const;
-
     mutable std::shared_mutex mutex_;
-    std::unordered_map<int32_t, int32_t> l2p_map_;  // logical -> physical
-    std::unordered_map<int32_t, int32_t> p2l_map_;  // physical -> logical
+    std::shared_ptr<OffsetMappingP2LBuffer> p2l_;
 
     bool enabled_{false};
     int64_t valid_count_{0};
-    int64_t total_count_{0};  // total logical count incl nulls
+    int64_t total_count_{0};
 };
 
 }  // namespace milvus

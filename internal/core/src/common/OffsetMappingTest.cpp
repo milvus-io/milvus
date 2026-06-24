@@ -11,195 +11,130 @@
 
 #include <gtest/gtest.h>
 
-#include <vector>
+#include <initializer_list>
+#include <memory>
 
 #include "common/OffsetMapping.h"
 
 namespace milvus {
-
 namespace {
-std::vector<bool>
+
+struct ValidData {
+    std::unique_ptr<bool[]> data;
+    int64_t count;
+};
+
+ValidData
 MakeValid(std::initializer_list<int> bits) {
-    std::vector<bool> v;
-    v.reserve(bits.size());
-    for (int b : bits) {
-        v.push_back(b != 0);
+    auto valid = std::make_unique<bool[]>(bits.size());
+    int64_t offset = 0;
+    for (const auto bit : bits) {
+        valid[offset++] = bit != 0;
     }
-    return v;
+    return {std::move(valid), offset};
 }
 
-std::vector<uint8_t>
-ToBoolBytes(const std::vector<bool>& valid) {
-    std::vector<uint8_t> bytes(valid.size());
-    for (size_t i = 0; i < valid.size(); ++i) {
-        bytes[i] = valid[i] ? 1 : 0;
-    }
-    return bytes;
-}
 }  // namespace
-
-// ---------- Default (disabled) state ----------
 
 TEST(OffsetMapping, DefaultIsDisabledAndPassThrough) {
     OffsetMapping mapping;
-    EXPECT_FALSE(mapping.IsEnabled());
-    EXPECT_EQ(mapping.GetValidCount(), 0);
-    EXPECT_EQ(mapping.GetTotalCount(), 0);
-    // When disabled, offset queries must pass through unchanged.
-    EXPECT_EQ(mapping.GetPhysicalOffset(42), 42);
-    EXPECT_EQ(mapping.GetLogicalOffset(42), 42);
+    auto snapshot = mapping.GetSnapshot();
+    EXPECT_FALSE(snapshot.IsEnabled());
+    EXPECT_EQ(snapshot.GetValidCount(), 0);
+    EXPECT_EQ(snapshot.GetTotalCount(), 0);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(42), 42);
+    EXPECT_EQ(snapshot.GetLogicalOffset(42), 42);
+    EXPECT_EQ(snapshot.GetLogicalOffsets(0, 1), nullptr);
 }
 
-// ---------- Build (eager) ----------
+TEST(OffsetMapping, AppendBuildsBidirectionalMapping) {
+    OffsetMapping mapping;
+    auto valid = MakeValid({1, 0, 1, 1});
+    auto append_result = mapping.Append(valid.data.get(), valid.count, 0);
 
-TEST(OffsetMapping, BuildBasicVecMode) {
-    SealedOffsetMapping mapping;
-    auto valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
-    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 5);
+    EXPECT_EQ(append_result.physical_offset, 0);
+    EXPECT_EQ(append_result.valid_count, 3);
 
-    EXPECT_TRUE(mapping.IsEnabled());
-    EXPECT_EQ(mapping.GetTotalCount(), 5);
-    EXPECT_EQ(mapping.GetValidCount(), 3);
-    EXPECT_EQ(mapping.GetPhysicalOffset(0), 0);
-    EXPECT_EQ(mapping.GetPhysicalOffset(1), -1);
-    EXPECT_EQ(mapping.GetPhysicalOffset(2), 1);
-    EXPECT_EQ(mapping.GetPhysicalOffset(3), 2);
-    EXPECT_EQ(mapping.GetPhysicalOffset(4), -1);
-    EXPECT_EQ(mapping.GetLogicalOffset(0), 0);
-    EXPECT_EQ(mapping.GetLogicalOffset(1), 2);
-    EXPECT_EQ(mapping.GetLogicalOffset(2), 3);
+    auto snapshot = mapping.GetSnapshot();
+    EXPECT_TRUE(snapshot.IsEnabled());
+    EXPECT_EQ(snapshot.GetTotalCount(), 4);
+    EXPECT_EQ(snapshot.GetValidCount(), 3);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(0), 0);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(1), -1);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(2), 1);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(3), 2);
+    EXPECT_EQ(snapshot.GetLogicalOffset(0), 0);
+    EXPECT_EQ(snapshot.GetLogicalOffset(1), 2);
+    EXPECT_EQ(snapshot.GetLogicalOffset(2), 3);
+    EXPECT_EQ(snapshot.GetVisiblePhysicalCount(4), 3);
+    auto ids = snapshot.GetLogicalOffsets(0, 3);
+    ASSERT_NE(ids, nullptr);
+    EXPECT_EQ(ids[0], 0);
+    EXPECT_EQ(ids[1], 2);
+    EXPECT_EQ(ids[2], 3);
 }
 
-TEST(OffsetMapping, BuildMapModeOnSparse) {
-    SealedOffsetMapping mapping;
-    std::vector<uint8_t> valid(100, 0);
-    valid[5] = 1;
-    valid[50] = 1;
-    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 100);
+TEST(OffsetMapping, AppendMultipleBatchesPreservesPhysicalVector) {
+    OffsetMapping mapping;
+    auto batch1 = MakeValid({1, 0, 1});
+    auto append_result = mapping.Append(batch1.data.get(), batch1.count, 0);
+    EXPECT_EQ(append_result.physical_offset, 0);
+    EXPECT_EQ(append_result.valid_count, 2);
 
-    EXPECT_EQ(mapping.GetTotalCount(), 100);
-    EXPECT_EQ(mapping.GetValidCount(), 2);
-    EXPECT_EQ(mapping.GetPhysicalOffset(5), 0);
-    EXPECT_EQ(mapping.GetPhysicalOffset(50), 1);
-    EXPECT_EQ(mapping.GetPhysicalOffset(0), -1);
-    EXPECT_EQ(mapping.GetLogicalOffset(0), 5);
-    EXPECT_EQ(mapping.GetLogicalOffset(1), 50);
+    auto batch2 = MakeValid({0, 1, 1});
+    append_result = mapping.Append(batch2.data.get(), batch2.count);
+    EXPECT_EQ(append_result.physical_offset, 2);
+    EXPECT_EQ(append_result.valid_count, 2);
+
+    auto snapshot = mapping.GetSnapshot();
+    EXPECT_EQ(snapshot.GetValidCount(), 4);
+    EXPECT_EQ(snapshot.GetTotalCount(), 6);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(0), 0);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(2), 1);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(4), 2);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(5), 3);
+    EXPECT_EQ(snapshot.GetLogicalOffset(0), 0);
+    EXPECT_EQ(snapshot.GetLogicalOffset(1), 2);
+    EXPECT_EQ(snapshot.GetLogicalOffset(2), 4);
+    EXPECT_EQ(snapshot.GetLogicalOffset(3), 5);
+    EXPECT_EQ(snapshot.GetVisiblePhysicalCount(4), 2);
+    EXPECT_EQ(snapshot.GetVisiblePhysicalCount(6), 4);
+    auto ids = snapshot.GetLogicalOffsets(0, 4);
+    ASSERT_NE(ids, nullptr);
+    EXPECT_EQ(ids[0], 0);
+    EXPECT_EQ(ids[1], 2);
+    EXPECT_EQ(ids[2], 4);
+    EXPECT_EQ(ids[3], 5);
 }
 
-TEST(OffsetMapping, BuildAllValid) {
-    SealedOffsetMapping mapping;
-    std::vector<uint8_t> valid(4, 1);
-    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 4);
-    EXPECT_EQ(mapping.GetValidCount(), 4);
-    for (int64_t i = 0; i < 4; ++i) {
-        EXPECT_EQ(mapping.GetPhysicalOffset(i), i);
-        EXPECT_EQ(mapping.GetLogicalOffset(i), i);
-    }
-}
+TEST(OffsetMapping, AppendAllNullStillEnablesMapping) {
+    OffsetMapping mapping;
+    auto valid = MakeValid({0, 0, 0, 0});
+    auto append_result = mapping.Append(valid.data.get(), valid.count, 0);
+    EXPECT_EQ(append_result.physical_offset, 0);
+    EXPECT_EQ(append_result.valid_count, 0);
 
-TEST(OffsetMapping, BuildAllNull) {
-    SealedOffsetMapping mapping;
-    std::vector<uint8_t> valid(4, 0);
-    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 4);
-    EXPECT_TRUE(mapping.IsEnabled());
-    EXPECT_EQ(mapping.GetValidCount(), 0);
-    EXPECT_EQ(mapping.GetTotalCount(), 4);
-    for (int64_t i = 0; i < 4; ++i) {
-        EXPECT_EQ(mapping.GetPhysicalOffset(i), -1);
-    }
-}
-
-TEST(OffsetMapping, BuildNoopOnNullOrZero) {
-    SealedOffsetMapping mapping;
-    mapping.Build(nullptr, 100);
-    EXPECT_FALSE(mapping.IsEnabled());
-    std::vector<uint8_t> valid(1, 1);
-    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 0);
-    EXPECT_FALSE(mapping.IsEnabled());
-}
-
-TEST(OffsetMapping, BuildTwiceResetsState) {
-    SealedOffsetMapping mapping;
-    auto v1 = ToBoolBytes(MakeValid({1, 1, 0, 0, 1}));
-    mapping.Build(reinterpret_cast<const bool*>(v1.data()), 5);
-    EXPECT_EQ(mapping.GetValidCount(), 3);
-    EXPECT_EQ(mapping.GetTotalCount(), 5);
-
-    auto v2 = ToBoolBytes(MakeValid({1, 0, 0}));
-    mapping.Build(reinterpret_cast<const bool*>(v2.data()), 3);
-    EXPECT_EQ(mapping.GetValidCount(), 1);
-    EXPECT_EQ(mapping.GetTotalCount(), 3);
-    EXPECT_EQ(mapping.GetPhysicalOffset(0), 0);
-    EXPECT_EQ(mapping.GetPhysicalOffset(1), -1);
-    EXPECT_EQ(mapping.GetPhysicalOffset(2), -1);
-}
-
-// ---------- Append ----------
-
-TEST(OffsetMapping, AppendBasic) {
-    GrowingOffsetMapping mapping;
-    auto v = ToBoolBytes(MakeValid({1, 0, 1, 1}));
-    mapping.Append(reinterpret_cast<const bool*>(v.data()), 4, 0, 0);
-
-    EXPECT_TRUE(mapping.IsEnabled());
-    EXPECT_EQ(mapping.GetValidCount(), 3);
-    EXPECT_EQ(mapping.GetTotalCount(), 4);
-    EXPECT_EQ(mapping.GetPhysicalOffset(0), 0);
-    EXPECT_EQ(mapping.GetPhysicalOffset(2), 1);
-    EXPECT_EQ(mapping.GetPhysicalOffset(3), 2);
-}
-
-TEST(OffsetMapping, AppendMultipleBatches) {
-    GrowingOffsetMapping mapping;
-    auto b1 = ToBoolBytes(MakeValid({1, 0, 1}));
-    mapping.Append(reinterpret_cast<const bool*>(b1.data()), 3, 0, 0);
-    EXPECT_EQ(mapping.GetValidCount(), 2);
-    EXPECT_EQ(mapping.GetTotalCount(), 3);
-
-    auto b2 = ToBoolBytes(MakeValid({0, 1, 1}));
-    mapping.Append(reinterpret_cast<const bool*>(b2.data()),
-                   3,
-                   mapping.GetTotalCount(),
-                   mapping.GetValidCount());
-    EXPECT_EQ(mapping.GetValidCount(), 4);
-    EXPECT_EQ(mapping.GetTotalCount(), 6);
-
-    EXPECT_EQ(mapping.GetPhysicalOffset(0), 0);
-    EXPECT_EQ(mapping.GetPhysicalOffset(2), 1);
-    EXPECT_EQ(mapping.GetPhysicalOffset(4), 2);
-    EXPECT_EQ(mapping.GetPhysicalOffset(5), 3);
-    EXPECT_EQ(mapping.GetLogicalOffset(3), 5);
+    auto snapshot = mapping.GetSnapshot();
+    EXPECT_TRUE(snapshot.IsEnabled());
+    EXPECT_EQ(snapshot.GetTotalCount(), 4);
+    EXPECT_EQ(snapshot.GetValidCount(), 0);
+    EXPECT_EQ(snapshot.GetPhysicalOffset(0), -1);
+    EXPECT_EQ(snapshot.GetVisiblePhysicalCount(4), 0);
+    EXPECT_EQ(snapshot.GetLogicalOffsets(0, 1), nullptr);
 }
 
 TEST(OffsetMapping, AppendNoopOnNullOrZero) {
-    GrowingOffsetMapping mapping;
-    mapping.Append(nullptr, 3, 0, 0);
-    EXPECT_FALSE(mapping.IsEnabled());
-    std::vector<uint8_t> v(1, 1);
-    mapping.Append(reinterpret_cast<const bool*>(v.data()), 0, 0, 0);
-    EXPECT_FALSE(mapping.IsEnabled());
-}
+    OffsetMapping mapping;
+    auto append_result = mapping.Append(nullptr, 3, 0);
+    EXPECT_EQ(append_result.physical_offset, 0);
+    EXPECT_EQ(append_result.valid_count, 0);
+    EXPECT_FALSE(mapping.GetSnapshot().IsEnabled());
 
-// ---------- IsValid ----------
-
-TEST(OffsetMapping, IsValidMatchesPhysicalOffsetSign) {
-    SealedOffsetMapping mapping;
-    auto v = ToBoolBytes(MakeValid({1, 0, 1, 0}));
-    mapping.Build(reinterpret_cast<const bool*>(v.data()), 4);
-    EXPECT_TRUE(mapping.IsValid(0));
-    EXPECT_FALSE(mapping.IsValid(1));
-    EXPECT_TRUE(mapping.IsValid(2));
-    EXPECT_FALSE(mapping.IsValid(3));
-}
-
-// ---------- Out-of-bounds queries ----------
-
-TEST(OffsetMapping, OutOfBoundsReturnsMinusOne) {
-    SealedOffsetMapping mapping;
-    auto v = ToBoolBytes(MakeValid({1, 0, 1}));
-    mapping.Build(reinterpret_cast<const bool*>(v.data()), 3);
-    EXPECT_EQ(mapping.GetPhysicalOffset(99), -1);
-    EXPECT_EQ(mapping.GetLogicalOffset(99), -1);
+    auto valid = MakeValid({1});
+    append_result = mapping.Append(valid.data.get(), 0, 0);
+    EXPECT_EQ(append_result.physical_offset, 0);
+    EXPECT_EQ(append_result.valid_count, 0);
+    EXPECT_FALSE(mapping.GetSnapshot().IsEnabled());
 }
 
 }  // namespace milvus

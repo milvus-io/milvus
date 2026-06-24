@@ -26,11 +26,12 @@
 
 #include "Utils.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/id_map.h"
+#include "knowhere/index/index.h"
 #include "knowhere/index/index_factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
@@ -39,17 +40,25 @@
 
 namespace milvus::index {
 
-// valid data keys for nullable vector index serialization
-constexpr const char* VALID_DATA_KEY = "valid_data";
-constexpr const char* VALID_DATA_COUNT_KEY = "valid_data_count";
+struct EmbListRetrieveResult {
+    std::vector<uint8_t> raw_data;
+    std::vector<size_t> offsets;
+};
+
+struct VectorRetrieveResult {
+    std::vector<uint8_t> raw_data;
+};
+
+struct SparseVectorRetrieveResult {
+    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
+        sparse_data;
+};
 
 class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
                          const MetricType& metric_type)
-        : IndexBase(index_type),
-          offset_mapping_(std::make_unique<milvus::GrowingOffsetMapping>()),
-          metric_type_(metric_type) {
+        : IndexBase(index_type), metric_type_(metric_type) {
     }
 
  public:
@@ -101,7 +110,7 @@ class VectorIndex : public IndexBase {
             "CalcDistByIDs not supported for current index type");
     }
 
-    virtual std::vector<uint8_t>
+    virtual VectorRetrieveResult
     GetVector(const DatasetPtr dataset) const = 0;
 
     /**
@@ -112,16 +121,26 @@ class VectorIndex : public IndexBase {
      * @return A pair of (raw_vector_data, offsets) where offsets has size count+1
      *         and raw_vector_data contains all vectors concatenated.
      */
-    virtual std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    virtual EmbListRetrieveResult
     GetEmbListByIds(const DatasetPtr dataset,
                     const std::string& metric_type) const {
         ThrowInfo(NotImplemented,
                   "GetEmbListByIds not supported for current index type");
     }
 
-    virtual std::unique_ptr<
-        const knowhere::sparse::SparseRow<SparseValueType>[]>
+    virtual SparseVectorRetrieveResult
     GetSparseVector(const DatasetPtr dataset) const = 0;
+
+    virtual knowhere::IdMap&
+    GetIdMap() = 0;
+
+    virtual const knowhere::IdMap&
+    GetIdMap() const = 0;
+
+    virtual void
+    SetIdMapUseLock(bool use_lock) {
+        GetIdMap().SetUseLock(use_lock);
+    }
 
     IndexType
     GetIndexType() const {
@@ -186,55 +205,6 @@ class VectorIndex : public IndexBase {
         return search_cfg;
     }
 
-    void
-    UpdateValidData(const bool* valid_data, int64_t count) {
-        auto* growing_mapping =
-            dynamic_cast<milvus::GrowingOffsetMapping*>(offset_mapping_.get());
-        AssertInfo(growing_mapping != nullptr,
-                   "cannot update growing valid data from sealed mapping");
-        growing_mapping->Append(valid_data, count);
-    }
-
-    void
-    BuildValidData(const bool* valid_data, int64_t total_count) {
-        auto sealed_mapping = std::make_unique<milvus::SealedOffsetMapping>();
-        sealed_mapping->Build(valid_data, total_count);
-        offset_mapping_ = std::move(sealed_mapping);
-    }
-
-    bool
-    IsRowValid(int64_t logical_offset) const {
-        if (!offset_mapping_->IsEnabled()) {
-            return true;
-        }
-        return offset_mapping_->IsValid(logical_offset);
-    }
-
-    bool
-    HasValidData() const {
-        return offset_mapping_->IsEnabled();
-    }
-
-    int64_t
-    GetValidCount() const {
-        return offset_mapping_->GetValidCount();
-    }
-
-    int64_t
-    GetPhysicalOffset(int64_t logical_offset) const {
-        return offset_mapping_->GetPhysicalOffset(logical_offset);
-    }
-
-    int64_t
-    GetLogicalOffset(int64_t physical_offset) const {
-        return offset_mapping_->GetLogicalOffset(physical_offset);
-    }
-
-    const milvus::OffsetMapping&
-    GetOffsetMapping() const {
-        return *offset_mapping_;
-    }
-
  protected:
     template <typename T>
     static std::vector<uint8_t>
@@ -270,7 +240,112 @@ class VectorIndex : public IndexBase {
         return {std::move(raw_data), std::move(offsets)};
     }
 
-    std::unique_ptr<milvus::OffsetMapping> offset_mapping_;
+    template <typename T>
+    VectorRetrieveResult
+    GetVectorByIdsFromIndex(
+        const DatasetPtr dataset,
+        const knowhere::Index<knowhere::IndexNode>& index) const {
+        VectorRetrieveResult result;
+        if (IndexIsSparse(GetIndexType())) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to get vector, index is sparse");
+        }
+        if (dataset->GetRows() == 0) {
+            return result;
+        }
+
+        auto res = index.GetVectorByIds(dataset);
+        if (!res.has_value()) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to get vector, {}: {}",
+                      KnowhereStatusString(res.error()),
+                      res.what());
+        }
+        result.raw_data = DecodeVectorByIdsResult<T>(res.value());
+        return result;
+    }
+
+    SparseVectorRetrieveResult
+    GetSparseVectorByIdsFromIndex(
+        const DatasetPtr dataset,
+        const knowhere::Index<knowhere::IndexNode>& index) const {
+        SparseVectorRetrieveResult result;
+        if (dataset->GetRows() == 0) {
+            return result;
+        }
+
+        auto res = index.GetVectorByIds(dataset);
+        if (!res.has_value()) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to get vector, {}: {}",
+                      KnowhereStatusString(res.error()),
+                      res.what());
+        }
+        res.value()->SetIsOwner(false);
+        result.sparse_data.reset(
+            static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
+                res.value()->GetTensor()));
+        return result;
+    }
+
+    template <typename T>
+    EmbListRetrieveResult
+    GetEmbListByIdsFromIndex(
+        const DatasetPtr dataset,
+        const std::string& metric_type,
+        const knowhere::Index<knowhere::IndexNode>& index,
+        const std::vector<size_t>& empty_emb_list_offsets) const {
+        EmbListRetrieveResult result;
+        if (dataset->GetRows() == 0) {
+            result.offsets = {0};
+            return result;
+        }
+        if (!empty_emb_list_offsets.empty()) {
+            auto ids = dataset->GetIds();
+            auto rows = dataset->GetRows();
+            std::vector<int64_t> compact_ids;
+            ids = index.GetIdMap().MapOutToIn(ids, rows, compact_ids);
+            auto emb_list_count =
+                static_cast<int64_t>(empty_emb_list_offsets.size()) - 1;
+            for (int64_t i = 0; i < rows; ++i) {
+                AssertInfo(ids[i] >= 0 && ids[i] < emb_list_count,
+                           "emb list id {} out of range {}",
+                           ids[i],
+                           emb_list_count);
+            }
+            result.offsets.assign(rows + 1, 0);
+            return result;
+        }
+
+        auto res = index.GetEmbListByIds(dataset, metric_type);
+        if (!res.has_value()) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to get emb list, {}: {}",
+                      KnowhereStatusString(res.error()),
+                      res.what());
+        }
+        auto [raw_data, offsets] = DecodeEmbListByIdsResult<T>(res.value());
+        result.raw_data = std::move(raw_data);
+        result.offsets = std::move(offsets);
+        return result;
+    }
+
+    void
+    FinalizeIdMapForEmptyIndex(knowhere::Index<knowhere::IndexNode>& index,
+                               ErrorCode error_code,
+                               const std::string& context) const {
+        if (index.GetIdMap().GetSnapshot().GetCount() == 0) {
+            return;
+        }
+
+        auto stat = index.Node()->FinalizeIdMap();
+        if (stat != knowhere::Status::success) {
+            ThrowInfo(error_code,
+                      "failed to finalize id map for {}, {}",
+                      context,
+                      KnowhereStatusString(stat));
+        }
+    }
 
  private:
     MetricType metric_type_;

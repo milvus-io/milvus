@@ -15,7 +15,6 @@
 #include <tbb/concurrent_vector.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cassert>
 #include <deque>
 #include <memory>
@@ -23,7 +22,6 @@
 #include <shared_mutex>
 #include <string>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -292,21 +290,17 @@ class ConcurrentVectorImpl : public VectorBase {
         ssize_t storage_offset = 0;
         if (use_mapping_storage_) {
             if constexpr (!std::is_same_v<Type, bool>) {
-                storage_offset = offset_mapping_.GetValidCount();
                 // Build valid_data array for offset mapping
                 std::unique_ptr<bool[]> valid_data(new bool[element_count]);
                 for (ssize_t i = 0; i < element_count; ++i) {
                     bool is_valid =
                         valid_data_ptr_->is_valid(element_offset + i);
                     valid_data[i] = is_valid;
-                    if (is_valid) {
-                        valid_count++;
-                    }
                 }
-                offset_mapping_.Append(valid_data.get(),
-                                       element_count,
-                                       element_offset,
-                                       storage_offset);
+                const auto append_result = offset_mapping_.Append(
+                    valid_data.get(), element_count, element_offset);
+                storage_offset = append_result.physical_offset;
+                valid_count = append_result.valid_count;
             }
         } else {
             valid_count = element_count;
@@ -358,7 +352,8 @@ class ConcurrentVectorImpl : public VectorBase {
     // just for fun, don't use it directly
     const Type*
     get_element(ssize_t element_index) const {
-        auto physical_index = offset_mapping_.GetPhysicalOffset(element_index);
+        auto physical_index =
+            offset_mapping_.GetSnapshot().GetPhysicalOffset(element_index);
         if (physical_index == -1) {
             return nullptr;
         }
@@ -428,17 +423,17 @@ class ConcurrentVectorImpl : public VectorBase {
 
     int64_t
     get_physical_offset(int64_t logical_offset) const override {
-        return offset_mapping_.GetPhysicalOffset(logical_offset);
+        return offset_mapping_.GetSnapshot().GetPhysicalOffset(logical_offset);
     }
 
     int64_t
     get_logical_offset(int64_t physical_offset) const override {
-        return offset_mapping_.GetLogicalOffset(physical_offset);
+        return offset_mapping_.GetSnapshot().GetLogicalOffset(physical_offset);
     }
 
     int64_t
     get_valid_count() const override {
-        return offset_mapping_.GetValidCount();
+        return offset_mapping_.GetSnapshot().GetValidCount();
     }
 
     const milvus::OffsetMapping&
@@ -527,7 +522,7 @@ class ConcurrentVectorImpl : public VectorBase {
     ThreadSafeValidDataPtr valid_data_ptr_ = nullptr;
 
     const bool use_mapping_storage_;
-    milvus::GrowingOffsetMapping offset_mapping_;
+    milvus::OffsetMapping offset_mapping_;
 };
 
 template <typename Type>

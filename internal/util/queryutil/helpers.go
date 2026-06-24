@@ -401,7 +401,7 @@ func buildMergedScalarField(results []*internalpb.RetrieveResults, selectedRows 
 // Why hard-error instead of graceful fallback:
 // All segcore paths that produce vector FieldData for nullable fields
 // (SegmentGrowingImpl::bulk_subscript, ChunkedSegmentSealedImpl::get_raw_data,
-// ChunkedSegmentSealedImpl::get_vector) call FilterVectorValidOffsets and write
+// ChunkedSegmentSealedImpl::get_vector) call FilterValidOffsets and write
 // a full-length ValidData bitmap. The only path that omits ValidData is
 // fill_with_empty(field_id, count) (2-arg overload, used when index is not ready),
 // but that early-returns with numRows=count and no selected rows can reference it.
@@ -425,9 +425,9 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 
 		// Hard-error, not graceful fallback. All segcore vector output paths for
 		// nullable fields populate ValidData:
-		//   - get_raw_data:  FilterVectorValidOffsets → fill_with_empty(4-arg) → ValidData set
-		//   - get_vector:    FilterVectorValidOffsets → CreateVectorDataArrayFrom → ValidData set
-		//   - bulk_subscript (growing): FilterVectorValidOffsets → CreateEmptyVectorDataArray(4-arg) → ValidData set
+		//   - get_raw_data:  FilterValidOffsets → fill_with_empty(4-arg) → ValidData set
+		//   - get_vector:    FilterValidOffsets → CreateVectorDataArrayFrom → ValidData set
+		//   - bulk_subscript (growing): FilterValidOffsets → CreateEmptyVectorDataArray(4-arg) → ValidData set
 		//   - bulk_subscript_not_exist_field: CreateEmptyVectorDataArray(0) + manual Add(false) × count → ValidData set
 		// The only path that omits ValidData is fill_with_empty(2-arg) when index is not ready,
 		// but that path is unreachable for merge inputs (HasRawData gate + empty IDs filtering).

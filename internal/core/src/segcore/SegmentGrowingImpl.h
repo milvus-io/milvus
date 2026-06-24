@@ -654,10 +654,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     };
 
     ValidResult
-    FilterVectorValidOffsets(milvus::OpContext* op_ctx,
-                             FieldId field_id,
-                             const int64_t* seg_offsets,
-                             int64_t count) const;
+    FilterValidOffsets(FieldId field_id,
+                       const int64_t* seg_offsets,
+                       int64_t count) const;
 
     /**
      * @brief Estimate the current total resource usage of the growing segment

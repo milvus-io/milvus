@@ -84,14 +84,14 @@ class VectorMemIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        const auto& offset_mapping = GetOffsetMapping();
-        if (offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0) {
+        if (IsEmptyVectorIndex()) {
             return 0;
         }
-        if (IsEmptyEmbListIndex()) {
-            return 0;
+        if (IsEmbListIndex()) {
+            return index_.Count();
         }
-        return index_.Count();
+        const auto count = index_.GetIdMap().GetSnapshot().GetCount();
+        return count != 0 ? count : index_.Count();
     }
 
     void
@@ -107,15 +107,32 @@ class VectorMemIndex : public VectorIndex {
     bool
     IsIndexRefineEnabled() const override;
 
-    std::vector<uint8_t>
+    VectorRetrieveResult
     GetVector(const DatasetPtr dataset) const override;
 
-    std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    EmbListRetrieveResult
     GetEmbListByIds(const DatasetPtr dataset,
                     const std::string& metric_type) const override;
 
-    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
+    SparseVectorRetrieveResult
     GetSparseVector(const DatasetPtr dataset) const override;
+
+    knowhere::IdMap&
+    GetIdMap() override {
+        return index_.GetIdMap();
+    }
+
+    const knowhere::IdMap&
+    GetIdMap() const override {
+        return index_.GetIdMap();
+    }
+
+    void
+    SetIdMapUseLock(bool use_lock) override {
+        if (index_.Node() != nullptr) {
+            index_.GetIdMap().SetUseLock(use_lock);
+        }
+    }
 
     IndexStatsPtr
     Upload(const Config& config = {}) override;
@@ -142,8 +159,13 @@ class VectorMemIndex : public VectorIndex {
     LoadFromFile(const Config& config);
 
     bool
-    IsEmptyEmbListIndex() const {
-        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+    IsEmbListIndex() const {
+        return elem_type_ != DataType::NONE;
+    }
+
+    bool
+    IsEmptyVectorIndex() const {
+        return empty_vector_index_;
     }
 
  protected:
@@ -156,6 +178,7 @@ class VectorMemIndex : public VectorIndex {
     CreateIndexInfo create_index_info_;
     bool use_knowhere_build_pool_;
     std::vector<size_t> empty_emb_list_offsets_;
+    bool empty_vector_index_ = false;
 };
 
 template <typename T>

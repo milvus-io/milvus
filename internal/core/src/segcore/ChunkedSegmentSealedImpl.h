@@ -84,6 +84,10 @@
 #include "storage/MmapChunkManager.h"
 #include "segcore/TextColumnCache.h"
 
+namespace milvus::index {
+class VectorIndex;
+}
+
 namespace milvus::segcore {
 
 namespace storagev1translator {
@@ -1168,16 +1172,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     };
 
     ValidResult
-    FilterVectorValidOffsetsFromIndex(milvus::OpContext* op_ctx,
-                                      FieldId field_id,
-                                      const int64_t* seg_offsets,
-                                      int64_t count) const;
-
-    ValidResult
-    FilterVectorValidOffsetsFromColumn(milvus::OpContext* op_ctx,
-                                       const ChunkedColumnInterface* column,
-                                       const int64_t* seg_offsets,
-                                       int64_t count) const;
+    FilterValidOffsets(milvus::OpContext* op_ctx,
+                       FieldId field_id,
+                       const int64_t* seg_offsets,
+                       int64_t count,
+                       const index::VectorIndex* vec_index = nullptr) const;
 
     void
     update_row_count(int64_t row_count) {
@@ -1221,9 +1220,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadIndex(LoadIndexInfo& info, bool is_replace);
 
     bool
-    generate_interim_index(const FieldId field_id,
-                           int64_t num_rows,
-                           milvus::OpContext* op_ctx);
+    generate_interim_index(const FieldId field_id, milvus::OpContext* op_ctx);
 
     void
     fill_empty_field(const FieldMeta& field_meta);

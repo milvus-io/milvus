@@ -49,7 +49,7 @@ class SchemaReopenTest : public testing::Test {
  * - Its binlogs were written before `AddField(new_vec)` so they carry no data
  *   for the new column, while the segment is constructed with the new schema.
  * - Before the fix, the post-load backfill skipped all vector fields, so the
- *   column's validity bitmap stayed empty; FilterVectorValidOffsets then
+ *   column's validity bitmap stayed empty; FilterValidOffsets then
  *   returned valid_count == count with an EMPTY valid_offsets vector and
  *   bulk_subscript dereferenced the empty vector's data() (nullptr) as the
  *   offsets array -> SIGSEGV.
