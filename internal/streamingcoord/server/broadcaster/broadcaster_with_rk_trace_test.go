@@ -52,10 +52,22 @@ func TestBroadcasterWithRK_InjectsTraceContextBeforeTaskPersist(t *testing.T) {
 	_, err := b.Broadcast(ctx, msg)
 	assert.NoError(t, err)
 
+	spans := exporter.GetSpans()
+	var broadcastSpan tracetest.SpanStub
+	for _, s := range spans {
+		if s.Name == message.SpanNameWALBroadcast {
+			broadcastSpan = s
+			break
+		}
+	}
+	assert.Equal(t, message.SpanNameWALBroadcast, broadcastSpan.Name, "wal.broadcast span should be emitted")
+	assert.Equal(t, expectedTraceID, broadcastSpan.SpanContext.TraceID())
+
 	// Verify _tc was injected on the msg observed by the inner broadcast call.
 	sc := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsg))
 	assert.True(t, sc.IsValid(), "_tc should be present after Broadcast")
-	assert.Equal(t, expectedTraceID, sc.TraceID())
+	assert.Equal(t, broadcastSpan.SpanContext.TraceID(), sc.TraceID())
+	assert.Equal(t, broadcastSpan.SpanContext.SpanID(), sc.SpanID())
 }
 
 func TestBroadcasterWithRK_KeepsExistingTraceContext(t *testing.T) {
@@ -91,6 +103,16 @@ func TestBroadcasterWithRK_KeepsExistingTraceContext(t *testing.T) {
 	}
 	_, err := b.Broadcast(callerCtx, msg)
 	assert.NoError(t, err)
+
+	spans := exporter.GetSpans()
+	var broadcastSpan tracetest.SpanStub
+	for _, s := range spans {
+		if s.Name == message.SpanNameWALBroadcast {
+			broadcastSpan = s
+			break
+		}
+	}
+	assert.Equal(t, message.SpanNameWALBroadcast, broadcastSpan.Name, "wal.broadcast span should be emitted")
 
 	sc := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsg))
 	assert.True(t, sc.IsValid(), "_tc should still be present after Broadcast")

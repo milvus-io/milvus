@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"golang.org/x/time/rate"
 
@@ -125,16 +124,44 @@ func (g *ProduceGuard) commit(ctx context.Context) (*types.AppendResult, error) 
 	if len(g.msgs) == 0 {
 		panic("append task with no messages")
 	}
+	if g.msgs[0].BroadcastHeader() != nil {
+		return g.producer.produceInternal(ctx, g.msgs[0])
+	}
 	// auto commit if there's only one message.
 	if len(g.msgs) == 1 {
-		return g.producer.produceInternal(ctx, g.msgs[0])
+		return g.produceAutocommit(ctx, g.msgs[0])
 	}
 	// produce with transaction.
 	return g.produceTxn(ctx, g.msgs...)
 }
 
+func (g *ProduceGuard) produceAutocommit(ctx context.Context, msg message.MutableMessage) (_ *types.AppendResult, err error) {
+	ctx, span := message.StartSpan(ctx, message.SpanNameWALAutocommit)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	message.InjectTraceContext(ctx, msg)
+	return g.producer.produceInternal(ctx, msg)
+}
+
 // produceTxn produces the messages with a transaction, retry if the transaction is expired.
-func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMessage) (*types.AppendResult, error) {
+func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMessage) (_ *types.AppendResult, err error) {
+	ctx, span := message.StartSpan(ctx, message.SpanNameWALTxn)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	for _, msg := range msgs {
+		message.InjectTraceContext(ctx, msg)
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -156,15 +183,6 @@ func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMe
 
 // produceWithTxnOnce produces the messages with a transaction once.
 func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.MutableMessage) (_ *types.AppendResult, err error) {
-	ctx, span := otel.Tracer("milvus.streaming.wal").Start(ctx, "wal.txn")
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-	}()
-
 	// a txn batch should always belong to one vchannel.
 	txn, err := g.beginTxn(ctx, msgs[0].VChannel())
 	if err != nil {
@@ -184,6 +202,7 @@ func (g *ProduceGuard) beginTxn(ctx context.Context, vchannel string) (*message.
 		WithHeader(&message.BeginTxnMessageHeader{}).
 		WithBody(&message.BeginTxnMessageBody{}).
 		MustBuildMutable()
+	message.InjectTraceContext(ctx, beginTxn)
 
 	result, err := g.producer.produceInternal(ctx, beginTxn)
 	if err != nil {
@@ -226,6 +245,7 @@ func (g *ProduceGuard) commitTxn(ctx context.Context, vchannel string, txn *mess
 		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
 		MustBuildMutable()
+	message.InjectTraceContext(ctx, commitTxn)
 
 	return g.producer.produceInternal(ctx, commitTxn.WithTxnContext(*txn))
 }

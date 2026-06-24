@@ -3,10 +3,27 @@ package message
 import (
 	"context"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
+
+const (
+	tracerName = "milvus.streaming.wal"
+
+	SpanNameWALAutocommit   = "wal.autocommit"
+	SpanNameWALTxn          = "wal.txn"
+	SpanNameWALBroadcast    = "wal.broadcast"
+	SpanNameWALServer       = "wal.server"
+	SpanNameReplicateClient = "replicate.client"
+	SpanNameReplicateServer = "replicate.server"
+	SpanNameWALBCCallback   = "wal.bc_callback"
+)
+
+func StartSpan(ctx context.Context, spanName string) (context.Context, trace.Span) {
+	return otel.Tracer(tracerName).Start(ctx, spanName)
+}
 
 // InjectTraceContext writes the current span context into msg under the
 // reserved key _tc as a base64-encoded marshaled TraceContextHeader.

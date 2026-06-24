@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -131,7 +130,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	// Extract trace context carried by the replicated immutable message, then
 	// keep it in the local mutable message if it already exists.
 	msgCtx := message.ExtractTraceContext(p.streamServer.Context(), msg)
-	msgCtx, span := otel.Tracer("milvus.streaming.wal").Start(msgCtx, "wal.replicate.append")
+	msgCtx, span := message.StartSpan(msgCtx, message.SpanNameReplicateServer)
 	defer span.End()
 	message.InjectTraceContext(msgCtx, msg)
 

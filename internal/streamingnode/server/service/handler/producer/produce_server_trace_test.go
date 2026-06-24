@@ -28,7 +28,7 @@ import (
 
 // TestHandleProduce_ExtractsAndOpensServerSpan verifies that handleProduce:
 //  1. Extracts the client-injected trace context from message properties.
-//  2. Starts a "wal.append.server" child span under the extracted trace.
+//  2. Starts a "wal.server" child span under the extracted trace.
 //  3. Passes a ctx carrying that span to AppendAsync.
 //  4. Ends the span inside the AppendAsync callback.
 func TestHandleProduce_ExtractsAndOpensServerSpan(t *testing.T) {
@@ -120,15 +120,15 @@ func TestHandleProduce_ExtractsAndOpensServerSpan(t *testing.T) {
 	assert.True(t, capturedSpan.SpanContext().IsValid(),
 		"ctx passed to AppendAsync should carry a valid span")
 
-	// 2. A "wal.append.server" span must have been exported with the same trace ID.
+	// 2. A "wal.server" span must have been exported with the same trace ID.
 	spans := exporter.GetSpans()
 	var serverFound bool
 	for _, s := range spans {
-		if s.Name == "wal.append.server" {
+		if s.Name == message.SpanNameWALServer {
 			assert.Equal(t, expectedTraceID, s.SpanContext.TraceID(),
-				"wal.append.server span must share the client trace ID")
+				"wal.server span must share the client trace ID")
 			serverFound = true
 		}
 	}
-	assert.True(t, serverFound, "a 'wal.append.server' span must be exported")
+	assert.True(t, serverFound, "a 'wal.server' span must be exported")
 }
