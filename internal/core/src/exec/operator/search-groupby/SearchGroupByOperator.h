@@ -432,7 +432,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               const segcore::SegmentInternalInterface& segment,
               std::vector<int64_t>& seg_offsets,
               std::vector<float>& distances,
-              std::vector<size_t>& topk_per_nq_prefix_sum);
+              std::vector<size_t>& topk_per_nq_prefix_sum,
+              std::vector<int32_t>* element_indices = nullptr);
 
 }  // namespace exec
 }  // namespace milvus

@@ -2781,9 +2781,12 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
     ASSERT_TRUE(search_result->composite_group_by_values_.has_value())
         << "Group by values should be present";
 
-    // Group by returns row-level results even for element-level search
-    ASSERT_FALSE(search_result->element_level_)
-        << "Group by should return row-level results";
+    // Group by preserves element-level metadata for element-level search.
+    ASSERT_TRUE(search_result->element_level_)
+        << "Group by should preserve element-level results";
+    ASSERT_EQ(search_result->element_indices_.size(),
+              search_result->seg_offsets_.size())
+        << "Element indices should align with grouped row offsets";
 
     auto& group_by_values = search_result->composite_group_by_values_.value();
 
@@ -2904,9 +2907,12 @@ TEST(ElementFilterGroupBy, GrowingSegment) {
     ASSERT_TRUE(search_result->composite_group_by_values_.has_value())
         << "Group by values should be present";
 
-    // Verify element_level_ is false (group by returns row-level results)
-    ASSERT_FALSE(search_result->element_level_)
-        << "Group by should return row-level results";
+    // Verify element_level_ is preserved.
+    ASSERT_TRUE(search_result->element_level_)
+        << "Group by should preserve element-level results";
+    ASSERT_EQ(search_result->element_indices_.size(),
+              search_result->seg_offsets_.size())
+        << "Element indices should align with grouped row offsets";
 
     auto& group_by_values = search_result->composite_group_by_values_.value();
 
@@ -3151,8 +3157,11 @@ TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
     ASSERT_NE(search_result, nullptr);
     ASSERT_TRUE(search_result->composite_group_by_values_.has_value())
         << "Group by values should be present";
-    ASSERT_FALSE(search_result->element_level_)
-        << "Group by should return row-level results";
+    ASSERT_TRUE(search_result->element_level_)
+        << "Group by should preserve element-level results";
+    ASSERT_EQ(search_result->element_indices_.size(),
+              search_result->seg_offsets_.size())
+        << "Element indices should align with grouped row offsets";
 
     auto& group_by_values = search_result->composite_group_by_values_.value();
 

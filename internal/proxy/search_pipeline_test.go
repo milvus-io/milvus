@@ -739,6 +739,14 @@ func (s *SearchPipelineSuite) TestElementLevelHybridPrepareAndRestoreKeys() {
 			},
 			Scores:         []float32{0.8, 0.9, 0.7},
 			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+			GroupByFieldValues: []*schemapb.FieldData{{
+				FieldId:   100,
+				FieldName: "pk",
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 10, 20}}},
+				}},
+			}},
 		},
 	}
 
@@ -746,6 +754,8 @@ func (s *SearchPipelineSuite) TestElementLevelHybridPrepareAndRestoreKeys() {
 	s.Require().NoError(err)
 	preparedIDs := prepared.GetResults().GetIds().GetStrId().GetData()
 	s.Require().Len(preparedIDs, 3)
+	s.Require().Len(prepared.GetResults().GetGroupByFieldValues(), 1)
+	s.Equal([]int64{10, 10, 20}, prepared.GetResults().GetGroupByFieldValues()[0].GetScalars().GetLongData().GetData())
 
 	rankResult := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -759,6 +769,14 @@ func (s *SearchPipelineSuite) TestElementLevelHybridPrepareAndRestoreKeys() {
 				},
 			},
 			Scores: []float32{0.99, 0.88},
+			GroupByFieldValues: []*schemapb.FieldData{{
+				FieldId:   100,
+				FieldName: "pk",
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}},
+				}},
+			}},
 		},
 	}
 
@@ -767,6 +785,8 @@ func (s *SearchPipelineSuite) TestElementLevelHybridPrepareAndRestoreKeys() {
 	s.Equal([]int64{10, 20}, restored.GetResults().GetIds().GetIntId().GetData())
 	s.Equal([]int64{2, 1}, restored.GetResults().GetElementIndices().GetData())
 	s.Equal([]float32{0.99, 0.88}, restored.GetResults().GetScores())
+	s.Require().Len(restored.GetResults().GetGroupByFieldValues(), 1)
+	s.Equal([]int64{10, 20}, restored.GetResults().GetGroupByFieldValues()[0].GetScalars().GetLongData().GetData())
 
 	_, err = prepareElementLevelHybridResult(&milvuspb.SearchResults{
 		Status: merr.Success(),

@@ -4615,6 +4615,71 @@ func Test_reconstructStructFieldData(t *testing.T) {
 		assert.Equal(t, originalOutputFields, resultOutputFields)
 	})
 
+	t.Run("group by with count(*) should preserve aggregate field", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "id",
+				FieldId:   100,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "count(*)",
+				FieldId:   0,
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{3, 4}},
+						},
+					},
+				},
+			},
+		}
+		outputFields := []string{"id", "count(*)"}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "test_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "test_struct[sub_field]",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+		}
+
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
+
+		assert.Len(t, resultFieldsData, 2)
+		assert.Equal(t, "id", resultFieldsData[0].FieldName)
+		assert.Equal(t, int64(100), resultFieldsData[0].FieldId)
+		assert.Equal(t, "count(*)", resultFieldsData[1].FieldName)
+		assert.Equal(t, int64(0), resultFieldsData[1].FieldId)
+		assert.Equal(t, []string{"id", "count(*)"}, resultOutputFields)
+		assert.Equal(t, []int64{3, 4}, resultFieldsData[1].GetScalars().GetLongData().GetData())
+	})
+
 	t.Run("struct field query - should reconstruct struct field", func(t *testing.T) {
 		fieldsData := []*schemapb.FieldData{
 			{

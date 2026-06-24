@@ -36,6 +36,9 @@ const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
 // Virtual field ID for two-project mode: carries segment offsets through
 // the pipeline so that deferred fields can be fetched after TopK.
 const milvus::FieldId SegmentOffsetFieldID = milvus::FieldId(-100);
+// Virtual field ID for element-level ORDER BY: carries the matched element
+// index alongside SegmentOffsetFieldID after TopK.
+const milvus::FieldId ElementIndexFieldID = milvus::FieldId(-101);
 
 // fill followed extra info to binlog file
 const char ORIGIN_SIZE_KEY[] = "original_size";

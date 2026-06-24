@@ -628,6 +628,8 @@ func prepareElementLevelHybridResult(result *milvuspb.SearchResults) (*milvuspb.
 			AllSearchCount:          data.GetAllSearchCount(),
 			PrimaryFieldName:        data.GetPrimaryFieldName(),
 			ElementIndices:          &schemapb.LongArray{},
+			GroupByFieldValues:      append([]*schemapb.FieldData(nil), data.GetGroupByFieldValues()...),
+			GroupByFieldValue:       data.GetGroupByFieldValue(),
 			SearchIteratorV2Results: data.GetSearchIteratorV2Results(),
 		}
 		if len(data.GetDistances()) > 0 {
@@ -665,6 +667,8 @@ func prepareElementLevelHybridResult(result *milvuspb.SearchResults) (*milvuspb.
 		AllSearchCount:          data.GetAllSearchCount(),
 		PrimaryFieldName:        data.GetPrimaryFieldName(),
 		ElementIndices:          data.GetElementIndices(),
+		GroupByFieldValues:      append([]*schemapb.FieldData(nil), data.GetGroupByFieldValues()...),
+		GroupByFieldValue:       data.GetGroupByFieldValue(),
 		SearchIteratorV2Results: data.GetSearchIteratorV2Results(),
 	}
 	if len(data.GetDistances()) > 0 {
@@ -753,6 +757,8 @@ func restoreElementLevelHybridRankResult(rankResult *milvuspb.SearchResults) (*m
 		AllSearchCount:          data.GetAllSearchCount(),
 		PrimaryFieldName:        data.GetPrimaryFieldName(),
 		ElementIndices:          &schemapb.LongArray{Data: elementIndices},
+		GroupByFieldValues:      append([]*schemapb.FieldData(nil), data.GetGroupByFieldValues()...),
+		GroupByFieldValue:       data.GetGroupByFieldValue(),
 		SearchIteratorV2Results: data.GetSearchIteratorV2Results(),
 	}
 	if len(data.GetDistances()) > 0 {

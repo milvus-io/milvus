@@ -30,6 +30,17 @@ namespace milvus {
 
 namespace exec {
 
+namespace {
+
+struct GroupedResult {
+    int64_t row_offset;
+    int32_t element_index;
+    float distance;
+    CompositeGroupKey group_key;
+};
+
+}  // namespace
+
 // Helper to create a single-field getter that returns GroupByValueType
 template <typename T, typename InnerRawType = T>
 static std::function<GroupByValueType(int64_t)>
@@ -189,18 +200,21 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
                     std::vector<CompositeGroupKey>& composite_group_by_values,
                     std::vector<int64_t>& offsets,
                     std::vector<float>& distances,
-                    const SearchInfo& search_info) {
+                    const SearchInfo& search_info,
+                    std::vector<int32_t>* element_indices) {
     // 1. Create group map for composite keys
     CompositeGroupByMap groupMap(search_info.topk_,
                                  search_info.group_size_,
                                  search_info.strict_group_size_);
 
     auto is_element_id = search_info.element_level();
+    AssertInfo(element_indices == nullptr || is_element_id,
+               "element_indices output requires element-level search");
 
     //2. do iteration until fill the whole map or run out of all data
     //note it may enumerate all data inside a segment and can block following
     //query and search possibly
-    std::vector<std::tuple<int64_t, float, CompositeGroupKey>> res;
+    std::vector<GroupedResult> res;
     CompositeGroupKey scratch_key;
     while (iterator->HasNext() && !groupMap.IsGroupResEnough()) {
         auto offset_dis_pair = iterator->Next();
@@ -212,35 +226,41 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
 
         // For element-level search, the offset is the element_id, we need to convert it to the row_id.
         int64_t row_offset = raw_offset;
+        int32_t element_index = -1;
         if (is_element_id) {
             AssertInfo(search_info.array_offsets_ != nullptr,
                        "Array offsets not available for element-level search");
-            row_offset =
-                search_info.array_offsets_
-                    ->ElementIDToRowID(static_cast<int32_t>(raw_offset))
-                    .first;
+            auto [doc_id, elem_idx] =
+                search_info.array_offsets_->ElementIDToRowID(
+                    static_cast<int32_t>(raw_offset));
+            row_offset = doc_id;
+            element_index = elem_idx;
         }
 
         data_getter->GetInto(row_offset, scratch_key);
         if (groupMap.Push(scratch_key)) {
             // Safe to move: next iteration's GetInto() will Clear+Reserve+Add
             // on the moved-from small_vector, which is guaranteed empty-inline.
-            res.emplace_back(row_offset, dis, std::move(scratch_key));
+            res.emplace_back(GroupedResult{
+                row_offset, element_index, dis, std::move(scratch_key)});
         }
     }
 
     // 3. Sort based on distances and metrics
     auto customComparator = [&](const auto& lhs, const auto& rhs) {
         return milvus::query::dis_closer(
-            std::get<1>(lhs), std::get<1>(rhs), search_info.metric_type_);
+            lhs.distance, rhs.distance, search_info.metric_type_);
     };
     std::sort(res.begin(), res.end(), customComparator);
 
     // 4. Save results
     for (auto iter = res.begin(); iter != res.end(); ++iter) {
-        offsets.emplace_back(std::get<0>(*iter));
-        distances.emplace_back(std::get<1>(*iter));
-        composite_group_by_values.emplace_back(std::move(std::get<2>(*iter)));
+        offsets.emplace_back(iter->row_offset);
+        distances.emplace_back(iter->distance);
+        if (element_indices != nullptr) {
+            element_indices->emplace_back(iter->element_index);
+        }
+        composite_group_by_values.emplace_back(std::move(iter->group_key));
     }
 }
 
@@ -252,7 +272,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               const segcore::SegmentInternalInterface& segment,
               std::vector<int64_t>& seg_offsets,
               std::vector<float>& distances,
-              std::vector<size_t>& topk_per_nq_prefix_sum) {
+              std::vector<size_t>& topk_per_nq_prefix_sum,
+              std::vector<int32_t>* element_indices) {
     // Get field IDs for group by
     AssertInfo(!search_info.group_by_field_ids_.empty(),
                "group_by_field_ids must be set for group by search");
@@ -263,6 +284,9 @@ SearchGroupBy(milvus::OpContext* op_ctx,
     seg_offsets.reserve(max_total_size);
     distances.reserve(max_total_size);
     composite_group_by_values.reserve(max_total_size);
+    if (element_indices != nullptr) {
+        element_indices->reserve(max_total_size);
+    }
     topk_per_nq_prefix_sum.reserve(iterators.size() + 1);
 
     // Create data getter for all fields
@@ -281,7 +305,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                             composite_group_by_values,
                             seg_offsets,
                             distances,
-                            search_info);
+                            search_info,
+                            element_indices);
         topk_per_nq_prefix_sum.push_back(seg_offsets.size());
     }
 }

@@ -3099,9 +3099,11 @@ func reconstructStructFieldData(
 		if _, ok := regularFieldIDs[fieldID]; ok {
 			newFieldsData = append(newFieldsData, field)
 			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
-		} else {
-			structFieldID := subFieldToStructMap[fieldID]
+		} else if structFieldID, ok := subFieldToStructMap[fieldID]; ok {
 			groupedStructFields[structFieldID] = append(groupedStructFields[structFieldID], field)
+		} else {
+			newFieldsData = append(newFieldsData, field)
+			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
 		}
 	}
 

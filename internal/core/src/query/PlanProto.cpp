@@ -390,7 +390,8 @@ std::tuple<plan::PlanNodePtr, std::vector<FieldId>, std::vector<FieldId>>
 BuildOrderByProjectNode(const proto::plan::QueryPlanNode& query,
                         const planpb::PlanNode& plan_node_proto,
                         const SchemaPtr& schema,
-                        const std::vector<plan::PlanNodePtr>& sources) {
+                        const std::vector<plan::PlanNodePtr>& sources,
+                        bool is_element_level) {
     std::vector<FieldId> project_ids;
     std::vector<std::string> project_names;
     std::vector<milvus::DataType> project_types;
@@ -450,6 +451,15 @@ BuildOrderByProjectNode(const proto::plan::QueryPlanNode& query,
             project_names.push_back(schema->GetFieldName(fid));
             project_types.push_back(schema->GetFieldType(fid));
         }
+    }
+
+    // Element-level ORDER BY sorts logical element rows. Keep the matched
+    // element index in a hidden column so result assembly can restore SDK
+    // offsets after TopK reorders rows.
+    if (is_element_level) {
+        project_ids.push_back(ElementIndexFieldID);
+        project_names.push_back("ElementIndex");
+        project_types.push_back(DataType::INT64);
     }
 
     // Always append SegmentOffsetFieldID as the last pipeline column.
@@ -824,8 +834,11 @@ ProtoParser::RetrievePlanNodeFromProto(
                 (group_by_field_count > 0 || agg_functions_count > 0);
             if (!has_aggregation) {
                 auto [project, deferred, pipeline_ids] =
-                    BuildOrderByProjectNode(
-                        query, plan_node_proto, schema, sources);
+                    BuildOrderByProjectNode(query,
+                                            plan_node_proto,
+                                            schema,
+                                            sources,
+                                            is_element_level);
                 plannode = project;
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
                 plan_node->deferred_field_ids_ = std::move(deferred);

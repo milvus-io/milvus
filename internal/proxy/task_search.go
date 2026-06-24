@@ -580,6 +580,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			subSearchInfo.Collapse = collapseConfig
 		}
 
+		// ArrayOfVector hybrid validation is kind-specific: embedding-list
+		// rejects range/iterator here, element-level rejects legacy iterator
+		// here, and group-by is validated after same-struct inference below.
+
 		// Hybrid search only supports plain top-K on ArrayOfVector fields. Both
 		// element-level and embedding-list searches reject advanced controls here.
 		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
@@ -590,13 +594,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 				if isStructEmbListSubSearch {
 					searchKind = "embedding-list"
 				}
-				if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				if isStructEmbListSubSearch && gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
 					return merr.WrapErrParameterInvalid("", "",
 						"range search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
-				}
-				if t.rankParams.GetGroupByFieldId() > 0 || len(t.rankParams.GetGroupByFieldIds()) > 0 {
-					return merr.WrapErrParameterInvalid("", "",
-						"group by search is not supported for vector array ("+searchKind+") fields in hybrid search, fieldName:"+annsField.GetName())
 				}
 				if subIsIterator {
 					return merr.WrapErrParameterInvalid("", "",
@@ -696,6 +696,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
+	if err := t.validateHybridArrayOfVectorGroupBy(); err != nil {
+		return err
+	}
 	for index, info := range t.hybridSubSearchInfos {
 		if t.hybridElementLevel && info.ElementScopeProvided {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed for same-struct element-level hybrid search", elementScopeKey)
@@ -726,6 +729,50 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 
+	return nil
+}
+
+func (t *searchTask) validateHybridArrayOfVectorGroupBy() error {
+	groupByFieldIDs := t.rankParams.GetGroupByFieldIds()
+	if len(groupByFieldIDs) == 0 {
+		return nil
+	}
+
+	fieldName := func(index int) string {
+		if index >= 0 && index < len(t.queryInfos) {
+			if field := typeutil.GetField(t.schema.CollectionSchema, t.queryInfos[index].GetQueryFieldId()); field != nil {
+				return field.GetName()
+			}
+		}
+		return ""
+	}
+
+	hasStructElementSubSearch := false
+	for index, info := range t.hybridSubSearchInfos {
+		switch info.Kind {
+		case hybridSubSearchStructEmbList:
+			return merr.WrapErrParameterInvalid("", "",
+				"group by search is not supported for vector array (embedding-list) fields in hybrid search, fieldName:"+fieldName(index))
+		case hybridSubSearchStructElement:
+			hasStructElementSubSearch = true
+			if !t.hybridElementLevel {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by search is only supported for same-struct element-level vector array fields in hybrid search, fieldName:"+fieldName(index))
+			}
+		}
+	}
+	if !hasStructElementSubSearch {
+		return nil
+	}
+
+	pkField, err := t.schema.GetPkField()
+	if err != nil {
+		return err
+	}
+	if len(groupByFieldIDs) != 1 || pkField == nil || groupByFieldIDs[0] != pkField.GetFieldID() {
+		return merr.WrapErrParameterInvalid("", "",
+			"only group by primary key is supported for same-struct element-level vector array fields in hybrid search")
+	}
 	return nil
 }
 

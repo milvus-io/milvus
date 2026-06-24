@@ -6495,7 +6495,8 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 				Name:    "struct_array",
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 104, Name: "emb_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
-					{FieldID: 105, Name: typeutil.ConcatStructFieldName("struct_array", "price"), DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+					{FieldID: 105, Name: "emb_text_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+					{FieldID: 106, Name: typeutil.ConcatStructFieldName("struct_array", "price"), DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 				},
 			},
 		},
@@ -6514,19 +6515,35 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		return bs
 	}
 
-	buildHybridTaskWithMetric := func(annsField string, metricType string, phType commonpb.PlaceholderType, rangeRadius string, withIterator bool, groupByField string) *searchTask {
-		paramsJSON := `{"nprobe": 10}`
-		if rangeRadius != "" {
-			paramsJSON = `{"nprobe": 10, "radius": ` + rangeRadius + `}`
-		}
-		subParams := []*commonpb.KeyValuePair{
-			{Key: common.MetricTypeKey, Value: metricType},
-			{Key: ParamsKey, Value: paramsJSON},
-			{Key: AnnsFieldKey, Value: annsField},
-			{Key: TopKKey, Value: "10"},
-		}
-		if withIterator {
-			subParams = append(subParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+	type hybridSubSpec struct {
+		annsField    string
+		metricType   string
+		phType       commonpb.PlaceholderType
+		rangeRadius  string
+		withIterator bool
+	}
+
+	buildHybridTaskWithSubSpecs := func(groupByField string, specs ...hybridSubSpec) *searchTask {
+		subReqs := make([]*milvuspb.SubSearchRequest, 0, len(specs))
+		for _, spec := range specs {
+			paramsJSON := `{"nprobe": 10}`
+			if spec.rangeRadius != "" {
+				paramsJSON = `{"nprobe": 10, "radius": ` + spec.rangeRadius + `}`
+			}
+			subParams := []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: spec.metricType},
+				{Key: ParamsKey, Value: paramsJSON},
+				{Key: AnnsFieldKey, Value: spec.annsField},
+				{Key: TopKKey, Value: "10"},
+			}
+			if spec.withIterator {
+				subParams = append(subParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+			}
+			subReqs = append(subReqs, &milvuspb.SubSearchRequest{
+				Dsl:              "",
+				PlaceholderGroup: makePlaceholderGroup(spec.phType),
+				SearchParams:     subParams,
+			})
 		}
 
 		outerParams := []*commonpb.KeyValuePair{
@@ -6547,17 +6564,21 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 			request: &milvuspb.SearchRequest{
 				CollectionName: "test_collection",
 				SearchParams:   outerParams,
-				SubReqs: []*milvuspb.SubSearchRequest{
-					{
-						Dsl:              "",
-						PlaceholderGroup: makePlaceholderGroup(phType),
-						SearchParams:     subParams,
-					},
-				},
+				SubReqs:        subReqs,
 			},
 			schema: schemaInfo,
 			tr:     timerecord.NewTimeRecorder("test"),
 		}
+	}
+
+	buildHybridTaskWithMetric := func(annsField string, metricType string, phType commonpb.PlaceholderType, rangeRadius string, withIterator bool, groupByField string) *searchTask {
+		return buildHybridTaskWithSubSpecs(groupByField, hybridSubSpec{
+			annsField:    annsField,
+			metricType:   metricType,
+			phType:       phType,
+			rangeRadius:  rangeRadius,
+			withIterator: withIterator,
+		})
 	}
 
 	buildHybridTask := func(annsField string, rangeRadius string, withIterator bool, groupByField string) *searchTask {
@@ -6566,6 +6587,13 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 
 	buildElementHybridTask := func(annsField string, rangeRadius string, withIterator bool, groupByField string) *searchTask {
 		return buildHybridTaskWithMetric(annsField, metric.L2, commonpb.PlaceholderType_FloatVector, rangeRadius, withIterator, groupByField)
+	}
+
+	buildSameStructElementHybridTask := func(groupByField string) *searchTask {
+		return buildHybridTaskWithSubSpecs(groupByField,
+			hybridSubSpec{annsField: "emb_vec", metricType: metric.L2, phType: commonpb.PlaceholderType_FloatVector},
+			hybridSubSpec{annsField: "emb_text_vec", metricType: metric.L2, phType: commonpb.PlaceholderType_FloatVector},
+		)
 	}
 
 	t.Run("hybrid with ArrayOfVector EmbList metric plain topK should succeed", func(t *testing.T) {
@@ -6598,6 +6626,14 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding-list) fields in hybrid search")
 	})
 
+	t.Run("hybrid with ArrayOfVector group by PK should fail for embedding-list", func(t *testing.T) {
+		qt := buildHybridTask("emb_vec", "", false, "pk")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding-list) fields in hybrid search")
+	})
+
 	t.Run("hybrid with element-level ArrayOfVector plain topK should succeed", func(t *testing.T) {
 		qt := buildElementHybridTask("emb_vec", "", false, "")
 		err := qt.initAdvancedSearchRequest(ctx)
@@ -6624,12 +6660,10 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("hybrid with element-level ArrayOfVector range search should fail", func(t *testing.T) {
+	t.Run("hybrid with element-level ArrayOfVector range search should succeed", func(t *testing.T) {
 		qt := buildElementHybridTask("emb_vec", "0.2", false, "")
 		err := qt.initAdvancedSearchRequest(ctx)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "range search is not supported for vector array (element-level) fields in hybrid search")
+		assert.NoError(t, err)
 	})
 
 	t.Run("hybrid with element-level ArrayOfVector iterator should fail", func(t *testing.T) {
@@ -6640,12 +6674,47 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		assert.Contains(t, err.Error(), "search iterator is not supported for vector array (element-level) fields in hybrid search")
 	})
 
-	t.Run("hybrid with element-level ArrayOfVector group by should fail", func(t *testing.T) {
-		qt := buildElementHybridTask("emb_vec", "", false, "pk")
+	t.Run("hybrid with same-struct element-level ArrayOfVector group by PK should succeed", func(t *testing.T) {
+		qt := buildSameStructElementHybridTask("pk")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.NoError(t, err)
+		assert.True(t, qt.hybridElementLevel)
+		assert.Equal(t, int64(100), qt.GroupByFieldId)
+	})
+
+	t.Run("hybrid with element-level ArrayOfVector group by non-PK should fail", func(t *testing.T) {
+		qt := buildElementHybridTask("emb_vec", "", false, "scalar_field")
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "group by search is not supported for vector array (element-level) fields in hybrid search")
+		assert.Contains(t, err.Error(), "only group by primary key is supported")
+	})
+
+	t.Run("hybrid with same-struct element-level ArrayOfVector composite group by should fail", func(t *testing.T) {
+		qt := buildSameStructElementHybridTask("")
+		qt.request.SearchParams = append(qt.request.SearchParams, &commonpb.KeyValuePair{Key: GroupByFieldsKey, Value: "pk,scalar_field"})
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "only group by primary key is supported")
+	})
+
+	t.Run("hybrid with mixed element-level ArrayOfVector group by should fail", func(t *testing.T) {
+		qt := buildHybridTaskWithSubSpecs("pk",
+			hybridSubSpec{annsField: "emb_vec", metricType: metric.L2, phType: commonpb.PlaceholderType_FloatVector},
+			hybridSubSpec{annsField: "regular_vec", metricType: metric.L2, phType: commonpb.PlaceholderType_FloatVector},
+		)
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "same-struct element-level")
+	})
+
+	t.Run("hybrid with single element-level ArrayOfVector group by PK should succeed", func(t *testing.T) {
+		qt := buildElementHybridTask("emb_vec", "", false, "pk")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.NoError(t, err)
+		assert.True(t, qt.hybridElementLevel)
 	})
 
 	t.Run("hybrid with normal vector advanced controls should succeed", func(t *testing.T) {
