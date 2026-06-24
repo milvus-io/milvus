@@ -3172,6 +3172,34 @@ func TestDML(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
+func TestQueryRejectsInvalidExprParamsBeforeProxyDispatch(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, QueryAction), bytes.NewReader([]byte(
+		`{"collectionName": "book", "filter": "book_id in {ids}", "exprParams": {"ids": []}, "outputFields": ["book_id"], "limit": 10}`,
+	)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+	assert.Contains(t, returnBody.Message, "exprParams array value cannot be empty")
+	mp.AssertNotCalled(t, "Query", mock.Anything, mock.Anything)
+}
+
 func TestAllowInt64(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
