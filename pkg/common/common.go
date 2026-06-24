@@ -315,9 +315,16 @@ const (
 	FieldDescriptionKey = "field.description"
 )
 
+// local format type
+const (
+	LocalFormatRaw    = "raw"
+	LocalFormatVortex = "vortex"
+)
+
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
+	LocalFormatKey             = "local_format"
 	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"

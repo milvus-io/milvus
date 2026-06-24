@@ -255,6 +255,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     fn(true, i);
                 }
             }
+            return;
         }
         // nullable:
         if (count == 0) {
@@ -724,6 +725,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
  private:
+    std::optional<DataType>
+    GetDefaultScanDataType() const override {
+        return data_type_;
+    }
+
     std::shared_ptr<ChunkedColumnGroup> group_;
     FieldId field_id_;
     const FieldMeta field_meta_;

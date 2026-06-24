@@ -35,6 +35,7 @@ extern std::atomic<bool> JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED;
 extern std::atomic<bool> ENABLE_PARQUET_STATS_SKIP_INDEX;
+extern std::atomic<bool> ENABLE_VORTEX_SCAN_PUSHDOWN;
 
 void
 SetIndexSliceSize(const int64_t size);
@@ -62,6 +63,9 @@ SetDefaultConfigParamTypeCheck(bool val);
 
 void
 SetDefaultEnableParquetStatsSkipIndex(bool val);
+
+void
+SetDefaultVortexScanPushdownEnable(bool val);
 
 void
 SetEnableLatestDeleteSnapshotOptimization(bool val);

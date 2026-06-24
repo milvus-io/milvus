@@ -68,6 +68,9 @@ void
 SetDefaultEnableParquetStatsSkipIndex(bool val);
 
 void
+SetDefaultVortexScanPushdownEnable(bool val);
+
+void
 SetEnableLatestDeleteSnapshotOptimization(bool val);
 
 // dynamic update segcore params

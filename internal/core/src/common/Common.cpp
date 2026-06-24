@@ -44,6 +44,8 @@ std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED(
     DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED);
 std::atomic<bool> ENABLE_PARQUET_STATS_SKIP_INDEX(
     DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX);
+std::atomic<bool> ENABLE_VORTEX_SCAN_PUSHDOWN(
+    DEFAULT_ENABLE_VORTEX_SCAN_PUSHDOWN);
 
 void
 SetIndexSliceSize(const int64_t size) {
@@ -111,6 +113,13 @@ SetDefaultEnableParquetStatsSkipIndex(bool val) {
     ENABLE_PARQUET_STATS_SKIP_INDEX.store(val);
     LOG_INFO("set default enable parquet stats: {}",
              ENABLE_PARQUET_STATS_SKIP_INDEX.load());
+}
+
+void
+SetDefaultVortexScanPushdownEnable(bool val) {
+    ENABLE_VORTEX_SCAN_PUSHDOWN.store(val);
+    LOG_INFO("set default enable vortex scan pushdown: {}",
+             ENABLE_VORTEX_SCAN_PUSHDOWN.load());
 }
 
 void

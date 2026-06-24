@@ -30,14 +30,51 @@ namespace milvus {
 namespace exec {
 
 bool
-PhyCompareFilterExpr::IsStringExpr() {
-    return expr_->left_data_type_ == DataType::VARCHAR ||
-           expr_->right_data_type_ == DataType::VARCHAR;
+PhyCompareFilterExpr::CanUseBothDataCompare(OffsetVector* input) const {
+    const auto is_supported_compare_op = [&]() {
+        switch (expr_->op_type_) {
+            case OpType::Equal:
+            case OpType::NotEqual:
+            case OpType::GreaterEqual:
+            case OpType::GreaterThan:
+            case OpType::LessEqual:
+            case OpType::LessThan:
+            case OpType::PrefixMatch:
+                return true;
+            default:
+                return false;
+        }
+    }();
+    if (!is_supported_compare_op) {
+        return false;
+    }
+
+    const auto is_left_string = expr_->left_data_type_ == DataType::VARCHAR ||
+                                expr_->left_data_type_ == DataType::TEXT;
+    const auto is_right_string = expr_->right_data_type_ == DataType::VARCHAR ||
+                                 expr_->right_data_type_ == DataType::TEXT;
+    if (is_left_string || is_right_string) {
+        if (!is_left_string || !is_right_string) {
+            return false;
+        }
+        if (input != nullptr &&
+            !IsDenseOffsetInputForScan(input, batch_size_)) {
+            return false;
+        }
+        return segment_chunk_reader_.segment_->GetChunkedColumn(left_field_) !=
+                   nullptr &&
+               segment_chunk_reader_.segment_->GetChunkedColumn(right_field_) !=
+                   nullptr;
+    }
+
+    return expr_->op_type_ != OpType::PrefixMatch;
 }
 
 bool
 PhyCompareFilterExpr::CanUseBothDataFastPath() {
-    if (is_left_indexed_ || is_right_indexed_ || IsStringExpr()) {
+    if (is_left_indexed_ || is_right_indexed_ ||
+        IsStringDataType(expr_->left_data_type_) ||
+        IsStringDataType(expr_->right_data_type_)) {
         return false;
     }
 
@@ -264,9 +301,11 @@ PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    // For segment both fields has no index, can use SIMD to speed up.
-    // Avoiding too much call stack that blocks SIMD.
-    if (CanUseBothDataFastPath()) {
+    // For unindexed field-field compare, use the direct data path. Fixed-width
+    // values use DataScan when available and fall back to chunk SIMD. String
+    // values require Scan-provided string_view batches.
+    if (!is_left_indexed_ && !is_right_indexed_ &&
+        CanUseBothDataCompare(input)) {
         result = ExecCompareExprDispatcherForBothDataSegment(context);
         return;
     }
@@ -325,6 +364,9 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
             return ExecCompareLeftType<float>(context);
         case DataType::DOUBLE:
             return ExecCompareLeftType<double>(context);
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return ExecCompareLeftType<std::string_view>(context);
         default:
             ThrowInfo(
                 DataTypeInvalid,
@@ -336,27 +378,58 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
 template <typename T>
 VectorPtr
 PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
-    switch (expr_->right_data_type_) {
+    const auto right_type = expr_->right_data_type_;
+    switch (right_type) {
         case DataType::BOOL:
-            return ExecCompareRightType<T, bool>(context);
+            if constexpr (!IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, bool>(context);
+            }
+            break;
         case DataType::INT8:
-            return ExecCompareRightType<T, int8_t>(context);
+            if constexpr (!IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, int8_t>(context);
+            }
+            break;
         case DataType::INT16:
-            return ExecCompareRightType<T, int16_t>(context);
+            if constexpr (!IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, int16_t>(context);
+            }
+            break;
         case DataType::INT32:
-            return ExecCompareRightType<T, int32_t>(context);
+            if constexpr (!IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, int32_t>(context);
+            }
+            break;
         case DataType::INT64:
-            return ExecCompareRightType<T, int64_t>(context);
+            if constexpr (!IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, int64_t>(context);
+            }
+            break;
         case DataType::FLOAT:
-            return ExecCompareRightType<T, float>(context);
+            if constexpr (!IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, float>(context);
+            }
+            break;
         case DataType::DOUBLE:
-            return ExecCompareRightType<T, double>(context);
+            if constexpr (!IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, double>(context);
+            }
+            break;
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            if constexpr (IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, std::string_view>(context);
+            }
+            break;
         default:
             ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("unsupported right datatype:{} of compare expr",
-                            expr_->right_data_type_));
+                            right_type));
     }
+    ThrowInfo(DataTypeInvalid,
+              fmt::format("unsupported right datatype:{} of compare expr",
+                          right_type));
 }
 
 template <typename T, typename U>
@@ -458,6 +531,18 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                      offsets);
                 break;
             }
+            case proto::plan::PrefixMatch: {
+                CompareElementFunc<T, U, proto::plan::PrefixMatch, filter_type>
+                    func;
+                func(left,
+                     right,
+                     size,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
             default:
                 ThrowInfo(OpTypeInvalid,
                           fmt::format("unsupported operator type for "
@@ -471,8 +556,15 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
         processed_size = ProcessBothDataByOffsets<T, U>(
             execute_sub_batch, input, res, valid_res);
     } else {
-        processed_size = ProcessBothDataChunks<T, U>(
-            execute_sub_batch, input, res, valid_res);
+        processed_size = TryProcessBothDataByScan<T, U>(
+            execute_sub_batch, real_batch_size, res, valid_res);
+        if (processed_size < 0) {
+            if constexpr (!IsCompareStringViewType<T> &&
+                          !IsCompareStringViewType<U>) {
+                processed_size = ProcessBothDataChunks<T, U>(
+                    execute_sub_batch, input, res, valid_res);
+            }
+        }
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "

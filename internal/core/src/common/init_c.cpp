@@ -109,6 +109,11 @@ SetDefaultEnableParquetStatsSkipIndex(bool val) {
 }
 
 void
+SetDefaultVortexScanPushdownEnable(bool val) {
+    milvus::SetDefaultVortexScanPushdownEnable(val);
+}
+
+void
 SetEnableLatestDeleteSnapshotOptimization(bool val) {
     milvus::SetEnableLatestDeleteSnapshotOptimization(val);
 }

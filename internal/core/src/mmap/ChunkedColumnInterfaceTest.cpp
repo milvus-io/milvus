@@ -51,7 +51,26 @@ struct ColumnSpec {
     std::vector<int64_t> rows_per_chunk;
     std::vector<std::vector<bool>> valid_patterns;  // empty => all valid
     bool nullable{true};
+    DataType data_type{DataType::VECTOR_INT8};
 };
+
+FieldMeta
+MakeTestFieldMeta(const ColumnSpec& spec) {
+    if (IsVectorDataType(spec.data_type)) {
+        return FieldMeta(FieldName("t"),
+                         FieldId(kTestFieldId),
+                         spec.data_type,
+                         kElementSize,
+                         std::nullopt,
+                         spec.nullable,
+                         std::nullopt);
+    }
+    return FieldMeta(FieldName("t"),
+                     FieldId(kTestFieldId),
+                     spec.data_type,
+                     spec.nullable,
+                     std::nullopt);
+}
 
 struct VectorArrayColumnFixture {
     std::shared_ptr<ChunkedColumnInterface> column;
@@ -218,13 +237,7 @@ struct ChunkedColumnFactory {
         auto fetched = std::make_shared<std::set<cachinglayer::cid_t>>();
         auto translator = std::make_unique<CountingChunkTranslator>(
             spec.rows_per_chunk, "cc_iface", std::move(chunks), fetched);
-        FieldMeta fm(FieldName("t"),
-                     FieldId(kTestFieldId),
-                     DataType::VECTOR_INT8,
-                     kElementSize,
-                     std::nullopt,
-                     spec.nullable,
-                     std::nullopt);
+        auto fm = MakeTestFieldMeta(spec);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::move(translator), nullptr);
         auto column = std::make_shared<ChunkedColumn>(std::move(slot), fm);
@@ -267,13 +280,7 @@ struct ProxyChunkColumnFactory {
             fetched);
         auto group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
-        FieldMeta fm(FieldName("t"),
-                     FieldId(kTestFieldId),
-                     DataType::VECTOR_INT8,
-                     kElementSize,
-                     std::nullopt,
-                     spec.nullable,
-                     std::nullopt);
+        auto fm = MakeTestFieldMeta(spec);
         auto column = std::make_shared<ProxyChunkColumn>(
             group, FieldId(kTestFieldId), fm);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
@@ -502,6 +509,37 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
         fx.column->BulkVectorArrayAt(
             nullptr, [](VectorFieldProto&&, size_t) {}, null_offset, 1),
         std::exception);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, RawFormatScanDoesNotSupportUnaryRowIds) {
+    ColumnSpec spec{{5}, {{true, false, true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(3);
+    auto options = ChunkedColumnInterface::ScanOptions::ForUnary(
+        0, 5, proto::plan::OpType::Equal, value);
+
+    EXPECT_FALSE(fx.column->SupportsScanPushdown(options));
+    EXPECT_EQ(fx.column->Scan(nullptr, options), nullptr);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           RawFormatScanDoesNotSupportBinaryRangeRowIds) {
+    ColumnSpec spec{{5}, {{true, false, true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    proto::plan::GenericValue lower;
+    proto::plan::GenericValue upper;
+    lower.set_int64_val(1);
+    upper.set_int64_val(10);
+    auto options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(
+        0, 5, lower, true, upper, true);
+
+    EXPECT_FALSE(fx.column->SupportsScanPushdown(options));
+    EXPECT_EQ(fx.column->Scan(nullptr, options), nullptr);
 }
 
 }  // namespace milvus
