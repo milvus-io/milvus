@@ -2571,16 +2571,16 @@ ChunkedSegmentSealedImpl::search_batch_pks(
             ts_chunk_pins[c].get()->RawData());
         return data[offset - ts_chunk_offsets[c]];
     };
+    auto timestamp_hit = [include_same_ts](Timestamp insert_ts,
+                                           Timestamp timestamp) {
+        return include_same_ts ? insert_ts <= timestamp : insert_ts < timestamp;
+    };
 
     // Virtual PK offset maps can resolve pk -> offset directly by bit-extract.
     // Avoid the sorted-PK column scan below: external segments synthesize PKs
     // with VirtualPKChunkedColumn, which intentionally does not support
     // GetAllChunks().
     if (insert_record_.pk2offset_is_zero_storage()) {
-        auto timestamp_hit =
-            include_same_ts
-                ? [](Timestamp lhs, Timestamp rhs) { return lhs <= rhs; }
-                : [](Timestamp lhs, Timestamp rhs) { return lhs < rhs; };
         for (size_t i = 0; i < pks.size(); i++) {
             auto timestamp = get_timestamp(i);
             for (auto offset : insert_record_.pk2offset_->find(pks[i])) {
@@ -2597,10 +2597,6 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     if (!is_sorted_by_pk_) {
         auto pk_index = PinPkIndex(nullptr);
         auto* pk_cell = pk_index.get();
-        auto timestamp_hit =
-            include_same_ts
-                ? [](Timestamp lhs, Timestamp rhs) { return lhs <= rhs; }
-                : [](Timestamp lhs, Timestamp rhs) { return lhs < rhs; };
         for (size_t i = 0; i < pks.size(); i++) {
             auto timestamp = get_timestamp(i);
             auto offsets = pk_cell != nullptr
@@ -2622,13 +2618,6 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
     auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
-
-    auto timestamp_hit = include_same_ts
-                             ? [](const Timestamp& ts1,
-                                  const Timestamp& ts2) { return ts1 <= ts2; }
-                             : [](const Timestamp& ts1, const Timestamp& ts2) {
-                                   return ts1 < ts2;
-                               };
 
     dispatch_pk_type(
         schema_->get_fields().at(pk_field_id).get_data_type(),
