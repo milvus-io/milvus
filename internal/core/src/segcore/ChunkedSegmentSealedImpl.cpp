@@ -37,6 +37,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 #include <nlohmann/json.hpp>
@@ -274,6 +275,24 @@ cancel_and_clear_json_indices(std::vector<JsonIndexT>& json_indices) {
         cancel_warmup(index.index);
     }
     json_indices.clear();
+}
+
+[[noreturn]] static void
+throw_unsupported_pk_type(DataType data_type) {
+    ThrowInfo(DataTypeInvalid, fmt::format("unsupported type {}", data_type));
+}
+
+template <typename Func>
+decltype(auto)
+dispatch_pk_type(DataType data_type, Func&& func) {
+    switch (data_type) {
+        case DataType::INT64:
+            return std::forward<Func>(func).template operator()<int64_t>();
+        case DataType::VARCHAR:
+            return std::forward<Func>(func).template operator()<std::string>();
+        default:
+            throw_unsupported_pk_type(data_type);
+    }
 }
 
 PinWrapper<const storagev2translator::TimestampIndexCell*>
@@ -2095,22 +2114,12 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     auto pk_column = get_column(pk_field_id);
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
-    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-        case DataType::INT64:
-            search_pks_with_two_pointers_impl<int64_t>(
+    dispatch_pk_type(
+        schema_->get_fields().at(pk_field_id).get_data_type(),
+        [&]<sealed_segment_detail::PrimaryKey PK>() {
+            search_pks_with_two_pointers_impl<PK>(
                 bitset_view, pks, pk_column);
-            break;
-        case DataType::VARCHAR:
-            search_pks_with_two_pointers_impl<std::string>(
-                bitset_view, pks, pk_column);
-            break;
-        default:
-            ThrowInfo(
-                DataTypeInvalid,
-                fmt::format(
-                    "unsupported type {}",
-                    schema_->get_fields().at(pk_field_id).get_data_type()));
-    }
+        });
 }
 
 void
@@ -2322,22 +2331,12 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
     auto pk_column = get_column(pk_field_id);
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
-    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-        case DataType::INT64:
-            search_sorted_pk_range_impl<int64_t>(
-                op, std::get<int64_t>(pk), pk_column, bitset);
-            break;
-        case DataType::VARCHAR:
-            search_sorted_pk_range_impl<std::string>(
-                op, std::get<std::string>(pk), pk_column, bitset);
-            break;
-        default:
-            ThrowInfo(
-                DataTypeInvalid,
-                fmt::format(
-                    "unsupported type {}",
-                    schema_->get_fields().at(pk_field_id).get_data_type()));
-    }
+    dispatch_pk_type(
+        schema_->get_fields().at(pk_field_id).get_data_type(),
+        [&]<sealed_segment_detail::PrimaryKey PK>() {
+            search_sorted_pk_range_impl<PK>(
+                op, std::get<PK>(pk), pk_column, bitset);
+        });
 }
 
 void
@@ -2387,32 +2386,16 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
     auto pk_column = get_column(pk_field_id);
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
-    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-        case DataType::INT64:
-            search_sorted_pk_binary_range_impl<int64_t>(
-                std::get<int64_t>(lower_pk),
-                lower_inclusive,
-                std::get<int64_t>(upper_pk),
-                upper_inclusive,
-                pk_column,
-                bitset);
-            break;
-        case DataType::VARCHAR:
-            search_sorted_pk_binary_range_impl<std::string>(
-                std::get<std::string>(lower_pk),
-                lower_inclusive,
-                std::get<std::string>(upper_pk),
-                upper_inclusive,
-                pk_column,
-                bitset);
-            break;
-        default:
-            ThrowInfo(
-                DataTypeInvalid,
-                fmt::format(
-                    "unsupported type {}",
-                    schema_->get_fields().at(pk_field_id).get_data_type()));
-    }
+    dispatch_pk_type(
+        schema_->get_fields().at(pk_field_id).get_data_type(),
+        [&]<sealed_segment_detail::PrimaryKey PK>() {
+            search_sorted_pk_binary_range_impl<PK>(std::get<PK>(lower_pk),
+                                                   lower_inclusive,
+                                                   std::get<PK>(upper_pk),
+                                                   upper_inclusive,
+                                                   pk_column,
+                                                   bitset);
+        });
 }
 
 std::pair<std::vector<OffsetMap::OffsetType>, bool>
@@ -2486,22 +2469,12 @@ ChunkedSegmentSealedImpl::find_first_n_element(
         AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
         auto pk_column = get_column(pk_field_id);
         AssertInfo(pk_column != nullptr, "primary key column not loaded");
-        switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-            case DataType::INT64:
-                cursor_doc_offset = find_sorted_pk_doc_offset<int64_t>(
-                    std::get<int64_t>(cursor->last_pk), pk_column);
-                break;
-            case DataType::VARCHAR:
-                cursor_doc_offset = find_sorted_pk_doc_offset<std::string>(
-                    std::get<std::string>(cursor->last_pk), pk_column);
-                break;
-            default:
-                ThrowInfo(
-                    DataTypeInvalid,
-                    fmt::format(
-                        "unsupported type {}",
-                        schema_->get_fields().at(pk_field_id).get_data_type()));
-        }
+        cursor_doc_offset = dispatch_pk_type(
+            schema_->get_fields().at(pk_field_id).get_data_type(),
+            [&]<sealed_segment_detail::PrimaryKey PK>() {
+                return find_sorted_pk_doc_offset<PK>(
+                    std::get<PK>(cursor->last_pk), pk_column);
+            });
     }
 
     int64_t hit_num = 0;
