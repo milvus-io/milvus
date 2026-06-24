@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hamba/avro/v2"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus/internal/snapshotio"
