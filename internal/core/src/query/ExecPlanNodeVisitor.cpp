@@ -145,7 +145,7 @@ ExecPlanNodeVisitor::ExecuteTaskWithoutResult(
         if (auto vec = std::dynamic_pointer_cast<ColumnVector>(childrens[0])) {
             processed_num += vec->size();
         } else {
-            PanicInfo(UnexpectedError, "expr return type not matched");
+            ThrowInfo(UnexpectedError, "expr return type not matched");
         }
     }
     span.GetSpan()->SetAttribute("total_rows", processed_num);
