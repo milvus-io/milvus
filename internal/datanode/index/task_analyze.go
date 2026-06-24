@@ -144,15 +144,15 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 					fieldBinLogs = append(fieldBinLogs, binlog)
 				} else {
 					isFieldBinlogOfFieldID := IsFieldBinlogOfFieldID(binlog, requestFieldID)
-					log.Info("look for binlog", zap.Int64("requestFieldID", requestFieldID), zap.Int64("binlog.FieldID", binlog.FieldID))
+					mlog.Info(context.TODO(), "look for binlog", mlog.Int64("requestFieldID", requestFieldID), mlog.Int64("binlog.FieldID", binlog.FieldID))
 					if isFieldBinlogOfFieldID {
-						log.Info("binlog found ", zap.String("theBinLog", binlog.String()))
+						mlog.Info(context.TODO(), "binlog found ", mlog.String("theBinLog", binlog.String()))
 						fieldBinLogs = append(fieldBinLogs, binlog)
 					}
 				}
 			}
 			if len(fieldBinLogs) > 0 {
-				log.Info("Found binlog via child ids")
+				mlog.Info(context.TODO(), "Found binlog via child ids")
 				segmentInsertFilesMapV2[segID] = util.GetSegmentInsertFiles(
 					fieldBinLogs,
 					at.req.GetStorageConfig(),
@@ -160,7 +160,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 					at.req.GetPartitionID(),
 					segID)
 			} else {
-				log.Info("Use single binlog")
+				mlog.Info(context.TODO(), "Use single binlog")
 				segmentInsertFilesMapV2[segID] = util.GetSegmentInsertFiles(
 					at.req.GetInsertFiles()[segID].BinLogs,
 					at.req.GetStorageConfig(),
@@ -201,17 +201,17 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		TrainBufferSize:    at.req.GetTrainBufferSize(),
 		AssignBufferSize:   at.req.GetAssignBufferSize(),
 	}
-	log.Info("analyze buffer sizes", zap.Int64("train_buffer_size", analyzeInfo.TrainBufferSize),
-		zap.Int64("assign_buffer_size", analyzeInfo.AssignBufferSize))
-	log.Info("starting analyze", zap.Any("analyzeInfo", analyzeInfo))
+	mlog.Info(context.TODO(), "analyze buffer sizes", mlog.Int64("train_buffer_size", analyzeInfo.TrainBufferSize),
+		mlog.Int64("assign_buffer_size", analyzeInfo.AssignBufferSize))
+	mlog.Info(context.TODO(), "starting analyze", mlog.Any("analyzeInfo", analyzeInfo))
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
 	if err != nil {
-		log.Error(ctx, "failed to analyze data", mlog.Err(err))
+		mlog.Error(ctx, "failed to analyze data", mlog.Err(err))
 		return err
 	}
 
 	analyzeLatency := at.tr.RecordSpan()
-	log.Info(ctx, "analyze done", mlog.Int64("analyze cost", analyzeLatency.Milliseconds()))
+	mlog.Info(ctx, "analyze done", mlog.Int64("analyze cost", analyzeLatency.Milliseconds()))
 	return nil
 }
 

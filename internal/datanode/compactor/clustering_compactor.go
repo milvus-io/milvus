@@ -433,7 +433,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 	}
 	centroidGroups, groupIndex := centroidsInfo.splitCentroids(t.maxCentroidsPerSegment, t.minimumSegments, t.useAdditionalCentroidIfImbalance)
 	if len(centroidGroups) == 0 {
-		log.Info("Could not group segments, using 1 centroid per segment")
+		mlog.Info(context.TODO(), "Could not group segments, using 1 centroid per segment")
 		centroidGroups, groupIndex = splitCentroids(centroidsOffset, bufferNum)
 	}
 	for id, group := range centroidGroups {
@@ -468,8 +468,8 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		for (maxSegmentSize / partSize) > 10000 {
 			partSize += 1024 * 1024
 		}
-		log.Info("Created a writer", zap.Int64("bufferSize", t.bufferSize), zap.Int64("partSize", partSize), zap.Int64("segmentNumRows", segmentNumRows),
-			zap.Int64("maxSegmentSize", maxSegmentSize), zap.Int64("segmentSizeLimit", segmentSizeLimit))
+		mlog.Info(context.TODO(), "Created a writer", mlog.Int64("bufferSize", t.bufferSize), mlog.Int64("partSize", partSize), mlog.Int64("segmentNumRows", segmentNumRows),
+			mlog.Int64("maxSegmentSize", maxSegmentSize), mlog.Int64("segmentSizeLimit", segmentSizeLimit))
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			segmentSizeLimit, t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
@@ -616,11 +616,10 @@ func (t *clusteringCompactionTask) mappingSegment(
 ) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mappingSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
-	log := log.With(zap.Int64("planID", t.GetPlanID()),
-		zap.Int64("collectionID", t.GetCollection()),
-		zap.Int64("partitionID", t.partitionID),
-		zap.Int64("segmentID", segment.GetSegmentID()))
-	mlog.Info(context.TODO(), "mapping segment start")
+	mlog.Info(context.TODO(), "mapping segment start", mlog.Int64("planID", t.GetPlanID()),
+		mlog.Int64("collectionID", t.GetCollection()),
+		mlog.Int64("partitionID", t.partitionID),
+		mlog.Int64("segmentID", segment.GetSegmentID()))
 	processStart := time.Now()
 	var remained int64 = 0
 
@@ -704,7 +703,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 		vs := make([]*storage.Value, r.Len())
 		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
-			mlog.Warn(context.TODO(), "compact wrong, failed to deserialize data", mlog.Error(err))
+			mlog.Warn(context.TODO(), "compact wrong, failed to deserialize data", mlog.Err(err))
 			return err
 		}
 
@@ -747,7 +746,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			t.writtenRowNum.Inc()
 			rowNum := t.writtenRowNum.Load()
 			if rowNum%1000000 == 0 {
-				log.Info("Mapping progress", zap.Int64("numRows", rowNum))
+				mlog.Info(context.TODO(), "Mapping progress", mlog.Int64("numRows", rowNum))
 			}
 
 			remained++
