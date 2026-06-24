@@ -1859,7 +1859,7 @@ Set this parameter as the path that you have permission to write.`,
 		Key:          "grpc.log.server.methods",
 		DefaultValue: "",
 		Version:      "3.0.0",
-		Doc:          "Comma-separated full-method allowlist logged on server side (e.g. /proxy.Proxy/Search). Prefix an entry with re: to use Go regexp matching. Empty disables logging. Hot-reloadable.",
+		Doc:          "Comma-separated full-method allowlist logged on server side (e.g. /milvus.proto.milvus.MilvusService/Search). Prefix an entry with re: to use Go regexp matching. Empty disables logging. Hot-reloadable.",
 		Export:       false,
 	}
 	l.GrpcServerLogMethods.Init(base.mgr)
