@@ -18,14 +18,13 @@ package allocator
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -249,10 +248,9 @@ func (ta *CachedAllocator) finishSyncRequest() {
 func (ta *CachedAllocator) failRemainRequest() {
 	var err error
 	if ta.SyncErr != nil {
-		err = fmt.Errorf("%s failRemainRequest err:%w", ta.Role, ta.SyncErr)
+		err = merr.Wrapf(ta.SyncErr, "%s failRemainRequest", ta.Role)
 	} else {
-		errMsg := fmt.Sprintf("%s failRemainRequest unexpected error", ta.Role)
-		err = errors.New(errMsg)
+		err = merr.WrapErrServiceInternalMsg("%s failRemainRequest unexpected error", ta.Role)
 	}
 	if len(ta.ToDoReqs) > 0 {
 		log.Warn("Allocator has some reqs to fail",
@@ -290,8 +288,7 @@ func (ta *CachedAllocator) Close() {
 	ta.CancelFunc()
 	ta.wg.Wait()
 	ta.TChan.Close()
-	errMsg := fmt.Sprintf("%s is closing", ta.Role)
-	ta.revokeRequest(errors.New(errMsg))
+	ta.revokeRequest(merr.WrapErrServiceInternalMsg("%s is closing", ta.Role))
 }
 
 // CleanCache is used to force synchronize with global allocator.

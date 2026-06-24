@@ -639,7 +639,12 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithMetaCache(wb.metaCache).
 		WithSchema(schema).
 		WithSyncPack(pack).
-		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
+		// The flush write path must keep retrying: aborting surfaces the error
+		// to SyncTask.HandleError, whose default callback panics the datanode.
+		// retry.Do short-circuits InputError-typed errors unless an explicit
+		// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
+		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+			retry.RetryErr(func(error) bool { return true }))
 	return task, nil
 }
 

@@ -19,9 +19,8 @@
 package function
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type FunctionRunner interface {
@@ -41,6 +40,6 @@ func NewFunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Functio
 	case schemapb.FunctionType_TextEmbedding:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
+		return nil, merr.WrapErrParameterInvalidMsg("unknown functionRunner type %s", schema.GetType().String())
 	}
 }

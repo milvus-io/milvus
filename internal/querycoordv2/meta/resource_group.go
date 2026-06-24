@@ -1,13 +1,13 @@
 package meta
 
 import (
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -281,7 +281,7 @@ func (rg *ResourceGroup) Snapshot() *ResourceGroup {
 func (rg *ResourceGroup) MeetRequirement() error {
 	// if len(node) is less than requests, new node need to be assigned.
 	if rg.MissingNumOfNodes() > 0 {
-		return errors.Errorf(
+		return merr.WrapErrServiceInternalMsg(
 			"has %d nodes, less than request %d",
 			rg.NodeNum(),
 			rg.cfg.Requests.NodeNum,
@@ -289,7 +289,7 @@ func (rg *ResourceGroup) MeetRequirement() error {
 	}
 	// if len(node) is greater than limits, node need to be removed.
 	if rg.RedundantNumOfNodes() > 0 {
-		return errors.Errorf(
+		return merr.WrapErrServiceInternalMsg(
 			"has %d nodes, greater than limit %d",
 			rg.NodeNum(),
 			rg.cfg.Requests.NodeNum,

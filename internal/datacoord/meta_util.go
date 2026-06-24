@@ -22,7 +22,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
-var ErrIgnoredSegmentMetaOperation = errors.New("ignored segment meta operation")
+// errIgnoredSegmentMetaOperation is an internal control-flow signal: the
+// requested segment meta update is stale (segment already flushed, or an
+// outdated time tick) and is skipped as a benign no-op. It never crosses the
+// package boundary — UpdateSegmentsInfo swallows it and returns nil.
+//
+// It MUST stay a plain errors.New identity sentinel. A merr-typed value would
+// make errors.Is match by error code (milvusError.Is compares codes only), so
+// any error sharing the code — e.g. a real etcd write failure wrapped as
+// ServiceInternal — would be misread as ignorable and acknowledged as success.
+var errIgnoredSegmentMetaOperation = errors.New("ignored segment meta operation")
 
 // reviseVChannelInfo will revise the datapb.VchannelInfo for upgrade compatibility from 2.0.2
 func reviseVChannelInfo(vChannel *datapb.VchannelInfo) {

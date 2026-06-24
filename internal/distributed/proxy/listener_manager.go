@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -85,7 +86,7 @@ func newHTTPListner(ctx context.Context, l *listenerManager) error {
 	}
 	tlsMode := paramtable.Get().ProxyGrpcServerCfg.TLSMode.GetAsInt()
 	if tlsMode != 0 && tlsMode != 1 && tlsMode != 2 {
-		return errors.New("tls mode must be 0: no authentication, 1: one way authentication or 2: two way authentication")
+		return merr.WrapErrParameterInvalidMsg("tls mode must be 0: no authentication, 1: one way authentication or 2: two way authentication")
 	}
 
 	httpPortString := HTTPParams.Port.GetValue()
@@ -93,7 +94,7 @@ func newHTTPListner(ctx context.Context, l *listenerManager) error {
 	externGrpcPort := l.externalGrpcListener.Port()
 	if len(httpPortString) == 0 || externGrpcPort == httpPort {
 		if tlsMode != 0 {
-			err := errors.New("proxy server(http) and external grpc server share the same port, tls mode must be 0")
+			err := merr.WrapErrParameterInvalidMsg("proxy server(http) and external grpc server share the same port, tls mode must be 0")
 			log.Warn("can not initialize http listener", zap.Error(err))
 			return err
 		}
@@ -138,7 +139,7 @@ func newHTTPListner(ctx context.Context, l *listenerManager) error {
 		}
 		if !certPool.AppendCertsFromPEM(rootBuf) {
 			log.Warn("fail to append ca to cert")
-			return errors.New("fail to append ca to cert")
+			return merr.WrapErrParameterInvalidMsg("fail to append ca to cert")
 		}
 		tlsConf = &tls.Config{
 			ClientAuth:   tls.RequireAndVerifyClientCert,

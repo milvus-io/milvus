@@ -2,7 +2,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"time"
 
@@ -98,7 +97,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 
 	configMaxSize := getExpectedSegmentSize(policy.meta, collectionID, collection.Schema)
 	if targetSizeBytes < configMaxSize {
-		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("targetSize %d MB should be greater than or equal to configMaxSize %d MB", targetSize, configMaxSize/(1024*1024)))
+		return nil, 0, merr.WrapErrParameterInvalidMsg("targetSize %d MB should be greater than or equal to configMaxSize %d MB", targetSize, configMaxSize/(1024*1024))
 	}
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(isNormalManualCompactionCandidate))
@@ -176,7 +175,7 @@ var _ CollectionTopologyQuerier = (*metricsNodeMemoryQuerier)(nil)
 func (q *metricsNodeMemoryQuerier) GetCollectionTopology(ctx context.Context, collectionID int64) (*CollectionTopology, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 	if q.mixCoord == nil {
-		return nil, fmt.Errorf("mixCoord not available for topology query")
+		return nil, merr.WrapErrServiceInternalMsg("mixCoord not available for topology query")
 	}
 
 	// 1. Get replica information

@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/samber/lo"
@@ -53,7 +52,7 @@ func ReduceSearchOnQueryNode(ctx context.Context, results []*internalpb.SearchRe
 
 func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, info *reduce.ResultInfo) (*internalpb.SearchResults, error) {
 	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
-		return result != nil && result.GetSlicedBlob() != nil
+		return result != nil && (result.GetSlicedBlob() != nil || result.GetResultData() != nil)
 	})
 
 	if len(results) == 1 {
@@ -168,6 +167,7 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 			NumQueries:     result.GetNumQueries(),
 			TopK:           result.GetTopK(),
 			SlicedBlob:     result.GetSlicedBlob(),
+			ResultData:     result.GetResultData(),
 			SlicedNumCount: result.GetSlicedNumCount(),
 			SlicedOffset:   result.GetSlicedOffset(),
 			ReqIndex:       int64(index),
@@ -233,16 +233,17 @@ func DecodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 
 	results := make([]*schemapb.SearchResultData, 0)
 	for _, partialSearchResult := range searchResults {
-		if partialSearchResult.SlicedBlob == nil {
-			continue
+		if partialSearchResult.ResultData != nil {
+			// Pre-decoded by delegator — use directly, no unmarshal needed.
+			results = append(results, partialSearchResult.ResultData)
+		} else if partialSearchResult.SlicedBlob != nil {
+			var partialResultData schemapb.SearchResultData
+			err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, &partialResultData)
 		}
-
-		var partialResultData schemapb.SearchResultData
-		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, &partialResultData)
 	}
 	return results, nil
 }
@@ -258,13 +259,18 @@ func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.Sear
 		NumQueries: nq,
 		TopK:       topk,
 		MetricType: metricType,
-		SlicedBlob: nil,
 	}
-	slicedBlob, err := proto.Marshal(searchResultData)
-	if err != nil {
-		return nil, err
-	}
-	if searchResultData != nil && searchResultData.Ids != nil && typeutil.GetSizeOfIDs(searchResultData.Ids) != 0 {
+
+	hasData := searchResultData != nil && searchResultData.Ids != nil && typeutil.GetSizeOfIDs(searchResultData.Ids) != 0
+	if hasData && paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetAsBool() {
+		// New path: embed struct directly, skip marshal
+		searchResults.ResultData = searchResultData
+	} else if hasData {
+		// Legacy path: marshal to SlicedBlob
+		slicedBlob, err := proto.Marshal(searchResultData)
+		if err != nil {
+			return nil, err
+		}
 		searchResults.SlicedBlob = slicedBlob
 	}
 	return
@@ -359,7 +365,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrServiceInternalMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 
 		cursors[sel]++
@@ -532,7 +538,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, merr.WrapErrServiceInternalMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
 		}
 	} else {
@@ -593,7 +599,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			segmentResOffset[selection.batchIndex]++
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, merr.WrapErrServiceInternalMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
 		}
 	}
@@ -612,7 +618,7 @@ func mergeInternalRetrieveResultsAndFillIfEmpty(
 	}
 
 	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewInternalResult(mergedResult), param.outputFieldsId, param.schema); err != nil {
-		return nil, fmt.Errorf("failed to fill internal retrieve results: %s", err.Error())
+		return nil, merr.WrapErrServiceInternalMsg("failed to fill internal retrieve results: %s", err.Error())
 	}
 
 	return mergedResult, nil
@@ -632,7 +638,7 @@ func mergeSegcoreRetrieveResultsAndFillIfEmpty(
 	}
 
 	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewSegcoreResults(mergedResult), param.outputFieldsId, param.schema); err != nil {
-		return nil, fmt.Errorf("failed to fill segcore retrieve results: %s", err.Error())
+		return nil, merr.WrapErrServiceInternalMsg("failed to fill segcore retrieve results: %s", err.Error())
 	}
 
 	return mergedResult, nil

@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"io"
 	"strconv"
 
@@ -53,7 +52,7 @@ func newPackedRecordReader(
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 	field2Col := make(map[FieldID]int)
 	allFields := typeutil.GetAllFieldSchemas(schema)
@@ -94,7 +93,12 @@ func (ir *IterativeRecordReader) Close() error {
 	return nil
 }
 
-func (ir *IterativeRecordReader) Next() (Record, error) {
+func (ir *IterativeRecordReader) Next() (rec Record, err error) {
+	defer func() {
+		if x := recover(); x != nil {
+			rec, err = nil, merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
+		}
+	}()
 	if ir.cur == nil {
 		r, err := ir.iterate()
 		if err != nil {
@@ -102,7 +106,7 @@ func (ir *IterativeRecordReader) Next() (Record, error) {
 		}
 		ir.cur = r
 	}
-	rec, err := ir.cur.Next()
+	rec, err = ir.cur.Next()
 	if err == io.EOF {
 		closeErr := ir.cur.Close()
 		if closeErr != nil {
@@ -162,7 +166,7 @@ func NewManifestReaderFromBinlogs(fieldBinlogs []*datapb.FieldBinlog,
 ) (*ManifestReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, false)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
@@ -204,7 +208,7 @@ func NewManifestReader(manifest string,
 ) (*ManifestReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
@@ -291,7 +295,7 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 				nRows = int(r.NumRows())
 			}
 			if nRows != int(r.NumRows()) {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("number of rows mismatch for field %d", f.FieldID))
+				return nil, merr.WrapErrServiceInternalMsg("number of rows mismatch for field %d", f.FieldID)
 			}
 		} else {
 			nonExistingFields = append(nonExistingFields, f)

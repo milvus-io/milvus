@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -66,7 +65,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 	}
 
 	if field.DataType == schemapb.DataType_Text {
-		return nil, fmt.Errorf("filter on text field (%s) is not supported yet", field.Name)
+		return nil, merr.WrapErrParameterInvalidMsg("filter on text field (%s) is not supported yet", field.Name)
 	}
 
 	return &ExprWithType{
@@ -214,7 +213,7 @@ func (v *ParserVisitor) parseStringLiteralOrTemplate(ctx parser.IExprContext, ar
 
 func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 {
-		return errors.New("can not comparisons array fields directly")
+		return merr.WrapErrQueryPlanMsg("can not comparisons array fields directly")
 	}
 	return nil
 }
@@ -235,7 +234,7 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
 	if leftValueExpr != nil && rightValueExpr != nil {
 		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
-			return fmt.Errorf("placeholder was not supported between two constants with operator: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("placeholder was not supported between two constants with operator: %s", ctx.GetOp().GetText())
 		}
 		leftValue, rightValue := leftValueExpr.GetValue(), rightValueExpr.GetValue()
 		switch ctx.GetOp().GetTokenType() {
@@ -252,7 +251,7 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 			}
 			return n
 		default:
-			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 		}
 	}
 
@@ -260,7 +259,7 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	reverse := leftValueExpr != nil
 
 	if leftExpr == nil || rightExpr == nil {
-		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
 	if err = checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
@@ -276,7 +275,7 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 		dataType = leftExpr.dataType
 	} else {
 		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
-			return fmt.Errorf("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
+			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 
 		dataType, err = calcDataType(leftExpr, rightExpr, reverse)
@@ -318,7 +317,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
 	if leftValueExpr != nil && rightValueExpr != nil {
 		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
-			return fmt.Errorf("placeholder was not supported between two constants with operator: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("placeholder was not supported between two constants with operator: %s", ctx.GetOp().GetText())
 		}
 		leftValue, rightValue := getGenericValue(left), getGenericValue(right)
 		switch ctx.GetOp().GetTokenType() {
@@ -341,7 +340,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 			}
 			return n
 		default:
-			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 		}
 	}
 
@@ -349,7 +348,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 	reverse := leftValueExpr != nil
 
 	if leftExpr == nil || rightExpr == nil {
-		return fmt.Errorf("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
 	}
 
 	if err := checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
@@ -366,7 +365,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 		dataType = leftExpr.dataType
 	} else {
 		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
-			return fmt.Errorf("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
+			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 
 		if err = checkValidModArith(arithExprMap[ctx.GetOp().GetTokenType()], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
@@ -412,7 +411,7 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
 	if leftValueExpr != nil && rightValueExpr != nil {
 		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
-			return fmt.Errorf("placeholder was not supported between two constants with operator: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("placeholder was not supported between two constants with operator: %s", ctx.GetOp().GetText())
 		}
 		leftValue, rightValue := leftValueExpr.GetValue(), rightValueExpr.GetValue()
 		var ret *ExprWithType
@@ -422,10 +421,10 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		case parser.PlanParserNE:
 			ret = NotEqual(leftValue, rightValue)
 		default:
-			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 		}
 		if ret == nil {
-			return fmt.Errorf("comparison operations cannot be applied to two incompatible operands: %s", ctx.GetText())
+			return merr.WrapErrParameterInvalidMsg("comparison operations cannot be applied to two incompatible operands: %s", ctx.GetText())
 		}
 		return ret
 	}
@@ -457,7 +456,7 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
 	if leftValueExpr != nil && rightValueExpr != nil {
 		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
-			return fmt.Errorf("placeholder was not supported between two constants with operator: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("placeholder was not supported between two constants with operator: %s", ctx.GetOp().GetText())
 		}
 		leftValue, rightValue := getGenericValue(left), getGenericValue(right)
 		var ret *ExprWithType
@@ -471,10 +470,10 @@ func (v *ParserVisitor) VisitRelational(ctx *parser.RelationalContext) interface
 		case parser.PlanParserGE:
 			ret = GreaterEqual(leftValue, rightValue)
 		default:
-			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 		}
 		if ret == nil {
-			return fmt.Errorf("comparison operations cannot be applied to two incompatible operands: %s", ctx.GetText())
+			return merr.WrapErrParameterInvalidMsg("comparison operations cannot be applied to two incompatible operands: %s", ctx.GetText())
 		}
 		return ret
 	}
@@ -507,12 +506,12 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 
 	leftExpr := getExpr(left)
 	if leftExpr == nil {
-		return errors.New("the left operand of like is invalid")
+		return merr.WrapErrQueryPlanMsg("the left operand of like is invalid")
 	}
 
 	column := toColumnInfo(leftExpr)
 	if column == nil {
-		return errors.New("like operation on complicated expr is unsupported")
+		return merr.WrapErrQueryPlanMsg("like operation on complicated expr is unsupported")
 	}
 	if err := checkDirectComparisonBinaryField(column); err != nil {
 		return err
@@ -520,7 +519,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 
 	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
 		(!typeutil.IsArrayType(leftExpr.dataType) || !typeutil.IsStringType(column.GetElementType())) {
-		return errors.New("like operation on non-string or no-json field is unsupported")
+		return merr.WrapErrQueryPlanMsg("like operation on non-string or no-json field is unsupported")
 	}
 
 	pattern, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(1), "like pattern")
@@ -562,13 +561,13 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	}
 	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
-		return errors.New("text match operation on non-string is unsupported")
+		return merr.WrapErrQueryPlanMsg("text match operation on non-string is unsupported")
 	}
 	if column.dataType == schemapb.DataType_Text {
-		return errors.New("text match operation on text field is not supported yet")
+		return merr.WrapErrQueryPlanMsg("text match operation on text field is not supported yet")
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
-		return fmt.Errorf("field \"%s\" does not enable match", identifier)
+		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
 	}
 
 	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(), "text_match query")
@@ -616,7 +615,7 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 	integerConstant := ctx.IntegerConstant().GetText()
 	value, err := strconv.ParseInt(integerConstant, 0, 64)
 	if err != nil {
-		return fmt.Errorf("invalid minimum_should_match value: %s", integerConstant)
+		return merr.WrapErrParameterInvalidMsg("invalid minimum_should_match value: %s", integerConstant)
 	}
 
 	return &ExprWithType{
@@ -640,10 +639,10 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 
 	columnInfo := toColumnInfo(column)
 	if !typeutil.IsStringType(column.dataType) {
-		return errors.New("phrase match operation on non-string is unsupported")
+		return merr.WrapErrQueryPlanMsg("phrase match operation on non-string is unsupported")
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
-		return fmt.Errorf("field \"%s\" does not enable match", identifier)
+		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
 	}
 
 	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(0), "phrase_match query")
@@ -659,15 +658,15 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		slopExpr := ctx.Expr(1).Accept(v)
 		slopValueExpr := getValueExpr(slopExpr)
 		if slopValueExpr == nil || slopValueExpr.GetValue() == nil {
-			return fmt.Errorf("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.Expr(1).GetText())
+			return merr.WrapErrParameterInvalidMsg("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.Expr(1).GetText())
 		}
 		slop = slopValueExpr.GetValue().GetInt64Val()
 		if slop < 0 {
-			return fmt.Errorf("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.Expr(1).GetText())
+			return merr.WrapErrParameterInvalidMsg("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.Expr(1).GetText())
 		}
 
 		if slop > math.MaxUint32 {
-			return fmt.Errorf("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.Expr(1).GetText())
+			return merr.WrapErrParameterInvalidMsg("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.Expr(1).GetText())
 		}
 	}
 
@@ -696,21 +695,21 @@ const EPSILON = 1e-10
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
 	if ctx.Expr() == nil {
-		return fmt.Errorf("sample factor missed: %s", ctx.GetText())
+		return merr.WrapErrParameterInvalidMsg("sample factor missed: %s", ctx.GetText())
 	}
 
 	floatExpr := ctx.Expr().Accept(v)
 	if err := getError(floatExpr); err != nil {
-		return fmt.Errorf("cannot parse expression: %s, error: %s", ctx.Expr().GetText(), err)
+		return merr.WrapErrParameterInvalidMsg("cannot parse expression: %s, error: %s", ctx.Expr().GetText(), err)
 	}
 	floatValueExpr := getValueExpr(floatExpr)
 	if floatValueExpr == nil || floatValueExpr.GetValue() == nil {
-		return fmt.Errorf("\"float factor\" should be a const float expression: \"float factor\" passed: %s", ctx.Expr().GetText())
+		return merr.WrapErrParameterInvalidMsg("\"float factor\" should be a const float expression: \"float factor\" passed: %s", ctx.Expr().GetText())
 	}
 
 	sampleFactor := floatValueExpr.GetValue().GetFloatVal()
 	if sampleFactor <= 0+EPSILON || sampleFactor >= 1-EPSILON {
-		return fmt.Errorf("the sample factor should be between 0 and 1 and not too close to 0 or 1(the difference should be larger than 1e-10), but got %s", ctx.Expr().GetText())
+		return merr.WrapErrParameterInvalidMsg("the sample factor should be between 0 and 1 and not too close to 0 or 1(the difference should be larger than 1e-10), but got %s", ctx.Expr().GetText())
 	}
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -733,13 +732,13 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	}
 
 	if childValue := getGenericValue(child); childValue != nil {
-		return fmt.Errorf("'term' can only be used on non-const expression, but got: %s", ctx.Expr(0).GetText())
+		return merr.WrapErrParameterInvalidMsg("'term' can only be used on non-const expression, but got: %s", ctx.Expr(0).GetText())
 	}
 
 	childExpr := getExpr(child)
 	columnInfo := toColumnInfo(childExpr)
 	if columnInfo == nil {
-		return fmt.Errorf("'term' can only be used on single field, but got: %s", ctx.Expr(0).GetText())
+		return merr.WrapErrParameterInvalidMsg("'term' can only be used on single field, but got: %s", ctx.Expr(0).GetText())
 	}
 
 	dataType := columnInfo.GetDataType()
@@ -763,18 +762,18 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	} else {
 		elementValue := valueExpr.GetValue()
 		if elementValue == nil {
-			return fmt.Errorf("value '%s' in list cannot be a non-const expression", ctx.Expr(1).GetText())
+			return merr.WrapErrParameterInvalidMsg("value '%s' in list cannot be a non-const expression", ctx.Expr(1).GetText())
 		}
 
 		if !IsArray(elementValue) {
-			return fmt.Errorf("the right-hand side of 'in' must be a list, but got: %s", ctx.Expr(1).GetText())
+			return merr.WrapErrParameterInvalidMsg("the right-hand side of 'in' must be a list, but got: %s", ctx.Expr(1).GetText())
 		}
 		array := elementValue.GetArrayVal().GetArray()
 		values = make([]*planpb.GenericValue, len(array))
 		for i, e := range array {
 			castedValue, err := castValue(dataType, e)
 			if err != nil {
-				return fmt.Errorf("value '%s' in list cannot be casted to %s", e.String(), dataType.String())
+				return merr.WrapErrParameterInvalidMsg("value '%s' in list cannot be casted to %s", e.String(), dataType.String())
 			}
 			values[i] = castedValue
 		}
@@ -873,7 +872,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 		return err
 	}
 	if columnInfo == nil {
-		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
 	if err := checkDirectComparisonBinaryField(columnInfo); err != nil {
 		return err
@@ -890,10 +889,10 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 
 	lowerValueExpr, upperValueExpr := getValueExpr(lower), getValueExpr(upper)
 	if lowerValueExpr == nil {
-		return fmt.Errorf("lowerbound cannot be a non-const expression: %s", ctx.Expr(0).GetText())
+		return merr.WrapErrParameterInvalidMsg("lowerbound cannot be a non-const expression: %s", ctx.Expr(0).GetText())
 	}
 	if upperValueExpr == nil {
-		return fmt.Errorf("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
 	}
 
 	fieldDataType := columnInfo.GetDataType()
@@ -918,11 +917,11 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
 		if !lowerInclusive || !upperInclusive {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return errors.New("invalid range: lowerbound is greater than upperbound")
+				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 			}
 		} else {
 			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return errors.New("invalid range: lowerbound is greater than upperbound")
+				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 			}
 		}
 	}
@@ -954,7 +953,7 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 		return err
 	}
 	if columnInfo == nil {
-		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
 
 	if err := checkDirectComparisonBinaryField(columnInfo); err != nil {
@@ -972,10 +971,10 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 
 	lowerValueExpr, upperValueExpr := getValueExpr(lower), getValueExpr(upper)
 	if lowerValueExpr == nil {
-		return fmt.Errorf("lowerbound cannot be a non-const expression: %s", ctx.Expr(0).GetText())
+		return merr.WrapErrParameterInvalidMsg("lowerbound cannot be a non-const expression: %s", ctx.Expr(0).GetText())
 	}
 	if upperValueExpr == nil {
-		return fmt.Errorf("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("upperbound cannot be a non-const expression: %s", ctx.Expr(1).GetText())
 	}
 
 	fieldDataType := columnInfo.GetDataType()
@@ -1000,11 +999,11 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
 		if !lowerInclusive || !upperInclusive {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return errors.New("invalid range: lowerbound is greater than upperbound")
+				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 			}
 		} else {
 			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return errors.New("invalid range: lowerbound is greater than upperbound")
+				return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
 			}
 		}
 	}
@@ -1067,16 +1066,16 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 			}
 			return n
 		default:
-			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
+			return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 		}
 	}
 
 	childExpr := getExpr(child)
 	if childExpr == nil {
-		return errors.New("failed to parse unary expressions")
+		return merr.WrapErrQueryPlanMsg("failed to parse unary expressions")
 	}
 	if isRandomSampleExpr(childExpr) {
-		return errors.New("random sample expression cannot be used in unary expression")
+		return merr.WrapErrQueryPlanMsg("random sample expression cannot be used in unary expression")
 	}
 
 	if err := checkDirectComparisonBinaryField(toColumnInfo(childExpr)); err != nil {
@@ -1087,7 +1086,7 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 		return childExpr
 	case parser.PlanParserNOT:
 		if !canBeExecuted(childExpr) {
-			return fmt.Errorf("%s op can only be applied on boolean expression", unaryLogicalNameMap[parser.PlanParserNOT])
+			return merr.WrapErrParameterInvalidMsg("%s op can only be applied on boolean expression", unaryLogicalNameMap[parser.PlanParserNOT])
 		}
 		return &ExprWithType{
 			expr: &planpb.Expr{
@@ -1102,7 +1101,7 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 			dataType: schemapb.DataType_Bool,
 		}
 	default:
-		return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
+		return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 	}
 }
 
@@ -1127,7 +1126,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	}
 
 	if leftValue != nil || rightValue != nil {
-		return errors.New("'or' can only be used between boolean expressions")
+		return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 	}
 
 	var leftExpr *ExprWithType
@@ -1135,11 +1134,11 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
 	if isRandomSampleExpr(leftExpr) || isRandomSampleExpr(rightExpr) {
-		return errors.New("random sample expression cannot be used in logical and expression")
+		return merr.WrapErrQueryPlanMsg("random sample expression cannot be used in logical and expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
-		return errors.New("'or' can only be used between boolean expressions")
+		return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_BinaryExpr{
@@ -1179,7 +1178,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	}
 
 	if leftValue != nil || rightValue != nil {
-		return errors.New("'and' can only be used between boolean expressions")
+		return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 	}
 
 	var leftExpr *ExprWithType
@@ -1187,11 +1186,11 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
 	if isRandomSampleExpr(leftExpr) {
-		return errors.New("random sample expression can only be the last expression in the logical and expression")
+		return merr.WrapErrQueryPlanMsg("random sample expression can only be the last expression in the logical and expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
-		return errors.New("'and' can only be used between boolean expressions")
+		return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
 	}
 
 	var expr *planpb.Expr
@@ -1224,12 +1223,12 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 
 // VisitBitXor not supported.
 func (v *ParserVisitor) VisitBitXor(ctx *parser.BitXorContext) interface{} {
-	return fmt.Errorf("BitXor is not supported: %s", ctx.GetText())
+	return merr.WrapErrParameterInvalidMsg("BitXor is not supported: %s", ctx.GetText())
 }
 
 // VisitBitAnd not supported.
 func (v *ParserVisitor) VisitBitAnd(ctx *parser.BitAndContext) interface{} {
-	return fmt.Errorf("BitAnd is not supported: %s", ctx.GetText())
+	return merr.WrapErrParameterInvalidMsg("BitAnd is not supported: %s", ctx.GetText())
 }
 
 // VisitPower parses power expression.
@@ -1249,17 +1248,17 @@ func (v *ParserVisitor) VisitPower(ctx *parser.PowerContext) interface{} {
 		return Power(leftValue, rightValue)
 	}
 
-	return fmt.Errorf("power can only apply on constants: %s", ctx.GetText())
+	return merr.WrapErrParameterInvalidMsg("power can only apply on constants: %s", ctx.GetText())
 }
 
 // VisitShift unsupported.
 func (v *ParserVisitor) VisitShift(ctx *parser.ShiftContext) interface{} {
-	return fmt.Errorf("shift is not supported: %s", ctx.GetText())
+	return merr.WrapErrParameterInvalidMsg("shift is not supported: %s", ctx.GetText())
 }
 
 // VisitBitOr unsupported.
 func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
-	return fmt.Errorf("BitOr is not supported: %s", ctx.GetText())
+	return merr.WrapErrParameterInvalidMsg("BitOr is not supported: %s", ctx.GetText())
 }
 
 // getColumnInfoFromJSONIdentifier parse JSON field name and JSON nested path.
@@ -1302,7 +1301,7 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 	if field.GetDataType() != schemapb.DataType_JSON &&
 		field.GetDataType() != schemapb.DataType_Array {
 		errMsg := fmt.Sprintf("%s data type not supported accessed with []", field.GetDataType())
-		return nil, fmt.Errorf("%s", errMsg)
+		return nil, merr.WrapErrParameterInvalidMsg("%s", errMsg)
 	}
 	if fieldName != field.Name {
 		nestedPath = append(nestedPath, fieldName)
@@ -1312,19 +1311,19 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 	for i := 0; i < len(ss); i++ {
 		path := strings.Trim(ss[i], "[]")
 		if path == "" {
-			return nil, fmt.Errorf("invalid identifier: %s", identifier)
+			return nil, merr.WrapErrParameterInvalidMsg("invalid identifier: %s", identifier)
 		}
 		if (strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"")) ||
 			(strings.HasPrefix(path, "'") && strings.HasSuffix(path, "'")) {
 			path = path[1 : len(path)-1]
 			if path == "" {
-				return nil, fmt.Errorf("invalid identifier: %s", identifier)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid identifier: %s", identifier)
 			}
 			if typeutil.IsArrayType(field.DataType) {
-				return nil, errors.New("can only access array field with integer index")
+				return nil, merr.WrapErrQueryPlanMsg("can only access array field with integer index")
 			}
 		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
-			return nil, fmt.Errorf("json key must be enclosed in double quotes or single quotes: \"%s\"", path)
+			return nil, merr.WrapErrParameterInvalidMsg("json key must be enclosed in double quotes or single quotes: \"%s\"", path)
 		}
 		nestedPath = append(nestedPath, path)
 	}
@@ -1369,17 +1368,17 @@ func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
 	}
 	columnInfo := toColumnInfo(child.(*ExprWithType))
 	if columnInfo == nil {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"exists operations are only supported on single fields now, got: %s", ctx.Expr().GetText())
 	}
 
 	if columnInfo.GetDataType() != schemapb.DataType_JSON {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"exists operations are only supportted on json field, got:%s", columnInfo.GetDataType())
 	}
 
 	if len(columnInfo.GetNestedPath()) == 0 {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"exists operations are only supportted on json key")
 	}
 
@@ -1411,7 +1410,7 @@ func (v *ParserVisitor) VisitArray(ctx *parser.ArrayContext) interface{} {
 		}
 		elementValue := getGenericValue(element)
 		if elementValue == nil {
-			return fmt.Errorf("array element type must be generic value, but got: %s", allExpr[i].GetText())
+			return merr.WrapErrParameterInvalidMsg("array element type must be generic value, but got: %s", allExpr[i].GetText())
 		}
 		array[i] = elementValue
 
@@ -1475,7 +1474,7 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 	}
 
 	if typeutil.IsVectorType(column.DataType) {
-		return fmt.Errorf("IsNull/IsNotNull operations are not supported on vector fields")
+		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 
 	if len(column.NestedPath) != 0 {
@@ -1522,7 +1521,7 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 	}
 
 	if typeutil.IsVectorType(column.DataType) {
-		return fmt.Errorf("IsNull/IsNotNull operations are not supported on vector fields")
+		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 
 	if len(column.NestedPath) != 0 {
@@ -1577,7 +1576,7 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 	columnInfo := toColumnInfo(field.(*ExprWithType))
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"contains operation are only supported on json or array fields now, got: %s", ctx.Expr(0).GetText())
 	}
 
@@ -1587,7 +1586,7 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 	}
 	elementExpr := getValueExpr(element)
 	if elementExpr == nil {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"contains operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
 	}
 	var elements []*planpb.GenericValue
@@ -1628,7 +1627,7 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 	columnInfo := toColumnInfo(field.(*ExprWithType))
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"contains_all operation are only supported on json or array fields now, got: %s", ctx.Expr(0).GetText())
 	}
 
@@ -1639,7 +1638,7 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 
 	elementExpr := getValueExpr(element)
 	if elementExpr == nil {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"contains_all operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
 	}
 
@@ -1681,7 +1680,7 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 	columnInfo := toColumnInfo(field.(*ExprWithType))
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"contains_any operation are only supported on json or array fields now, got: %s", ctx.Expr(0).GetText())
 	}
 
@@ -1692,7 +1691,7 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 	valueExpr := getValueExpr(element)
 
 	if valueExpr == nil {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"contains_any operation are only supported explicitly specified element, got: %s", ctx.Expr(1).GetText())
 	}
 
@@ -1732,7 +1731,7 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"array_length operation are only supported on json or array fields now, got: %s", ctx.GetText())
 	}
 
@@ -1779,7 +1778,7 @@ func (v *ParserVisitor) buildGISFunctionFilterExpr(identifier string, wktExpr pa
 	}
 	columnInfo := toColumnInfo(childExpr)
 	if columnInfo == nil || !typeutil.IsGeometryType(columnInfo.GetDataType()) {
-		return fmt.Errorf("%s operation are only supported on geometry fields now, got: %s", opName, text)
+		return merr.WrapErrParameterInvalidMsg("%s operation are only supported on geometry fields now, got: %s", opName, text)
 	}
 
 	wktString, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(wktExpr, "WKT string")
@@ -1845,7 +1844,7 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	columnInfo := toColumnInfo(childExpr)
 	if columnInfo == nil ||
 		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
-		return fmt.Errorf(
+		return merr.WrapErrParameterInvalidMsg(
 			"ST_DWITHIN operation are only supported on geometry fields now, got: %s", ctx.GetText())
 	}
 
@@ -1868,13 +1867,13 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	// Extract distance value - must be a constant expression
 	distanceValueExpr := getValueExpr(distanceExpr)
 	if distanceValueExpr == nil {
-		return fmt.Errorf("distance parameter must be a constant numeric value, got: %s", ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("distance parameter must be a constant numeric value, got: %s", ctx.Expr(1).GetText())
 	}
 
 	var distance float64
 	genericValue := distanceValueExpr.GetValue()
 	if genericValue == nil {
-		return fmt.Errorf("invalid distance value: %s", ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("invalid distance value: %s", ctx.Expr(1).GetText())
 	}
 
 	// Handle both integer and floating point values using type assertion
@@ -1884,11 +1883,11 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	case *planpb.GenericValue_FloatVal:
 		distance = val.FloatVal
 	default:
-		return fmt.Errorf("distance parameter must be a numeric value (int or float), got: %s", ctx.Expr(1).GetText())
+		return merr.WrapErrParameterInvalidMsg("distance parameter must be a numeric value (int or float), got: %s", ctx.Expr(1).GetText())
 	}
 
 	if distance < 0 {
-		return fmt.Errorf("distance parameter must be non-negative, got: %f", distance)
+		return merr.WrapErrParameterInvalidMsg("distance parameter must be non-negative, got: %f", distance)
 	}
 
 	// Create the GIS function expression using the bounding box
@@ -1923,17 +1922,17 @@ func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCo
 	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	identifier := ctx.Identifier().Accept(v)
 	if err != nil {
-		return fmt.Errorf("can not translate identifier: %s", identifier)
+		return merr.WrapErrParameterInvalidMsg("can not translate identifier: %s", identifier)
 	}
 	if colExpr.dataType != schemapb.DataType_Timestamptz {
-		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
+		return merr.WrapErrParameterInvalidMsg("field '%s' is not a timestamptz datatype", identifier)
 	}
 
 	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
 	rawCompareStr := ctx.GetCompare_string().GetText()
 	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
 	if err != nil {
-		return fmt.Errorf("can not convert compare string: %s", rawCompareStr)
+		return merr.WrapErrParameterInvalidMsg("can not convert compare string: %s", rawCompareStr)
 	}
 	timestamptzInt64, err := timestamptz.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
 	if err != nil {
@@ -1959,7 +1958,7 @@ func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCo
 	rawIntervalStr := ctx.GetInterval_string().GetText()
 	unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
 	if err != nil {
-		return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+		return merr.WrapErrParameterInvalidMsg("can not convert interval string: %s", rawIntervalStr)
 	}
 	interval, err := parseISODuration(unquotedIntervalStr)
 	if err != nil {
@@ -1997,22 +1996,22 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	identifier := ctx.Identifier().GetText()
 	if err != nil {
-		return fmt.Errorf("can not translate identifier: %s", identifier)
+		return merr.WrapErrParameterInvalidMsg("can not translate identifier: %s", identifier)
 	}
 	if colExpr.dataType != schemapb.DataType_Timestamptz {
-		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
+		return merr.WrapErrParameterInvalidMsg("field '%s' is not a timestamptz datatype", identifier)
 	}
 
 	rawCompareStr := ctx.GetCompare_string().GetText()
 	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
 	if err != nil {
-		return fmt.Errorf("can not convert compare string: %s", rawCompareStr)
+		return merr.WrapErrParameterInvalidMsg("can not convert compare string: %s", rawCompareStr)
 	}
 
 	originalCompareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
 	compareOp := reverseCompareOp(originalCompareOp)
 	if compareOp == planpb.OpType_Invalid && originalCompareOp != planpb.OpType_Invalid {
-		return fmt.Errorf("unsupported comparison operator for reverse Timestamptz: %s", ctx.GetOp2().GetText())
+		return merr.WrapErrParameterInvalidMsg("unsupported comparison operator for reverse Timestamptz: %s", ctx.GetOp2().GetText())
 	}
 
 	timestamptzInt64, err := timestamptz.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
@@ -2041,7 +2040,7 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 	rawIntervalStr := ctx.GetInterval_string().GetText()
 	unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
 	if err != nil {
-		return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+		return merr.WrapErrParameterInvalidMsg("can not convert interval string: %s", rawIntervalStr)
 	}
 	interval, err := parseISODuration(unquotedIntervalStr)
 	if err != nil {
@@ -2089,14 +2088,14 @@ func validateAndExtractMinShouldMatch(minShouldMatchExpr interface{}) ([]*planpb
 	if minShouldMatchValue, ok := minShouldMatchExpr.(*ExprWithType); ok {
 		valueExpr := getValueExpr(minShouldMatchValue)
 		if valueExpr == nil || valueExpr.GetValue() == nil {
-			return nil, fmt.Errorf("minimum_should_match should be a const integer expression")
+			return nil, merr.WrapErrParameterInvalidMsg("minimum_should_match should be a const integer expression")
 		}
 		minShouldMatch := valueExpr.GetValue().GetInt64Val()
 		if minShouldMatch < 1 {
-			return nil, fmt.Errorf("minimum_should_match should be >= 1, got %d", minShouldMatch)
+			return nil, merr.WrapErrParameterInvalidMsg("minimum_should_match should be >= 1, got %d", minShouldMatch)
 		}
 		if minShouldMatch > 1000 {
-			return nil, fmt.Errorf("minimum_should_match should be <= 1000, got %d", minShouldMatch)
+			return nil, merr.WrapErrParameterInvalidMsg("minimum_should_match should be <= 1000, got %d", minShouldMatch)
 		}
 		return []*planpb.GenericValue{NewInt(minShouldMatch)}, nil
 	}

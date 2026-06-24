@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -28,6 +29,11 @@ const (
 	versionChecker260 = "<2.6.0-dev"
 	versionChecker265 = "<2.6.6-dev"
 )
+
+// errVersionWatchDone is an INTERNAL break-signal sentinel used by
+// blockUntilRoleGreaterThanVersion to exit the resolver watch callback.
+// Never crosses any gRPC boundary.
+var errVersionWatchDone = errors.New("done")
 
 // RecoverBalancer recover the balancer working.
 func RecoverBalancer(
@@ -42,7 +48,7 @@ func RecoverBalancer(
 	// Recover the channel view from catalog.
 	manager, err := channel.RecoverChannelManager(ctx, provider.GetInitialChannels()...)
 	if err != nil {
-		return nil, errors.Wrap(err, "fail to recover channel manager")
+		return nil, merr.Wrap(err, "fail to recover channel manager")
 	}
 	manager.SetLogger(resource.Resource().Logger().With(log.FieldComponent("channel-manager")))
 	ctx, cancel := context.WithCancelCause(context.Background())
@@ -465,7 +471,6 @@ func (b *balancerImpl) blockUntilExpectedInitialStreamingNodeNumReached(ctx cont
 
 // blockUntilRoleGreaterThanVersion block until the role is greater than 2.6.0 at background.
 func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, role string, versionChecker string) error {
-	doneErr := errors.New("done")
 	logger := b.Logger().With(zap.String("role", role))
 	logger.Info("start to wait that the nodes is greater than version", zap.String("version", versionChecker))
 	// Check if there's any proxy or data node with version < 2.6.0.
@@ -477,12 +482,12 @@ func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, rol
 	r := rb.Resolver()
 	err := r.Watch(ctx, func(vs resolver.VersionedState) error {
 		if len(vs.Sessions()) == 0 {
-			return doneErr
+			return errVersionWatchDone
 		}
 		logger.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
 		return nil
 	})
-	if err != nil && !errors.Is(err, doneErr) {
+	if err != nil && !errors.Is(err, errVersionWatchDone) {
 		logger.Info("fail to wait that the nodes is greater than version", zap.String("version", versionChecker), zap.Error(err))
 		return err
 	}
@@ -537,14 +542,14 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	currentLayout := generateCurrentLayout(pchannelView, nodeStatus, accessMode)
 	expectedLayout, err := b.policy.Balance(currentLayout)
 	if err != nil {
-		return false, errors.Wrap(err, "fail to balance")
+		return false, merr.Wrap(err, "fail to balance")
 	}
 
 	b.Logger().Info("balance policy generate result success, try to assign...", zap.Stringer("expectedLayout", expectedLayout))
 	// bookkeeping the meta assignment started.
 	modifiedChannels, err := b.channelMetaManager.AssignPChannels(ctx, expectedLayout.ChannelAssignment)
 	if err != nil {
-		return false, errors.Wrap(err, "fail to assign pchannels")
+		return false, merr.Wrap(err, "fail to assign pchannels")
 	}
 
 	if len(modifiedChannels) == 0 {
@@ -558,7 +563,7 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName string) (map[int64]*types.StreamingNodeStatus, error) {
 	nodeStatus, err := resource.Resource().StreamingNodeManagerClient().CollectAllStatus(ctx, rgName)
 	if err != nil {
-		return nil, errors.Wrap(err, "fail to collect all status")
+		return nil, merr.Wrap(err, "fail to collect all status")
 	}
 
 	// mark the frozen node as frozen in the node status.

@@ -298,6 +298,12 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn("search/query channel failed",
 				zap.Int64("nodeID", targetNode.NodeID),
 				zap.Error(err))
+			// An input error is the request's own fault: re-dispatching it to
+			// other replicas cannot make it succeed. Abort immediately without
+			// retrying or excluding the (healthy) serving node.
+			if merr.GetErrorType(err) == merr.InputError {
+				return false, err
+			}
 			excludeNodes.Insert(targetNode.NodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
 			return true, lastErr
@@ -390,7 +396,10 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 			PreferredNodeID: preferredNodeID(workload, channel),
 		})
 	}
-	return fmt.Errorf("no acitvate sheard leader exist for collection: %s", workload.CollectionName)
+	// An empty leader list here is a transient routing-cache state (leaders are
+	// re-discovered on retry); reporting "collection not loaded" would tell the
+	// user to re-load a collection that is loaded.
+	return merr.WrapErrServiceUnavailable(fmt.Sprintf("no available shard leader for collection %d", workload.CollectionID))
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {

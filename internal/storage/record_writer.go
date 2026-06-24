@@ -171,15 +171,13 @@ func NewPackedRecordWriter(
 	})
 	writer, err := packed.NewPackedWriter(truePaths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
 	pathsMap := make(map[typeutil.UniqueID]string)
 	if len(paths) != len(columnGroups) {
-		return nil, merr.WrapErrParameterInvalid(len(paths), len(columnGroups),
-			"paths length is not equal to column groups length for packed record writer")
+		return nil, merr.WrapErrStorageMsg("paths length is not equal to column groups length for packed record writer: paths=%d columnGroups=%d", len(paths), len(columnGroups))
 	}
 	for i, columnGroup := range columnGroups {
 		columnGroupUncompressed[columnGroup.GroupID] = 0
@@ -318,8 +316,7 @@ func NewPackedRecordManifestWriter(
 
 	writer, err := packed.NewFFIPackedWriter(basePath, baseVersion, arrowSchema, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
@@ -354,8 +351,7 @@ func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemap
 ) (*SerializeWriterImpl[*Value], error) {
 	packedRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, nil, nil)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.Wrap(err, "can not new packed record writer")
 	}
 	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
 		return ValueSerializer(v, schema)

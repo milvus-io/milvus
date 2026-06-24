@@ -196,7 +196,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         else:
             error = {
                 ct.err_code: 65535,
-                ct.err_msg: f"cannot parse expression: {term_expr}, error: field invalid_field not exist",
+                ct.err_msg: "field invalid_field not exist",
             }
             self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -269,16 +269,15 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. test wrong term expressions
         expr_1 = f"{ct.default_int64_field_name} inn [1, 2]"
         error_1 = {
-            ct.err_code: 65535,
-            ct.err_msg: "cannot parse expression: int64 inn [1, 2], error: invalid expression: int64 inn [1, 2]",
+            ct.err_code: 1100,
+            ct.err_msg: "invalid expression: int64 inn [1, 2]",
         }
         self.query(client, collection_name, filter=expr_1, check_task=CheckTasks.err_res, check_items=error_1)
 
         expr_2 = f"{ct.default_int64_field_name} in not [1, 2]"
         error_2 = {
-            ct.err_code: 65535,
-            ct.err_msg: "cannot parse expression: int64 in not [1, 2], "
-            "error: not can only apply on boolean: invalid parameter",
+            ct.err_code: 1100,
+            ct.err_msg: "not can only apply on boolean",
         }
         self.query(client, collection_name, filter=expr_2, check_task=CheckTasks.err_res, check_items=error_2)
         # 5. clean up
@@ -302,15 +301,14 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         for expr in exprs:
             error = {
                 ct.err_code: 1100,
-                ct.err_msg: f"cannot parse expression: {expr}, error: the right-hand side of 'in' must be a list",
+                ct.err_msg: "the right-hand side of 'in' must be a list",
             }
             self.query(client, collection_name, filter=expr, check_task=CheckTasks.err_res, check_items=error)
 
         expr = f"{ct.default_int64_field_name} in (mn)"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"cannot parse expression: {expr}, "
-            "error: value '(mn)' in list cannot be a non-const expression",
+            ct.err_msg: "value '(mn)' in list cannot be a non-const expression",
         }
         self.query(client, collection_name, filter=expr, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -363,8 +361,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         term_expr = f"{default_primary_key_field_name} in {values}"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
-            "error: value 'float_val:1' in list cannot be casted to Int64",
+            ct.err_msg: "value 'float_val:1' in list cannot be casted to Int64",
         }
         self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -372,8 +369,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         term_expr = f"{default_primary_key_field_name} in {values}"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
-            "error: value 'float_val:2' in list cannot be casted to Int64",
+            ct.err_msg: "value 'float_val:2' in list cannot be casted to Int64",
         }
         self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
         # 4. clean up
@@ -882,7 +878,10 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with invalid limit type
-        error = {ct.err_code: 1, ct.err_msg: f"limit [{limit}] is invalid"}
+        # milvus strips leading/trailing whitespace before echoing the value
+        # in the error message, so " " becomes "" in `limit [<displayed>] is invalid`
+        displayed = limit.strip() if isinstance(limit, str) else limit
+        error = {ct.err_code: 1, ct.err_msg: f"limit [{displayed}] is invalid"}
         self.query(
             client,
             collection_name,
@@ -966,7 +965,10 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with invalid offset type
-        error = {ct.err_code: 1, ct.err_msg: f"offset [{offset}] is invalid"}
+        # milvus strips leading/trailing whitespace before echoing the value
+        # in the error message, so " " becomes "" in `offset [<displayed>] is invalid`
+        displayed = offset.strip() if isinstance(offset, str) else offset
+        error = {ct.err_code: 1, ct.err_msg: f"offset [{displayed}] is invalid"}
         self.query(
             client,
             collection_name,
@@ -1792,8 +1794,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         not_support_expr = f"{ct.default_bool_field_name} in [0]"
         error = {
             ct.err_code: 65535,
-            ct.err_msg: "cannot parse expression: bool in [0], error: "
-            "value 'int64_val:0' in list cannot be casted to Bool",
+            ct.err_msg: "value 'int64_val:0' in list cannot be casted to Bool",
         }
         self.query(
             client,
@@ -5070,8 +5071,8 @@ class TestQueryString(TestMilvusClientV2Base):
         # 4. query with invalid prefix expression
         expression = 'float like "0%"'
         error = {
-            ct.err_code: 65535,
-            ct.err_msg: f"cannot parse expression: {expression}, error: like operation on non-string or no-json field is unsupported",
+            ct.err_code: 1100,
+            ct.err_msg: "like operation on non-string or no-json field is unsupported",
         }
         self.query(client, collection_name, filter=expression, check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
@@ -5159,8 +5160,7 @@ class TestQueryString(TestMilvusClientV2Base):
         expression = "varchar == int64"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
-            f"error: comparisons between VarChar and Int64 are not supported: invalid parameter",
+            ct.err_msg: "comparisons between VarChar and Int64 are not supported",
         }
         self.query(client, collection_name, filter=expression, check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up

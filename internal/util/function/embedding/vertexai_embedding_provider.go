@@ -25,13 +25,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -49,7 +48,7 @@ func getVertexAIJsonKey() ([]byte, error) {
 
 	jsonKeyPath := os.Getenv(models.VertexServiceAccountJSONEnv)
 	if jsonKeyPath == "" {
-		return nil, errors.New("VetexAI credentials file path is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("VetexAI credentials file path is empty")
 	}
 	if vtxKey.filePath == jsonKeyPath {
 		return vtxKey.jsonKey, nil
@@ -57,7 +56,7 @@ func getVertexAIJsonKey() ([]byte, error) {
 
 	jsonKey, err := os.ReadFile(jsonKeyPath) //nolint:gosec // path is from trusted environment variable
 	if err != nil {
-		return nil, fmt.Errorf("Vertexai: read credentials file failed, %v", err) //nolint:staticcheck // starts with proper noun
+		return nil, merr.Wrap(err, "Vertexai: read credentials file failed") //nolint:staticcheck // starts with proper noun
 	}
 
 	vtxKey.jsonKey = jsonKey
@@ -287,11 +286,11 @@ func (provider *VertexAIEmbeddingProvider) callVertexAIEmbedding(texts []string,
 			return nil, err
 		}
 		if end-i != len(resp.Predictions) {
-			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Predictions))
+			return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Predictions))
 		}
 		for _, item := range resp.Predictions {
 			if len(item.Embeddings.Values) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embeddings.Values))
 			}
 			data = append(data, item.Embeddings.Values)
@@ -311,7 +310,7 @@ func (provider *VertexAIEmbeddingProvider) callGeminiEmbedding(texts []string, m
 			return nil, err
 		}
 		if len(resp.Embedding.Values) != int(provider.fieldDim) {
-			return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+			return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 				provider.fieldDim, len(resp.Embedding.Values))
 		}
 		data = append(data, resp.Embedding.Values)

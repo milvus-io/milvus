@@ -2674,7 +2674,7 @@ class TestSearchVectorNegative(TestBase):
             "offset": 0,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 65535
+        assert rsp['code'] == 1100
 
     @pytest.mark.parametrize("offset", [-1, 100_001])
     def test_search_vector_with_invalid_offset(self, offset):
@@ -2699,7 +2699,7 @@ class TestSearchVectorNegative(TestBase):
             "offset": offset,
         }
         rsp = self.vector_client.vector_search(payload)
-        assert rsp['code'] == 65535
+        assert rsp['code'] == 1100
 
     def test_search_vector_with_invalid_collection_name(self):
         """
@@ -3279,7 +3279,7 @@ class TestHybridSearchVector(TestBase):
         rsp = self.vector_client.vector_hybrid_search(payload)
         # When offset + limit exceeds max allowed
         if large_offset + limit > MAX_SUM_OFFSET_AND_LIMIT:
-            assert rsp['code'] == 65535
+            assert rsp['code'] == 1100
             assert "exceeds" in rsp['message'] or "invalid" in rsp['message'].lower()
         # When offset is larger than the available results
         elif large_offset >= nb:

@@ -38,6 +38,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+// ErrTracerConfigInvalid stands for an invalid tracer exporter configuration.
+var ErrTracerConfigInvalid = errors.New("invalid tracer config")
+
 func Init() error {
 	params := paramtable.Get()
 
@@ -142,14 +145,14 @@ func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, 
 			}
 			exp, err = otlptracehttp.New(context.Background(), opts...)
 		default:
-			return nil, errors.Newf("otlp method not supported: %s", params.TraceCfg.OtlpMethod.GetValue())
+			return nil, errors.Wrapf(ErrTracerConfigInvalid, "otlp method not supported: %s", params.TraceCfg.OtlpMethod.GetValue())
 		}
 	case "stdout":
 		exp, err = stdout.New()
 	case "noop":
 		return nil, nil
 	default:
-		err = errors.New("Empty Trace")
+		err = errors.Wrapf(ErrTracerConfigInvalid, "unsupported trace exporter: %s", params.TraceCfg.Exporter.GetValue())
 	}
 
 	return exp, err

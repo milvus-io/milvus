@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -99,7 +100,7 @@ func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel
 	}
 	serverID, ok := balancer.GetLatestWALLocated(ctx, pchannel)
 	if !ok {
-		return -1, errors.Errorf("channel: %s not found", vchannel)
+		return -1, merr.WrapErrChannelNotFound(vchannel)
 	}
 	return serverID, nil
 }

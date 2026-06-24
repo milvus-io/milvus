@@ -300,10 +300,10 @@ func (s *mixCoordImpl) getQueryNodes(ctx context.Context) (*querypb.ListQueryNod
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list query nodes: %w", err)
+		return nil, merr.Wrapf(err, "failed to list query nodes")
 	}
 	if !merr.Ok(resp.GetStatus()) {
-		return nil, fmt.Errorf("failed to list query nodes: %s", resp.GetStatus().GetReason())
+		return nil, merr.Wrapf(merr.Error(resp.GetStatus()), "failed to list query nodes")
 	}
 	return resp, nil
 }
@@ -516,7 +516,7 @@ func (s *mixCoordImpl) getQueryCoordChannelBalanceActive(ctx context.Context) (b
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		return channelActivate, fmt.Errorf("%s", resp.GetStatus().GetReason())
+		return channelActivate, merr.Error(resp.GetStatus())
 	}
 
 	return channelActivate && resp.IsActive, nil
@@ -530,7 +530,7 @@ func (s *mixCoordImpl) getQueryCoordBalanceActive(ctx context.Context) (bool, er
 		return false, err
 	}
 	if !merr.Ok(resp.GetStatus()) {
-		return false, fmt.Errorf("%s", resp.GetStatus().GetReason())
+		return false, merr.Error(resp.GetStatus())
 	}
 	return resp.IsActive, nil
 }
@@ -571,7 +571,7 @@ func (s *mixCoordImpl) controlQueryCoordChannelBalanceStatus(ctx context.Context
 	default:
 		// If the status is not recognized, return an informative error immediately.
 		// This avoids proceeding with an invalid state.
-		err = fmt.Errorf("invalid status value: '%s'. Use 'suspended', 'resumed' or 'active'", status)
+		err = merr.WrapErrParameterInvalidMsg("invalid status value: '%s'. Use 'suspended', 'resumed' or 'active'", status)
 	}
 
 	// --- Unified Error Handling ---
@@ -580,7 +580,7 @@ func (s *mixCoordImpl) controlQueryCoordChannelBalanceStatus(ctx context.Context
 	// First, check if there was a low-level error during the method execution (e.g., network issue).
 	if err != nil {
 		// Wrap the original error with more context.
-		return fmt.Errorf("%s: %w", errMsg, err)
+		return merr.Wrap(err, errMsg)
 	}
 	// If no errors were encountered, the operation was successful. Return nil to indicate success.
 	return nil
@@ -960,11 +960,11 @@ func (s *mixCoordImpl) handleQueryNodeStatusUpdate(ctx context.Context, nodeID i
 		errMsg = "failed to resume node"
 	default:
 		errMsg = "invalid status value. Use 'suspended', 'resumed' or 'active'"
-		err = fmt.Errorf("%s", errMsg)
+		err = merr.WrapErrParameterInvalidMsg("%s", errMsg)
 	}
 	err = merr.CheckRPCCall(resp, err)
 	if err != nil {
-		err = fmt.Errorf("%s: %w", errMsg, err)
+		err = merr.Wrap(err, errMsg)
 	}
 	return err
 }
@@ -1247,7 +1247,7 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 
 	if len(broadcastPChannels) == 0 {
 		logger.Info("broadcastAlterWALMessage failed, no active pChannel found")
-		return errors.New("no active pChannels found")
+		return merr.WrapErrServiceInternalMsg("no active pChannels found")
 	}
 
 	logger.Info("broadcastAlterWALMessage preparing",

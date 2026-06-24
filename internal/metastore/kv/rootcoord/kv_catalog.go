@@ -177,14 +177,14 @@ func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]
 
 func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
 	if coll.State != pb.CollectionState_CollectionCreated {
-		return fmt.Errorf("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
+		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
 	k1 := BuildCollectionKey(coll.DBID, coll.CollectionID)
 	collInfo := model.MarshalCollectionModel(coll)
 	v1, err := proto.Marshal(collInfo)
 	if err != nil {
-		return fmt.Errorf("failed to marshal collection info: %s", err.Error())
+		return merr.WrapErrSerializationFailed(err, "marshal collection info")
 	}
 
 	kvs := map[string]string{}
@@ -324,11 +324,11 @@ func (kc *Catalog) CreatePartition(ctx context.Context, dbID int64, partition *m
 	}
 
 	if partitionExistByID(collMeta, partition.PartitionID) {
-		return fmt.Errorf("partition already exist: %d", partition.PartitionID)
+		return merr.WrapErrServiceInternalMsg("partition already exist: %d", partition.PartitionID)
 	}
 
 	if partitionExistByName(collMeta, partition.PartitionName) {
-		return fmt.Errorf("partition already exist: %s", partition.PartitionName)
+		return merr.WrapErrServiceInternalMsg("partition already exist: %s", partition.PartitionName)
 	}
 
 	// keep consistent with older version, otherwise it's hard to judge where to find partitions.
@@ -673,7 +673,7 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	credentialInfo := internalpb.CredentialInfo{}
 	err = json.Unmarshal([]byte(v), &credentialInfo)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal credential info err:%w", err)
+		return nil, merr.WrapErrDataIntegrity(err, "unmarshal credential info")
 	}
 	// we don't save the username in the credential info, so we need to set it manually from path.
 	credentialInfo.Username = username
@@ -727,10 +727,10 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 
 func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool) error {
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
-		return errors.New("altering tenant id or collection id is forbidden")
+		return merr.WrapErrParameterInvalidMsg("altering tenant id or collection id is forbidden")
 	}
 	if oldColl.DBID != newColl.DBID {
-		return errors.New("altering dbID should use `AlterCollectionDB` interface")
+		return merr.WrapErrParameterInvalidMsg("altering dbID should use `AlterCollectionDB` interface")
 	}
 	oldCollClone := oldColl.Clone()
 	oldCollClone.DBID = newColl.DBID
@@ -802,13 +802,13 @@ func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collectio
 	case metastore.MODIFY:
 		return kc.alterModifyCollection(ctx, oldColl, newColl, ts, fieldModify)
 	default:
-		return fmt.Errorf("altering collection doesn't support %s", alterType.String())
+		return merr.WrapErrParameterInvalidMsg("altering collection doesn't support %s", alterType.String())
 	}
 }
 
 func (kc *Catalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
-		return errors.New("altering tenant id or collection id is forbidden")
+		return merr.WrapErrParameterInvalidMsg("altering tenant id or collection id is forbidden")
 	}
 	oldKey := BuildCollectionKey(oldColl.DBID, oldColl.CollectionID)
 	newKey := BuildCollectionKey(newColl.DBID, newColl.CollectionID)
@@ -824,7 +824,7 @@ func (kc *Catalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collect
 
 func (kc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition, ts typeutil.Timestamp) error {
 	if oldPart.CollectionID != newPart.CollectionID || oldPart.PartitionID != newPart.PartitionID {
-		return errors.New("altering collection id or partition id is forbidden")
+		return merr.WrapErrParameterInvalidMsg("altering collection id or partition id is forbidden")
 	}
 	oldPartClone := oldPart.Clone()
 	newPartClone := newPart.Clone()
@@ -843,7 +843,7 @@ func (kc *Catalog) AlterPartition(ctx context.Context, dbID int64, oldPart *mode
 	if alterType == metastore.MODIFY {
 		return kc.alterModifyPartition(ctx, oldPart, newPart, ts)
 	}
-	return fmt.Errorf("altering partition doesn't support %s", alterType.String())
+	return merr.WrapErrParameterInvalidMsg("altering partition doesn't support %s", alterType.String())
 }
 
 func dropPartition(collMeta *pb.CollectionInfo, partitionID typeutil.UniqueID) {
@@ -1148,7 +1148,7 @@ func (kc *Catalog) remove(ctx context.Context, k string) error {
 	}
 	if err != nil && errors.Is(err, merr.ErrIoKeyNotFound) {
 		log.Ctx(ctx).Debug("the key isn't existed", zap.String("key", k))
-		return common.NewIgnorableError(fmt.Errorf("the key[%s] isn't existed", k))
+		return common.NewIgnorableErrorf("the key[%s] isn't existed", k)
 	}
 	return kc.Txn.Remove(ctx, k)
 }
@@ -1222,7 +1222,7 @@ func (kc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity 
 	case milvuspb.OperateUserRoleType_RemoveUserFromRole:
 		return kc.Txn.Remove(ctx, k)
 	}
-	return fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
+	return merr.WrapErrParameterInvalidMsg("invalid operate user role type, operate type: %d", operateType)
 }
 
 func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
@@ -1288,7 +1288,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		}
 	} else {
 		if funcutil.IsEmptyString(entity.Name) {
-			return results, errors.New("role name in the role entity is empty")
+			return results, merr.WrapErrParameterInvalidMsg("role name in the role entity is empty")
 		}
 		roleKey := RolePrefix + "/" + entity.Name
 		value, err := kc.Txn.Load(ctx, roleKey)
@@ -1571,7 +1571,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 			log.Ctx(ctx).Warn("fail to load grant privilege entity", zap.String("key", granteeKey), zap.Any("type", operateType), zap.Error(err))
 			if funcutil.IsRevoke(operateType) {
 				if errors.Is(err, merr.ErrIoKeyNotFound) {
-					return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", granteeKey))
+					return common.NewIgnorableErrorf("the grant[%s] isn't existed", granteeKey)
 				}
 				return err
 			}
@@ -1604,7 +1604,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		}
 		log.Ctx(ctx).Debug("not found the grantee id", zap.String("key", k))
 		if funcutil.IsRevoke(operateType) {
-			return common.NewIgnorableError(fmt.Errorf("the grantee-id[%s] isn't existed", k))
+			return common.NewIgnorableErrorf("the grantee-id[%s] isn't existed", k)
 		}
 		if funcutil.IsGrant(operateType) {
 			if err = kc.Txn.Save(ctx, k, entity.Grantor.User.Name); err != nil {
@@ -1621,7 +1621,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		}
 		return err
 	}
-	return common.NewIgnorableError(fmt.Errorf("the privilege[%s] has been granted", privilegeName))
+	return common.NewIgnorableErrorf("the privilege[%s] has been granted", privilegeName)
 }
 
 func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
@@ -2125,7 +2125,7 @@ func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) (*mi
 	val, err := kc.Txn.Load(ctx, k)
 	if err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return nil, fmt.Errorf("privilege group [%s] does not exist", groupName)
+			return nil, merr.WrapErrParameterInvalidMsg("privilege group [%s] does not exist", groupName)
 		}
 		log.Ctx(ctx).Error("failed to load privilege group", zap.String("group", groupName), zap.Error(err))
 		return nil, err

@@ -123,7 +123,7 @@ func (mcm *RemoteChunkManager) Path(ctx context.Context, filePath string) (strin
 		return "", err
 	}
 	if !exist {
-		return "", errors.New("minio file manage cannot be found with filePath:" + filePath)
+		return "", merr.WrapErrServiceInternalMsg("minio file manage cannot be found with filePath:" + filePath)
 	}
 	return filePath, nil
 }
@@ -188,7 +188,7 @@ func (mcm *RemoteChunkManager) MultiWrite(ctx context.Context, kvs map[string][]
 	for key, value := range kvs {
 		err := mcm.Write(ctx, key, value)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to write %s", key))
+			el = merr.Combine(el, merr.Wrapf(err, "failed to write %s", key))
 		}
 	}
 	return el
@@ -253,7 +253,7 @@ func (mcm *RemoteChunkManager) MultiRead(ctx context.Context, keys []string) ([]
 	for _, key := range keys {
 		objectValue, err := mcm.Read(ctx, key)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to read %s", key))
+			el = merr.Combine(el, merr.Wrapf(err, "failed to read %s", key))
 		}
 		objectsValues = append(objectsValues, objectValue)
 	}
@@ -262,7 +262,7 @@ func (mcm *RemoteChunkManager) MultiRead(ctx context.Context, keys []string) ([]
 }
 
 func (mcm *RemoteChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
-	return nil, errors.New("this method has not been implemented")
+	return nil, merr.WrapErrServiceInternalMsg("this method has not been implemented")
 }
 
 // ReadAt reads specific position data of minio storage if exists.
@@ -304,7 +304,7 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 	for _, key := range keys {
 		err := mcm.Remove(ctx, key)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to remove %s", key))
+			el = merr.Combine(el, merr.Wrapf(err, "failed to remove %s", key))
 		}
 	}
 	return el

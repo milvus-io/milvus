@@ -18,7 +18,6 @@ package storage
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"google.golang.org/protobuf/proto"
 
@@ -60,7 +59,11 @@ func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema) (*I
 
 func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool) (*InsertData, error) {
 	if schema == nil {
-		return nil, merr.WrapErrParameterMissing("collection schema")
+		// A nil schema here is an internal invariant violation (callers within
+		// Milvus always pass a schema), not a client-supplied missing parameter.
+		// ErrParameterMissing defaults to InputError, so mark this one site as a
+		// system error to keep it out of the client-fault (fail_input) bucket.
+		return nil, merr.WrapErrAsSysError(merr.WrapErrParameterMissing("collection schema"))
 	}
 
 	idata := &InsertData{
@@ -69,17 +72,17 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 
 	appendField := func(field *schemapb.FieldSchema) error {
 		if field.IsPrimaryKey && field.GetNullable() {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("primary key field should not be nullable (field: %s)", field.Name))
+			return merr.WrapErrParameterInvalidMsg("primary key field should not be nullable (field: %s)", field.Name)
 		}
 		if field.IsPartitionKey && field.GetNullable() {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field should not be nullable (field: %s)", field.Name))
+			return merr.WrapErrParameterInvalidMsg("partition key field should not be nullable (field: %s)", field.Name)
 		}
 		if field.IsFunctionOutput {
 			if field.IsPrimaryKey || field.IsPartitionKey {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be primary key or partition key (field: %s)", field.Name))
+				return merr.WrapErrParameterInvalidMsg("function output field should not be primary key or partition key (field: %s)", field.Name)
 			}
 			if field.GetNullable() {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be nullable (field: %s)", field.Name))
+				return merr.WrapErrParameterInvalidMsg("function output field should not be nullable (field: %s)", field.Name)
 			}
 			if !withFunctionOutput {
 				return nil
@@ -149,11 +152,11 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 	for fID, v := range row {
 		field, ok := i.Data[fID]
 		if !ok {
-			return fmt.Errorf("missing field when appending row, got %d", fID)
+			return merr.WrapErrServiceInternalMsg("missing field when appending row, got %d", fID)
 		}
 
 		if err := field.AppendRow(v); err != nil {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("append data for field %d failed, err=%s", fID, err.Error()))
+			return merr.WrapErrParameterInvalidMsg("append data for field %d failed, err=%s", fID, err.Error())
 		}
 	}
 
@@ -401,7 +404,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		}
 		return data, nil
 	default:
-		return nil, fmt.Errorf("unexpected schema data type: %d", dataType)
+		return nil, merr.WrapErrServiceInternalMsg("unexpected schema data type: %d", dataType)
 	}
 }
 

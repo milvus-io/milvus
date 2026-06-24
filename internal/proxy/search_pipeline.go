@@ -71,7 +71,7 @@ type Node struct {
 func (n *Node) unpackInputs(msg opMsg) ([]any, error) {
 	for _, input := range n.inputs {
 		if _, ok := msg[input]; !ok {
-			return nil, fmt.Errorf("node [%s]'s input %s not found", n.name, input)
+			return nil, merr.WrapErrServiceInternalMsg("Node [%s]'s input %s not found", n.name, input)
 		}
 	}
 	inputs := make([]any, len(n.inputs))
@@ -84,7 +84,7 @@ func (n *Node) unpackInputs(msg opMsg) ([]any, error) {
 func (n *Node) packOutputs(outputs []any, srcMsg opMsg) (opMsg, error) {
 	msg := srcMsg
 	if len(outputs) != len(n.outputs) {
-		return nil, fmt.Errorf("node [%s] output size not match operator output size", n.name)
+		return nil, merr.WrapErrServiceInternalMsg("Node [%s] output size not match operator output size", n.name)
 	}
 	for i, output := range n.outputs {
 		msg[output] = outputs[i]
@@ -241,6 +241,7 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 				NumQueries:     subResult.GetNumQueries(),
 				TopK:           subResult.GetTopK(),
 				SlicedBlob:     subResult.GetSlicedBlob(),
+				ResultData:     subResult.GetResultData(),
 				SlicedNumCount: subResult.GetSlicedNumCount(),
 				SlicedOffset:   subResult.GetSlicedOffset(),
 				IsAdvanced:     false,
@@ -311,7 +312,7 @@ func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span,
 		return nil, merr.WrapErrParameterInvalidMsg("element best collapse: inputs[1] must be []string, got %T", inputs[1])
 	}
 	if len(metrics) != len(results) {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: metrics length (%d) does not match results length (%d)", len(metrics), len(results)))
+		return nil, merr.WrapErrServiceInternalMsg("element best collapse: metrics length (%d) does not match results length (%d)", len(metrics), len(results))
 	}
 
 	collapsed := make([]*milvuspb.SearchResults, len(results))
@@ -331,7 +332,7 @@ func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span,
 				totalRows += topk
 			}
 			if totalRows > 0 {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: missing metric type for element-level result[%d]", i))
+				return nil, merr.WrapErrServiceInternalMsg("element best collapse: missing metric type for element-level result[%d]", i)
 			}
 		}
 		var err error
@@ -415,24 +416,24 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 	}
 
 	if typeutil.GetSizeOfIDs(data.GetIds()) < int(totalRows) {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: ids length (%d) is less than total rows (%d)",
-			typeutil.GetSizeOfIDs(data.GetIds()), totalRows))
+		return nil, merr.WrapErrServiceInternalMsg("element best collapse: ids length (%d) is less than total rows (%d)",
+			typeutil.GetSizeOfIDs(data.GetIds()), totalRows)
 	}
 	if int64(len(data.GetScores())) < totalRows {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: scores length (%d) is less than total rows (%d)",
-			len(data.GetScores()), totalRows))
+		return nil, merr.WrapErrServiceInternalMsg("element best collapse: scores length (%d) is less than total rows (%d)",
+			len(data.GetScores()), totalRows)
 	}
 	if int64(len(data.GetElementIndices().GetData())) < totalRows {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: element_indices length (%d) is less than total rows (%d)",
-			len(data.GetElementIndices().GetData()), totalRows))
+		return nil, merr.WrapErrServiceInternalMsg("element best collapse: element_indices length (%d) is less than total rows (%d)",
+			len(data.GetElementIndices().GetData()), totalRows)
 	}
 	if len(data.GetDistances()) > 0 && int64(len(data.GetDistances())) < totalRows {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: distances length (%d) is less than total rows (%d)",
-			len(data.GetDistances()), totalRows))
+		return nil, merr.WrapErrServiceInternalMsg("element best collapse: distances length (%d) is less than total rows (%d)",
+			len(data.GetDistances()), totalRows)
 	}
 	if len(data.GetRecalls()) > 0 && int64(len(data.GetRecalls())) < totalRows {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("element best collapse: recalls length (%d) is less than total rows (%d)",
-			len(data.GetRecalls()), totalRows))
+		return nil, merr.WrapErrServiceInternalMsg("element best collapse: recalls length (%d) is less than total rows (%d)",
+			len(data.GetRecalls()), totalRows)
 	}
 
 	output := &schemapb.SearchResultData{
@@ -1170,10 +1171,10 @@ func (op *hybridAssembleOperator) run(ctx context.Context, span trace.Span, inpu
 				fmt.Sprintf("hybrid assemble: missing id %v, collection=%d", candidateKey, op.collectionID))
 		}
 		if computers[loc.resultIdx] == nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf(
+			return nil, merr.WrapErrServiceInternalMsg(
 				"hybrid assemble: sub-result[%d] has empty FieldsData but contributed reranked id %v; "+
 					"all sub-results that contribute ids must share the same FieldsData layout, "+
-					"collection=%d", loc.resultIdx, candidateKey, op.collectionID))
+					"collection=%d", loc.resultIdx, candidateKey, op.collectionID)
 		}
 		locs[i] = loc
 		itemsByResult[loc.resultIdx] = append(itemsByResult[loc.resultIdx], rowIdxComputeItem{
@@ -1825,7 +1826,7 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 			return newPipeline(hybridSearchWithRequeryPipe, t)
 		}
 	}
-	return nil, fmt.Errorf("unsupported pipeline")
+	return nil, merr.WrapErrServiceInternalMsg("unsupported pipeline")
 }
 
 func aggregatedAllSearchCount(searchResults []*milvuspb.SearchResults) int64 {

@@ -204,8 +204,9 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="L2")
         # 3. create another index
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -235,12 +236,10 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
         # 4. create another index
-        error = {
-            ct.err_code: 1100,
-            ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}: "
-            f"invalid parameter[expected=valid index params][actual=invalid index params]",
-        }
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -949,25 +948,17 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name="my_json", index_type="INVERTED")
         # 3. create index
-        error = {
-            ct.err_code: 1100,
-            ct.err_msg: "json index must specify cast type: missing parameter"
-            "[missing_param=json_cast_type]: invalid parameter"
-            "[expected=valid index params][actual=invalid index params]",
-        }
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1101, ct.err_msg: "json index must specify cast type: missing parameter"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
         # 4. prepare index params with no json_cast_type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name="my_json", index_type="INVERTED", params={"json_path": "my_json['a']['b']"})
         # 5. create index
-        error = {
-            ct.err_code: 1100,
-            ct.err_msg: "json index must specify cast type: missing parameter"
-            "[missing_param=json_cast_type]: invalid parameter"
-            "[expected=valid index params][actual=invalid index params]",
-        }
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1101, ct.err_msg: "json index must specify cast type: missing parameter"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
         # 6. prepare index params with no json_path
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
@@ -1047,13 +1038,10 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             supported_field_type = "bool, int, string and array"
             not_supported_varchar_scalar_index = "bitmap index"
             got_json_suffix = ""
-        error = {
-            ct.err_code: 1100,
-            ct.err_msg: f"{not_supported_varchar_scalar_index} are only supported on "
-            f"{supported_field_type} field{got_json_suffix}: invalid parameter[expected=valid "
-            f"index params][actual=invalid index params]",
-        }
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: f"{not_supported_varchar_scalar_index} are only supported on "
+                                                f"{supported_field_type} field{got_json_suffix}"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
@@ -1089,8 +1077,9 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             params={"json_cast_type": invalid_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
         )
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: "is not supported"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True])
@@ -1126,8 +1115,9 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                 params={"json_cast_type": cast_type, "json_path": f"{json_field_name}['a']['b']"},
             )
             # 3. create index
-            error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
-            self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+            error = {ct.err_code: 1100, ct.err_msg: "is not supported"}
+            self.create_index(client, collection_name, index_params,
+                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [False])
@@ -1163,8 +1153,13 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             params={"json_cast_type": "Double", "json_path": invalid_json_path},
         )
         # 3. create index
-        error = {ct.err_code: 65535, ct.err_msg: f"cannot parse identifier: {invalid_json_path}"}
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        if invalid_json_path == '/':
+            json_path_err_msg = "mismatched input '/'"
+        else:
+            json_path_err_msg = f"cannot parse identifier: {invalid_json_path}"
+        error = {ct.err_code: 65535, ct.err_msg: json_path_err_msg}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_json_path_index_not_exist_field_non_dynamic(self, supported_varchar_scalar_index):
@@ -1239,8 +1234,9 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"},
         )
         # 5. create index
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
@@ -1348,8 +1344,9 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
         )
         # 4. create index
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
-        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):

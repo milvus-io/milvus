@@ -99,7 +99,7 @@ func Int64TupleMapToSlice(s map[int]common.Int64Tuple) []common.Int64Tuple {
 
 func CheckMsgType(got, expect commonpb.MsgType) error {
 	if got != expect {
-		return fmt.Errorf("invalid msg type, expect %s, but got %s", expect, got)
+		return merr.WrapErrServiceInternalMsg("invalid msg type, expect %s, but got %s", expect, got)
 	}
 	return nil
 }
@@ -332,7 +332,7 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 		errStr += fmt.Sprintf("data max timetick lag:%s on channel:%s", maxLag, maxLagChannel)
 	}
 	if errStr != "" {
-		return fmt.Errorf("max timetick lag execced threhold: %s", errStr)
+		return merr.WrapErrServiceInternalMsg("max timetick lag execced threhold: %s", errStr)
 	}
 
 	return nil
@@ -438,7 +438,7 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 						zap.ByteString("data", defVal),
 						zap.Error(err),
 					)
-					return merr.WrapErrParameterInvalidMsg(err.Error())
+					return merr.WrapErrParameterInvalidErr(err, "invalid default json value, milvus only supports json map")
 				}
 			default:
 				panic("default value unsupport data type")
@@ -509,7 +509,7 @@ func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema
 		}
 		return maxCapacity, nil
 	}
-	return 0, merr.WrapErrParameterInvalidMsg("type param(%s) should be specified for field %s in struct array field %s",
+	return 0, merr.WrapErrParameterMissingMsg("type param(%s) should be specified for field %s in struct array field %s",
 		common.MaxCapacityKey, field.GetName(), structName)
 }
 
@@ -561,11 +561,11 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 		}
 		for _, subField := range field.GetFields() {
 			if subField.GetDataType() != schemapb.DataType_Array && subField.GetDataType() != schemapb.DataType_ArrayOfVector {
-				return fmt.Errorf("fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
+				return merr.WrapErrParameterInvalidMsg("fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
 			}
 			if subField.GetElementType() == schemapb.DataType_ArrayOfStruct || subField.GetElementType() == schemapb.DataType_ArrayOfVector ||
 				subField.GetElementType() == schemapb.DataType_Array {
-				return fmt.Errorf("nested array is not supported %s", subField.Name)
+				return merr.WrapErrParameterInvalidMsg("nested array is not supported for field %s", subField.Name)
 			}
 			if _, ok := schemapb.DataType_name[int32(subField.GetElementType())]; !ok || subField.GetElementType() == schemapb.DataType_None {
 				return merr.WrapErrParameterInvalid("Invalid field", fmt.Sprintf("field data type: %s is not supported", subField.GetElementType()))

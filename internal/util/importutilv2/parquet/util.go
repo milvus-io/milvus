@@ -75,7 +75,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 
 	pqSchema, err := fileReader.Schema()
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("get parquet schema failed, err=%v", err))
+		return nil, merr.WrapErrImportFailedMsg("get parquet schema failed, err=%v", err)
 	}
 
 	// Check if we have nested struct format
@@ -87,11 +87,11 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 			}
 			listType, ok := pqField.Type.(*arrow.ListType)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("struct field is not a list of structs: %s", structField.Name))
+				return nil, merr.WrapErrImportFailedMsg("struct field is not a list of structs: %s", structField.Name)
 			}
 			structType, ok := listType.Elem().(*arrow.StructType)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("struct field is not a list of structs: %s", structField.Name))
+				return nil, merr.WrapErrImportFailedMsg("struct field is not a list of structs: %s", structField.Name)
 			}
 			nestedStructs[structField.Name] = i
 			// Verify struct fields match
@@ -108,7 +108,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 					}
 				}
 				if !found {
-					return nil, merr.WrapErrImportFailed(fmt.Sprintf("field not found in struct: %s", fieldName))
+					return nil, merr.WrapErrImportFailedMsg("field not found in struct: %s", fieldName)
 				}
 			}
 		}
@@ -117,7 +117,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	// Original flat format handling
 	err = isSchemaEqual(schema, pqSchema)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("schema not equal, err=%v", err))
+		return nil, merr.WrapErrImportFailedMsg("schema not equal, err=%v", err)
 	}
 
 	// this loop is for "how many fields are provided by this parquet file?"
@@ -191,7 +191,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 			}
 
 			if fieldIndex == -1 {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("field not found in struct: %s", fieldName))
+				return nil, merr.WrapErrImportFailedMsg("field not found in struct: %s", fieldName)
 			}
 
 			// Create struct field reader
@@ -554,15 +554,15 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 			if field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil {
 				continue
 			}
-			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' not in arrow schema", field.GetName()))
+			return merr.WrapErrImportFailedMsg("field '%s' not in arrow schema", field.GetName())
 		}
 		toArrDataType, err := convertToArrowDataType(field, false)
 		if err != nil {
 			return err
 		}
 		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field, true) {
-			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, expect arrow type '%s', get arrow data type '%s'",
-				field.Name, toArrDataType.String(), arrField.Type.String()))
+			return merr.WrapErrImportFailedMsg("field '%s' type mis-match, expect arrow type '%s', get arrow data type '%s'",
+				field.Name, toArrDataType.String(), arrField.Type.String())
 		}
 	}
 
@@ -575,14 +575,14 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		// Verify the arrow field is list<struct> type
 		listType, ok := arrStructField.Type.(*arrow.ListType)
 		if !ok {
-			return merr.WrapErrImportFailed(fmt.Sprintf("struct field '%s' should be list type in arrow schema, but got '%s'",
-				structField.Name, arrStructField.Type.String()))
+			return merr.WrapErrImportFailedMsg("struct field '%s' should be list type in arrow schema, but got '%s'",
+				structField.Name, arrStructField.Type.String())
 		}
 
 		structType, ok := listType.Elem().(*arrow.StructType)
 		if !ok {
-			return merr.WrapErrImportFailed(fmt.Sprintf("struct field '%s' should contain struct elements in arrow schema, but got '%s'",
-				structField.Name, listType.Elem().String()))
+			return merr.WrapErrImportFailedMsg("struct field '%s' should contain struct elements in arrow schema, but got '%s'",
+				structField.Name, listType.Elem().String())
 		}
 
 		// Create a map of struct field names to arrow.Field for quick lookup
@@ -601,8 +601,8 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 
 			arrowSubField, ok := structFieldMap[fieldName]
 			if !ok {
-				return merr.WrapErrImportFailed(fmt.Sprintf("sub-field '%s' not found in struct '%s' of arrow schema",
-					fieldName, structField.Name))
+				return merr.WrapErrImportFailedMsg("sub-field '%s' not found in struct '%s' of arrow schema",
+					fieldName, structField.Name)
 			}
 
 			// Convert Milvus field type to expected Arrow type
@@ -621,18 +621,18 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 					return err
 				}
 			default:
-				return merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type in struct field: %v", subField.DataType))
+				return merr.WrapErrImportFailedMsg("unsupported data type in struct field: %v", subField.DataType)
 			}
 
 			// Check if the arrow type is convertible to the expected type
 			if !isArrowDataTypeConvertible(arrowSubField.Type, expectedArrowType, subField, false) {
-				return merr.WrapErrImportFailed(fmt.Sprintf("sub-field '%s' in struct '%s' type mis-match, expect arrow type '%s', got '%s'",
-					fieldName, structField.Name, expectedArrowType.String(), arrowSubField.Type.String()))
+				return merr.WrapErrImportFailedMsg("sub-field '%s' in struct '%s' type mis-match, expect arrow type '%s', got '%s'",
+					fieldName, structField.Name, expectedArrowType.String(), arrowSubField.Type.String())
 			}
 		}
 
 		if len(structFieldMap) != len(structField.Fields) {
-			return merr.WrapErrImportFailed(fmt.Sprintf("struct field number dismatch: %s, expect %d, got %d", structField.Name, len(structField.Fields), len(structFieldMap)))
+			return merr.WrapErrImportFailedMsg("struct field number dismatch: %s, expect %d, got %d", structField.Name, len(structField.Fields), len(structFieldMap))
 		}
 	}
 

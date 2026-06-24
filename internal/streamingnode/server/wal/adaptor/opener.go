@@ -305,7 +305,7 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, l walimpls.WALIm
 	}
 
 	targetWALName := snapshot.AlterWALInfo.TargetWALName
-	return nil, errors.Errorf("WAL switch success: %s switch to %s finish, re-opening required", opt.Channel.Name, targetWALName)
+	return nil, status.NewInner("WAL switch success: %s switch to %s finish, re-opening required", opt.Channel.Name, targetWALName)
 }
 
 func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt *wal.OpenOption, roWAL *roWALAdaptorImpl,
@@ -365,7 +365,7 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 			log.Ctx(ctx).Warn("timeout waiting for flush completion",
 				zap.String("channel", opt.Channel.Name),
 				zap.Duration("timeout", defaultWALSwitchFlushTimeout))
-			return errors.Newf("timeout waiting for flush completion during WAL switch")
+			return status.NewInner("timeout waiting for flush completion during WAL switch")
 		case <-ctx.Done():
 			log.Ctx(ctx).Warn("context canceled while waiting for flush completion",
 				zap.String("channel", opt.Channel.Name),

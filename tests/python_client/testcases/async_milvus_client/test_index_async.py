@@ -169,8 +169,7 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = async_client.prepare_index_params()[0]
         index_params.add_index(field_name="vector", metric_type=metric)
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"float vector index does not support metric type: {metric}: "
-                                                f"invalid parameter[expected=valid index params][actual=invalid index params"}
+        error = {ct.err_code: 1100, ct.err_msg: f"float vector index does not support metric type: {metric}"}
         # It's good to show what the valid index params are
         await async_client.create_index(collection_name, index_params,
                                         check_task=CheckTasks.err_res, 

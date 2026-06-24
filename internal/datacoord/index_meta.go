@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -454,7 +455,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool)
 					index.IndexName, index.FieldID, index.IndexParams, index.UserIndexParams, index.TypeParams)),
 				zap.String("current index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, user_params: %v, type_params: %v}",
 					req.GetIndexName(), req.GetFieldID(), req.GetIndexParams(), req.GetUserIndexParams(), req.GetTypeParams())))
-			return 0, fmt.Errorf("CreateIndex failed: %s", errMsg)
+			return 0, merr.WrapErrParameterInvalidMsg("%s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
 			if isJSON {
@@ -470,7 +471,11 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool)
 			// creating multiple indexes on same field is not supported
 			errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
 			log.Warn(errMsg)
-			return 0, errors.New(errMsg)
+			// Client-caused conflict, same family as the "one distinct index per
+			// field" case above: return an input-class error rather than
+			// ServiceInternal (code 5, "never return out of Milvus") so the
+			// caller is not blamed with a system error / counted as fail_system.
+			return 0, merr.WrapErrParameterInvalidMsg("%s", errMsg)
 		}
 	}
 	return 0, nil
@@ -979,7 +984,7 @@ func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 	log.Ctx(m.ctx).Info("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
-		return fmt.Errorf("there is no index with buildID: %d", buildID)
+		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
@@ -998,7 +1003,7 @@ func (m *indexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		log.Ctx(m.ctx).Warn("there is no index with buildID", zap.Int64("buildID", buildID))
-		return fmt.Errorf("there is no index with buildID: %d", buildID)
+		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
@@ -1091,7 +1096,7 @@ func (m *indexMeta) BuildIndex(buildID UniqueID) error {
 
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
-		return fmt.Errorf("there is no index with buildID: %d", buildID)
+		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {

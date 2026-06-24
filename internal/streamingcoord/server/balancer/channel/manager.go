@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -121,7 +122,7 @@ func recoverCChannelMeta(ctx context.Context, incomingChannel ...string) (*strea
 	}
 	if cchannelMeta == nil {
 		if len(incomingChannel) == 0 {
-			return nil, errors.New("no incoming channel while no control channel meta found")
+			return nil, status.NewInner("no incoming channel while no control channel meta found")
 		}
 		cchannelMeta = &streamingpb.CChannelMeta{
 			Pchannel: incomingChannel[0],
@@ -361,7 +362,7 @@ func (cm *ChannelManager) MarkWALBasedDDLEnabled(ctx context.Context) error {
 	defer cm.cond.L.Unlock()
 
 	if cm.streamingVersion == nil {
-		return errors.New("streaming service is not enabled, cannot mark WAL based DDL enabled")
+		return status.NewInner("streaming service is not enabled, cannot mark WAL based DDL enabled")
 	}
 	if cm.streamingVersion.Version >= StreamingVersion265 {
 		return nil
@@ -394,7 +395,7 @@ func (cm *ChannelManager) AllocVirtualChannels(ctx context.Context, param AllocV
 
 	availableChannels := cm.sortAvailableChannelsByVChannelCount()
 	if len(availableChannels) < param.Num {
-		return nil, errors.Errorf("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(availableChannels))
+		return nil, status.NewInner("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(availableChannels))
 	}
 
 	vchannels := make([]string, 0, param.Num)

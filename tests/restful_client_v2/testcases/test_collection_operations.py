@@ -447,7 +447,7 @@ class TestCreateCollection(TestBase):
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp["code"] == 65535
+        assert rsp["code"] == 1100
         rsp = client.collection_list()
 
         all_collections = rsp["data"]

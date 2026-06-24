@@ -3,8 +3,7 @@ package stats
 import (
 	"time"
 
-	"github.com/cockroachdb/errors"
-
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -64,7 +63,7 @@ func (c statsConfig) Validate() error {
 		c.l1MinSizeFromIdleTime <= 0 ||
 		c.maxBinlogFileNum <= 0 ||
 		c.l0MaxLifetime <= 0 {
-		return errors.Errorf("invalid stats config, cfg: %+v", c)
+		return status.NewInvalidArgument("invalid stats config, cfg: %+v", c)
 	}
 	return nil
 }

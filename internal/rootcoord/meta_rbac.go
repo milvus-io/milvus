@@ -10,18 +10,14 @@ import (
 )
 
 var (
-	errEmptyUsername     = errors.New("username is empty")
 	errUserNotFound      = errors.New("user not found")
 	errUserAlreadyExists = errors.New("user already exists")
 
-	errEmptyRoleName     = errors.New("role name is empty")
 	errRoleAlreadyExists = errors.New("role already exists")
 	errRoleNotExists     = errors.New("role not exists")
 
 	errEmptyRBACMeta           = errors.New("rbac meta is empty")
 	errNotCustomPrivilegeGroup = errors.New("not a custom privilege group")
-
-	errEmptyPrivilegeGroupName = errors.New("privilege group name is empty")
 )
 
 type RBACChecker interface {

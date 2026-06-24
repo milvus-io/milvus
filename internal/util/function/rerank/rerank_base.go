@@ -19,11 +19,10 @@
 package rerank
 
 import (
-	"fmt"
-
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -59,7 +58,7 @@ func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.Functio
 	}
 	if len(pkTypeOverride) > 0 && pkTypeOverride[0] != schemapb.DataType_None {
 		if pkTypeOverride[0] != schemapb.DataType_Int64 && pkTypeOverride[0] != schemapb.DataType_VarChar {
-			return nil, fmt.Errorf("unsupported pk type override: %s", pkTypeOverride[0].String())
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported pk type override: %s", pkTypeOverride[0].String())
 		}
 		pkType = pkTypeOverride[0]
 	}
@@ -76,22 +75,22 @@ func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.Functio
 	})
 
 	if len(funcSchema.GetOutputFieldNames()) != 0 {
-		return nil, fmt.Errorf("rerank function output field names should be empty")
+		return nil, merr.WrapErrParameterInvalidMsg("rerank function output field names should be empty")
 	}
 
 	for _, name := range funcSchema.GetInputFieldNames() {
 		if name == "" {
-			return nil, fmt.Errorf("rerank input field name cannot be empty string")
+			return nil, merr.WrapErrParameterInvalidMsg("rerank input field name cannot be empty string")
 		}
 		if lo.Count(funcSchema.GetInputFieldNames(), name) > 1 {
-			return nil, fmt.Errorf("each function input field should be used exactly once in the same function, input field: %s", name)
+			return nil, merr.WrapErrParameterInvalidMsg("each function input field should be used exactly once in the same function, input field: %s", name)
 		}
 		inputField, ok := nameMap[name]
 		if !ok {
-			return nil, fmt.Errorf("function input field not found: %s", name)
+			return nil, merr.WrapErrParameterInvalidMsg("function input field not found: %s", name)
 		}
 		if inputField.GetNullable() {
-			return nil, fmt.Errorf("function input field cannot be nullable: field %s", inputField.GetName())
+			return nil, merr.WrapErrParameterInvalidMsg("function input field cannot be nullable: field %s", inputField.GetName())
 		}
 		base.inputFieldIDs = append(base.inputFieldIDs, inputField.FieldID)
 		base.inputFieldTypes = append(base.inputFieldTypes, inputField.DataType)

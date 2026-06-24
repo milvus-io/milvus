@@ -838,7 +838,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	if len(req.GetDmlChannels()) != 1 {
-		err := merr.WrapErrParameterInvalid(1, len(req.GetDmlChannels()), "count of channel to be searched should only be 1, wrong code")
+		// internal protocol assertion: the proxy always targets exactly one
+		// channel per request, so a violation is a Milvus bug, not user input
+		err := merr.WrapErrServiceInternalMsg("count of channels to be searched should only be 1, got %d, wrong code", len(req.GetDmlChannels()))
 		resp.Status = merr.Status(err)
 		log.Warn("got wrong number of channels to be searched", zap.Error(err))
 		return resp, nil

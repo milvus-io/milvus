@@ -145,7 +145,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 			}
 
 			if !fieldFound {
-				return nil, fmt.Errorf("field %s not exist", reqField)
+				return nil, merr.WrapErrParameterInvalidMsg("field %s not exist", reqField)
 			}
 		}
 
@@ -233,7 +233,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		isLimitProvided = true
 		limit, err = strconv.ParseInt(limitStr, 0, 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+			return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", LimitKey, limitStr)
 		}
 	}
 	if isLimitProvided {
@@ -242,12 +242,12 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
 			if err != nil {
-				return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+				return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", OffsetKey, offsetStr)
 			}
 		}
 		// validate max result window.
 		if err = validateMaxQueryResultWindow(offset, limit, largeTopKEnabled); err != nil {
-			return nil, fmt.Errorf("invalid max query result window, %w", err)
+			return nil, merr.WrapErrParameterInvalidMsg("invalid max query result window, %v", err)
 		}
 	}
 
@@ -293,7 +293,7 @@ func createCntPlan(expr string, schemaHelper *typeutil.SchemaHelper, exprTemplat
 	plan, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, exprTemplateValues)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
+		return nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
@@ -322,7 +322,7 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.plan, err = planparserv2.CreateRetrievePlanArgs(schema.schemaHelper, t.request.Expr, t.request.GetExprTemplateValues(), visitorArgs)
 		if err != nil {
 			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err))
+			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 		}
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
@@ -340,6 +340,7 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	t.OutputFieldsId = outputFieldIDs
 	t.plan.OutputFieldIds = outputFieldIDs
 	t.plan.DynamicFields = t.userDynamicFields
+
 	log.Ctx(ctx).Debug("translate output fields to field ids",
 		zap.Int64s("OutputFieldsID", t.OutputFieldsId),
 		zap.String("requestType", t.getQueryLabel()))
@@ -395,7 +396,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		return err
 	}
 	t.CollectionID = collID
 
@@ -403,7 +404,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("Failed to get collection info.", zap.String("collectionName", collectionName),
 			zap.Int64("collectionID", t.CollectionID), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+		// The name was already resolved above (GetCollectionID succeeded), so a
+		// not-found here means the collection was concurrently dropped between the
+		// two lookups — a TOCTOU race, not the caller's input error. Leave it as the
+		// default SystemError; do not stamp InputError.
+		return err
 	}
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
@@ -413,11 +418,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used"))
+		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
 	if t.mustUsePartitionKey && !t.partitionKeyMode {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
-			"because the mustUsePartitionKey config is true"))
+		return merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
+			"because the mustUsePartitionKey config is true")
 	}
 
 	for _, tag := range t.request.PartitionNames {
@@ -437,8 +442,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if queryParams.collectionID > 0 && queryParams.collectionID != t.GetCollectionID() {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
-			"alias or database may have changed"))
+		return merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
+			"alias or database may have changed")
 	}
 	if queryParams.reduceType == reduce.IReduceInOrderForBest {
 		t.ReduceStopForBest = true
@@ -571,7 +576,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternal(fmt.Sprintf("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL))
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()
@@ -632,7 +637,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
-		return nil
+		return merr.Wrapf(t.TraceCtx().Err(), "Query wait to finish timeout, msgID=%d", t.ID())
 	default:
 		log.Debug("all queries are finished or canceled")
 		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
@@ -834,7 +839,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 
 		cursors[sel]++
@@ -852,7 +857,7 @@ func reduceRetrieveResultsAndFillIfEmpty(ctx context.Context, retrieveResults []
 	// filter system fields.
 	filtered := filterSystemFields(outputFieldsID)
 	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewMilvusResult(result), filtered, schema); err != nil {
-		return nil, fmt.Errorf("failed to fill retrieve results: %s", err.Error())
+		return nil, merr.Wrapf(err, "failed to fill retrieve results")
 	}
 
 	return result, nil

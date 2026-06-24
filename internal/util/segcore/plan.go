@@ -29,8 +29,6 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -44,10 +42,13 @@ type SearchPlan struct {
 }
 
 func createSearchPlanByExpr(col *CCollection, expr []byte) (*SearchPlan, error) {
+	if len(expr) == 0 {
+		return nil, errors.New("empty expression plan")
+	}
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "Create Plan by expr failed")
+		return nil, merr.Wrap(err, "Create Plan by expr failed")
 	}
 	return &SearchPlan{cSearchPlan: cPlan}, nil
 }
@@ -94,7 +95,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 
 	if len(placeholderGrp) == 0 {
 		plan.delete()
-		return nil, errors.New("empty search request")
+		return nil, merr.WrapErrParameterInvalidMsg("empty search request")
 	}
 
 	metricTypeInPlan := plan.GetMetricType()
@@ -107,7 +108,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 	status := C.GetFieldID(plan.cSearchPlan, &fieldID)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		plan.delete()
-		return nil, errors.Wrap(err, "get fieldID from plan failed")
+		return nil, merr.Wrap(err, "get fieldID from plan failed")
 	}
 
 	blobPtr := unsafe.Pointer(&placeholderGrp[0])
@@ -116,7 +117,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 	status = C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		plan.delete()
-		return nil, errors.Wrap(err, "parser searchRequest failed")
+		return nil, merr.Wrap(err, "parser searchRequest failed")
 	}
 
 	return &SearchRequest{
@@ -167,12 +168,12 @@ type RetrievePlan struct {
 
 func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64, consistencylevel commonpb.ConsistencyLevel, collectionTTL typeutil.Timestamp) (*RetrievePlan, error) {
 	if col.rawPointer() == nil {
-		return nil, errors.New("collection is released")
+		return nil, merr.WrapErrServiceInternalMsg("collection is released")
 	}
 	var cPlan C.CRetrievePlan
 	status := C.CreateRetrievePlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "Create retrieve plan by expr failed")
+		return nil, merr.Wrap(err, "Create retrieve plan by expr failed")
 	}
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	return &RetrievePlan{

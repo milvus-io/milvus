@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -106,7 +105,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
-		err = fmt.Errorf("failed to get primary keys, err = %v", err)
+		err = merr.WrapErrServiceInternalMsg("failed to get primary keys, err = %v", err)
 		log.Error(err.Error(), zap.String("channel", eNode.channel))
 		return err
 	}
@@ -157,7 +156,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *m
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return errors.New("BM25 runner return unknown type output")
+		return merr.WrapErrServiceInternalMsg("BM25 runner return unknown type output")
 	}
 
 	if _, ok := stats[outputFieldID]; !ok {
@@ -179,7 +178,7 @@ func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]
 			}
 		default:
 			log.Warn("pipeline embedding with unknown function type", zap.Any("type", functionSchema.GetType()))
-			return errors.New("unknown function type")
+			return merr.WrapErrServiceInternalMsg("unknown function type")
 		}
 	}
 
@@ -230,5 +229,5 @@ func getEmbeddingFieldData(datas []*schemapb.FieldData, fieldID int64) ([]string
 			return data.GetScalars().GetStringData().GetData(), nil
 		}
 	}
-	return nil, fmt.Errorf("field %d not found", fieldID)
+	return nil, merr.WrapErrParameterInvalidMsg("field %d not found", fieldID)
 }

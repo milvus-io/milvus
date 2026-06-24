@@ -23,7 +23,6 @@ import (
 	"maps"
 	"math"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -101,7 +100,7 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		stats.MaxPk = &VarCharPrimaryKey{}
 		stats.MinPk = &VarCharPrimaryKey{}
 	default:
-		return errors.New("Invalid PK Data Type")
+		return merr.WrapErrServiceInternalMsg("Invalid PK Data Type")
 	}
 
 	if maxPkMessage, ok := messageMap["maxPk"]; ok && maxPkMessage != nil {
@@ -282,10 +281,7 @@ func (sr *StatsReader) GetPrimaryKeyStats() (*PrimaryKeyStats, error) {
 	stats := &PrimaryKeyStats{}
 	err := json.Unmarshal(sr.buffer, &stats)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid(
-			"valid JSON",
-			string(sr.buffer),
-			err.Error())
+		return nil, merr.WrapErrDataIntegrity(err, "PrimaryKeyStats unmarshal failed")
 	}
 
 	return stats, nil
@@ -296,10 +292,7 @@ func (sr *StatsReader) GetPrimaryKeyStatsList() ([]*PrimaryKeyStats, error) {
 	stats := []*PrimaryKeyStats{}
 	err := json.Unmarshal(sr.buffer, &stats)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid(
-			"valid JSON",
-			string(sr.buffer),
-			err.Error())
+		return nil, merr.WrapErrDataIntegrity(err, "PrimaryKeyStats list unmarshal failed")
 	}
 
 	return stats, nil

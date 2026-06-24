@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -30,11 +28,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var errLazyLoadTimeout = merr.WrapErrServiceInternal("lazy load time out")
-
 func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	lazyLoadTimeout := paramtable.Get().QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
-	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, errLazyLoadTimeout)
+	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, merr.WrapErrServiceInternal("lazy load time out"))
 }
 
 func GetPkField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
@@ -81,7 +77,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 4
 					break
@@ -92,7 +88,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim / 8
 					break
@@ -103,7 +99,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 2
 					break
@@ -114,14 +110,14 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrParameterInvalidMsg("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 2
 					break
 				}
 			}
 		case schemapb.DataType_SparseFloatVector:
-			return nil, errors.New("SparseFloatVector not support in row based message")
+			return nil, merr.WrapErrParameterInvalidMsg("SparseFloatVector not support in row based message")
 		}
 	}
 
@@ -262,7 +258,7 @@ func getFieldSchema(schema *schemapb.CollectionSchema, fieldID int64) (*schemapb
 			}
 		}
 	}
-	return nil, fmt.Errorf("field %d not found in schema", fieldID)
+	return nil, merr.WrapErrFieldNotFound(fieldID, "not in schema")
 }
 
 func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {
