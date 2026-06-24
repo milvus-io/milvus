@@ -261,7 +261,7 @@ func NewObservabilityServerUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		lvl, shouldLog := logCfg.shouldLog(info.FullMethod)
-		if !shouldLog {
+		if !shouldLog || !mlog.LevelEnabled(lvl) {
 			return metricsIntercept(ctx, req, info, handler)
 		}
 
@@ -289,7 +289,7 @@ func NewObservabilityServerStreamInterceptor() grpc.StreamServerInterceptor {
 
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		lvl, shouldLog := logCfg.shouldLog(info.FullMethod)
-		if !shouldLog {
+		if !shouldLog || !mlog.LevelEnabled(lvl) {
 			return metricsIntercept(srv, ss, info, handler)
 		}
 
@@ -312,7 +312,7 @@ func NewObservabilityClientUnaryInterceptor() grpc.UnaryClientInterceptor {
 
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		lvl, shouldLog := logCfg.shouldLog(method)
-		if !shouldLog {
+		if !shouldLog || !mlog.LevelEnabled(lvl) {
 			return metricsIntercept(ctx, method, req, reply, cc, invoker, opts...)
 		}
 
@@ -337,7 +337,7 @@ func NewObservabilityClientStreamInterceptor() grpc.StreamClientInterceptor {
 
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		lvl, shouldLog := logCfg.shouldLog(method)
-		if !shouldLog {
+		if !shouldLog || !mlog.LevelEnabled(lvl) {
 			return metricsIntercept(ctx, desc, cc, method, streamer, opts...)
 		}
 
@@ -348,7 +348,7 @@ func NewObservabilityClientStreamInterceptor() grpc.StreamClientInterceptor {
 			cs, callErr = streamer(ctx, desc, cc, method, opts...)
 			return cs, callErr
 		}
-		_, _ = metricsIntercept(ctx, desc, cc, method, wrapped, opts...)
+		cs, callErr = metricsIntercept(ctx, desc, cc, method, wrapped, opts...)
 		emitClientAccessLog(ctx, lvl, method, callErr, time.Since(start))
 		return cs, callErr
 	}

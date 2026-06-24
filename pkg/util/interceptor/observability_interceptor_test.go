@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -300,13 +301,44 @@ func TestObservabilityClientStream_AccessLogPath(t *testing.T) {
 	intercept := NewObservabilityClientStreamInterceptor()
 
 	streamerCalled := false
+	rawStream := &mockClientStream{ctx: context.Background()}
 	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		streamerCalled = true
-		return nil, nil
+		return rawStream, nil
 	}
 	cs, err := intercept(context.Background(), &grpc.StreamDesc{}, nil, "/svc/Stream", streamer)
 
 	assert.True(t, streamerCalled)
-	assert.Nil(t, cs)
+	assert.NotNil(t, cs)
+	assert.NotEqual(t, rawStream, cs)
 	assert.NoError(t, err)
+}
+
+type mockClientStream struct {
+	grpc.ClientStream
+	ctx context.Context
+}
+
+func (s *mockClientStream) Header() (metadata.MD, error) {
+	return metadata.MD{}, nil
+}
+
+func (s *mockClientStream) Trailer() metadata.MD {
+	return metadata.MD{}
+}
+
+func (s *mockClientStream) CloseSend() error {
+	return nil
+}
+
+func (s *mockClientStream) Context() context.Context {
+	return s.ctx
+}
+
+func (s *mockClientStream) SendMsg(any) error {
+	return nil
+}
+
+func (s *mockClientStream) RecvMsg(any) error {
+	return nil
 }
