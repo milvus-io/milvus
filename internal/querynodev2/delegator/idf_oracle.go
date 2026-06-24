@@ -117,6 +117,19 @@ func (s bm25FunctionSet) IsSupersetOf(old bm25FunctionSet) bool {
 	return true
 }
 
+func (s bm25FunctionSet) HasIncompatibleCommonFunction(old bm25FunctionSet) bool {
+	// Do not reuse IsSupersetOf here: loaded collections must allow BM25
+	// function fields to be dropped and re-added with new output field IDs,
+	// while still rejecting in-place changes to an existing output field.
+	for outputFieldID, newFunction := range s {
+		oldFunction, ok := old[outputFieldID]
+		if ok && !sameBM25Function(newFunction, oldFunction) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s bm25FunctionSet) Equal(other bm25FunctionSet) bool {
 	return len(s) == len(other) && s.IsSupersetOf(other)
 }
@@ -208,6 +221,40 @@ func (s *sealedBm25Stats) addFieldsLocked(fieldIDs []int64) {
 	}
 }
 
+func (s *sealedBm25Stats) RetainFields(fieldIDs map[int64]struct{}) int64 {
+	s.Lock()
+	defer s.Unlock()
+
+	kept := s.fieldList[:0]
+	removedDiskSize := int64(0)
+	for _, fieldID := range s.fieldList {
+		if _, ok := fieldIDs[fieldID]; ok {
+			kept = append(kept, fieldID)
+			continue
+		}
+		if s.localDir == "" {
+			continue
+		}
+		fieldDir := path.Join(s.localDir, fmt.Sprintf("%d", fieldID))
+		fieldDiskSize := bm25FieldDirDiskSize(fieldDir)
+		if err := os.RemoveAll(fieldDir); err != nil {
+			// Removal failed: the files remain on disk, so keep tracking the
+			// field and do not count its bytes as freed — tracked disk usage
+			// must match what is physically present.
+			mlog.Warn(context.TODO(), "remove dropped bm25 stats field failed", mlog.Err(err), mlog.String("path", fieldDir))
+			kept = append(kept, fieldID)
+			continue
+		}
+		removedDiskSize += fieldDiskSize
+	}
+	s.fieldList = kept
+	if removedDiskSize > s.diskSize {
+		removedDiskSize = s.diskSize
+	}
+	s.diskSize -= removedDiskSize
+	return removedDiskSize
+}
+
 func (s *sealedBm25Stats) FieldList() []int64 {
 	s.RLock()
 	defer s.RUnlock()
@@ -285,14 +332,32 @@ func newBm25Stats(functions []*schemapb.FunctionSchema) bm25Stats {
 	return stats
 }
 
-func (s bm25Stats) AddMissingFunctions(functions []*schemapb.FunctionSchema) {
+func bm25FunctionFieldIDs(functions []*schemapb.FunctionSchema) map[int64]struct{} {
+	fieldIDs := make(map[int64]struct{})
 	for _, function := range functions {
 		if function.GetType() != schemapb.FunctionType_BM25 || len(function.GetOutputFieldIds()) == 0 {
 			continue
 		}
-		fieldID := function.GetOutputFieldIds()[0]
+		fieldIDs[function.GetOutputFieldIds()[0]] = struct{}{}
+	}
+	return fieldIDs
+}
+
+func (s bm25Stats) SyncFunctions(functions []*schemapb.FunctionSchema) map[int64]struct{} {
+	fieldIDs := bm25FunctionFieldIDs(functions)
+	s.RetainFields(fieldIDs)
+	for fieldID := range fieldIDs {
 		if _, ok := s[fieldID]; !ok {
 			s[fieldID] = storage.NewBM25Stats()
+		}
+	}
+	return fieldIDs
+}
+
+func (s bm25Stats) RetainFields(fieldIDs map[int64]struct{}) {
+	for fieldID := range s {
+		if _, ok := fieldIDs[fieldID]; !ok {
+			delete(s, fieldID)
 		}
 	}
 }
@@ -411,7 +476,18 @@ func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
 
 func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
 	o.Lock()
-	o.current.AddMissingFunctions(functions)
+	fieldIDs := o.current.SyncFunctions(functions)
+	for _, stats := range o.growing {
+		stats.RetainFields(fieldIDs)
+	}
+	removedDiskSize := int64(0)
+	o.sealed.Range(func(_ int64, stats *sealedBm25Stats) bool {
+		removedDiskSize += stats.RetainFields(fieldIDs)
+		return true
+	})
+	if removedDiskSize > 0 {
+		o.sealedDiskSize.Add(-removedDiskSize)
+	}
 	o.Unlock()
 	o.syncResource()
 	return nil
@@ -609,6 +685,27 @@ type streamLoadResult struct {
 	fieldList []int64
 	stats     bm25Stats // non-nil only when needParse=true
 	diskSize  int64
+}
+
+func bm25FieldDirDiskSize(fieldDir string) int64 {
+	entries, err := os.ReadDir(fieldDir)
+	if err != nil {
+		return 0
+	}
+
+	size := int64(0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			mlog.Warn(context.TODO(), "stat bm25 stats field file failed", mlog.Err(err), mlog.String("path", path.Join(fieldDir, entry.Name())))
+			continue
+		}
+		size += info.Size()
+	}
+	return size
 }
 
 // streamLoad downloads BM25 stats from remote storage to local disk.

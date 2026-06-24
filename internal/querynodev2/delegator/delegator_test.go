@@ -2218,8 +2218,19 @@ func TestBM25FunctionSetAdditiveValidation(t *testing.T) {
 
 	changed := proto.Clone(newBM25FunctionSchema()).(*schemapb.FunctionSchema)
 	changed.InputFieldIds = []int64{103}
-	assert.False(t, newBM25FunctionSet(newFunctionRuntimeTestSchema(changed)).IsSupersetOf(base))
-	assert.False(t, newBM25FunctionSet(newFunctionRuntimeTestSchema()).IsSupersetOf(base))
+	changedSet := newBM25FunctionSet(newFunctionRuntimeTestSchema(changed))
+	assert.False(t, changedSet.IsSupersetOf(base))
+	assert.True(t, changedSet.HasIncompatibleCommonFunction(base))
+
+	droppedSet := newBM25FunctionSet(newFunctionRuntimeTestSchema())
+	assert.False(t, droppedSet.IsSupersetOf(base))
+	assert.False(t, droppedSet.HasIncompatibleCommonFunction(base))
+
+	readded := proto.Clone(newBM25FunctionSchema()).(*schemapb.FunctionSchema)
+	readded.OutputFieldIds = []int64{104}
+	readdedSet := newBM25FunctionSet(newFunctionRuntimeTestSchema(readded))
+	assert.False(t, readdedSet.IsSupersetOf(base))
+	assert.False(t, readdedSet.HasIncompatibleCommonFunction(base))
 }
 
 func TestBM25FunctionSetIgnoresAnalyzerParams(t *testing.T) {
@@ -2253,7 +2264,7 @@ func TestBM25FunctionSetNormalizesFunctionParamOrder(t *testing.T) {
 	assert.True(t, changed.IsSupersetOf(base))
 }
 
-func TestUpdateSchemaRejectsNonAdditiveBM25FunctionChange(t *testing.T) {
+func TestUpdateSchemaRejectsIncompatibleBM25FunctionChange(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	workerManager := cluster.NewMockManager(t)
@@ -2280,7 +2291,7 @@ func TestUpdateSchemaRejectsNonAdditiveBM25FunctionChange(t *testing.T) {
 	changed.InputFieldIds = []int64{103}
 	err := sd.UpdateSchema(context.Background(), newFunctionRuntimeTestSchemaWithVersion(1, changed), 100)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported non-additive BM25 function schema change")
+	assert.Contains(t, err.Error(), "unsupported incompatible BM25 function schema change")
 	assert.True(t, sd.functionState.hasFunctionType(102, schemapb.FunctionType_BM25))
 	assert.Same(t, oldOracle, sd.getIDFOracle())
 }
@@ -2433,7 +2444,7 @@ func TestUpdateSchemaRefreshesCollectionBaselineForSequentialBM25Validation(t *t
 	changed.InputFieldIds = []int64{103}
 	err = sd.UpdateSchema(context.Background(), newFunctionRuntimeTestSchemaWithVersion(2, changed), 200)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported non-additive BM25 function schema change")
+	assert.Contains(t, err.Error(), "unsupported incompatible BM25 function schema change")
 	require.Equal(t, uint64(1), sd.collection.SchemaVersion())
 }
 

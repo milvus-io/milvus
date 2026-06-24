@@ -1953,7 +1953,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Nil(mutation)
 	})
 
-	suite.Run("replacement result drops old segment and creates flushed new segment", func() {
+	suite.Run("replacement result accepts expanded preallocated segment ID range", func() {
 		m := &meta{
 			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 			segments: makeSegments(1, commonpb.SegmentState_Flushed),
@@ -1964,7 +1964,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			Schema: &schemapb.CollectionSchema{
 				Version: 3,
 			},
-			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 2, End: 3},
+			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 2, End: 4},
 		}
 		oldBefore := m.segments.GetSegment(1)
 		oldBefore.InsertChannel = "test-channel"
