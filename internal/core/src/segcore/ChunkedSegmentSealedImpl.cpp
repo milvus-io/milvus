@@ -294,6 +294,18 @@ dispatch_pk_type(DataType data_type, Func&& func) {
     }
 }
 
+template <sealed_segment_detail::PrimaryKey PK>
+sealed_segment_detail::PrimaryKeyView<PK>
+get_pk_value(const PinWrapper<Chunk*>& pin, int64_t offset) {
+    if constexpr (std::same_as<PK, int64_t>) {
+        auto src = reinterpret_cast<const int64_t*>(pin.get()->RawData());
+        return src[offset];
+    } else {
+        auto string_chunk = static_cast<StringChunk*>(pin.get());
+        return string_chunk->operator[](offset);
+    }
+}
+
 template <sealed_segment_detail::PrimaryKey PK, typename Callback>
 void
 for_each_sorted_pk_match(
@@ -582,19 +594,6 @@ ChunkedSegmentSealedImpl::pk_lower_bound(
         return {};  // Invalid starting chunk
     }
 
-    using PKViewType = sealed_segment_detail::PrimaryKeyView<PK>;
-
-    auto get_val_view = [&](int chunk_id, int in_chunk_offset) -> PKViewType {
-        auto& pw = all_chunk_pins[chunk_id];
-        if constexpr (std::same_as<PK, int64_t>) {
-            auto src = reinterpret_cast<const int64_t*>(pw.get()->RawData());
-            return src[in_chunk_offset];
-        } else {
-            auto string_chunk = static_cast<StringChunk*>(pw.get());
-            return string_chunk->operator[](in_chunk_offset);
-        }
-    };
-
     // Binary search at chunk level to find the first chunk that might contain pk
     int left_chunk_id = from_chunk_id;
     int right_chunk_id = num_chunk - 1;
@@ -604,8 +603,9 @@ ChunkedSegmentSealedImpl::pk_lower_bound(
         int mid_chunk_id = left_chunk_id + (right_chunk_id - left_chunk_id) / 2;
         auto chunk_row_num = pk_column->chunk_row_nums(mid_chunk_id);
 
-        PKViewType min_val = get_val_view(mid_chunk_id, 0);
-        PKViewType max_val = get_val_view(mid_chunk_id, chunk_row_num - 1);
+        auto min_val = get_pk_value<PK>(all_chunk_pins[mid_chunk_id], 0);
+        auto max_val =
+            get_pk_value<PK>(all_chunk_pins[mid_chunk_id], chunk_row_num - 1);
 
         if (pk >= min_val && pk <= max_val) {
             // pk might be in this chunk
@@ -637,7 +637,8 @@ ChunkedSegmentSealedImpl::pk_lower_bound(
 
     while (left_offset < right_offset) {
         int mid_offset = left_offset + (right_offset - left_offset) / 2;
-        PKViewType mid_val = get_val_view(target_chunk_id, mid_offset);
+        auto mid_val =
+            get_pk_value<PK>(all_chunk_pins[target_chunk_id], mid_offset);
 
         if (mid_val < pk) {
             left_offset = mid_offset + 1;
@@ -649,7 +650,8 @@ ChunkedSegmentSealedImpl::pk_lower_bound(
     // Check if we found a valid position
     if (left_offset < chunk_row_num) {
         // Found position within current chunk
-        PKViewType found_val = get_val_view(target_chunk_id, left_offset);
+        auto found_val =
+            get_pk_value<PK>(all_chunk_pins[target_chunk_id], left_offset);
         bool exact_match = (found_val == pk);
         return {target_chunk_id, left_offset, exact_match};
     } else {
@@ -657,7 +659,8 @@ ChunkedSegmentSealedImpl::pk_lower_bound(
         if (target_chunk_id + 1 < num_chunk) {
             // Next chunk exists, return its first position
             // Check if the first value in next chunk equals pk
-            PKViewType next_val = get_val_view(target_chunk_id + 1, 0);
+            auto next_val =
+                get_pk_value<PK>(all_chunk_pins[target_chunk_id + 1], 0);
             bool exact_match = (next_val == pk);
             return {target_chunk_id + 1, 0, exact_match};
         } else {
@@ -677,19 +680,6 @@ ChunkedSegmentSealedImpl::find_last_pk_position(
     int first_in_chunk_offset) const {
     const auto num_chunk = pk_column->num_chunks();
 
-    using PKViewType = sealed_segment_detail::PrimaryKeyView<PK>;
-
-    auto get_val_view = [&](int chunk_id, int in_chunk_offset) -> PKViewType {
-        auto pw = all_chunk_pins[chunk_id];
-        if constexpr (std::same_as<PK, int64_t>) {
-            auto src = reinterpret_cast<const int64_t*>(pw.get()->RawData());
-            return src[in_chunk_offset];
-        } else {
-            auto string_chunk = static_cast<StringChunk*>(pw.get());
-            return string_chunk->operator[](in_chunk_offset);
-        }
-    };
-
     int last_chunk_id = first_chunk_id;
     int last_offset = first_in_chunk_offset;
 
@@ -697,7 +687,8 @@ ChunkedSegmentSealedImpl::find_last_pk_position(
     auto chunk_row_num = pk_column->chunk_row_nums(first_chunk_id);
     for (int offset = first_in_chunk_offset + 1; offset < chunk_row_num;
          offset++) {
-        PKViewType curr_val = get_val_view(first_chunk_id, offset);
+        auto curr_val =
+            get_pk_value<PK>(all_chunk_pins[first_chunk_id], offset);
         if (curr_val == pk) {
             last_offset = offset;
         } else {
@@ -711,7 +702,7 @@ ChunkedSegmentSealedImpl::find_last_pk_position(
         auto curr_chunk_row_num = pk_column->chunk_row_nums(chunk_id);
 
         // Check first value in this chunk
-        PKViewType first_val = get_val_view(chunk_id, 0);
+        auto first_val = get_pk_value<PK>(all_chunk_pins[chunk_id], 0);
         if (first_val != pk) {
             // This chunk doesn't contain pk anymore
             return {last_chunk_id, last_offset};
@@ -722,7 +713,7 @@ ChunkedSegmentSealedImpl::find_last_pk_position(
         last_offset = 0;
 
         for (int offset = 1; offset < curr_chunk_row_num; offset++) {
-            PKViewType curr_val = get_val_view(chunk_id, offset);
+            auto curr_val = get_pk_value<PK>(all_chunk_pins[chunk_id], offset);
             if (curr_val == pk) {
                 last_offset = offset;
             } else {
