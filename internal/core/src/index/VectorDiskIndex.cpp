@@ -355,7 +355,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             nostd_span_load_engine);
         auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
         if (stat != knowhere::Status::success)
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to Deserialize index, {}",
                       KnowhereStatusString(stat));
         span_load_engine->End();
@@ -385,7 +385,7 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
     if (!IsAllNullNullable(offset_mapping) && !IsEmptyEmbListIndex()) {
         auto stat = index_.Serialize(ret);
         if (stat != knowhere::Status::success) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to serialize index, {}",
                       KnowhereStatusString(stat));
         }
@@ -511,7 +511,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     build_config.erase(VEC_OPT_FIELDS);
     auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
-        ThrowInfo(ErrorCode::IndexBuildError,
+        ThrowInfo(knowhere::IsInputError(stat) ? ErrorCode::InvalidParameter
+                                               : ErrorCode::IndexBuildError,
                   "failed to build disk index, {}",
                   KnowhereStatusString(stat));
 
@@ -650,7 +651,8 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
     auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
-        ThrowInfo(ErrorCode::IndexBuildError,
+        ThrowInfo(knowhere::IsInputError(stat) ? ErrorCode::InvalidParameter
+                                               : ErrorCode::IndexBuildError,
                   "failed to build index, {}",
                   KnowhereStatusString(stat));
 
@@ -729,7 +731,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             auto res =
                 index_.RangeSearch(dataset, search_config, bitset, op_context);
             if (!res.has_value()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                           fmt::format("failed to range search: {}: {}",
                                       KnowhereStatusString(res.error()),
                                       res.what()));
@@ -740,7 +742,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
             auto res =
                 index_.Search(dataset, search_config, bitset, op_context);
             if (!res.has_value()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                           fmt::format("failed to search: {}: {}",
                                       KnowhereStatusString(res.error()),
                                       res.what()));
@@ -851,7 +853,7 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
 
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                   fmt::format("failed to get vector: {}: {}",
                               KnowhereStatusString(res.error()),
                               res.what()));
@@ -882,7 +884,7 @@ VectorDiskAnnIndex<T>::GetEmbListByIds(const DatasetPtr dataset,
 
     auto res = index_.GetEmbListByIds(dataset, metric_type);
     if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                   fmt::format("failed to get emb list: {}: {}",
                               KnowhereStatusString(res.error()),
                               res.what()));
