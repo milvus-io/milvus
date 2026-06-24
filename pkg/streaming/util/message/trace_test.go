@@ -4,8 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
 func makeSpanContext(t *testing.T, tid, sid string, flags byte) trace.SpanContext {
@@ -26,13 +29,13 @@ func TestInjectExtractTraceContext_RoundTrip(t *testing.T) {
 	sc := makeSpanContext(t, "0102030405060708090a0b0c0d0e0f10", "1112131415161718", 0x01)
 	ctxIn := trace.ContextWithRemoteSpanContext(context.Background(), sc)
 
-	p := propertiesImpl{}
-	InjectTraceContext(ctxIn, p)
+	msg := CreateTestEmptyInsertMesage(1, nil)
+	InjectTraceContext(ctxIn, msg)
 
-	_, ok := p.Get(messageTraceContext)
+	_, ok := msg.Properties().Get(messageTraceContext)
 	assert.True(t, ok, "InjectTraceContext should set _tc")
 
-	ctxOut := ExtractTraceContext(context.Background(), p)
+	ctxOut := ExtractTraceContext(context.Background(), msg)
 	got := trace.SpanContextFromContext(ctxOut)
 	assert.True(t, got.IsValid())
 	assert.Equal(t, sc.TraceID(), got.TraceID())
@@ -41,55 +44,59 @@ func TestInjectExtractTraceContext_RoundTrip(t *testing.T) {
 }
 
 func TestInjectTraceContext_NoActiveSpan_NoOp(t *testing.T) {
-	p := propertiesImpl{}
-	InjectTraceContext(context.Background(), p) // no span in ctx
-	_, ok := p.Get(messageTraceContext)
+	msg := CreateTestEmptyInsertMesage(1, nil)
+	InjectTraceContext(context.Background(), msg) // no span in ctx
+	_, ok := msg.Properties().Get(messageTraceContext)
 	assert.False(t, ok, "InjectTraceContext should be a no-op without an active span")
 }
 
 func TestExtractTraceContext_MissingKey_ReturnsOriginalCtx(t *testing.T) {
-	p := propertiesImpl{}
+	msg := CreateTestEmptyInsertMesage(1, nil)
 	baseCtx := context.Background()
-	ctx := ExtractTraceContext(baseCtx, p)
+	ctx := ExtractTraceContext(baseCtx, msg)
 	assert.Equal(t, baseCtx, ctx)
 }
 
 func TestExtractTraceContext_MalformedValue_ReturnsOriginalCtx(t *testing.T) {
-	p := propertiesImpl{messageTraceContext: "!!!not-base64!!!"}
+	msg := CreateTestEmptyInsertMesage(1, nil)
+	msg.Properties().ToRawMap()[messageTraceContext] = "!!!not-base64!!!"
 	baseCtx := context.Background()
-	ctx := ExtractTraceContext(baseCtx, p)
+	ctx := ExtractTraceContext(baseCtx, msg)
 	assert.Equal(t, baseCtx, ctx)
 }
 
-func TestExtractSpanContextFromProperties_EmptyWhenMissing(t *testing.T) {
-	p := propertiesImpl{}
-	sc := ExtractSpanContextFromProperties(p)
+func TestExtractSpanContext_EmptyWhenMissing(t *testing.T) {
+	msg := CreateTestEmptyInsertMesage(1, nil)
+	sc := extractSpanContext(msg)
 	assert.False(t, sc.IsValid())
 }
 
-func TestExtractSpanContextFromProperties_Valid(t *testing.T) {
+func TestExtractSpanContext_Valid(t *testing.T) {
 	orig := makeSpanContext(t, "0102030405060708090a0b0c0d0e0f10", "1112131415161718", 0x01)
-	p := propertiesImpl{}
-	InjectTraceContext(trace.ContextWithRemoteSpanContext(context.Background(), orig), p)
-	sc := ExtractSpanContextFromProperties(p)
+	msg := CreateTestEmptyInsertMesage(1, nil)
+	InjectTraceContext(trace.ContextWithRemoteSpanContext(context.Background(), orig), msg)
+	sc := extractSpanContext(msg)
 	assert.True(t, sc.IsValid())
 	assert.Equal(t, orig.TraceID(), sc.TraceID())
 	assert.Equal(t, orig.SpanID(), sc.SpanID())
 	assert.Equal(t, orig.TraceFlags(), sc.TraceFlags())
 }
 
-func TestInjectTraceContextIntoMap_RoundTrip(t *testing.T) {
+func TestInjectTraceContext_BroadcastMutableMessage(t *testing.T) {
 	sc := makeSpanContext(t, "0102030405060708090a0b0c0d0e0f10", "1112131415161718", 0x01)
 	ctx := trace.ContextWithRemoteSpanContext(context.Background(), sc)
 
-	m := map[string]string{"other": "v"}
-	InjectTraceContextIntoMap(ctx, m)
+	msg := NewDropCollectionMessageBuilderV1().
+		WithHeader(&messagespb.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		WithBroadcast([]string{"v1", "v2"}).
+		MustBuildBroadcast()
+	InjectTraceContext(ctx, msg)
 
-	_, ok := m[messageTraceContext]
+	_, ok := msg.Properties().Get(messageTraceContext)
 	assert.True(t, ok)
 
-	p := propertiesImpl(m)
-	ctxOut := ExtractTraceContext(context.Background(), p)
+	ctxOut := ExtractTraceContext(context.Background(), msg)
 	got := trace.SpanContextFromContext(ctxOut)
 	assert.True(t, got.IsValid())
 	assert.Equal(t, sc.TraceID(), got.TraceID())

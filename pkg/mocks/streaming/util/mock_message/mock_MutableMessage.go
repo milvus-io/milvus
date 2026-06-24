@@ -1090,23 +1090,8 @@ func (_c *MockMutableMessage_WithReplicateHeader_Call) RunAndReturn(run func(*me
 }
 
 // WithTraceContext provides a mock function with given fields: ctx
-func (_m *MockMutableMessage) WithTraceContext(ctx context.Context) message.MutableMessage {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for WithTraceContext")
-	}
-
-	var r0 message.MutableMessage
-	if rf, ok := ret.Get(0).(func(context.Context) message.MutableMessage); ok {
-		r0 = rf(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(message.MutableMessage)
-		}
-	}
-
-	return r0
+func (_m *MockMutableMessage) WithTraceContext(ctx context.Context) {
+	_m.Called(ctx)
 }
 
 // MockMutableMessage_WithTraceContext_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithTraceContext'
@@ -1127,13 +1112,13 @@ func (_c *MockMutableMessage_WithTraceContext_Call) Run(run func(ctx context.Con
 	return _c
 }
 
-func (_c *MockMutableMessage_WithTraceContext_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithTraceContext_Call {
-	_c.Call.Return(_a0)
+func (_c *MockMutableMessage_WithTraceContext_Call) Return() *MockMutableMessage_WithTraceContext_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockMutableMessage_WithTraceContext_Call) RunAndReturn(run func(context.Context) message.MutableMessage) *MockMutableMessage_WithTraceContext_Call {
-	_c.Call.Return(run)
+func (_c *MockMutableMessage_WithTraceContext_Call) RunAndReturn(run func(context.Context)) *MockMutableMessage_WithTraceContext_Call {
+	_c.Run(run)
 	return _c
 }
 

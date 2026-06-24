@@ -3,7 +3,6 @@ package message
 import (
 	"context"
 
-	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -17,6 +16,12 @@ var (
 	_ ImmutableMessage    = (*immutableMessageImpl)(nil)
 	_ ImmutableTxnMessage = (*immutableTxnMessageImpl)(nil)
 )
+
+// TraceContextInjector injects the current ctx's W3C trace span context into
+// the message under the reserved _tc property.
+type TraceContextInjector interface {
+	WithTraceContext(ctx context.Context)
+}
 
 // BasicMessage is the basic interface of message.
 type BasicMessage interface {
@@ -83,6 +88,7 @@ type BasicMessage interface {
 // Message can be modified before it is persistent by wal.
 type MutableMessage interface {
 	BasicMessage
+	TraceContextInjector
 
 	// VChannel returns the virtual channel of current message.
 	// Available only when the message's version greater than 0.
@@ -128,12 +134,6 @@ type MutableMessage interface {
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithReplicateHeader(rh *ReplicateHeader) MutableMessage
 
-	// WithTraceContext injects the current ctx's W3C trace span context into
-	// the message under the reserved _tc property. No-op when ctx has no active
-	// span. Used to propagate trace across the WAL write RPC boundary.
-	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
-	WithTraceContext(ctx context.Context) MutableMessage
-
 	// IntoImmutableMessage converts the mutable message to immutable message.
 	IntoImmutableMessage(msgID MessageID) ImmutableMessage
 }
@@ -150,6 +150,7 @@ type ReplicateMutableMessage interface {
 // Indicated the message is broadcasted on various vchannels.
 type BroadcastMutableMessage interface {
 	BasicMessage
+	TraceContextInjector
 
 	// WithBroadcastID sets the broadcast id of the message.
 	WithBroadcastID(broadcastID uint64) BroadcastMutableMessage

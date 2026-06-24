@@ -121,7 +121,7 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 
 	ctx, span := otel.Tracer("milvus.streaming.wal").Start(ctx, "wal.append.client")
 	defer span.End()
-	msg.WithTraceContext(ctx)
+	message.InjectTraceContext(ctx, msg)
 
 	for {
 		// get producer.

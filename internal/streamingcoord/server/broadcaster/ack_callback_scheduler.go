@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 
@@ -326,7 +325,7 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 // span under it, invoking fn with the new ctx. Span is always ended,
 // and errors are recorded on the span.
 func runAckCallbackWithTrace(msg message.BroadcastMutableMessage, fn func(ctx context.Context) error) error {
-	parentCtx := message.ExtractTraceContext(context.Background(), msg.Properties())
+	parentCtx := message.ExtractTraceContext(context.Background(), msg)
 	ctx, span := otel.Tracer("milvus.streaming.wal").Start(parentCtx, "broadcast.ack_callback")
 	defer span.End()
 	err := fn(ctx)

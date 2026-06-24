@@ -5,13 +5,20 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
-// InjectTraceContext writes the current span context into msg Properties
+// InjectTraceContext writes the current span context into msg
 // under the reserved key _tc as a base64-encoded marshaled TraceContextHeader.
 // No-op when no active / valid span is present on ctx.
-func InjectTraceContext(ctx context.Context, p Properties) {
+func InjectTraceContext(ctx context.Context, msg TraceContextInjector) {
+	if msg == nil {
+		return
+	}
+	msg.WithTraceContext(ctx)
+}
+
+func injectTraceContext(ctx context.Context, p Properties) {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
 		return
@@ -23,39 +30,25 @@ func InjectTraceContext(ctx context.Context, p Properties) {
 	p.Set(messageTraceContext, val)
 }
 
-// InjectTraceContextIntoMap is a variant operating on a raw map[string]string,
-// used by CDC / replicate paths that work on proto-decoded Properties maps.
-func InjectTraceContextIntoMap(ctx context.Context, m map[string]string) {
-	if m == nil {
-		return
-	}
-	sc := trace.SpanContextFromContext(ctx)
-	if !sc.IsValid() {
-		return
-	}
-	val, ok := encodeTraceContextHeader(sc)
-	if !ok {
-		return
-	}
-	m[messageTraceContext] = val
-}
-
-// ExtractTraceContext reads _tc from Properties and returns ctx with the
+// ExtractTraceContext reads _tc from msg and returns ctx with the
 // extracted remote span context attached. Returns ctx unchanged when _tc is
 // absent or malformed — trace propagation is never a correctness dependency.
-func ExtractTraceContext(ctx context.Context, p RProperties) context.Context {
-	sc := ExtractSpanContextFromProperties(p)
+func ExtractTraceContext(ctx context.Context, msg BasicMessage) context.Context {
+	sc := extractSpanContext(msg)
 	if !sc.IsValid() {
 		return ctx
 	}
 	return trace.ContextWithRemoteSpanContext(ctx, sc)
 }
 
-// ExtractSpanContextFromProperties returns the raw SpanContext stored in
-// Properties, or an invalid zero SpanContext when _tc is absent or malformed.
-// Used by call sites that need a Link (rather than a parent) to the upstream
-// span — e.g. CDC replication.
-func ExtractSpanContextFromProperties(p RProperties) trace.SpanContext {
+func extractSpanContext(msg BasicMessage) trace.SpanContext {
+	if msg == nil {
+		return trace.SpanContext{}
+	}
+	return extractSpanContextFromProperties(msg.Properties())
+}
+
+func extractSpanContextFromProperties(p RProperties) trace.SpanContext {
 	value, ok := p.Get(messageTraceContext)
 	if !ok {
 		return trace.SpanContext{}

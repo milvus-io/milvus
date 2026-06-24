@@ -12,7 +12,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func TestRunAckCallbackWithTrace_OpensChildSpan(t *testing.T) {
@@ -32,8 +32,7 @@ func TestRunAckCallbackWithTrace_OpensChildSpan(t *testing.T) {
 	originSpan.End()
 
 	msg := buildTestBroadcastMessageForTrace(t)
-	// Inject _tc into msg Properties directly via InjectTraceContextIntoMap.
-	message.InjectTraceContextIntoMap(originCtx, msg.Properties().ToRawMap())
+	message.InjectTraceContext(originCtx, msg)
 
 	var innerCalled bool
 	var childTraceID trace.TraceID
