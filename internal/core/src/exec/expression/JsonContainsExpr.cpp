@@ -38,9 +38,9 @@ class ContainsAllMatcher {
             value_to_bit_[target] = idx++;
         }
         if (use_small_) {
-            full_mask_ = target_count_ == 64 ? ~uint64_t(0)
-                                             : (uint64_t(1) << target_count_) -
-                                                   1;
+            full_mask_ = target_count_ == 64
+                             ? ~uint64_t(0)
+                             : (uint64_t(1) << target_count_) - 1;
         } else {
             num_words_ = (target_count_ + 63) / 64;
         }
