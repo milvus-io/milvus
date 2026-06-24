@@ -101,6 +101,7 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
 				mlog.Uint64("schemaBarrierTs", nodeMsg.schemaBarrierTs),
 				mlog.Err(err))
+			return nil
 		}
 	}
 

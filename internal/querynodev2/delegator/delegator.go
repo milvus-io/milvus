@@ -1287,11 +1287,13 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return err
 	}
 
-	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateSchemaRequest, worker cluster.Worker) (*StatusWrapper, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 1)
-		status, err := worker.UpdateSchema(ctx, req)
-		return (*StatusWrapper)(status), err
-	}, "UpdateSchema", log)
+	err = retry.Do(ctx, func() error {
+		_, err := executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateSchemaRequest, worker cluster.Worker) (*StatusWrapper, error) {
+			status, err := worker.UpdateSchema(ctx, req)
+			return (*StatusWrapper)(status), err
+		}, "UpdateSchema", log)
+		return err
+	}, retry.AttemptAlways(), retry.Sleep(200*time.Millisecond), retry.MaxSleepTime(2*time.Second))
 	if err != nil {
 		newFunctionState.Close()
 		return err
@@ -1299,7 +1301,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 
 	// Apply the local collection update with the same barrier used for remote
 	// workers. collectionManager keeps schema.Version as the logical freshness key.
-	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
+	if _, err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
 		newFunctionState.Close()
 		return err
 	}

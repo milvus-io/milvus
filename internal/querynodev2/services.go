@@ -588,46 +588,23 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	// Pass the barrier timestamp through; collectionManager derives the logical
 	// schema version from the schema payload when it is present.
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
+	changed, err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
 	if err != nil {
 		log.Warn(ctx, "failed to update schema", mlog.Err(err))
 		return merr.Status(err), nil
 	}
-
-	// Only reopen segments already loaded on this QueryNode. Load-time refreshes stay
-	// on the delegator publish path so the service gate remains in one place.
-	infos := node.collectLoadedSealedSegmentLoadInfos(req.GetCollectionID())
-	if len(infos) == 0 {
+	if !changed {
 		return merr.Success(), nil
 	}
 
-	err = node.loader.ReopenSegments(ctx, infos)
+	// Only reopen segments already loaded on this QueryNode. Load-time refreshes stay
+	// on the delegator publish path so the service gate remains in one place.
+	err = node.loader.ReopenLoadedSealedSegmentsForSchemaUpdate(ctx, req.GetCollectionID())
 	if err != nil {
-		log.Warn(ctx, "failed to reopen loaded segments after schema update",
-			mlog.Int("segmentNum", len(infos)),
-			mlog.Err(err),
-		)
+		log.Warn(ctx, "failed to reopen loaded segments after schema update", mlog.Err(err))
 	}
 
 	return merr.Status(err), nil
-}
-
-func (node *QueryNode) collectLoadedSealedSegmentLoadInfos(collectionID int64) []*querypb.SegmentLoadInfo {
-	loaded := node.manager.Segment.GetBy(
-		segments.WithType(segments.SegmentTypeSealed),
-		segments.WithoutLevel(datapb.SegmentLevel_L0),
-	)
-
-	infos := make([]*querypb.SegmentLoadInfo, 0, len(loaded))
-	for _, segment := range loaded {
-		if segment.Collection() != collectionID {
-			continue
-		}
-		if info := segment.LoadInfo(); info != nil {
-			infos = append(infos, info)
-		}
-	}
-	return infos
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode

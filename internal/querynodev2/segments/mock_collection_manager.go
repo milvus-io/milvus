@@ -308,21 +308,31 @@ func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32)
 }
 
 // UpdateSchema provides a mock function with given fields: collectionID, schema, schemaBarrierTs
-func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) (bool, error) {
 	ret := _m.Called(collectionID, schema, schemaBarrierTs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateSchema")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, uint64) error); ok {
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, uint64) (bool, error)); ok {
+		return rf(collectionID, schema, schemaBarrierTs)
+	}
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, uint64) bool); ok {
 		r0 = rf(collectionID, schema, schemaBarrierTs)
 	} else {
-		r0 = ret.Error(0)
+		r0 = ret.Get(0).(bool)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(int64, *schemapb.CollectionSchema, uint64) error); ok {
+		r1 = rf(collectionID, schema, schemaBarrierTs)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockCollectionManager_UpdateSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSchema'
@@ -345,12 +355,12 @@ func (_c *MockCollectionManager_UpdateSchema_Call) Run(run func(collectionID int
 	return _c
 }
 
-func (_c *MockCollectionManager_UpdateSchema_Call) Return(_a0 error) *MockCollectionManager_UpdateSchema_Call {
-	_c.Call.Return(_a0)
+func (_c *MockCollectionManager_UpdateSchema_Call) Return(_a0 bool, _a1 error) *MockCollectionManager_UpdateSchema_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, uint64) error) *MockCollectionManager_UpdateSchema_Call {
+func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, uint64) (bool, error)) *MockCollectionManager_UpdateSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -100,6 +100,10 @@ type Loader interface {
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
 	) error
+
+	// ReopenLoadedSealedSegmentsForSchemaUpdate refreshes already loaded sealed segments
+	// for a collection after its schema has advanced on this QueryNode.
+	ReopenLoadedSealedSegmentsForSchemaUpdate(ctx context.Context, collectionID int64) error
 }
 
 type ResourceEstimate struct {
@@ -2559,19 +2563,47 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
 ) error {
+	return loader.reopenSegments(ctx, loadInfos, false)
+}
+
+func (loader *segmentLoader) ReopenLoadedSealedSegmentsForSchemaUpdate(ctx context.Context, collectionID int64) error {
+	loaded := loader.manager.Segment.GetBy(
+		WithType(SegmentTypeSealed),
+		WithoutLevel(datapb.SegmentLevel_L0),
+	)
+
+	infos := make([]*querypb.SegmentLoadInfo, 0, len(loaded))
+	for _, segment := range loaded {
+		if segment.Collection() != collectionID {
+			continue
+		}
+		if info := segment.LoadInfo(); info != nil {
+			infos = append(infos, info)
+		}
+	}
+
+	return loader.reopenSegments(ctx, infos, true)
+}
+
+func (loader *segmentLoader) reopenSegments(ctx context.Context,
+	loadInfos []*querypb.SegmentLoadInfo,
+	skipResourceCheck bool,
+) error {
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)
 	defer loader.unregister(infos...)
 
-	// use full resource in case of whole segment reopen
-	// TODO use calculated resource from segcore after supported
-	requestResourceResult, err := loader.requestResource(ctx, infos...)
-	if err != nil {
-		mlog.Warn(context.TODO(), "reopen segment request resource failed", mlog.Err(err))
-		return err
+	if !skipResourceCheck {
+		// use full resource in case of whole segment reopen
+		// TODO use calculated resource from segcore after supported
+		requestResourceResult, err := loader.requestResource(ctx, infos...)
+		if err != nil {
+			mlog.Warn(context.TODO(), "reopen segment request resource failed", mlog.Err(err))
+			return err
+		}
+		defer loader.freeRequestResource(requestResourceResult)
 	}
-	defer loader.freeRequestResource(requestResourceResult)
 
 	for _, info := range infos {
 		segment := loader.manager.Segment.GetSealed(info.GetSegmentID())
