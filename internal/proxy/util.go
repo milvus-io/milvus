@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -1437,6 +1438,25 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 		return util.DefaultDBName
 	}
 	return dbNameData[0]
+}
+
+// GetCurDBNameFromRequestOrContext returns the database a request actually
+// operates on. It prefers the DbName carried in the request body (which is
+// what downstream handlers execute against, after DatabaseInterceptor has
+// normalized it) and only falls back to the connection-context db / cluster
+// default when the request carries none.
+//
+// Privilege checks MUST use this rather than GetCurDBNameFromContextOrDefault:
+// authorizing against the connection-context db while the operation runs
+// against the request's DbName both falsely denies legitimate access and
+// allows cross-database privilege escalation (see milvus-io/milvus#50678).
+func GetCurDBNameFromRequestOrContext(ctx context.Context, req interface{}) string {
+	if getter, ok := req.(requestutil.DBNameGetter); ok {
+		if dbName := getter.GetDbName(); dbName != "" {
+			return dbName
+		}
+	}
+	return GetCurDBNameFromContextOrDefault(ctx)
 }
 
 func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
@@ -2954,8 +2974,10 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		}
 		return db.dbID, collToPartIDs, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:
-		dbName := GetCurDBNameFromContextOrDefault(ctx)
-		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
+		// Use the db the request actually targets (normalized by
+		// DatabaseInterceptor), consistent with the sibling cases, so quota is
+		// accounted against the correct database. See milvus-io/milvus#50678.
+		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
 		if err != nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}

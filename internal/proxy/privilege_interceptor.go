@@ -69,7 +69,19 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectType := privilegeExt.ObjectType.String()
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
-	dbName := GetCurDBNameFromContextOrDefault(ctx)
+	objectPrivilege := privilegeExt.ObjectPrivilege.String()
+	// Authorize against the db the request actually operates on: the request-body
+	// DbName takes precedence over the connection-context db (see
+	// milvus-io/milvus#50678). Cluster-level privileges (e.g. CreateDatabase) are
+	// not scoped to a specific database, so authorize them against the
+	// connection-context db (the pre-#50678 behavior) rather than the request's
+	// DbName — for CreateDatabase the request DbName is the brand-new database
+	// name, which would never match a pre-existing cluster grant. Database- and
+	// Collection-level privileges stay scoped to the db the request targets.
+	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
+	if util.GetPrivilegeLevel(util.MetaStore2API(objectPrivilege)) == milvuspb.PrivilegeLevel_Cluster.String() {
+		dbName = GetCurDBNameFromContextOrDefault(ctx)
+	}
 
 	// Resolve alias to actual collection name for RBAC checks
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
@@ -112,8 +124,6 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		}
 		objectNames = resolvedNames
 	}
-
-	objectPrivilege := privilegeExt.ObjectPrivilege.String()
 
 	log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
 		mlog.String("object_type", objectType), mlog.String("object_privilege", objectPrivilege),

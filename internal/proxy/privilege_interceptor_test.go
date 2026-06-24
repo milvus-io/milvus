@@ -82,12 +82,12 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		err = InitMetaCache(ctx, client)
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
@@ -134,18 +134,20 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Error(t, err)
 
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.FlushRequest{
-			DbName:          "db_test",
+			DbName:          "default",
 			CollectionNames: []string{"col1"},
 		})
 		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 
-		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "foo"), &milvuspb.LoadCollectionRequest{
+		// fooo holds Global-All only on "default"; a request explicitly targeting
+		// another db must be denied regardless of the connection-context db.
+		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "default"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
@@ -169,6 +171,172 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Panics(t, func() {
 			privilege.GetPolicyModel("foo")
 		})
+	})
+}
+
+// TestPrivilegeInterceptorRequestDBName guards against milvus-io/milvus#50678:
+// the privilege check must run against the db the request actually operates on
+// (request-body DbName takes precedence), not merely the connection-context db.
+func TestPrivilegeInterceptorRequestDBName(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				// scenario A: alice is granted Load on col1 ONLY in db_target.
+				funcutil.PolicyForPrivilege("role_a", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeLoad.String(), "db_target"),
+				// scenario B: bob is granted Load on col1 ONLY in default.
+				funcutil.PolicyForPrivilege("role_b", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeLoad.String(), "default"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("alice", "role_a"),
+				funcutil.EncodeUserRoleCache("bob", "role_b"),
+			},
+		}, nil
+	}
+	err := InitMetaCache(context.Background(), client)
+	assert.NoError(t, err)
+
+	// Both users connect WITHOUT useDatabase, so the connection-context db is
+	// "default"; they target a database purely via the request body DbName.
+	t.Run("false denial fixed: granted on db_target, request db_target -> allowed", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "alice:pwd"), &milvuspb.LoadCollectionRequest{
+			DbName:         "db_target",
+			CollectionName: "col1",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("escalation blocked: granted on default, request db_escalate -> denied", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "bob:pwd"), &milvuspb.LoadCollectionRequest{
+			DbName:         "db_escalate",
+			CollectionName: "col1",
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("fallback to context db when request carries no db_name", func(t *testing.T) {
+		// bob is granted on default; request omits db_name, context db is default.
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "bob:pwd"), &milvuspb.LoadCollectionRequest{
+			CollectionName: "col1",
+		})
+		assert.NoError(t, err)
+	})
+}
+
+// TestPrivilegeInterceptorClusterLevel guards the cluster-level half of the
+// #50678 fix: cluster-level privileges (e.g. CreateDatabase/DropDatabase) are
+// not scoped to a specific database, so they must be authorized against the
+// connection-context db rather than the request's DbName (which for
+// CreateDatabase is the brand-new database name and would never match the
+// cluster grant). Without the level-aware resolution this denies every
+// pre-existing cluster grant.
+func TestPrivilegeInterceptorClusterLevel(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				// cluster admin: granted PrivilegeAll on the connection-context db
+				// (default). carol below also connects on the default db, so the
+				// cluster check (context-scoped) matches this grant.
+				funcutil.PolicyForPrivilege("role_cluster", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeAll.String(), "default"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("carol", "role_cluster"),
+			},
+		}, nil
+	}
+	err := InitMetaCache(context.Background(), client)
+	assert.NoError(t, err)
+
+	t.Run("cluster grant authorizes CreateDatabase for any new db name", func(t *testing.T) {
+		// carol connects without useDatabase (context db = default); the request
+		// targets a brand-new db. Authorization must use AnyWord, not "brand_new_db".
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "carol:pwd"), &milvuspb.CreateDatabaseRequest{
+			DbName: "brand_new_db",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("cluster grant authorizes DropDatabase regardless of target db", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "carol:pwd"), &milvuspb.DropDatabaseRequest{
+			DbName: "some_other_db",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("no cluster grant -> CreateDatabase denied", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "dave:pwd"), &milvuspb.CreateDatabaseRequest{
+			DbName: "brand_new_db",
+		})
+		assert.Error(t, err)
+	})
+}
+
+// TestPrivilegeInterceptorDatabaseLevel covers the database-level half of the
+// #50678 fix using the issue's original reproducer (AlterDatabase). A
+// database-level privilege is scoped to the db the request targets, so a grant
+// on db_target authorizes the op even without a prior useDatabase (false denial
+// fixed), while a grant on another db does not (cross-db escalation blocked).
+func TestPrivilegeInterceptorDatabaseLevel(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				// AlterDatabase granted ONLY on db_target (database-level: objectName=*).
+				funcutil.PolicyForPrivilege("role_alter", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeAlterDatabase.String(), "db_target"),
+				// DescribeDatabase granted ONLY on default.
+				funcutil.PolicyForPrivilege("role_desc", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeDescribeDatabase.String(), "default"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("erin", "role_alter"),
+				funcutil.EncodeUserRoleCache("frank", "role_desc"),
+			},
+		}, nil
+	}
+	err := InitMetaCache(context.Background(), client)
+	assert.NoError(t, err)
+
+	// erin connects without useDatabase (context db = default); grant is on db_target.
+	t.Run("false denial fixed: AlterDatabase granted on db_target, request db_target -> allowed", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "erin:pwd"), &milvuspb.AlterDatabaseRequest{
+			DbName: "db_target",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("escalation blocked: AlterDatabase granted on db_target, request another db -> denied", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "erin:pwd"), &milvuspb.AlterDatabaseRequest{
+			DbName: "db_other",
+		})
+		assert.Error(t, err)
+	})
+
+	// frank is granted DescribeDatabase only on default.
+	t.Run("DescribeDatabase scoped to granted db", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "frank:pwd"), &milvuspb.DescribeDatabaseRequest{
+			DbName: "default",
+		})
+		assert.NoError(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "frank:pwd"), &milvuspb.DescribeDatabaseRequest{
+			DbName: "db_secret",
+		})
+		assert.Error(t, err)
 	})
 }
 
