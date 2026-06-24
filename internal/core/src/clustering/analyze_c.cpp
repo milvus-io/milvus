@@ -20,6 +20,7 @@
 #include "analyze_c.h"
 #include "bitset/common.h"
 #include "clustering/KmeansClustering.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "fmt/core.h"
@@ -134,12 +135,8 @@ Analyze(CAnalyze* res_analyze,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -154,9 +151,11 @@ DeleteAnalyze(CAnalyze analyze) {
         delete real_analyze;
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
@@ -189,9 +188,11 @@ GetAnalyzeResultMeta(CAnalyze analyze,
         }
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
+    } catch (const std::exception& e) {
+        status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        status = milvus::FailureCStatus(milvus::UnexpectedError,
+                                        "unknown exception");
     }
     return status;
 }
