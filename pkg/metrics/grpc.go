@@ -21,17 +21,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// TODO: otel provides a grpc metrics collector, migrate once we switch from
-// the prometheus exporter to otel meters.
 var (
-	GRPCServerMetric *grpcprom.ServerMetrics
-	GRPCClientMetric *grpcprom.ClientMetrics
-)
-
-// RegisterGRPCMetrics initializes and registers the shared server/client gRPC
-// metrics collectors. Must be called exactly once during process startup, before
-// any interceptor that consumes GRPCServerMetric / GRPCClientMetric is built.
-func RegisterGRPCMetrics(r prometheus.Registerer) {
+	// TODO: otel provides a grpc metrics collector, migrate once we switch from
+	// the prometheus exporter to otel meters.
 	GRPCServerMetric = grpcprom.NewServerMetrics(
 		grpcprom.WithServerCounterOptions(
 			grpcprom.WithNamespace(milvusNamespace),
@@ -41,8 +33,6 @@ func RegisterGRPCMetrics(r prometheus.Registerer) {
 		),
 		grpcprom.WithContextLabels(NodeIDLabelName),
 	)
-	r.MustRegister(GRPCServerMetric)
-
 	GRPCClientMetric = grpcprom.NewClientMetrics(
 		grpcprom.WithClientCounterOptions(
 			grpcprom.WithNamespace(milvusNamespace),
@@ -51,5 +41,11 @@ func RegisterGRPCMetrics(r prometheus.Registerer) {
 			grpcprom.WithHistogramNamespace(milvusNamespace),
 		),
 	)
+)
+
+// RegisterGRPCMetrics registers the shared server/client gRPC metrics collectors.
+// Must be called exactly once for a given registry.
+func RegisterGRPCMetrics(r prometheus.Registerer) {
+	r.MustRegister(GRPCServerMetric)
 	r.MustRegister(GRPCClientMetric)
 }
