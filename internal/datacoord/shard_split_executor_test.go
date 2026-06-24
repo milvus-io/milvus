@@ -232,9 +232,9 @@ func TestAdvanceFencing(t *testing.T) {
 			}).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
-		// three persists: the fenced flag, the target start positions, then the
-		// state transition after the routing commit.
-		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(3)
+		// two persists: the fenced flag, then the state transition after the
+		// routing commit (no start-position persist — see below).
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
@@ -246,10 +246,9 @@ func TestAdvanceFencing(t *testing.T) {
 		// every target is created with the freshly allocated barrier (1000 from
 		// the mocked allocator), not T_switch.
 		assert.Equal(t, map[string]uint64{"v1": 1000, "v2": 1000}, initialized)
-		// the consume start position of each target is persisted.
-		for _, target := range task.GetTargets() {
-			assert.Equal(t, rmq.NewRmqID(9).Marshal(), target.GetStartPosition())
-		}
+		// no consume start position is persisted on the task: a split target is an
+		// ordinary vchannel whose genesis checkpoint reaches datacoord through the
+		// normal streamingnode WAL-open report.
 	})
 
 	t.Run("already fenced proceeds to create targets", func(t *testing.T) {
@@ -267,7 +266,8 @@ func TestAdvanceFencing(t *testing.T) {
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
-		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(3)
+		// two persists: the fenced flag, then the state transition.
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 		manager.advanceTasks()
 		task := manager.mustGetTask(100)
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
@@ -286,8 +286,8 @@ func TestAdvanceFencing(t *testing.T) {
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 
 		manager, catalog := newSplitExecutorManager(t, m, task, wal, nil, &fakeSplitPlanner{})
-		// already fenced: persist the start positions, then the state transition.
-		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+		// already fenced: only the state transition is persisted.
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
 
 		manager.advanceTasks()
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, manager.mustGetTask(100).GetState())
@@ -357,9 +357,8 @@ func TestAdvanceFencing(t *testing.T) {
 			return msg.MessageType() == message.MessageTypeCreateVChannel
 		}), mock.Anything).Return(&types.AppendResult{MessageID: rmq.NewRmqID(3), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(9)}, nil).Times(2)
 		manager, catalog := newSplitExecutorManager(t, m, fencingTask(), wal, nil, &fakeSplitPlanner{})
-		// the fenced-flag and start-position persists succeed, the final
-		// state-transition persist fails.
-		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+		// the fenced-flag persist succeeds, the final state-transition persist fails.
+		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
 		catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(errors.New("save failed")).Once()
 		manager.advanceTasks()
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, manager.mustGetTask(100).GetState())

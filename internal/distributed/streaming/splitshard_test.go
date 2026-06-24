@@ -122,16 +122,15 @@ func TestInitSplitTargetVChannels(t *testing.T) {
 			return &types.AppendResult{MessageID: rmq.NewRmqID(1), TimeTick: 2100, LastConfirmedMessageID: rmq.NewRmqID(7)}, nil
 		}).Times(2)
 
-	startPositions, err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
+	err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
 	assert.NoError(t, err)
-	// every target vchannel is created with T_switch as the barrier.
+	// every target vchannel is created with T_switch as the barrier. No consume
+	// start position is returned: a split target is an ordinary vchannel whose
+	// genesis checkpoint reaches datacoord through the normal WAL-open report.
 	assert.Equal(t, map[string]uint64{
 		"by-dev-rootcoord-dml_1_1v1": 2000,
 		"by-dev-rootcoord-dml_2_1v2": 2000,
 	}, initialized)
-	// the start position of each target is the marshaled LastConfirmedMessageID.
-	assert.Equal(t, rmq.NewRmqID(7).Marshal(), startPositions["by-dev-rootcoord-dml_1_1v1"])
-	assert.Equal(t, rmq.NewRmqID(7).Marshal(), startPositions["by-dev-rootcoord-dml_2_1v2"])
 }
 
 func TestInitSplitTargetVChannelsAppendFailure(t *testing.T) {
@@ -141,7 +140,7 @@ func TestInitSplitTargetVChannelsAppendFailure(t *testing.T) {
 		TimeTick:  2100,
 	}, errors.New("mock append error")).Once()
 
-	_, err := streaming.InitSplitTargetVChannels(context.Background(), w, newInitSplitTargetParam())
+	err := streaming.InitSplitTargetVChannels(context.Background(), w, newInitSplitTargetParam())
 	assert.Error(t, err)
 }
 
@@ -189,7 +188,7 @@ func TestInitSplitTargetVChannelsParamValidate(t *testing.T) {
 
 	// validation failure happens before any append.
 	w := mock_streaming.NewMockWALAccesser(t)
-	_, err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
+	err := streaming.InitSplitTargetVChannels(context.Background(), w, param)
 	assert.Error(t, err)
 }
 
