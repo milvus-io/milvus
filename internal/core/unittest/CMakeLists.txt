@@ -55,6 +55,7 @@ set(MILVUS_TEST_FILES
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
         test_group_by_json.cpp
+        test_growing_concurrent_reopen.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
