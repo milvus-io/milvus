@@ -14,8 +14,10 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestMixCompactionTaskSuite(t *testing.T) {
@@ -67,6 +69,55 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 		return b.GetSegmentID()
 	})
 	s.ElementsMatch([]int64{200, 201}, segIDs)
+}
+
+// Covers the FileResources branch in BuildCompactionRequest for MixCompaction
+// plans (previously only SortCompaction was wired). Without this, mix-compacted
+// segments with custom analyzers in ref mode would build text indexes using
+// default tokenization → silent search regressions.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResourcesInRefMode() {
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
+	defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+
+	channel := "Ch-1"
+	binLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segID,
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			Binlogs:       binLogs,
+		}}
+	}).Once()
+
+	expectedResources := []*internalpb.FileResourceInfo{
+		{Id: 7, Name: "dict", Path: "dict.jieba"},
+	}
+	s.mockMeta.EXPECT().GetFileResources(mock.Anything, mock.Anything).Return(expectedResources, nil).Once()
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     19530,
+		CollectionID:  1,
+		PartitionID:   10,
+		Type:          datapb.CompactionType_MixCompaction,
+		NodeID:        1,
+		State:         datapb.CompactionTaskState_executing,
+		InputSegments: []int64{200},
+		Schema: &schemapb.CollectionSchema{
+			FileResourceIds: []int64{7},
+		},
+	}, nil, s.mockMeta, newMockVersionManager())
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
+	task.allocator = alloc
+
+	plan, err := task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	s.Equal(expectedResources, plan.GetFileResources(),
+		"FileResources must flow through for MixCompaction plans (issue #50145, PR #50140)")
 }
 
 func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -49,6 +50,7 @@ import (
 
 type mixCompactionTask struct {
 	binlogIO    io.BinlogIO
+	cm          storage.ChunkManager
 	currentTime time.Time
 
 	plan *datapb.CompactionPlan
@@ -84,6 +86,7 @@ var _ Compactor = (*mixCompactionTask)(nil)
 func NewMixCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
+	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 	compactionParams compaction.Params,
 	sortByFieldIDs []int64,
@@ -93,6 +96,7 @@ func NewMixCompactionTask(
 		ctx:              ctx1,
 		cancel:           cancel,
 		binlogIO:         binlogIO,
+		cm:               cm,
 		plan:             plan,
 		tr:               timerecord.NewTimeRecorder("mergeSplit compaction"),
 		currentTime:      time.Now(),
@@ -481,6 +485,57 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
+	// Build text index inline for each output segment so the segment arrives at
+	// QueryNode with TextStatsLogs populated, avoiding the CGO_LOAD CreateTextIndex
+	// fallback at load time. Mirrors sortCompaction.
+	//
+	// Only sorted outputs get an inline text index. Unsorted mix-compaction outputs
+	// (from mergeSplit) are interim: a later sortcompaction will re-emit them as
+	// sorted and build the text index inline at that step. Building here would be
+	// discarded work. For non-external collections, stats_inspector also skips
+	// unsorted segments in its TextIndexJob filter, so the index would never be
+	// promoted to text_stats_logs in datacoord either. External collections are the
+	// exception (allowUnsorted = collection.IsExternal() in stats_inspector.go),
+	// where the async TextIndexJob still covers unsorted segments as a fallback.
+	textIndexStart := time.Now()
+	for _, resultSegment := range res {
+		if resultSegment.GetNumOfRows() == 0 {
+			continue
+		}
+		if !resultSegment.GetIsSorted() && !resultSegment.GetIsSortedByNamespace() {
+			continue
+		}
+		textStatsLogs, err := t.createTextIndex(ctx, resultSegment)
+		if err != nil {
+			mlog.Warn(context.TODO(), "failed to create text indexes",
+				mlog.Int64("targetSegmentID", resultSegment.GetSegmentID()), mlog.Err(err))
+			return nil, err
+		}
+		// For V3 segments, register text index stats in manifest.
+		// TextStatsLogs already carries full object keys for mixed-version compatibility;
+		// AddStatsToManifest stores the manifest-relative representation at commit time.
+		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
+			statEntries := packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion())
+			newManifest, mErr := packed.AddStatsToManifest(
+				resultSegment.GetManifest(), t.compactionParams.StorageConfig, statEntries)
+			if mErr != nil {
+				mlog.Warn(context.TODO(), "failed to add text index stats to manifest",
+					mlog.Int64("targetSegmentID", resultSegment.GetSegmentID()), mlog.Err(mErr))
+				return nil, mErr
+			}
+			resultSegment.Manifest = newManifest
+			// Dual-write: V3 segments store text index stats in both manifest and segment metadata.
+			// Manifest is the source of truth at load time; metadata acts as a placeholder so that
+			// needDoTextIndex() in stats_inspector.go won't trigger a redundant TextIndexJob.
+		}
+		resultSegment.TextStatsLogs = textStatsLogs
+	}
+	createTextIndexCost := time.Since(textIndexStart)
+	metrics.DataNodeCompactionStageLatency.
+		WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String(), "create_text_index").
+		Observe(float64(createTextIndexCost.Milliseconds()))
+	mlog.Info(context.TODO(), "compact create text index done", mlog.Duration("createTextIndexCost", createTextIndexCost))
+
 	planResult := &datapb.CompactionPlanResult{
 		State:    datapb.CompactionTaskState_completed,
 		PlanID:   t.GetPlanID(),
@@ -541,6 +596,16 @@ func GetBM25FieldIDs(coll *schemapb.CollectionSchema) []int64 {
 //   - REUSE_ALL: all TEXT fields reuse existing LOB files, merge LOB file references
 //   - REWRITE_ALL: all TEXT fields are rewritten, LOB files handled by segment writer
 //
+// createTextIndex delegates to the shared package-level createTextIndex helper,
+// sourcing collection/partition from the task and segment-specific fields from the
+// output segment. Mirrors sortCompactionTask.createTextIndex.
+func (t *mixCompactionTask) createTextIndex(ctx context.Context,
+	segment *datapb.CompactionSegment,
+) (map[int64]*datapb.TextIndexStats, error) {
+	return createTextIndex(ctx, t.cm, t.plan, t.compactionParams, segment.GetStorageVersion(),
+		t.collectionID, t.partitionID, segment.GetSegmentID(), t.GetPlanID(), segment)
+}
+
 // NOTE: SetSegmentRowStats() must be called during compaction iteration to track deleted rows per segment.
 func (t *mixCompactionTask) applyLOBCompaction(ctx context.Context, outputSegments []*datapb.CompactionSegment) error {
 	if t.lobContext == nil {
