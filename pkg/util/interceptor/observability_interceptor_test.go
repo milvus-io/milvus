@@ -51,22 +51,41 @@ func TestParseZapLevel(t *testing.T) {
 	}
 }
 
-func TestParseMethodList(t *testing.T) {
+func TestParseMethodFilter(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
-		want map[string]struct{}
+		name         string
+		in           string
+		matches      []string
+		nonMatches   []string
+		invalidRegex []string
 	}{
-		{"empty", "", nil},
-		{"whitespace only", "   ", nil},
-		{"single", "/svc/M", map[string]struct{}{"/svc/M": {}}},
-		{"multi trimmed", " /svc/M1 , /svc/M2 ", map[string]struct{}{"/svc/M1": {}, "/svc/M2": {}}},
-		{"empty parts", "/svc/M1,,/svc/M2,", map[string]struct{}{"/svc/M1": {}, "/svc/M2": {}}},
-		{"only separators", ", , ,", nil},
+		{name: "empty", in: "", nonMatches: []string{"/svc/M"}},
+		{name: "whitespace only", in: "   ", nonMatches: []string{"/svc/M"}},
+		{name: "single exact", in: "/svc/M", matches: []string{"/svc/M"}, nonMatches: []string{"/svc/Other"}},
+		{name: "multi exact trimmed", in: " /svc/M1 , /svc/M2 ", matches: []string{"/svc/M1", "/svc/M2"}, nonMatches: []string{"/svc/M3"}},
+		{name: "empty parts", in: "/svc/M1,,/svc/M2,", matches: []string{"/svc/M1", "/svc/M2"}, nonMatches: []string{"/svc/M3"}},
+		{name: "only separators", in: ", , ,", nonMatches: []string{"/svc/M"}},
+		{name: "regex", in: "re:^/svc/.+$", matches: []string{"/svc/M"}, nonMatches: []string{"/other/M"}},
+		{name: "mixed exact and regex", in: "/svc/Exact,re:^/svc/Regex.+$", matches: []string{"/svc/Exact", "/svc/RegexMatched"}, nonMatches: []string{"/svc/Other"}},
+		{name: "invalid regex is reported and skipped", in: "/svc/Exact,re:[", matches: []string{"/svc/Exact"}, nonMatches: []string{"/svc/RegexMatched"}, invalidRegex: []string{"re:["}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, parseMethodList(tt.in))
+			filter, invalidRegexs := parseMethodFilter(tt.in)
+			assert.Equal(t, tt.invalidRegex, invalidRegexs)
+
+			c := &dynamicLogConfig{}
+			c.level.Store(int32(zapcore.InfoLevel))
+			c.methods.Store(filter)
+			for _, method := range tt.matches {
+				lvl, ok := c.shouldLog(method)
+				assert.True(t, ok)
+				assert.Equal(t, zapcore.InfoLevel, lvl)
+			}
+			for _, method := range tt.nonMatches {
+				_, ok := c.shouldLog(method)
+				assert.False(t, ok)
+			}
 		})
 	}
 }
@@ -75,8 +94,6 @@ func TestDynamicLogConfig_ShouldLog(t *testing.T) {
 	t.Run("empty allowlist matches nothing", func(t *testing.T) {
 		c := &dynamicLogConfig{}
 		c.level.Store(int32(zapcore.InfoLevel))
-		var empty map[string]struct{}
-		c.methods.Store(&empty)
 		_, ok := c.shouldLog("/svc/M")
 		assert.False(t, ok)
 	})
@@ -84,8 +101,9 @@ func TestDynamicLogConfig_ShouldLog(t *testing.T) {
 	t.Run("listed method matches and returns current level", func(t *testing.T) {
 		c := &dynamicLogConfig{}
 		c.level.Store(int32(zapcore.DebugLevel))
-		set := map[string]struct{}{"/svc/M": {}}
-		c.methods.Store(&set)
+		filter, invalidRegexs := parseMethodFilter("/svc/M")
+		assert.Empty(t, invalidRegexs)
+		c.methods.Store(filter)
 		lvl, ok := c.shouldLog("/svc/M")
 		assert.True(t, ok)
 		assert.Equal(t, zapcore.DebugLevel, lvl)
@@ -94,8 +112,9 @@ func TestDynamicLogConfig_ShouldLog(t *testing.T) {
 	t.Run("unlisted method does not match", func(t *testing.T) {
 		c := &dynamicLogConfig{}
 		c.level.Store(int32(zapcore.InfoLevel))
-		set := map[string]struct{}{"/svc/M1": {}}
-		c.methods.Store(&set)
+		filter, invalidRegexs := parseMethodFilter("/svc/M1")
+		assert.Empty(t, invalidRegexs)
+		c.methods.Store(filter)
 		_, ok := c.shouldLog("/svc/M2")
 		assert.False(t, ok)
 	})
@@ -103,8 +122,9 @@ func TestDynamicLogConfig_ShouldLog(t *testing.T) {
 	t.Run("concurrent readers do not race", func(t *testing.T) {
 		c := &dynamicLogConfig{}
 		c.level.Store(int32(zapcore.InfoLevel))
-		set := map[string]struct{}{"/svc/M": {}}
-		c.methods.Store(&set)
+		filter, invalidRegexs := parseMethodFilter("/svc/M")
+		assert.Empty(t, invalidRegexs)
+		c.methods.Store(filter)
 
 		var wg sync.WaitGroup
 		for i := 0; i < 10; i++ {
@@ -120,6 +140,22 @@ func TestDynamicLogConfig_ShouldLog(t *testing.T) {
 	})
 }
 
+func TestDynamicLogConfig_UpdateMethodsRejectsInvalidRegex(t *testing.T) {
+	c := &dynamicLogConfig{}
+	c.level.Store(int32(zapcore.InfoLevel))
+	filter, invalidRegexs := parseMethodFilter("/svc/Old")
+	assert.Empty(t, invalidRegexs)
+	c.methods.Store(filter)
+
+	assert.False(t, c.updateMethods("grpc.serverLog.methods", "re:["))
+
+	lvl, ok := c.shouldLog("/svc/Old")
+	assert.True(t, ok)
+	assert.Equal(t, zapcore.InfoLevel, lvl)
+	_, ok = c.shouldLog("/svc/New")
+	assert.False(t, ok)
+}
+
 func TestNewDynamicLogConfig_SeedsAndHandlesUpdates(t *testing.T) {
 	// The production paths use paramtable-driven config keys; here we just
 	// verify the seeding path with existing paramtable keys.
@@ -129,6 +165,17 @@ func TestNewDynamicLogConfig_SeedsAndHandlesUpdates(t *testing.T) {
 	assert.Equal(t, zapcore.DebugLevel, lvl)
 
 	_, ok = c.shouldLog("/svc/Other")
+	assert.False(t, ok)
+}
+
+func TestNewDynamicLogConfig_RegexMethodFilter(t *testing.T) {
+	c := newDynamicLogConfig("grpc.serverLog.level", "grpc.serverLog.methods", "debug", "re:^/svc/.+$")
+
+	lvl, ok := c.shouldLog("/svc/RegexMatched")
+	assert.True(t, ok)
+	assert.Equal(t, zapcore.DebugLevel, lvl)
+
+	_, ok = c.shouldLog("/other/RegexNotMatched")
 	assert.False(t, ok)
 }
 
