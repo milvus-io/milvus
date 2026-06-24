@@ -16,6 +16,7 @@ from common.bulk_insert_data import (
     DataField as df,
 )
 from common.bulk_insert_data import (
+    gen_utf8_string,
     prepare_bulk_insert_json_files,
     prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
@@ -1671,6 +1672,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             enable_dynamic_field=enable_dynamic_field,
             force=True,
             schema=schema,
+            use_utf8_data=True,
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
         if add_field:
@@ -1790,8 +1792,20 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field]
             )
             assert len(res) == 0
-        res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[df.string_field])
+        res, _ = self.collection_wrap.query(
+            expr=f"{expr}",
+            output_fields=[df.pk_field, df.string_field, df.text_field, df.array_string_field, df.json_field],
+        )
         assert len(res) == entities
+        if not nullable:
+            sample = res[0]
+            json_value = sample[df.json_field]
+            if isinstance(json_value, str):
+                json_value = json.loads(json_value)
+            assert any(ord(ch) > 127 for ch in sample[df.string_field])
+            assert any(ord(ch) > 127 for ch in sample[df.text_field])
+            assert any(any(ord(ch) > 127 for ch in item) for item in sample[df.array_string_field])
+            assert any(ord(ch) > 127 for ch in json.dumps(json_value, ensure_ascii=False))
         query_data = [r[expr_field] for r in res][: len(self.collection_wrap.partitions)]
         res, _ = self.collection_wrap.query(expr=f"{expr_field} in {query_data}", output_fields=[expr_field])
         assert len(res) == len(query_data)
@@ -2277,12 +2291,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 {"key": "value"}
             ]
             for i in range(entities):
+                text_value = f"{gen_utf8_string(i)} milvus BM25 text"
                 row = {
                     df.pk_field: i,
                     df.int_field: 1,
                     df.float_field: 1.0,
                     df.string_field: "string",
-                    df.text_field: fake.text(),
+                    df.text_field: text_value,
                     df.json_field: json_value[i % len(json_value)],
                     df.array_int_field: [1, 2],
                     df.array_float_field: [1.0, 2.0],
@@ -2300,6 +2315,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 remote_writer.append_row(row)
             remote_writer.commit()
             files = remote_writer.batch_files
+        assert all(any(ord(ch) > 127 for ch in document) for document in documents)
         # import data
         for f in files:
             t0 = time.time()
@@ -2364,6 +2380,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_task=CheckTasks.check_search_results,
             check_items={"nq": 1, "limit": 1},
         )
+        for hit in res:
+            for r in hit:
+                assert any(ord(ch) > 127 for ch in r.fields[df.text_field])
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("auto_id", [True, False])
