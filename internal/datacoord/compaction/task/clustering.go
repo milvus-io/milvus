@@ -120,10 +120,6 @@ func (t *ClusteringCompactionTask) retryOnError(err error) {
 }
 
 func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-	log := mlog.Ctx(context.TODO()).With(mlog.Int64("triggerID", t.GetTaskProto().TriggerID),
-		mlog.Int64("collectionID", t.GetTaskProto().GetCollectionID()),
-		mlog.Int64("planID", t.GetTaskProto().GetPlanID()))
-
 	var err error
 	defer func() {
 		t.retryOnError(err)
@@ -724,7 +720,7 @@ func (t *ClusteringCompactionTask) processAnalyzing() error {
 		mlog.Warn(context.TODO(), "analyze task fail", mlog.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
 		return merr.WrapErrServiceInternalMsg(analyzeTask.FailReason)
 	case indexpb.JobState_JobStateNone:
-		log.Warn("analyze task state none failure", zap.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
+		mlog.Warn(context.TODO(), "analyze task state none failure", mlog.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
 		return merr.WrapErrServiceInternalMsg("State none")
 	default:
 	}
