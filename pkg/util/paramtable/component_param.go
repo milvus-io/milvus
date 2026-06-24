@@ -1842,7 +1842,7 @@ Set this parameter as the path that you have permission to write.`,
 	l.GrpcServerLogLevel = ParamItem{
 		Key:          "grpc.serverLog.level",
 		DefaultValue: "info",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		Doc:          "Log level for the gRPC server logging interceptor. Options: debug, info, warn, error. Hot-reloadable.",
 		Export:       false,
 	}
@@ -1851,7 +1851,7 @@ Set this parameter as the path that you have permission to write.`,
 	l.GrpcClientLogLevel = ParamItem{
 		Key:          "grpc.clientLog.level",
 		DefaultValue: "info",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		Doc:          "Log level for the gRPC client logging interceptor. Options: debug, info, warn, error. Hot-reloadable.",
 		Export:       false,
 	}
@@ -1860,8 +1860,8 @@ Set this parameter as the path that you have permission to write.`,
 	l.GrpcServerLogMethods = ParamItem{
 		Key:          "grpc.serverLog.methods",
 		DefaultValue: "",
-		Version:      "2.6.0",
-		Doc:          "Comma-separated full-method allowlist logged on server side (e.g. /proxy.Proxy/Search). Empty disables logging. Hot-reloadable.",
+		Version:      "3.0.0",
+		Doc:          "Comma-separated full-method allowlist logged on server side (e.g. /proxy.Proxy/Search). Prefix an entry with re: to use Go regexp matching. Empty disables logging. Hot-reloadable.",
 		Export:       false,
 	}
 	l.GrpcServerLogMethods.Init(base.mgr)
@@ -1869,8 +1869,8 @@ Set this parameter as the path that you have permission to write.`,
 	l.GrpcClientLogMethods = ParamItem{
 		Key:          "grpc.clientLog.methods",
 		DefaultValue: "",
-		Version:      "2.6.0",
-		Doc:          "Comma-separated full-method allowlist logged on client side. Empty disables logging. Hot-reloadable.",
+		Version:      "3.0.0",
+		Doc:          "Comma-separated full-method allowlist logged on client side. Prefix an entry with re: to use Go regexp matching. Empty disables logging. Hot-reloadable.",
 		Export:       false,
 	}
 	l.GrpcClientLogMethods.Init(base.mgr)
