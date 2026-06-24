@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
