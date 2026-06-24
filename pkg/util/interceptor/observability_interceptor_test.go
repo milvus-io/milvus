@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestParseLogLevel(t *testing.T) {
@@ -147,7 +148,7 @@ func TestDynamicLogConfig_UpdateMethodsRejectsInvalidRegex(t *testing.T) {
 	assert.Empty(t, invalidRegexs)
 	c.methods.Store(filter)
 
-	assert.False(t, c.updateMethods("grpc.serverLog.methods", "re:["))
+	assert.False(t, c.updateMethods("grpc.log.server.methods", "re:["))
 
 	lvl, ok := c.shouldLog("/svc/Old")
 	assert.True(t, ok)
@@ -159,7 +160,7 @@ func TestDynamicLogConfig_UpdateMethodsRejectsInvalidRegex(t *testing.T) {
 func TestNewDynamicLogConfig_SeedsAndHandlesUpdates(t *testing.T) {
 	// The production paths use paramtable-driven config keys; here we just
 	// verify the seeding path with existing paramtable keys.
-	c := newDynamicLogConfig("grpc.serverLog.level", "grpc.serverLog.methods", "debug", "/svc/M")
+	c := newDynamicLogConfig("grpc.log.server.level", "grpc.log.server.methods", "debug", "/svc/M")
 	lvl, ok := c.shouldLog("/svc/M")
 	assert.True(t, ok)
 	assert.Equal(t, mlog.DebugLevel, lvl)
@@ -169,7 +170,7 @@ func TestNewDynamicLogConfig_SeedsAndHandlesUpdates(t *testing.T) {
 }
 
 func TestNewDynamicLogConfig_RegexMethodFilter(t *testing.T) {
-	c := newDynamicLogConfig("grpc.serverLog.level", "grpc.serverLog.methods", "debug", "re:^/svc/.+$")
+	c := newDynamicLogConfig("grpc.log.server.level", "grpc.log.server.methods", "debug", "re:^/svc/.+$")
 
 	lvl, ok := c.shouldLog("/svc/RegexMatched")
 	assert.True(t, ok)
@@ -184,6 +185,19 @@ func resetDynamicLogConfigSingletonsForTest() {
 	serverDynamicLogConfig = nil
 	clientDynamicLogConfigOnce = sync.Once{}
 	clientDynamicLogConfig = nil
+}
+
+func configureObservabilityLogMethodsForTest(t *testing.T, serverMethods, clientMethods string) {
+	t.Helper()
+	pt := paramtable.Get()
+	pt.Save(pt.LogCfg.GrpcServerLogMethods.Key, serverMethods)
+	pt.Save(pt.LogCfg.GrpcClientLogMethods.Key, clientMethods)
+	resetDynamicLogConfigSingletonsForTest()
+	t.Cleanup(func() {
+		pt.Reset(pt.LogCfg.GrpcServerLogMethods.Key)
+		pt.Reset(pt.LogCfg.GrpcClientLogMethods.Key)
+		resetDynamicLogConfigSingletonsForTest()
+	})
 }
 
 func TestObservabilityLogConfigSingletons(t *testing.T) {
@@ -229,4 +243,70 @@ func TestObservabilityServerUnary_FastPath(t *testing.T) {
 	assert.True(t, handlerCalled)
 	assert.Equal(t, "response", resp)
 	assert.ErrorIs(t, err, wantErr)
+}
+
+func TestObservabilityServerUnary_AccessLogPath(t *testing.T) {
+	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
+	configureObservabilityLogMethodsForTest(t, "/svc/Unary", "")
+	intercept := NewObservabilityServerUnaryInterceptor()
+
+	handlerCalled := false
+	handler := func(ctx context.Context, req any) (any, error) {
+		handlerCalled = true
+		return "response", nil
+	}
+	resp, err := intercept(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/svc/Unary"}, handler)
+
+	assert.True(t, handlerCalled)
+	assert.Equal(t, "response", resp)
+	assert.NoError(t, err)
+}
+
+func TestObservabilityServerStream_AccessLogPath(t *testing.T) {
+	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
+	configureObservabilityLogMethodsForTest(t, "/svc/Stream", "")
+	intercept := NewObservabilityServerStreamInterceptor()
+
+	handlerCalled := false
+	handler := func(srv any, ss grpc.ServerStream) error {
+		handlerCalled = true
+		return nil
+	}
+	err := intercept(nil, newMockSS(context.Background()), &grpc.StreamServerInfo{FullMethod: "/svc/Stream"}, handler)
+
+	assert.True(t, handlerCalled)
+	assert.NoError(t, err)
+}
+
+func TestObservabilityClientUnary_AccessLogPath(t *testing.T) {
+	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
+	configureObservabilityLogMethodsForTest(t, "", "/svc/Unary")
+	intercept := NewObservabilityClientUnaryInterceptor()
+
+	invokerCalled := false
+	invoker := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+		invokerCalled = true
+		return nil
+	}
+	err := intercept(context.Background(), "/svc/Unary", nil, nil, nil, invoker)
+
+	assert.True(t, invokerCalled)
+	assert.NoError(t, err)
+}
+
+func TestObservabilityClientStream_AccessLogPath(t *testing.T) {
+	metrics.RegisterGRPCMetrics(prometheus.NewRegistry())
+	configureObservabilityLogMethodsForTest(t, "", "/svc/Stream")
+	intercept := NewObservabilityClientStreamInterceptor()
+
+	streamerCalled := false
+	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		streamerCalled = true
+		return nil, nil
+	}
+	cs, err := intercept(context.Background(), &grpc.StreamDesc{}, nil, "/svc/Stream", streamer)
+
+	assert.True(t, streamerCalled)
+	assert.Nil(t, cs)
+	assert.NoError(t, err)
 }

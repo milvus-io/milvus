@@ -31,10 +31,10 @@ Access logs are disabled by default. Enable them with method filters.
 
 | Key | Default | Purpose |
 |---|---:|---|
-| `grpc.serverLog.level` | `info` | Level for `grpc.server.call`. |
-| `grpc.clientLog.level` | `info` | Level for `grpc.client.call`. |
-| `grpc.serverLog.methods` | empty | Server full-method filter. |
-| `grpc.clientLog.methods` | empty | Client full-method filter. |
+| `grpc.log.server.level` | `info` | Level for `grpc.server.call`. |
+| `grpc.log.client.level` | `info` | Level for `grpc.client.call`. |
+| `grpc.log.server.methods` | empty | Server full-method filter. |
+| `grpc.log.client.methods` | empty | Client full-method filter. |
 
 Valid levels: `debug`, `info`, `warn`, `error`.
 
@@ -42,9 +42,9 @@ Method filters use comma-separated gRPC full methods. Use `re:` for Go regexp
 filters. Exact methods and regex filters can be mixed:
 
 ```text
-grpc.serverLog.methods=/milvus.proto.milvus.MilvusService/Search
-grpc.clientLog.methods=/milvus.proto.query.QueryNode/Search
-grpc.serverLog.methods=/milvus.proto.milvus.MilvusService/Search,re:^/milvus\.proto\.query\.QueryNode/.+$
+grpc.log.server.methods=/milvus.proto.milvus.MilvusService/Search
+grpc.log.client.methods=/milvus.proto.query.QueryNode/Search
+grpc.log.server.methods=/milvus.proto.milvus.MilvusService/Search,re:^/milvus\.proto\.query\.QueryNode/.+$
 ```
 
 Prefer exact method filters first. Use anchored regexes unless substring
@@ -66,15 +66,15 @@ Important debug fields are:
 ## Debug Workflow
 
 1. Identify the side to inspect.
-   - Incoming request: start with `grpc.serverLog.methods`.
-   - Outgoing internal call: start with `grpc.clientLog.methods`.
+   - Incoming request: start with `grpc.log.server.methods`.
+   - Outgoing internal call: start with `grpc.log.client.methods`.
 2. Enable one exact full method first.
 3. Use `info` for normal access logs; use `debug` only when global log level
    allows debug logs.
 4. Reproduce once and capture the time window, role, method, status code,
    duration, and trace IDs.
 5. Compare access logs with `milvus_grpc_*` metrics.
-6. Clear `grpc.serverLog.methods` and `grpc.clientLog.methods` after debugging.
+6. Clear `grpc.log.server.methods` and `grpc.log.client.methods` after debugging.
 
 ## Debug Cases
 

@@ -1840,7 +1840,7 @@ Set this parameter as the path that you have permission to write.`,
 	l.GrpcLogLevel.Init(base.mgr)
 
 	l.GrpcServerLogLevel = ParamItem{
-		Key:          "grpc.serverLog.level",
+		Key:          "grpc.log.server.level",
 		DefaultValue: "info",
 		Version:      "3.0.0",
 		Doc:          "Log level for the gRPC server logging interceptor. Options: debug, info, warn, error. Hot-reloadable.",
@@ -1849,7 +1849,7 @@ Set this parameter as the path that you have permission to write.`,
 	l.GrpcServerLogLevel.Init(base.mgr)
 
 	l.GrpcClientLogLevel = ParamItem{
-		Key:          "grpc.clientLog.level",
+		Key:          "grpc.log.client.level",
 		DefaultValue: "info",
 		Version:      "3.0.0",
 		Doc:          "Log level for the gRPC client logging interceptor. Options: debug, info, warn, error. Hot-reloadable.",
@@ -1858,7 +1858,7 @@ Set this parameter as the path that you have permission to write.`,
 	l.GrpcClientLogLevel.Init(base.mgr)
 
 	l.GrpcServerLogMethods = ParamItem{
-		Key:          "grpc.serverLog.methods",
+		Key:          "grpc.log.server.methods",
 		DefaultValue: "",
 		Version:      "3.0.0",
 		Doc:          "Comma-separated full-method allowlist logged on server side (e.g. /proxy.Proxy/Search). Prefix an entry with re: to use Go regexp matching. Empty disables logging. Hot-reloadable.",
@@ -1867,7 +1867,7 @@ Set this parameter as the path that you have permission to write.`,
 	l.GrpcServerLogMethods.Init(base.mgr)
 
 	l.GrpcClientLogMethods = ParamItem{
-		Key:          "grpc.clientLog.methods",
+		Key:          "grpc.log.client.methods",
 		DefaultValue: "",
 		Version:      "3.0.0",
 		Doc:          "Comma-separated full-method allowlist logged on client side. Prefix an entry with re: to use Go regexp matching. Empty disables logging. Hot-reloadable.",
