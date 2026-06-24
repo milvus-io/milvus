@@ -2108,13 +2108,13 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 100
-            assert "collection not found" in str(e)
+            assert "can't find collection" in str(e)
 
     def test_drop_collection_function_nonexistent_function(self):
         """
         target: test drop function that doesn't exist
         method: create collection without function, try to drop non-existent function
-        expected: no error (idempotent delete behavior)
+        expected: error function not found (code=1100); drop is non-idempotent since #50471
         """
         self._connect()
         dim = 768
@@ -2127,15 +2127,20 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         self.init_collection_wrap(name=c_name, schema=schema)
 
-        # Drop nonexistent function should not raise error (idempotent)
-        self.client.drop_collection_function(collection_name=c_name, function_name="nonexistent_function")
-        log.info("Drop nonexistent function succeeded (idempotent behavior)")
+        # Dropping a nonexistent function now errors (non-idempotent since #50471)
+        try:
+            self.client.drop_collection_function(collection_name=c_name, function_name="nonexistent_function")
+            assert False, "Expected exception for nonexistent function"
+        except Exception as e:
+            log.info(f"Expected error: {e}")
+            assert e.code == 1100
+            assert "function not found" in str(e)
 
     def test_drop_collection_function_empty_name(self):
         """
         target: test drop function with empty name
         method: call drop_collection_function with function_name=""
-        expected: no error (idempotent delete behavior)
+        expected: error requiring a valid drop identifier; rejected client-side since #50471
         """
         self._connect()
         dim = 768
@@ -2148,6 +2153,10 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         self.init_collection_wrap(name=c_name, schema=schema)
 
-        # Drop with empty name should not raise error (idempotent)
-        self.client.drop_collection_function(collection_name=c_name, function_name="")
-        log.info("Drop with empty function name succeeded (idempotent behavior)")
+        # An empty function name is rejected: a valid drop identifier is required (since #50471)
+        try:
+            self.client.drop_collection_function(collection_name=c_name, function_name="")
+            assert False, "Expected exception for empty function name"
+        except Exception as e:
+            log.info(f"Expected error: {e}")
+            assert "Must specify exactly one valid Drop identifier" in str(e)

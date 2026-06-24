@@ -1,13 +1,13 @@
-import pytest
+# fmt: off
 import numpy as np
-
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
 from pymilvus import Function, FunctionType
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 prefix = "client_insert"
 epsilon = ct.epsilon
@@ -119,7 +119,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection name must be less than 255 characters"}
         self.upsert(client, collection_name, rows,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -152,7 +152,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
+        error = {ct.err_code: 1, ct.err_msg: "wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
         self.upsert(client, collection_name, data,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -254,7 +254,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 1, ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
+        error = {ct.err_code: 1, ct.err_msg: "wrong type of argument 'data',expected 'Dict' or list of 'Dict'"}
         self.upsert(client, collection_name, data="",
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -294,7 +294,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(20)]
         error = {ct.err_code: 1,
-                 ct.err_msg: f"Insert missed an field `id` to collection without set nullable==true or set default_value"}
+                 ct.err_msg: "Insert missed an field `id` to collection without set nullable==true or set default_value"}
         self.upsert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -315,7 +315,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(10)]
         error = {ct.err_code: 1,
-                 ct.err_msg: f"Attempt to insert an unexpected field `float` to collection without enabling dynamic field"}
+                 ct.err_msg: "Attempt to insert an unexpected field `float` to collection without enabling dynamic field"}
         self.upsert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -337,7 +337,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         rows = [
             {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
              default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 65535, ct.err_msg: f"dim"}
+        error = {ct.err_code: 65535, ct.err_msg: "dim"}
         self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -366,8 +366,10 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         rows = [{default_primary_key_field_name: i, ct.default_binary_vec_field_name: binary_vectors[i],
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
 
-        # 3. Verify error on upsert
-        error = {ct.err_code: 1100, ct.err_msg: f"the dim ({dim}) of field data(binary_vector) is not equal to schema dim ({default_dim})"}
+        # 3. Verify error on upsert. Binary vector dim is counted in bits, so a
+        # mismatch surfaces as the total-bits-divisibility check rather than a
+        # plain dim-not-equal message.
+        error = {ct.err_code: 1100, ct.err_msg: "of all bits should divide the dim"}
         self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
@@ -411,7 +413,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}"}
         if partition_name == " ":
-            error = {ct.err_code: 1, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
+            error = {ct.err_code: 1, ct.err_msg: "Invalid partition name: . Partition name should not be empty."}
         self.upsert(client, collection_name, data=rows, partition_name=partition_name,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -541,7 +543,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False )
 
         bm25_function = Function(
-            name=f"text",
+            name="text",
             function_type=FunctionType.BM25,
             input_field_names=["text"],
             output_field_names=["text_sparse_emb"],
@@ -562,7 +564,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                  ct.err_msg: "Attempt to insert an unexpected function output field `text_sparse_emb` to collection"}
         self.upsert(client, collection_name, new_rows,
                     check_task=CheckTasks.err_res, check_items=error)
-        
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_upsert_duplicate_pk_int64(self):
         """
