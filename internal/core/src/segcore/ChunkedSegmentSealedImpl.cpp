@@ -4449,17 +4449,13 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
     auto has_pk_index = pk_index.get() != nullptr ? !pk_index.get()->empty_pks()
                                                   : !insert_record_.empty_pks();
     if (has_pk_index) {
-        auto end = std::remove_if(
-            ordering.begin(),
-            ordering.end(),
-            [&](const std::tuple<Timestamp, PkType>& record) {
-                if (pk_index.get() != nullptr) {
-                    return !pk_index.get()->contain(std::get<1>(record));
-                }
-                return !insert_record_.contain(std::get<1>(record));
-            });
-        size = end - ordering.begin();
-        ordering.resize(size);
+        std::erase_if(ordering, [&](const auto& record) {
+            if (pk_index.get() != nullptr) {
+                return !pk_index.get()->contain(std::get<1>(record));
+            }
+            return !insert_record_.contain(std::get<1>(record));
+        });
+        size = ordering.size();
     }
     if (size == 0) {
         return SegcoreError::success();
