@@ -282,7 +282,7 @@ throw_unsupported_pk_type(DataType data_type) {
 }
 
 template <typename Func>
-decltype(auto)
+static decltype(auto)
 dispatch_pk_type(DataType data_type, Func&& func) {
     switch (data_type) {
         case DataType::INT64:
@@ -295,7 +295,7 @@ dispatch_pk_type(DataType data_type, Func&& func) {
 }
 
 template <sealed_segment_detail::PrimaryKey PK>
-sealed_segment_detail::PrimaryKeyView<PK>
+static sealed_segment_detail::PrimaryKeyView<PK>
 get_pk_value(const PinWrapper<Chunk*>& pin, int64_t offset) {
     if constexpr (std::same_as<PK, int64_t>) {
         auto src = reinterpret_cast<const int64_t*>(pin.get()->RawData());
@@ -306,7 +306,7 @@ get_pk_value(const PinWrapper<Chunk*>& pin, int64_t offset) {
     }
 }
 
-std::vector<int64_t>
+static std::vector<int64_t>
 build_chunk_offsets(const ChunkedColumnInterface& column) {
     auto num_chunks = column.num_chunks();
     std::vector<int64_t> chunk_offsets(num_chunks + 1, 0);
@@ -316,7 +316,7 @@ build_chunk_offsets(const ChunkedColumnInterface& column) {
     return chunk_offsets;
 }
 
-int64_t
+static int64_t
 chunk_id_for_offset(const std::vector<int64_t>& chunk_offsets,
                     int64_t offset) {
     AssertInfo(chunk_offsets.size() >= 2, "chunk offsets must not be empty");
@@ -331,7 +331,7 @@ chunk_id_for_offset(const std::vector<int64_t>& chunk_offsets,
 }
 
 template <sealed_segment_detail::PrimaryKey PK, typename Callback>
-void
+static void
 for_each_sorted_pk_match(
     const std::vector<PkType>& pks,
     const ChunkedColumnInterface* pk_column,
