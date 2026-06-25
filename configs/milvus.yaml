@@ -1506,6 +1506,10 @@ function:
       tei:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable TEI model service
+      twelvelabs:
+        credential:  # The name in the credential configuration item
+        enable: true # Whether to enable TwelveLabs model service
+        url:  # Your TwelveLabs embedding url, Default is the official embedding url
       vertexai:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable vertexai model service
