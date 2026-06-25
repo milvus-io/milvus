@@ -24,6 +24,14 @@
 
 namespace milvus::segcore::storagev1translator {
 
+inline std::optional<milvus::cachinglayer::MetricAttribution>
+MetricAttributionFromShard(std::string shard) {
+    if (shard.empty()) {
+        return std::nullopt;
+    }
+    return milvus::cachinglayer::MetricAttribution{std::move(shard)};
+}
+
 struct CTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
     // virtual chunk is used to speed up the offset->cid translation
@@ -38,13 +46,14 @@ struct CTMeta : public milvus::cachinglayer::Meta {
            CacheWarmupPolicy cache_warmup_policy,
            bool support_eviction,
            std::string shard = "")
-        : milvus::cachinglayer::Meta(storage_type,
-                                     cell_id_mapping_mode,
-                                     cell_data_type,
-                                     cache_warmup_policy,
-                                     support_eviction,
-                                     std::nullopt,
-                                     std::move(shard)) {
+        : milvus::cachinglayer::Meta(
+              storage_type,
+              cell_id_mapping_mode,
+              cell_data_type,
+              cache_warmup_policy,
+              support_eviction,
+              std::nullopt,
+              MetricAttributionFromShard(std::move(shard))) {
     }
 };
 

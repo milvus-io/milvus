@@ -28,6 +28,14 @@
 
 namespace milvus::segcore::storagev2translator {
 
+inline std::optional<milvus::cachinglayer::MetricAttribution>
+MetricAttributionFromShard(std::string shard) {
+    if (shard.empty()) {
+        return std::nullopt;
+    }
+    return milvus::cachinglayer::MetricAttribution{std::move(shard)};
+}
+
 // Target average byte size per storage-v2 cache cell. Parquet row groups
 // are packed into cells so that `rgs_per_cell * avg_row_group_size ≈ target`.
 // Runtime-configurable via SetCellTargetSizeBytes (wired from paramtable
@@ -98,13 +106,14 @@ struct GroupCTMeta : public milvus::cachinglayer::Meta {
                 CacheWarmupPolicy cache_warmup_policy,
                 bool support_eviction,
                 std::string shard = "")
-        : milvus::cachinglayer::Meta(storage_type,
-                                     cell_id_mapping_mode,
-                                     cell_data_type,
-                                     cache_warmup_policy,
-                                     support_eviction,
-                                     std::nullopt,
-                                     std::move(shard)),
+        : milvus::cachinglayer::Meta(
+              storage_type,
+              cell_id_mapping_mode,
+              cell_data_type,
+              cache_warmup_policy,
+              support_eviction,
+              std::nullopt,
+              MetricAttributionFromShard(std::move(shard))),
           num_fields_(num_fields),
           total_row_groups_(0) {
     }
