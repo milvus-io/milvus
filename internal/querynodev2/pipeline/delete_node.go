@@ -34,6 +34,8 @@ type deleteNode struct {
 	*BaseNode
 	collectionID UniqueID
 	channel      string
+	ctx          context.Context
+	cancel       context.CancelFunc
 
 	manager   *DataManager
 	delegator delegator.ShardDelegator
@@ -59,6 +61,10 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 		mlog.Int("deleteRowNum", len(pks)),
 		mlog.Uint64("timestampMin", msg.BeginTimestamp),
 		mlog.Uint64("timestampMax", msg.EndTimestamp))
+}
+
+func (dNode *deleteNode) Close() {
+	dNode.cancel()
 }
 
 func (dNode *deleteNode) Operate(in Msg) Msg {
@@ -93,9 +99,8 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	if nodeMsg.schema != nil {
-		ctx := context.TODO()
-		if err := dNode.delegator.UpdateSchema(ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
-			mlog.Warn(ctx, "failed to update schema in delete node",
+		if err := dNode.delegator.UpdateSchema(dNode.ctx, nodeMsg.schema, nodeMsg.schemaBarrierTs); err != nil {
+			mlog.Warn(dNode.ctx, "failed to update schema in delete node",
 				mlog.Int64("collectionID", dNode.collectionID),
 				mlog.String("channel", dNode.channel),
 				mlog.Int32("schemaVersion", nodeMsg.schema.GetVersion()),
@@ -115,10 +120,13 @@ func newDeleteNode(
 	manager *DataManager, delegator delegator.ShardDelegator,
 	maxQueueLength int32,
 ) *deleteNode {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &deleteNode{
 		BaseNode:     base.NewBaseNode(fmt.Sprintf("DeleteNode-%s", channel), maxQueueLength),
 		collectionID: collectionID,
 		channel:      channel,
+		ctx:          ctx,
+		cancel:       cancel,
 		manager:      manager,
 		delegator:    delegator,
 	}
