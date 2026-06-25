@@ -197,6 +197,9 @@ ExpectedValid(int64_t row) {
     return row % 4 != 1;
 }
 
+std::string
+ExpectedString(DataType type, int64_t row);
+
 bool
 IsVortexStringPushdownType(DataType type) {
     return type == DataType::STRING || type == DataType::VARCHAR ||
