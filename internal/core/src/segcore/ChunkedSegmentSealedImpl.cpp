@@ -660,8 +660,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
 }
 
 void
-ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
-                                           milvus::OpContext* op_ctx) {
+ChunkedSegmentSealedImpl::LoadColumnGroups(
+    const SegmentLoadInfo& segment_load_info, milvus::OpContext* op_ctx) {
+    const auto& manifest_path = segment_load_info.GetManifestPath();
     auto load_cg_start = std::chrono::high_resolution_clock::now();
     LOG_INFO(
         "[LoadColumnGroups] segment {} start, manifest {}", id_, manifest_path);
@@ -670,8 +671,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
     auto properties = std::make_shared<milvus_storage::api::Properties>(
         *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
              .GetProperties());
-    auto load_info = std::atomic_load(&segment_load_info_);
-    auto column_groups = load_info->GetColumnGroups();
+    auto column_groups = segment_load_info.GetColumnGroups();
 
     // External collections: inject extfs.{collectionID}.* derived from
     // external_source and external_spec only. InjectExternalSpecProperties zero-
@@ -684,7 +684,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
     // matches.
     if (schema_->is_external_collection()) {
         InjectExternalSpecProperties(*properties,
-                                     load_info->GetCollectionID(),
+                                     segment_load_info.GetCollectionID(),
                                      schema_->get_external_source(),
                                      schema_->get_external_spec());
     }
@@ -4067,6 +4067,17 @@ ChunkedSegmentSealedImpl::HasFieldData(FieldId field_id) const {
     }
 }
 
+// Checks the cached loaded manifest instead of field-data/index bitsets.
+bool
+ChunkedSegmentSealedImpl::HasColumnInLoadedManifest(
+    const std::string& column_name) const {
+    auto load_info = std::atomic_load(&segment_load_info_);
+    if (load_info == nullptr || !load_info->HasManifestPath()) {
+        return true;
+    }
+    return load_info->HasManifestColumn(column_name);
+}
+
 std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
 ChunkedSegmentSealedImpl::GetFieldDataIfExist(FieldId field_id) const {
     std::shared_lock lck(mutex_);
@@ -4795,6 +4806,7 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     auto current = std::atomic_load(&segment_load_info_);
     SegmentLoadInfo current_mutable(*current);
     SegmentLoadInfo new_local(current->GetProto(), sch);
+    new_local.InheritCachedColumnGroupsFrom(*current);
     for (auto fid : current->GetCreatedTextIndexes()) {
         new_local.SetTextIndexCreated(fid);
     }
@@ -4802,6 +4814,10 @@ ChunkedSegmentSealedImpl::Reopen(milvus::OpContext* op_ctx, SchemaPtr sch) {
     auto diff = current_mutable.ComputeDiff(new_local);
     new_local.SetFieldsFilledWithDefault(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
+    // Populate manifest cache before publishing; readers do not take reopen_mutex_.
+    if (new_local.HasManifestPath() && sch->is_external_collection()) {
+        (void)new_local.GetColumnGroups();
+    }
     LOG_INFO(
         "Schema-only reopen segment {} with diff {}", id_, diff.ToString());
 
@@ -4855,6 +4871,7 @@ ChunkedSegmentSealedImpl::Reopen(
 
     SegmentLoadInfo current_mutable(*current);
     SegmentLoadInfo new_local(new_load_info, target_schema);
+    new_local.InheritCachedColumnGroupsFrom(*current);
     for (auto fid : current->GetCreatedTextIndexes()) {
         new_local.SetTextIndexCreated(fid);
     }
@@ -4862,6 +4879,11 @@ ChunkedSegmentSealedImpl::Reopen(
     auto diff = current_mutable.ComputeDiff(new_local);
     new_local.SetFieldsFilledWithDefault(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
+    // Populate manifest cache before publishing; readers do not take reopen_mutex_.
+    if (new_local.HasManifestPath() &&
+        target_schema->is_external_collection()) {
+        (void)new_local.GetColumnGroups();
+    }
     LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
 
     auto published = std::make_shared<const SegmentLoadInfo>(new_local);
@@ -4909,8 +4931,8 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
 
     // load column groups
     if (diff.load_external_manifest) {
-        // External collections: load via manifest path
-        LoadColumnGroups(segment_load_info.GetManifestPath(), op_ctx);
+        // External collections use manifest column names, not numeric field IDs.
+        LoadColumnGroups(segment_load_info, op_ctx);
     } else {
         bool has_cg_changes = !diff.column_groups_to_load.empty() ||
                               !diff.column_groups_to_replace.empty() ||
@@ -5234,8 +5256,11 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
         std::unique_lock lck(mutex_);
         commit_ts_ = commit_ts;
     }
+    // Do not parse manifest here: Load() must be able to observe a
+    // pre-cancelled OpContext before any storage/manifest IO happens.
+    SegmentLoadInfo local_load_info(std::move(load_info), schema_);
     auto published =
-        std::make_shared<const SegmentLoadInfo>(std::move(load_info), schema_);
+        std::make_shared<const SegmentLoadInfo>(std::move(local_load_info));
     std::atomic_store(&segment_load_info_, published);
     use_take_for_output_.store(published->GetUseTakeForOutput(),
                                std::memory_order_relaxed);
@@ -5248,38 +5273,6 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
         published->GetStorageVersion(),
         use_take_for_output_.load(std::memory_order_relaxed),
         commit_ts);
-}
-
-void
-ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path) {
-    LOG_INFO(
-        "Loading segment {} field data with manifest {}", id_, manifest_path);
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
-
-    auto column_groups =
-        std::atomic_load(&segment_load_info_)->GetColumnGroups();
-
-    auto arrow_schema =
-        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
-    reader_ = milvus_storage::api::Reader::create(
-        column_groups, arrow_schema, nullptr, *properties);
-
-    std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
-    for (int i = 0; i < column_groups->size(); ++i) {
-        auto column_group = column_groups->at(i);
-        std::vector<FieldId> milvus_field_ids;
-        for (auto& column : column_group->columns) {
-            auto field_id = std::stoll(column);
-            milvus_field_ids.emplace_back(field_id);
-        }
-        cg_field_ids.emplace_back(i, std::move(milvus_field_ids));
-    }
-
-    LoadColumnGroups(column_groups, properties, cg_field_ids, true);
-
-    // initialize LOB paths for TEXT fields
-    InitTextLobPaths(manifest_path);
 }
 
 void
@@ -5783,6 +5776,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     // reopen_mutex_ synchronizes this read with all schema_ writers.
     SegmentLoadInfo mutable_copy(snapshot->GetProto(), schema_);
+    mutable_copy.InheritCachedColumnGroupsFrom(*snapshot);
     mutable_copy.SetFieldsFilledWithDefault(
         snapshot->GetFieldsFilledWithDefault());
     for (auto fid : snapshot->GetCreatedTextIndexes()) {
@@ -5792,6 +5786,13 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
 
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
+
+    if (mutable_copy.HasManifestPath() && schema_->is_external_collection()) {
+        auto published = std::make_shared<const SegmentLoadInfo>(mutable_copy);
+        std::atomic_store(&segment_load_info_, published);
+        use_take_for_output_.store(published->GetUseTakeForOutput(),
+                                   std::memory_order_relaxed);
+    }
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }

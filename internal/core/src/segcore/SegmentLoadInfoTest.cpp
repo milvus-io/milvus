@@ -3175,6 +3175,37 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
 }
 
+TEST_F(SegmentLoadInfoTest, HasManifestColumnUsesManifestColumnNames) {
+    schema_->set_external_source("s3://external-bucket/table");
+
+    SegmentLoadInfo info(MakeManifestProto("/manifest/v1"), schema_);
+    info.SetColumnGroupsForTesting(MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id.parquet"}},
+         {{"vector", "tenant"}, {"/external/data.parquet"}}}));
+
+    EXPECT_TRUE(info.HasManifestColumn("id"));
+    EXPECT_TRUE(info.HasManifestColumn("vector"));
+    EXPECT_TRUE(info.HasManifestColumn("tenant"));
+    EXPECT_FALSE(info.HasManifestColumn("missing"));
+    EXPECT_FALSE(info.HasManifestColumn("101"));
+}
+
+TEST_F(SegmentLoadInfoTest, CachedManifestColumnsCanBeInherited) {
+    schema_->set_external_source("s3://external-bucket/table");
+
+    SegmentLoadInfo current(MakeManifestProto("/manifest/v1"), schema_);
+    current.SetColumnGroupsForTesting(MakeExternalColumnGroups(
+        {{{"id"}, {"/external/id.parquet"}},
+         {{"vector", "tenant"}, {"/external/data.parquet"}}}));
+
+    SegmentLoadInfo next(current.GetProto(), schema_);
+    next.InheritCachedColumnGroupsFrom(current);
+
+    EXPECT_TRUE(next.HasManifestColumn("id"));
+    EXPECT_TRUE(next.HasManifestColumn("vector"));
+    EXPECT_TRUE(next.HasManifestColumn("tenant"));
+}
+
 TEST_F(SegmentLoadInfoTest,
        ComputeDiffExternalManifestUpdateReloadsExternalManifest) {
     schema_->set_external_source("s3://external-bucket/table");
