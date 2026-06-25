@@ -1937,6 +1937,54 @@ func TestDeleteData(t *testing.T) {
 		assert.EqualValues(t, dData.RowCount, 3)
 		assert.EqualValues(t, dData.Size(), 72)
 	})
+
+	t.Run("predicate delete", func(t *testing.T) {
+		dData, err := NewPredicateDeleteData([][]byte{[]byte("expr-1")}, []Timestamp{100})
+		require.NoError(t, err)
+
+		assert.False(t, dData.HasPrimaryKeyDeletes())
+		assert.True(t, dData.HasPredicateDeletes())
+		assert.EqualValues(t, dData.RowCount, 1)
+		assert.EqualValues(t, dData.Size(), len("expr-1")+8)
+		assert.Equal(t, [][]byte{[]byte("expr-1")}, dData.SerializedExprPlans)
+		assert.Equal(t, []Timestamp{100}, dData.PredicateTss)
+	})
+
+	t.Run("merge predicate and pk", func(t *testing.T) {
+		first := NewDeleteData(pks[:1], []Timestamp{100})
+		second, err := NewPredicateDeleteData([][]byte{[]byte("expr-1")}, []Timestamp{101})
+		require.NoError(t, err)
+
+		first.Merge(second)
+
+		assert.True(t, first.HasPrimaryKeyDeletes())
+		assert.True(t, first.HasPredicateDeletes())
+		assert.EqualValues(t, first.RowCount, 2)
+		assert.EqualValues(t, first.Size(), 24+len("expr-1")+8)
+		assert.ElementsMatch(t, pks[:1], first.Pks)
+		assert.ElementsMatch(t, []Timestamp{100}, first.Tss)
+		assert.Equal(t, [][]byte{[]byte("expr-1")}, first.SerializedExprPlans)
+		assert.Equal(t, []Timestamp{101}, first.PredicateTss)
+
+		assert.NotNil(t, second)
+		assert.EqualValues(t, 0, second.RowCount)
+		assert.EqualValues(t, 0, second.Size())
+		assert.Nil(t, second.Pks)
+		assert.Nil(t, second.Tss)
+		assert.Nil(t, second.SerializedExprPlans)
+		assert.Nil(t, second.PredicateTss)
+	})
+
+	t.Run("predicate delete rejects mismatched expr and timestamp counts", func(t *testing.T) {
+		_, err := NewPredicateDeleteData([][]byte{[]byte("expr-1")}, nil)
+		require.Error(t, err)
+
+		dData := &DeleteData{}
+		err = dData.AppendPredicateBatch([][]byte{[]byte("expr-1")}, []Timestamp{100, 101})
+		require.Error(t, err)
+		assert.False(t, dData.HasPredicateDeletes())
+		assert.EqualValues(t, 0, dData.RowCount)
+	})
 }
 
 func TestAddFieldDataToPayload(t *testing.T) {

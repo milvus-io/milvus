@@ -53,6 +53,10 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 	if pack.deltaBinlog != nil && len(pack.deltaBinlog.Binlogs) > 0 {
 		deltaFieldBinlogs = append(deltaFieldBinlogs, pack.deltaBinlog)
 	}
+	predicateDeltaFieldBinlogs := segment.PredicateDeltalogs()
+	if pack.predicateDeltaBinlog != nil && len(pack.predicateDeltaBinlog.Binlogs) > 0 {
+		predicateDeltaFieldBinlogs = append(predicateDeltaFieldBinlogs, pack.predicateDeltaBinlog)
+	}
 
 	deltaBm25StatsBinlogs := segment.Bm25logs()
 	if len(pack.bm25Binlogs) > 0 {
@@ -91,6 +95,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		mlog.Int("binlogNum", lo.SumBy(insertFieldBinlogs, getBinlogNum)),
 		mlog.Int("statslogNum", lo.SumBy(statsFieldBinlogs, getBinlogNum)),
 		mlog.Int("deltalogNum", lo.SumBy(deltaFieldBinlogs, getBinlogNum)),
+		mlog.Int("predicateDeltalogNum", lo.SumBy(predicateDeltaFieldBinlogs, getBinlogNum)),
 		mlog.Int("bm25logNum", lo.SumBy(deltaBm25StatsBinlogs, getBinlogNum)),
 		mlog.String("manifestPath", pack.manifestPath),
 		mlog.String("vChannelName", pack.channelName),
@@ -109,6 +114,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		Field2StatslogPaths: statsFieldBinlogs,
 		Field2Bm25LogPaths:  deltaBm25StatsBinlogs,
 		Deltalogs:           deltaFieldBinlogs,
+		PredicateDeltalogs:  predicateDeltaFieldBinlogs,
 
 		CheckPoints: checkPoints,
 
@@ -157,6 +163,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		metacache.UpdateBinlogs(insertFieldBinlogs),
 		metacache.UpdateStatslogs(statsFieldBinlogs),
 		metacache.UpdateDeltalogs(deltaFieldBinlogs),
+		metacache.UpdatePredicateDeltalogs(predicateDeltaFieldBinlogs),
 		metacache.UpdateBm25logs(deltaBm25StatsBinlogs),
 	), metacache.WithSegmentIDs(pack.segmentID))
 	return nil

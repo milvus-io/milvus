@@ -145,6 +145,49 @@ var (
 	}
 )
 
+func TestBuildBinlogKvsPredicateDeltalogUsesFixedPostfix(t *testing.T) {
+	predicateFieldID := int64(12345)
+	anotherPredicateFieldID := int64(67890)
+	predicateDeltalogs := []*datapb.FieldBinlog{
+		{
+			FieldID: predicateFieldID,
+			Binlogs: []*datapb.Binlog{
+				{
+					EntriesNum: 5,
+					LogID:      logID,
+				},
+			},
+		},
+		{
+			FieldID: anotherPredicateFieldID,
+			Binlogs: []*datapb.Binlog{
+				{
+					EntriesNum: 6,
+					LogID:      logID + 1,
+				},
+			},
+		},
+	}
+
+	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, nil, nil, predicateDeltalogs, nil, nil)
+	assert.NoError(t, err)
+
+	expectedKey := buildPredicateDeltalogPath(collectionID, partitionID, segmentID)
+	oldFieldKey := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentPredicateDeltalogPathPrefix, collectionID, partitionID, segmentID, predicateFieldID)
+	anotherOldFieldKey := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentPredicateDeltalogPathPrefix, collectionID, partitionID, segmentID, anotherPredicateFieldID)
+	assert.Contains(t, kvs, expectedKey)
+	assert.NotContains(t, kvs, oldFieldKey)
+	assert.NotContains(t, kvs, anotherOldFieldKey)
+	assert.Len(t, kvs, 1)
+
+	storedDeltalog := &datapb.FieldBinlog{}
+	assert.NoError(t, proto.Unmarshal([]byte(kvs[expectedKey]), storedDeltalog))
+	assert.Equal(t, predicateFieldID, storedDeltalog.GetFieldID())
+	assert.Len(t, storedDeltalog.GetBinlogs(), 2)
+	assert.Equal(t, logID, storedDeltalog.GetBinlogs()[0].GetLogID())
+	assert.Equal(t, logID+1, storedDeltalog.GetBinlogs()[1].GetLogID())
+}
+
 func Test_ListSegments(t *testing.T) {
 	t.Run("load failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
@@ -249,7 +292,10 @@ func Test_ListSegments(t *testing.T) {
 			if strings.HasPrefix(k3, s) {
 				return f([]byte(k3), []byte(savedKvs[k3]))
 			}
-			// return empty bm25log list
+			// return empty predicate deltalog and bm25log lists
+			if strings.HasPrefix(s, SegmentPredicateDeltalogPathPrefix) {
+				return nil
+			}
 			if strings.HasPrefix(s, SegmentBM25logPathPrefix) {
 				return nil
 			}
@@ -823,6 +869,12 @@ func Test_parseBinlogKey(t *testing.T) {
 
 	t.Run("test ok", func(t *testing.T) {
 		segmentID, err := catalog.parseBinlogKey("root/1/1/1/1")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), segmentID)
+	})
+
+	t.Run("test predicate postfix", func(t *testing.T) {
+		segmentID, err := catalog.parseBinlogKey("root/1/1/1/predicate")
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), segmentID)
 	})

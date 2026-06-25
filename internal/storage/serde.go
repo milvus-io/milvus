@@ -1205,7 +1205,10 @@ func (mfw *multiFieldRecordWriter) Close() error {
 }
 
 func newMultiFieldRecordWriter(fieldIDs []FieldID, fields []arrow.Field, writer io.Writer) (*multiFieldRecordWriter, error) {
-	schema := arrow.NewSchema(fields, nil)
+	return newMultiFieldRecordWriterWithSchema(fieldIDs, arrow.NewSchema(fields, nil), writer)
+}
+
+func newMultiFieldRecordWriterWithSchema(fieldIDs []FieldID, schema *arrow.Schema, writer io.Writer) (*multiFieldRecordWriter, error) {
 	fw, err := pqarrow.NewFileWriter(schema, writer,
 		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(math.MaxInt64)), // No additional grouping for now.
 		pqarrow.DefaultWriterProps())

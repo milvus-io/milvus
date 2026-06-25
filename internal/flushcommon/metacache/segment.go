@@ -29,26 +29,27 @@ import (
 )
 
 type SegmentInfo struct {
-	segmentID        int64
-	partitionID      int64
-	state            commonpb.SegmentState
-	startPosition    *msgpb.MsgPosition
-	checkpoint       *msgpb.MsgPosition
-	startPosRecorded bool
-	flushedRows      int64
-	bufferRows       int64
-	syncingRows      int64
-	bfs              pkoracle.PkStat
-	bm25stats        *SegmentBM25Stats
-	level            datapb.SegmentLevel
-	syncingTasks     int32
-	storageVersion   int64
-	binlogs          []*datapb.FieldBinlog
-	statslogs        []*datapb.FieldBinlog
-	deltalogs        []*datapb.FieldBinlog
-	bm25logs         []*datapb.FieldBinlog
-	currentSplit     []storagecommon.ColumnGroup
-	manifestPath     string
+	segmentID          int64
+	partitionID        int64
+	state              commonpb.SegmentState
+	startPosition      *msgpb.MsgPosition
+	checkpoint         *msgpb.MsgPosition
+	startPosRecorded   bool
+	flushedRows        int64
+	bufferRows         int64
+	syncingRows        int64
+	bfs                pkoracle.PkStat
+	bm25stats          *SegmentBM25Stats
+	level              datapb.SegmentLevel
+	syncingTasks       int32
+	storageVersion     int64
+	binlogs            []*datapb.FieldBinlog
+	statslogs          []*datapb.FieldBinlog
+	deltalogs          []*datapb.FieldBinlog
+	predicateDeltalogs []*datapb.FieldBinlog
+	bm25logs           []*datapb.FieldBinlog
+	currentSplit       []storagecommon.ColumnGroup
+	manifestPath       string
 
 	// flushSourceMode is process-local runtime state; not persisted.
 	// See FlushSourceMode docs for lifecycle semantics.
@@ -130,6 +131,10 @@ func (s *SegmentInfo) Deltalogs() []*datapb.FieldBinlog {
 	return s.deltalogs
 }
 
+func (s *SegmentInfo) PredicateDeltalogs() []*datapb.FieldBinlog {
+	return s.predicateDeltalogs
+}
+
 func (s *SegmentInfo) Bm25logs() []*datapb.FieldBinlog {
 	return s.bm25logs
 }
@@ -147,27 +152,28 @@ func (s *SegmentInfo) FlushSourceMode() FlushSourceMode {
 
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
-		segmentID:        s.segmentID,
-		partitionID:      s.partitionID,
-		state:            s.state,
-		startPosition:    s.startPosition,
-		checkpoint:       s.checkpoint,
-		startPosRecorded: s.startPosRecorded,
-		flushedRows:      s.flushedRows,
-		bufferRows:       s.bufferRows,
-		syncingRows:      s.syncingRows,
-		bfs:              s.bfs,
-		level:            s.level,
-		syncingTasks:     s.syncingTasks,
-		bm25stats:        s.bm25stats,
-		storageVersion:   s.storageVersion,
-		binlogs:          s.binlogs,
-		statslogs:        s.statslogs,
-		deltalogs:        s.deltalogs,
-		bm25logs:         s.bm25logs,
-		currentSplit:     s.currentSplit,
-		manifestPath:     s.manifestPath,
-		flushSourceMode:  s.flushSourceMode,
+		segmentID:          s.segmentID,
+		partitionID:        s.partitionID,
+		state:              s.state,
+		startPosition:      s.startPosition,
+		checkpoint:         s.checkpoint,
+		startPosRecorded:   s.startPosRecorded,
+		flushedRows:        s.flushedRows,
+		bufferRows:         s.bufferRows,
+		syncingRows:        s.syncingRows,
+		bfs:                s.bfs,
+		level:              s.level,
+		syncingTasks:       s.syncingTasks,
+		bm25stats:          s.bm25stats,
+		storageVersion:     s.storageVersion,
+		binlogs:            s.binlogs,
+		statslogs:          s.statslogs,
+		deltalogs:          s.deltalogs,
+		predicateDeltalogs: s.predicateDeltalogs,
+		bm25logs:           s.bm25logs,
+		currentSplit:       s.currentSplit,
+		manifestPath:       s.manifestPath,
+		flushSourceMode:    s.flushSourceMode,
 	}
 }
 
@@ -191,22 +197,23 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		mlog.Info(context.TODO(), "recover split info", mlog.FieldSegmentID(info.GetID()), mlog.Stringers("columnGroup", currentSplit))
 	}
 	return &SegmentInfo{
-		segmentID:        info.GetID(),
-		partitionID:      info.GetPartitionID(),
-		state:            info.GetState(),
-		flushedRows:      info.GetNumOfRows(),
-		startPosition:    info.GetStartPosition(),
-		checkpoint:       info.GetDmlPosition(),
-		startPosRecorded: true,
-		level:            level,
-		bfs:              bfs,
-		bm25stats:        bm25Stats,
-		storageVersion:   info.GetStorageVersion(),
-		binlogs:          info.GetBinlogs(),
-		statslogs:        info.GetStatslogs(),
-		deltalogs:        info.GetDeltalogs(),
-		bm25logs:         info.GetBm25Statslogs(),
-		currentSplit:     currentSplit,
-		manifestPath:     info.GetManifestPath(),
+		segmentID:          info.GetID(),
+		partitionID:        info.GetPartitionID(),
+		state:              info.GetState(),
+		flushedRows:        info.GetNumOfRows(),
+		startPosition:      info.GetStartPosition(),
+		checkpoint:         info.GetDmlPosition(),
+		startPosRecorded:   true,
+		level:              level,
+		bfs:                bfs,
+		bm25stats:          bm25Stats,
+		storageVersion:     info.GetStorageVersion(),
+		binlogs:            info.GetBinlogs(),
+		statslogs:          info.GetStatslogs(),
+		deltalogs:          info.GetDeltalogs(),
+		predicateDeltalogs: info.GetPredicateDeltalogs(),
+		bm25logs:           info.GetBm25Statslogs(),
+		currentSplit:       currentSplit,
+		manifestPath:       info.GetManifestPath(),
 	}
 }

@@ -60,8 +60,24 @@ func (s *SegmentSuite) TestClone() {
 	s.Equal(segment.Binlogs(), cloned.Binlogs())
 	s.Equal(segment.Statslogs(), cloned.Statslogs())
 	s.Equal(segment.Deltalogs(), cloned.Deltalogs())
+	s.Equal(segment.PredicateDeltalogs(), cloned.PredicateDeltalogs())
 	s.Equal(segment.Bm25logs(), cloned.Bm25logs())
 	s.Equal(segment.GetBM25Stats(), cloned.GetBM25Stats())
+}
+
+func (s *SegmentSuite) TestSegmentPredicateDeltalogsPreserved() {
+	info := &datapb.SegmentInfo{
+		ID: 10,
+		PredicateDeltalogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "predicate"}},
+			},
+		},
+	}
+
+	segment := NewSegmentInfo(info, pkoracle.NewBloomFilterSet(), nil)
+	s.Equal(info.GetPredicateDeltalogs(), segment.PredicateDeltalogs())
 }
 
 func (s *SegmentSuite) TestRecoverCurrentSplitFormat() {

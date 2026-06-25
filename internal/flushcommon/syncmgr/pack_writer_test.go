@@ -145,7 +145,7 @@ func TestBulkPackWriter_Write(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotInserts, gotDeltas, gotStats, gotBm25Stats, gotSize, err := bw.Write(context.Background(), tt.pack)
+			gotInserts, gotDeltas, _, gotStats, gotBm25Stats, gotSize, err := bw.Write(context.Background(), tt.pack)
 			if err != tt.wantErr {
 				t.Errorf("BulkPackWriter.Write() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -376,4 +376,47 @@ func TestBulkPackWriter_WriteLog_NonRetryableError(t *testing.T) {
 	assert.Equal(t, 1, callCount, "non-retryable error should not be retried")
 	assert.True(t, merr.IsNonRetryableErr(err))
 	assert.True(t, errors.Is(err, merr.ErrIoPermissionDenied))
+}
+
+func TestBulkPackWriter_WritePredicateDelta(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	schema := &schemapb.CollectionSchema{
+		Name: "sync_task_test_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+	cm.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	deletes, err := storage.NewPredicateDeleteData([][]byte{{1, 2, 3}}, []storage.Timestamp{100})
+	require.NoError(t, err)
+	bw := &BulkPackWriter{
+		schema:       schema,
+		chunkManager: cm,
+		allocator:    allocator.NewLocalAllocator(10000, 100000),
+	}
+
+	got, err := bw.writePredicateDelta(context.Background(), new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithDeleteData(deletes))
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Len(t, got.GetBinlogs(), 1)
+	assert.EqualValues(t, common.RowIDField, got.GetFieldID())
+	assert.EqualValues(t, 1, got.GetBinlogs()[0].GetEntriesNum())
+	assert.EqualValues(t, 100, got.GetBinlogs()[0].GetTimestampFrom())
+	assert.EqualValues(t, 100, got.GetBinlogs()[0].GetTimestampTo())
+	assert.Equal(t, "files/delta_log/123/456/789/10000", got.GetBinlogs()[0].GetLogPath())
 }
