@@ -24,6 +24,8 @@ var (
 
 func getLexer(stream *antlr.InputStream, listeners ...antlr.ErrorListener) *antlrparser.PlanLexer {
 	lexer := lexerPool.Get().(*antlrparser.PlanLexer)
+	// Drop ANTLR's default ConsoleErrorListener (see getParser).
+	lexer.RemoveErrorListeners()
 	for _, listener := range listeners {
 		lexer.AddErrorListener(listener)
 	}
@@ -34,6 +36,9 @@ func getLexer(stream *antlr.InputStream, listeners ...antlr.ErrorListener) *antl
 func getParser(lexer *antlrparser.PlanLexer, listeners ...antlr.ErrorListener) *antlrparser.PlanParser {
 	tokenStream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
 	parser := parserPool.Get().(*antlrparser.PlanParser)
+	// Drop ANTLR's default ConsoleErrorListener so a syntax error does not do
+	// stderr I/O on the hot failure path; only our own listener stays attached.
+	parser.RemoveErrorListeners()
 	for _, listener := range listeners {
 		parser.AddErrorListener(listener)
 	}
