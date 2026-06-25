@@ -1241,9 +1241,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	oldSet := newBM25FunctionSet(sd.collection.Schema())
 	newSet := newBM25FunctionSet(schema)
 	idfOracle := sd.getIDFOracle()
-	if idfOracle != nil && !newSet.IsSupersetOf(oldSet) {
+	if idfOracle != nil && newSet.HasIncompatibleCommonFunction(oldSet) {
 		newFunctionState.Close()
-		return merr.WrapErrServiceInternal("unsupported non-additive BM25 function schema change on loaded collection")
+		return merr.WrapErrServiceInternal("unsupported incompatible BM25 function schema change on loaded collection")
 	}
 
 	// Keep the load barrier monotonic. A higher logical schema version can be

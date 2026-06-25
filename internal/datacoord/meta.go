@@ -3329,8 +3329,8 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 	schemaVersion int32,
 ) ([]*SegmentInfo, *segMetricMutation, error) {
 	idRange := t.GetPreAllocatedSegmentIDs()
-	if idRange == nil || idRange.GetBegin()+1 != idRange.GetEnd() || resultSegment.GetSegmentID() != idRange.GetBegin() {
-		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump replacement result segment ID %d does not match the pre-allocated segment ID", resultSegment.GetSegmentID())
+	if idRange == nil || idRange.GetBegin() >= idRange.GetEnd() || resultSegment.GetSegmentID() != idRange.GetBegin() {
+		return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump replacement result segment ID %d does not match the pre-allocated segment ID range", resultSegment.GetSegmentID())
 	}
 
 	dropped := oldSegment.Clone()

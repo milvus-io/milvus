@@ -1004,3 +1004,90 @@ func TestBuildIDFNewFieldAfterSyncFunctions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, float64(0), avgdl)
 }
+
+func TestIDFSyncFunctionsPrunesDroppedBM25Field(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{
+		{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}},
+		{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{103}, OutputFieldIds: []int64{104}},
+	}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	droppedStats := genBM25StatsForField(102, 1, 2)[102]
+	keptStats := genBM25StatsForField(104, 3, 4)[104]
+	idfOracle.current[102] = droppedStats
+	idfOracle.current[104] = keptStats
+	idfOracle.growing[1] = &growingBm25Stats{
+		bm25Stats: bm25Stats{
+			102: droppedStats.Clone(),
+			104: keptStats.Clone(),
+		},
+		activate: true,
+	}
+
+	segDir := path.Join(idfOracle.dirPath, "10")
+	droppedDir := path.Join(segDir, "102")
+	keptDir := path.Join(segDir, "104")
+	require.NoError(t, os.MkdirAll(droppedDir, os.ModePerm))
+	require.NoError(t, os.MkdirAll(keptDir, os.ModePerm))
+	droppedBytes := []byte("dropped")
+	keptBytes := []byte("kept")
+	require.NoError(t, os.WriteFile(path.Join(droppedDir, "0.data"), droppedBytes, 0o600))
+	require.NoError(t, os.WriteFile(path.Join(keptDir, "0.data"), keptBytes, 0o600))
+	idfOracle.sealed.Insert(10, &sealedBm25Stats{
+		activate:  atomic.NewBool(true),
+		segmentID: 10,
+		localDir:  segDir,
+		fieldList: []int64{102, 104},
+		diskSize:  int64(len(droppedBytes) + len(keptBytes)),
+	})
+	idfOracle.sealedDiskSize.Store(int64(len(droppedBytes) + len(keptBytes)))
+
+	err := idfOracle.SyncFunctions([]*schemapb.FunctionSchema{
+		{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{103}, OutputFieldIds: []int64{104}},
+	})
+	require.NoError(t, err)
+
+	_, err = idfOracle.current.GetStats(102)
+	require.Error(t, err)
+	existing, err := idfOracle.current.GetStats(104)
+	require.NoError(t, err)
+	assert.Same(t, keptStats, existing)
+	_, ok := idfOracle.growing[1].bm25Stats[102]
+	assert.False(t, ok)
+	_, ok = idfOracle.growing[1].bm25Stats[104]
+	assert.True(t, ok)
+
+	sealedStats, ok := idfOracle.sealed.Get(10)
+	require.True(t, ok)
+	assert.ElementsMatch(t, []int64{104}, sealedStats.FieldList())
+	_, err = os.Stat(droppedDir)
+	assert.True(t, os.IsNotExist(err))
+	_, err = os.Stat(keptDir)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(len(keptBytes)), sealedStats.diskSize)
+	assert.Equal(t, int64(len(keptBytes)), idfOracle.sealedDiskSize.Load())
+}
+
+func TestIDFSyncFunctionsPrunesAllDroppedBM25Fields(t *testing.T) {
+	idfOracle := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	}}).(*idfOracle)
+	idfOracle.dirPath = t.TempDir()
+	idfOracle.Start()
+	defer idfOracle.Close()
+
+	stats := genBM25StatsForField(102, 1, 2)[102]
+	idfOracle.current[102] = stats
+	idfOracle.growing[1] = &growingBm25Stats{bm25Stats: bm25Stats{102: stats.Clone()}, activate: true}
+
+	err := idfOracle.SyncFunctions(nil)
+	require.NoError(t, err)
+
+	_, err = idfOracle.current.GetStats(102)
+	require.Error(t, err)
+	assert.Empty(t, idfOracle.growing[1].bm25Stats)
+}
