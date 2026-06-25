@@ -2622,8 +2622,11 @@ TEST(ScalarArrayMatchNullableIngest, BinlogLoadAndInsertAgree) {
             }
             valid[i] = row_valid[i];
         }
-        auto scores_array = CreateDataArrayFrom(
-            scores.data(), valid.data(), N, ins_schema->operator[](ins_scores_fid));
+        auto scores_array =
+            CreateDataArrayFrom(scores.data(),
+                                valid.data(),
+                                N,
+                                ins_schema->operator[](ins_scores_fid));
         insert->mutable_fields_data()->AddAllocated(scores_array.release());
         insert->set_num_rows(N);
 
@@ -2657,8 +2660,7 @@ TEST(ScalarArrayMatchNullableIngest, BinlogLoadAndInsertAgree) {
             retrieve_rows(inserted.get(), *ins_schema, ins_schema, expr);
         EXPECT_EQ(loaded_rows, expected)
             << "binlog-load path wrong for: " << expr;
-        EXPECT_EQ(inserted_rows, expected)
-            << "insert path wrong for: " << expr;
+        EXPECT_EQ(inserted_rows, expected) << "insert path wrong for: " << expr;
         // The two ingestion paths must agree on a nullable array.
         EXPECT_EQ(loaded_rows, inserted_rows)
             << "load vs insert divergence for: " << expr;
