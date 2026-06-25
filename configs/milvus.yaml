@@ -148,7 +148,6 @@ minio:
   # You can use "aliyun" for other cloud provider uses virtual host style bucket
   # You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
   # for authentication.
-  # CubeFS is S3-compatible and works with cloudProvider: aws and useVirtualHost: false (no IAM support).
   # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
   cloudProvider: aws
   # The JSON content contains the gcs service account credentials.
