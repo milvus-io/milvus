@@ -48,10 +48,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         )
 
         # Step 2: Insert sealed data containing the target field.
-        rows = [
-            {"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "tag": f"tag_{i}"}
-            for i in range(5)
-        ]
+        rows = [{"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "tag": f"tag_{i}"} for i in range(5)]
         client.insert(collection_name=collection_name, data=rows)
         client.flush(collection_name)
         client.load_collection(collection_name)
@@ -666,10 +663,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         )
 
         # Step 2: Insert old sealed rows with a recognizable extra value.
-        old_rows = [
-            {"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "extra": "old_value"}
-            for i in range(5)
-        ]
+        old_rows = [{"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "extra": "old_value"} for i in range(5)]
         client.insert(collection_name=collection_name, data=old_rows)
         client.flush(collection_name)
         client.load_collection(collection_name)
@@ -726,8 +720,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
 
         # Step 5: Insert new rows using the new Int64 extra field.
         new_rows = [
-            {"id": 100 + i, "vec": [float(i), 1.0, 0.0, 0.0], "age": 100 + i, "extra": 2026 + i}
-            for i in range(5)
+            {"id": 100 + i, "vec": [float(i), 1.0, 0.0, 0.0], "age": 100 + i, "extra": 2026 + i} for i in range(5)
         ]
         client.insert(collection_name=collection_name, data=new_rows)
         client.flush(collection_name)
@@ -806,8 +799,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
 
         # Step 2: Insert and flush pre-drop sealed rows.
         sealed_rows = [
-            {"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "tag": "sealed_before_drop"}
-            for i in range(5)
+            {"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "tag": "sealed_before_drop"} for i in range(5)
         ]
         client.insert(collection_name=collection_name, data=sealed_rows)
         client.flush(collection_name)
@@ -873,10 +865,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             )
 
         # Step 7: Insert post-drop rows using the latest schema.
-        post_drop_rows = [
-            {"id": 200 + i, "vec": [float(i), 2.0, 0.0, 0.0], "age": 200 + i}
-            for i in range(5)
-        ]
+        post_drop_rows = [{"id": 200 + i, "vec": [float(i), 2.0, 0.0, 0.0], "age": 200 + i} for i in range(5)]
         client.insert(collection_name=collection_name, data=post_drop_rows)
         client.flush(collection_name)
 
@@ -886,9 +875,21 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             output_fields=["id", "age"],
         )
         assert {row["id"] for row in all_rows} == {
-            0, 1, 2, 3, 4,
-            100, 101, 102, 103, 104,
-            200, 201, 202, 203, 204,
+            0,
+            1,
+            2,
+            3,
+            4,
+            100,
+            101,
+            102,
+            103,
+            104,
+            200,
+            201,
+            202,
+            203,
+            204,
         }
         assert all("tag" not in row for row in all_rows)
 
@@ -902,9 +903,21 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             output_fields=["id", "age"],
         )
         assert {row["id"] for row in rows_after_reload} == {
-            0, 1, 2, 3, 4,
-            100, 101, 102, 103, 104,
-            200, 201, 202, 203, 204,
+            0,
+            1,
+            2,
+            3,
+            4,
+            100,
+            101,
+            102,
+            103,
+            104,
+            200,
+            201,
+            202,
+            203,
+            204,
         }
         assert all("tag" not in row for row in rows_after_reload)
 
@@ -989,7 +1002,9 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         assert "vec" in indexes
         assert "events[embedding]" in indexes
         assert "events[name]" in indexes
-        assert client.describe_index(collection_name, index_name="events[embedding]")["field_name"] == "events[embedding]"
+        assert (
+            client.describe_index(collection_name, index_name="events[embedding]")["field_name"] == "events[embedding]"
+        )
         assert client.describe_index(collection_name, index_name="events[name]")["field_name"] == "events[name]"
 
         client.load_collection(collection_name)
@@ -1293,8 +1308,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             check_items={
                 ct.err_code: 1100,
                 ct.err_msg: (
-                    "cannot drop function bm25: it would leave no vector field in the collection: "
-                    "invalid parameter"
+                    "cannot drop function bm25: it would leave no vector field in the collection: invalid parameter"
                 ),
             },
         )
@@ -1493,10 +1507,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         client.create_alias(collection_name, alias_name)
 
         # Step 2: Insert data and warm up alias-side schema/read cache before drop.
-        rows = [
-            {"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "tag": f"tag_{i}"}
-            for i in range(10)
-        ]
+        rows = [{"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "tag": f"tag_{i}"} for i in range(10)]
         client.insert(collection_name=collection_name, data=rows)
         client.flush(collection_name)
         client.load_collection(collection_name)
@@ -1911,10 +1922,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         )
 
         # Step 2: Insert rows that omit default fields and verify default backfill before drop.
-        rows = [
-            {"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i}
-            for i in range(10)
-        ]
+        rows = [{"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i} for i in range(10)]
         client.insert(collection_name=collection_name, data=rows)
         client.flush(collection_name)
         client.load_collection(collection_name)
@@ -2674,7 +2682,10 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             limit=3,
             output_fields=["id"],
             check_task=ct.CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "groupBy field not found in schema: field not found[field=group_field]"},
+            check_items={
+                ct.err_code: 1100,
+                ct.err_msg: "groupBy field not found in schema: field not found[field=group_field]",
+            },
         )
 
         # Step 5: Drop the order-by field. Post-drop order_by_fields must fail clearly.
@@ -3173,10 +3184,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         )
 
         # Step 2: Insert old rows with tag and confirm the old schema path works before Drop Field.
-        old_rows = [
-            {"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "tag": f"old_tag_{i}"}
-            for i in range(5)
-        ]
+        old_rows = [{"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "tag": f"old_tag_{i}"} for i in range(5)]
         client.insert(collection_name=collection_name, data=old_rows)
         client.flush(collection_name)
         client.load_collection(collection_name)
@@ -3208,10 +3216,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         assert count_after_truncate[0]["count(*)"] == 0
 
         # Step 5: Insert new rows using only the latest schema.
-        new_rows = [
-            {"id": 100 + i, "vec": [float(i), 1.0, 0.0, 0.0], "age": 100 + i}
-            for i in range(3)
-        ]
+        new_rows = [{"id": 100 + i, "vec": [float(i), 1.0, 0.0, 0.0], "age": 100 + i} for i in range(3)]
         client.insert(collection_name=collection_name, data=new_rows)
         client.flush(collection_name)
 
@@ -3661,10 +3666,7 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
             consistency_level="Strong",
         )
 
-        rows = [
-            {"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "score": i * 10}
-            for i in range(6)
-        ]
+        rows = [{"id": i, "vec": [float(i), 0.0, 0.0, 0.0], "age": 20 + i, "score": i * 10} for i in range(6)]
         client.insert(collection_name=collection_name, data=rows)
         client.flush(collection_name)
         client.load_collection(collection_name)
