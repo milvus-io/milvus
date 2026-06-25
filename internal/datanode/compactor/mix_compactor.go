@@ -74,7 +74,8 @@ type mixCompactionTask struct {
 	ttlFieldID int64
 
 	// lobContext holds LOB compaction strategy decisions for TEXT columns
-	lobContext *compaction.LOBCompactionContext
+	lobContext            *compaction.LOBCompactionContext
+	lobContextInitialized bool
 
 	// estimatedOutputSegmentCount is the estimated number of output segments
 	// computed during preCompact, used for LOB compaction strategy decision
@@ -154,31 +155,23 @@ func (t *mixCompactionTask) preCompact() error {
 	return nil
 }
 
-func (t *mixCompactionTask) mergeSplit(
-	ctx context.Context,
-) ([]*datapb.CompactionSegment, error) {
-	_ = t.tr.RecordSpan()
-
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "MergeSplit")
-	defer span.End()
-
-	if err := t.initLOBCompactionContext(ctx); err != nil {
-		return nil, err
+func (t *mixCompactionTask) ensureLOBCompactionContext(ctx context.Context) error {
+	if t.lobContextInitialized {
+		return nil
 	}
+	if err := t.initLOBCompactionContext(ctx); err != nil {
+		return err
+	}
+	t.lobContextInitialized = true
+	return nil
+}
 
-	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
-	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
-	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-
-	writerSchema := t.plan.GetSchema()
-
-	// build writer options
+func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.RwOption {
 	writerOpts := []storage.RwOption{
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
 	}
 
-	// add TEXT column configs for REWRITE_ALL mode
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
 		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
 		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
@@ -191,11 +184,34 @@ func (t *mixCompactionTask) mergeSplit(
 		)
 		if len(textColumnConfigs) > 0 {
 			writerOpts = append(writerOpts, storage.WithTextColumnConfigs(textColumnConfigs))
-			mlog.Info(context.TODO(), "TEXT column REWRITE_ALL mode enabled",
+			mlog.Info(ctx, "TEXT column REWRITE_ALL mode enabled",
 				mlog.Int("rewriteFieldCount", len(textColumnConfigs)),
 			)
 		}
 	}
+
+	return writerOpts
+}
+
+func (t *mixCompactionTask) mergeSplit(
+	ctx context.Context,
+) ([]*datapb.CompactionSegment, error) {
+	_ = t.tr.RecordSpan()
+
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "MergeSplit")
+	defer span.End()
+
+	if err := t.ensureLOBCompactionContext(ctx); err != nil {
+		return nil, err
+	}
+
+	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
+	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
+	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
+
+	writerSchema := t.plan.GetSchema()
+
+	writerOpts := t.buildWriterOptions(ctx)
 
 	mWriter, err := NewMultiSegmentWriter(ctx,
 		t.binlogIO, compAlloc, t.plan.GetMaxSize(), writerSchema,
@@ -442,6 +458,10 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan")
 	}
 
+	if err := t.ensureLOBCompactionContext(ctx); err != nil {
+		return nil, err
+	}
+
 	sortMergeAppicable := t.compactionParams.UseMergeSort
 	if sortMergeAppicable {
 		for _, segment := range t.plan.GetSegmentBinlogs() {
@@ -461,8 +481,10 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	var err error
 	if sortMergeAppicable {
 		mlog.Info(context.TODO(), "compact by merge sort")
+		writerOpts := t.buildWriterOptions(ctx)
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)
+			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams,
+			writerOpts, t.lobContext, t.sortByFieldIDs)
 		if err != nil {
 			mlog.Warn(context.TODO(), "compact wrong, fail to merge sort segments", mlog.Err(err))
 			return nil, err

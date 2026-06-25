@@ -127,11 +127,8 @@ func TestShardInterceptorUpdateFunctionRunnersReleasesWhenFunctionsDropped(t *te
 			},
 		},
 	}
-	errCh := function.AllocFunctionRunners(collectionID, vchannel, schema)
-	if errCh != nil {
-		assert.NoError(t, <-errCh)
-	}
-	defer function.ReleaseFunctionRunners(collectionID, vchannel)
+	assert.NoError(t, function.AllocFunctionRunners(collectionID, walFunctionRunnerKey(vchannel), schema))
+	defer function.ReleaseFunctionRunners(collectionID, walFunctionRunnerKey(vchannel))
 
 	ok, err := function.RunWithAnalyzer(context.Background(), collectionID, schema.GetVersion(), 101, func(function.Analyzer) error {
 		return nil
