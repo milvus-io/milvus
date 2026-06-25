@@ -27,7 +27,36 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func TestIsRetriableWatchErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"compacted", rpctypes.ErrCompacted, true},
+		{"invalid auth token", rpctypes.ErrInvalidAuthToken, true},
+		{"user empty", rpctypes.ErrUserEmpty, true},
+		{"auth old revision", rpctypes.ErrAuthOldRevision, true},
+		// A raw gRPC Unauthenticated that was not mapped back to an etcd
+		// sentinel is deliberately NOT retriable: we match sentinels only.
+		{"unmapped raw grpc unauthenticated", status.Error(codes.Unauthenticated, "some unmapped error"), false},
+		{"wrapped invalid auth token", errors.Wrap(rpctypes.ErrInvalidAuthToken, "watch failed"), true},
+		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"lease not found", rpctypes.ErrLeaseNotFound, false},
+		{"generic error", errors.New("some other error"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, IsRetriableWatchErr(c.err))
+		})
+	}
+}
 
 // freePort grabs a random unused TCP port. There's a small TOCTOU window
 // between Close and the subsequent bind, but for unit tests it's acceptable.
