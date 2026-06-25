@@ -27,13 +27,22 @@ var (
 	bfApplyPoolInitOnce sync.Once
 )
 
-func initIOPool() {
+// ioPoolCapacity resolves the size of the datanode object-storage IO pool.
+// When dataNode.dataSync.ioConcurrency is unset (<=0), it scales with the node
+// as CPU*2: the pool is object-storage IO bound and its goroutines mostly block
+// on network, so the concurrency can safely exceed the CPU count. An explicit
+// configuration is honored as-is (no more hard-coded 32 cap).
+func ioPoolCapacity() int {
 	capacity := paramtable.Get().DataNodeCfg.IOConcurrency.GetAsInt()
-	if capacity > 32 {
-		capacity = 32
+	if capacity <= 0 {
+		capacity = hardware.GetCPUNum() * 2
 	}
+	return capacity
+}
+
+func initIOPool() {
 	// error only happens with negative expiry duration or with negative pre-alloc size.
-	ioPool = conc.NewPool[any](capacity)
+	ioPool = conc.NewPool[any](ioPoolCapacity())
 }
 
 func GetOrCreateIOPool() *conc.Pool[any] {

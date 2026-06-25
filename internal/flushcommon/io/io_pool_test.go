@@ -40,6 +40,22 @@ func TestGetOrCreateIOPool(t *testing.T) {
 	wg.Wait()
 }
 
+func TestIOPoolCapacity(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	key := pt.DataNodeCfg.IOConcurrency.Key
+	original := pt.DataNodeCfg.IOConcurrency.GetValue()
+	defer pt.Save(key, original)
+
+	// explicit positive config is honored as-is (no hard-coded 32 cap)
+	pt.Save(key, "128")
+	assert.Equal(t, 128, ioPoolCapacity())
+
+	// unset (<=0) scales with the node as CPU*2
+	pt.Save(key, "0")
+	assert.Equal(t, hardware.GetCPUNum()*2, ioPoolCapacity())
+}
+
 func TestResizePools(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()

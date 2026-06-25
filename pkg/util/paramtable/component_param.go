@@ -7071,7 +7071,9 @@ Setting this parameter too small causes the system to store a small amount of da
 	p.IOConcurrency = ParamItem{
 		Key:          "dataNode.dataSync.ioConcurrency",
 		Version:      "2.0.0",
-		DefaultValue: "16",
+		DefaultValue: "0",
+		Doc:          "Concurrency of the datanode object-storage I/O pool (download/upload for compaction and stats tasks). 0 or negative means auto (CPU*2).",
+		Export:       true,
 	}
 	p.IOConcurrency.Init(base.mgr)
 
