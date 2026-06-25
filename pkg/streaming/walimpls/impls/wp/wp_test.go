@@ -86,7 +86,7 @@ func TestWAL(t *testing.T) {
 				// setup mini cluster
 				const nodeCount = 3
 				cluster, cfg, _, serviceSeeds := utils.StartMiniClusterWithCfg(t, nodeCount, tc.rootPath, cfg)
-				cfg.Woodpecker.Client.Quorum.BufferPools[0].Seeds = serviceSeeds
+				cfg.Woodpecker.Client.Quorum.SetBufferPoolSeeds(0, serviceSeeds)
 				defer func() {
 					cluster.StopMultiNodeCluster(t)
 				}()

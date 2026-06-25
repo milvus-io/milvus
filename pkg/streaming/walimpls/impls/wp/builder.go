@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go.uber.org/zap"
 	"net"
 
 	"github.com/zilliztech/woodpecker/common/config"
@@ -167,35 +168,99 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 }
 
 func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) {
-	// Parse buffer pools from JSON string
-	bufferPoolsJSON := cfg.QuorumBufferPools.GetValue()
-	if bufferPoolsJSON != "" {
-		var bufferPools []config.QuorumBufferPool
-		if err := json.Unmarshal([]byte(bufferPoolsJSON), &bufferPools); err != nil {
-			mlog.Warn(context.TODO(), "failed to parse quorum buffer pools JSON, using empty configuration",
-				mlog.String("json", bufferPoolsJSON),
-				mlog.Err(err))
-		} else {
-			wpConfig.Woodpecker.Client.Quorum.BufferPools = bufferPools
+	q := &wpConfig.Woodpecker.Client.Quorum
+
+	// Bind milvus' dynamic config as the runtime source for woodpecker's quorum
+	// knobs. milvus is the authoritative config source, so the source always wins
+	// (ok=true) over woodpecker's static YAML value. These params are
+	// refreshable:"true", and woodpecker calls .Get() per segment when selecting a
+	// quorum (woodpecker/quorum/discovery.go), so etcd config changes take effect on
+	// the next segment with no restart.
+	q.SelectStrategy.AffinityMode.WithSource(func() (string, bool) {
+		return cfg.QuorumAffinityMode.GetValue(), true
+	})
+	q.SelectStrategy.Replicas.WithSource(func() (int, bool) {
+		return cfg.QuorumReplicas.GetAsInt(), true
+	})
+	q.SelectStrategy.Strategy.WithSource(func() (string, bool) {
+		return cfg.QuorumStrategy.GetValue(), true
+	})
+
+	// JSON-encoded knobs: parse on each read; on empty/parse failure return ok=false
+	// so woodpecker falls back to its static (YAML default) value. No logging here
+	// because .Get() is called per segment and would spam; format problems are
+	// surfaced by the startup validation and change callbacks below instead.
+	q.BufferPools.WithSource(func() ([]config.QuorumBufferPool, bool) {
+		raw := cfg.QuorumBufferPools.GetValue()
+		if raw == "" {
+			return nil, false
 		}
-	}
-
-	// Quorum selection strategy
-	wpConfig.Woodpecker.Client.Quorum.SelectStrategy.AffinityMode = cfg.QuorumAffinityMode.GetValue()
-	wpConfig.Woodpecker.Client.Quorum.SelectStrategy.Replicas = cfg.QuorumReplicas.GetAsInt()
-	wpConfig.Woodpecker.Client.Quorum.SelectStrategy.Strategy = cfg.QuorumStrategy.GetValue()
-
-	// Parse custom placement from JSON string
-	customPlacementJSON := cfg.QuorumCustomPlacement.GetValue()
-	if customPlacementJSON != "" {
+		var pools []config.QuorumBufferPool
+		if err := json.Unmarshal([]byte(raw), &pools); err != nil {
+			return nil, false
+		}
+		return pools, true
+	})
+	q.SelectStrategy.CustomPlacement.WithSource(func() ([]config.CustomPlacement, bool) {
+		raw := cfg.QuorumCustomPlacement.GetValue()
+		if raw == "" {
+			return nil, false
+		}
 		var customPlacements []config.CustomPlacement
-		if err := json.Unmarshal([]byte(customPlacementJSON), &customPlacements); err != nil {
-			mlog.Warn(context.TODO(), "failed to parse custom placement JSON, using empty configuration",
-				mlog.String("json", customPlacementJSON),
-				mlog.Err(err))
-		} else {
-			wpConfig.Woodpecker.Client.Quorum.SelectStrategy.CustomPlacement = customPlacements
+		if err := json.Unmarshal([]byte(raw), &customPlacements); err != nil {
+			return nil, false
 		}
+		return customPlacements, true
+	})
+
+	// Validate the current JSON values once at startup (the change callbacks below
+	// only fire on subsequent updates, not on the initial value). Invalid JSON only
+	// warns; woodpecker falls back to its static default.
+	validateQuorumJSON("woodpecker quorum buffer pools", cfg.QuorumBufferPools.GetValue(), func(b []byte) error {
+		var v []config.QuorumBufferPool
+		return json.Unmarshal(b, &v)
+	})
+	validateQuorumJSON("woodpecker quorum custom placement", cfg.QuorumCustomPlacement.GetValue(), func(b []byte) error {
+		var v []config.CustomPlacement
+		return json.Unmarshal(b, &v)
+	})
+
+	// Validate JSON format on config change. A non-nil error is logged once per
+	// change by the param framework ("param change callback failed"); it does not
+	// veto the change, so on bad JSON woodpecker simply falls back to its static
+	// default on the next .Get().
+	cfg.QuorumBufferPools.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		if newValue == "" {
+			return nil
+		}
+		var v []config.QuorumBufferPool
+		if err := json.Unmarshal([]byte(newValue), &v); err != nil {
+			return fmt.Errorf("invalid quorum buffer pools JSON %q: %w", newValue, err)
+		}
+		return nil
+	})
+	cfg.QuorumCustomPlacement.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		if newValue == "" {
+			return nil
+		}
+		var v []config.CustomPlacement
+		if err := json.Unmarshal([]byte(newValue), &v); err != nil {
+			return fmt.Errorf("invalid quorum custom placement JSON %q: %w", newValue, err)
+		}
+		return nil
+	})
+}
+
+// validateQuorumJSON parses a non-empty raw JSON config once and warns on failure.
+func validateQuorumJSON(label, raw string, parse func([]byte) error) {
+	if raw == "" {
+		return
+	}
+	if err := parse([]byte(raw)); err != nil {
+		mlog.Warn(context.TODO(), "invalid quorum JSON config at startup, will fall back to static default",
+			zap.String("config", label),
+			mlog.String("json", raw),
+			mlog.Err(err))
 	}
 }
 
