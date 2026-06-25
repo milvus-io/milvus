@@ -191,8 +191,10 @@ func (s *DelegatorSuite) SetupTest() {
 }
 
 func (s *DelegatorSuite) TearDownTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
-	s.delegator.Close()
+	if s.delegator != nil {
+		s.delegator.Close()
+	}
+	function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
 	s.delegator = nil
 }
 
@@ -261,8 +263,9 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, nextSchemaVersionLoadMeta())
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
+		defer delegator.Close()
 	})
 }
 
@@ -1502,12 +1505,8 @@ func (s *DelegatorSuite) ResetDelegator() {
 }
 
 func (s *DelegatorSuite) allocFunctionRunnersForTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
 	sd := s.delegator.(*shardDelegator)
-	errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, sd.collection.Schema())
-	if errCh != nil {
-		s.Require().NoError(<-errCh)
-	}
+	s.Require().NoError(function.UpdateFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), sd.collection.Schema()))
 }
 
 func (s *DelegatorSuite) TestRunAnalyzer() {
