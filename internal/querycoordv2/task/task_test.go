@@ -2223,6 +2223,59 @@ func (suite *TaskSuite) TestSegmentTaskDeltaWithDistFilter() {
 	suite.Equal(1, scheduler.GetChannelTaskDelta(targetNode, coll))
 }
 
+func (suite *TaskSuite) TestSegmentTaskDeltaSnapshotKeepsStreamingReduceUntilGrowingDistGone() {
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+
+	coll := int64(1001)
+	partition := int64(100)
+	channel := "channel-1"
+	sourceNode := int64(1)
+	segmentID := int64(102)
+	rowCount := 100
+
+	suite.dist.ChannelDistManager.Update(sourceNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: coll,
+			ChannelName:  channel,
+		},
+		Node:    sourceNode,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           sourceNode,
+			CollectionID: coll,
+			Channel:      channel,
+			GrowingSegments: map[int64]*meta.Segment{
+				segmentID: utils.CreateTestSegment(coll, partition, segmentID, sourceNode, 1, channel),
+			},
+		},
+	})
+
+	reduceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(sourceNode, ActionTypeReduce, channel, segmentID, querypb.DataScope_Streaming, rowCount),
+	)
+	suite.NoError(err)
+	reduceTask.SetID(1)
+	scheduler.incExecutingTaskDelta(reduceTask)
+
+	snapshot := scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode}, coll)
+	suite.Equal(-rowCount, snapshot.GetByNode(sourceNode))
+	suite.Equal(-rowCount, snapshot.GetByNodeInCollection(sourceNode))
+
+	suite.dist.ChannelDistManager.Update(sourceNode)
+	snapshot = scheduler.GetSegmentTaskDeltaSnapshot([]int64{sourceNode}, coll)
+	suite.Equal(0, snapshot.GetByNode(sourceNode))
+	suite.Equal(0, snapshot.GetByNodeInCollection(sourceNode))
+
+	scheduler.decExecutingTaskDelta(reduceTask)
+}
+
 func (suite *TaskSuite) TestChannelTaskDeltaCache() {
 	delta := NewChannelTaskDelta()
 
