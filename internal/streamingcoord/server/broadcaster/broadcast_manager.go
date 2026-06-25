@@ -384,17 +384,15 @@ func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64]
 		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 			continue
 		}
-		switch task.msg.MessageType() {
-		case message.MessageTypeCreateCollection:
+		switch task.msg.MessageTypeWithVersion() {
+		case message.MessageTypeCreateCollectionV1:
 			createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
 			if err != nil {
 				continue
 			}
 			body := createMsg.MustBody()
 			ids := body.CollectionSchema.GetFileResourceIds()
-			if len(ids) > 0 {
-				result[createMsg.Header().CollectionId] = ids
-			}
+			appendPendingFileResourceIDs(result, createMsg.Header().CollectionId, ids)
 		case message.MessageTypeAlterCollectionV2:
 			alterMsg, err := message.AsMutableAlterCollectionMessageV2(task.msg)
 			if err != nil {
@@ -402,12 +400,27 @@ func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64]
 			}
 			schema := alterMsg.MustBody().GetUpdates().GetSchema()
 			ids := schema.GetFileResourceIds()
-			if len(ids) > 0 {
-				result[alterMsg.Header().CollectionId] = ids
-			}
+			appendPendingFileResourceIDs(result, alterMsg.Header().CollectionId, ids)
 		default:
 			continue
 		}
 	}
 	return result
+}
+
+func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, ids []int64) {
+	if len(ids) == 0 {
+		return
+	}
+	seen := make(map[int64]struct{}, len(result[collectionID])+len(ids))
+	for _, id := range result[collectionID] {
+		seen[id] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		result[collectionID] = append(result[collectionID], id)
+		seen[id] = struct{}{}
+	}
 }
