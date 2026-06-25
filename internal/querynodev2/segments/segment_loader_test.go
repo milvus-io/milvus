@@ -1718,7 +1718,7 @@ func (suite *SegmentLoaderDetailSuite) TestReopenLoadedSealedSegmentsForSchemaUp
 		noInfo.EXPECT().Collection().Return(suite.collectionID).Once()
 		noInfo.EXPECT().LoadInfo().Return(nil).Once()
 
-		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentType(commonpb.SegmentState_SegmentStateNone)).Return(nil).Once()
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, commonpb.SegmentState_SegmentStateNone).Return(nil).Once()
 		suite.segmentManager.EXPECT().GetSealed(suite.segmentID).Return(reopened).Once()
 		reopened.EXPECT().Reopen(mock.Anything, mock.MatchedBy(func(info *querypb.SegmentLoadInfo) bool {
 			return info.GetSegmentID() == suite.segmentID && info.GetCollectionID() == suite.collectionID

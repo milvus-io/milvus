@@ -804,15 +804,15 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := cluster.NewMockWorker(s.T())
 		worker2 := cluster.NewMockWorker(s.T())
-		worker1Attempts := 0
+		worker1Attempts := atomic.NewInt32(0)
 
 		workers[1] = worker1
 		workers[2] = worker2
 
 		worker1.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
-			worker1Attempts++
+			attempt := worker1Attempts.Inc()
 			s.Equal(uint64(100), usr.GetSchemaBarrierTs())
-			if worker1Attempts == 1 {
+			if attempt == 1 {
 				return merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")
 			}
 			return merr.Success(), nil
