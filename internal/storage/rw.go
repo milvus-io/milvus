@@ -73,6 +73,7 @@ type rwOptions struct {
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
 	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
 	externalReader      packed.ExternalReaderContext
 }
 
@@ -200,6 +201,15 @@ func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption 
 func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
 	return func(options *rwOptions) {
 		options.textColumnConfigs = configs
+	}
+}
+
+// WithTextRefsAsBinary is for manifest compaction paths that preserve existing
+// TEXT LOB references. The input TEXT columns are already encoded binary refs,
+// so the plain packed writer should use the physical binary schema.
+func WithTextRefsAsBinary() RwOption {
+	return func(options *rwOptions) {
+		options.textRefsAsBinary = true
 	}
 }
 
@@ -450,6 +460,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
 			pluginContext,
+			rwOptions.textRefsAsBinary,
 		)
 	}
 	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)

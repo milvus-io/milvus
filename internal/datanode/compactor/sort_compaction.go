@@ -173,6 +173,18 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 
 	writerSchema := t.plan.GetSchema()
 
+	writerOpts := []storage.RwOption{
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			return t.binlogIO.Upload(ctx, kvs)
+		}),
+		storage.WithVersion(t.storageVersion),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithUseLoonFFI(t.useLoonFFI),
+	}
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
+	}
+
 	srw, err := storage.NewBinlogRecordWriter(ctx,
 		t.collectionID,
 		t.partitionID,
@@ -181,12 +193,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		alloc,
 		t.compactionParams.BinLogMaxSize,
 		numRows,
-		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
-			return t.binlogIO.Upload(ctx, kvs)
-		}),
-		storage.WithVersion(t.storageVersion),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		storage.WithUseLoonFFI(t.useLoonFFI),
+		writerOpts...,
 	)
 	if err != nil {
 		log.Warn(ctx, "sort segment wrong, unable to init segment writer",
@@ -587,7 +594,6 @@ func (t *sortCompactionTask) initLOBCompactionContext(ctx context.Context) error
 	}
 	if !hasLobFiles {
 		log.Info(ctx, "no LOB files found in source segment")
-		return nil
 	}
 
 	// create LOB compaction context

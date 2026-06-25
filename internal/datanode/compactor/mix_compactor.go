@@ -196,6 +196,9 @@ func (t *mixCompactionTask) mergeSplit(
 			)
 		}
 	}
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
+	}
 
 	mWriter, err := NewMultiSegmentWriter(ctx,
 		t.binlogIO, compAlloc, t.plan.GetMaxSize(), writerSchema,
@@ -700,7 +703,6 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 	}
 	if !hasLobFiles {
 		mlog.Info(context.TODO(), "no LOB files found in source segments")
-		return nil
 	}
 
 	// create LOB compaction context and compute strategies
