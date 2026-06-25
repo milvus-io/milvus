@@ -1356,6 +1356,60 @@ class TestMilvusClientStructArrayElementIndexRegression(TestMilvusClientV2Base):
         for hit in results[0]:
             assert any(e["int_val"] > 100 for e in hit["structA"])
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_bitmap_index_on_varchar_subfield(self):
+        """
+        target: BITMAP index on struct VARCHAR sub-field type correctness
+        method: create BITMAP index on structA[color], insert data, verify searchable
+        expected: index created and element_filter search works correctly
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_bitmap_vc")
+
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[color]",
+            index_type="BITMAP",
+        )
+        res, check = self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+        )
+        assert check
+
+        data = self._insert_sealed_and_growing(client, collection_name)
+        query_vector = data[0]["structA"][0]["embedding"]
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter='element_filter(structA, $[color] == "Blue")',
+            limit=10,
+            output_fields=["id", "structA"],
+        )
+        assert check
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert any(e["color"] == "Blue" for e in hit["structA"])
+
     # ---- 5.2 STL_SORT index type correctness ----
 
     @pytest.mark.tags(CaseLabel.L1)
