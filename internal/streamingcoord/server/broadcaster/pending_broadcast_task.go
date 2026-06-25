@@ -48,7 +48,7 @@ type pendingBroadcastTask struct {
 // Execute can be repeated called until the task is done.
 // Same semantics as the `Poll` operation in eventloop.
 func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
-	ctx = message.ExtractTraceContext(ctx, b.broadcastTask.msg)
+	ctx = message.ExtractTraceContext(ctx, b.msg)
 
 	if err := b.InitializeRecovery(ctx); err != nil {
 		b.Logger().Warn(ctx, "broadcast task initialize recovery failed", mlog.Err(err))
