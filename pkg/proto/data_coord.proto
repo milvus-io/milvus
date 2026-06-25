@@ -1163,9 +1163,6 @@ message CopySegmentResult {
 
   // Transformed manifest path for target segment
   string manifest_path = 10;
-
-  // Whether DataCoord should overwrite target segment NumOfRows with imported_rows.
-  bool update_num_rows = 11;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes

@@ -2876,7 +2876,6 @@ func TestRewriteManifestSegmentForCutoff_FiltersRows(t *testing.T) {
 	result, copiedFiles, err := rewriteManifestSegmentForCutoff(ctx, source, target, userSchema, storageConfig)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), result.GetImportedRows())
-	assert.True(t, result.GetUpdateNumRows())
 	targetBasePath, _, err := packed.UnmarshalManifestPath(result.GetManifestPath())
 	require.NoError(t, err)
 	assert.Equal(t, path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, "444/555/666"), targetBasePath)
@@ -3136,11 +3135,10 @@ func TestCopySegmentAndIndexFiles_V2WithCutoff(t *testing.T) {
 		}},
 	}}
 	mockPrepare := mockey.Mock(prepareNonManifestRestoreCutoff).Return(&restoreCutoffPlan{
-		copySource:    copySource,
-		metaSource:    metaSource,
-		mappings:      map[string]string{"files/delta_log/111/222/333/31": "files/delta_log/444/555/666/31"},
-		copiedFiles:   []string{"files/delta_log/444/555/666/31"},
-		updateNumRows: true,
+		copySource:  copySource,
+		metaSource:  metaSource,
+		mappings:    map[string]string{"files/delta_log/111/222/333/31": "files/delta_log/444/555/666/31"},
+		copiedFiles: []string{"files/delta_log/444/555/666/31"},
 	}, nil).Build()
 	defer mockPrepare.UnPatch()
 
@@ -3165,7 +3163,6 @@ func TestCopySegmentAndIndexFiles_V2WithCutoff(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(3), result.GetImportedRows())
-	assert.True(t, result.GetUpdateNumRows())
 	assert.Len(t, result.GetDeltalogs(), 1)
 	assert.Equal(t, int64(100), result.GetDeltalogs()[0].GetFieldID())
 	assert.Equal(t, int64(1), result.GetDeltalogs()[0].GetBinlogs()[0].GetEntriesNum())
@@ -3208,12 +3205,11 @@ func TestCopySegmentAndIndexFiles_L0WithCutoff(t *testing.T) {
 			}},
 		}}
 		mockPrepare := mockey.Mock(prepareNonManifestRestoreCutoff).Return(&restoreCutoffPlan{
-			copySource:    copySource,
-			metaSource:    metaSource,
-			mappings:      map[string]string{"files/delta_log/111/-1/333/1": "files/delta_log/444/-1/666/1"},
-			copiedFiles:   []string{"files/delta_log/444/-1/666/1"},
-			updateNumRows: true,
-			importedRows:  2,
+			copySource:   copySource,
+			metaSource:   metaSource,
+			mappings:     map[string]string{"files/delta_log/111/-1/333/1": "files/delta_log/444/-1/666/1"},
+			copiedFiles:  []string{"files/delta_log/444/-1/666/1"},
+			importedRows: 2,
 		}, nil).Build()
 		defer mockPrepare.UnPatch()
 
@@ -3230,7 +3226,6 @@ func TestCopySegmentAndIndexFiles_L0WithCutoff(t *testing.T) {
 		)
 
 		assert.NoError(t, err)
-		assert.True(t, result.GetUpdateNumRows())
 		assert.Equal(t, int64(2), result.GetImportedRows())
 		assert.Len(t, result.GetDeltalogs(), 1)
 		assert.Equal(t, []string{"files/delta_log/444/-1/666/1"}, copiedFiles)
@@ -3241,11 +3236,10 @@ func TestCopySegmentAndIndexFiles_L0WithCutoff(t *testing.T) {
 		copySource.DeltaBinlogs = nil
 		metaSource := proto.Clone(copySource).(*datapb.CopySegmentSource)
 		mockPrepare := mockey.Mock(prepareNonManifestRestoreCutoff).Return(&restoreCutoffPlan{
-			copySource:    copySource,
-			metaSource:    metaSource,
-			mappings:      map[string]string{},
-			updateNumRows: true,
-			importedRows:  0,
+			copySource:   copySource,
+			metaSource:   metaSource,
+			mappings:     map[string]string{},
+			importedRows: 0,
 		}, nil).Build()
 		defer mockPrepare.UnPatch()
 
@@ -3262,7 +3256,6 @@ func TestCopySegmentAndIndexFiles_L0WithCutoff(t *testing.T) {
 		)
 
 		assert.NoError(t, err)
-		assert.True(t, result.GetUpdateNumRows())
 		assert.Equal(t, int64(0), result.GetImportedRows())
 		assert.Empty(t, result.GetDeltalogs())
 		assert.Empty(t, copiedFiles)

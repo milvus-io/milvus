@@ -166,12 +166,11 @@ const (
 )
 
 type restoreCutoffPlan struct {
-	copySource    *datapb.CopySegmentSource
-	metaSource    *datapb.CopySegmentSource
-	mappings      map[string]string
-	copiedFiles   []string
-	updateNumRows bool
-	importedRows  int64
+	copySource   *datapb.CopySegmentSource
+	metaSource   *datapb.CopySegmentSource
+	mappings     map[string]string
+	copiedFiles  []string
+	importedRows int64
 }
 
 func classifyBinlogForCutoff(binlog *datapb.Binlog, cutoffTs uint64) cutoffLogAction {
@@ -301,10 +300,9 @@ func prepareNonManifestRestoreCutoff(
 	copySource := proto.Clone(source).(*datapb.CopySegmentSource)
 	metaSource := proto.Clone(source).(*datapb.CopySegmentSource)
 	plan := &restoreCutoffPlan{
-		copySource:    copySource,
-		metaSource:    metaSource,
-		mappings:      make(map[string]string),
-		updateNumRows: true,
+		copySource: copySource,
+		metaSource: metaSource,
+		mappings:   make(map[string]string),
 	}
 
 	insertMutated := false
@@ -485,11 +483,10 @@ func rewriteManifestSegmentForCutoff(
 		return nil, copiedFiles, merr.Wrap(err, "failed to compress cutoff manifest binlog paths")
 	}
 	return &datapb.CopySegmentResult{
-		SegmentId:     target.GetSegmentId(),
-		ImportedRows:  int64(rowCount),
-		Binlogs:       binlogs,
-		ManifestPath:  manifestPath,
-		UpdateNumRows: true,
+		SegmentId:    target.GetSegmentId(),
+		ImportedRows: int64(rowCount),
+		Binlogs:      binlogs,
+		ManifestPath: manifestPath,
 	}, copiedFiles, nil
 }
 
@@ -1859,8 +1856,7 @@ func CopySegmentAndIndexFiles(
 		JsonKeyIndexInfos: jsonKeyIndexInfos,
 	}
 
-	if cutoffPlan != nil && cutoffPlan.updateNumRows {
-		result.UpdateNumRows = true
+	if cutoffPlan != nil {
 		if deltaOnlyCutoffSource {
 			result.ImportedRows = cutoffPlan.importedRows
 		}

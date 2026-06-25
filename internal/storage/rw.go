@@ -69,13 +69,13 @@ type rwOptions struct {
 	multiPartUploadSize  int64
 	columnGroups         []storagecommon.ColumnGroup
 	collectionID         int64
-	collectionProperties []*commonpb.KeyValuePair
 	storageConfig        *indexpb.StorageConfig
 	neededFields         typeutil.Set[int64]
 	useLoonFFI           bool
 	pluginContext        *indexcgopb.StoragePluginContext
 	textColumnConfigs    []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
 	externalReader       packed.ExternalReaderContext
+	collectionProperties []*commonpb.KeyValuePair
 }
 
 func (o *rwOptions) validate() error {

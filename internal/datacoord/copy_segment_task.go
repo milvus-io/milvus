@@ -697,10 +697,8 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
-			operators := []UpdateOperator{op1, op2, op3}
-			if result.GetUpdateNumRows() {
-				operators = append(operators, UpdateImportedRows(result.GetSegmentId(), result.GetImportedRows()))
-			}
+			op4 := UpdateImportedRows(result.GetSegmentId(), result.GetImportedRows())
+			operators := []UpdateOperator{op1, op2, op3, op4}
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}
