@@ -1,10 +1,13 @@
 package adaptor
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -55,6 +58,28 @@ func TestNewMsgPackFromInsertMessage(t *testing.T) {
 			assert.Equal(t, ts, tt)
 		}
 	}
+}
+
+func TestNewMsgPackFromMessageRestoresTraceContext(t *testing.T) {
+	traceID, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	require.NoError(t, err)
+	spanID, err := trace.SpanIDFromHex("0102030405060708")
+	require.NoError(t, err)
+	ctx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID,
+		SpanID:  spanID,
+	}))
+
+	id := rmq.NewRmqID(1)
+	mutableMsg := message.CreateTestInsertMessage(t, 3, 1, uint64(time.Now().UnixNano()), id)
+	message.InjectTraceContext(ctx, mutableMsg)
+	immutableMsg := mutableMsg.WithOldVersion().IntoImmutableMessage(id)
+
+	pack, err := NewMsgPackFromMessage(immutableMsg)
+	require.NoError(t, err)
+	require.NotNil(t, pack)
+	require.Len(t, pack.Msgs, 1)
+	assert.Equal(t, traceID, trace.SpanContextFromContext(pack.Msgs[0].TraceCtx()).TraceID())
 }
 
 func TestNewMsgPackFromCreateCollectionMessage(t *testing.T) {

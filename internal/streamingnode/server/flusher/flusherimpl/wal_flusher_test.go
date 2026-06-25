@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -166,6 +167,44 @@ func TestWALFlusher_DispatchObservesTruncateCollectionBeforeHandlingWithoutAckSy
 	msg := newTruncateCollectionMessage(t, "vchannel-1")
 
 	require.ErrorContains(t, flusher.dispatch(msg), "observe failed")
+}
+
+func TestWALFlusherDispatchRestoresTraceContext(t *testing.T) {
+	expectedTraceID, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	require.NoError(t, err)
+	spanID, err := trace.SpanIDFromHex("0102030405060708")
+	require.NoError(t, err)
+	clientCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: expectedTraceID,
+		SpanID:  spanID,
+	}))
+
+	mutableMsg := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&msgpb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{},
+		}).
+		WithVChannel("vchannel-1").
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmed(rmq.NewRmqID(1))
+	message.InjectTraceContext(clientCtx, mutableMsg)
+	msg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(2))
+
+	var observedTraceID trace.TraceID
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, msg message.ImmutableMessage) error {
+			observedTraceID = trace.SpanContextFromContext(ctx).TraceID()
+			return nil
+		}).
+		Once()
+
+	flusher := newTestWALFlusher(rs)
+	require.NoError(t, flusher.dispatch(msg))
+	assert.Equal(t, expectedTraceID, observedTraceID)
 }
 
 func newTestWALFlusher(rs recovery.RecoveryStorage) *WALFlusherImpl {
