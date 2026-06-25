@@ -51,9 +51,14 @@ func TestIOPoolCapacity(t *testing.T) {
 	pt.Save(key, "128")
 	assert.Equal(t, 128, ioPoolCapacity())
 
-	// unset (<=0) scales with the node as CPU*2
+	// unset (<=0) scales with the node as max(16, CPU*2)
 	pt.Save(key, "0")
-	assert.Equal(t, hardware.GetCPUNum()*2, ioPoolCapacity())
+	expected := hardware.GetCPUNum() * 2
+	if expected < ioDefaultPoolFloor {
+		expected = ioDefaultPoolFloor
+	}
+	assert.Equal(t, expected, ioPoolCapacity())
+	assert.GreaterOrEqual(t, ioPoolCapacity(), ioDefaultPoolFloor, "auto default must not drop below the historical floor")
 }
 
 func TestResizePools(t *testing.T) {
