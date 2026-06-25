@@ -46,9 +46,6 @@ misc:
   - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=ci-v2/code-check'
-  - when_code_check_macos_success: &WHEN_CODE_CHECK_MACOS_SUCCESS
-      - 'status-success=Code Checker MacOS 13'
-      - 'status-success=Code Checker MacOS'
 
   # CI-v2 checker conditions (3.0 branch)
   - when_build_ut_cov_success: &WHEN_BUILD_UT_COV_SUCCESS
@@ -208,7 +205,6 @@ pull_request_rules:
       - *WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS
       - or: *WHEN_GO_SDK_STATUS_SUCCESS
       - or: *WHEN_E2E_TEST_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
@@ -226,7 +222,6 @@ pull_request_rules:
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_E2E_TEST_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
@@ -240,7 +235,6 @@ pull_request_rules:
       - or: *WHEN_BUILD_UT_COV_SUCCESS
       - or: *WHEN_E2E_AMD_SUCCESS
       - or: *WHEN_GO_SDK_STATUS_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
     actions:
       label:
         add:
@@ -305,7 +299,6 @@ pull_request_rules:
       - *MASTER_BRANCH
       - *only_go_unittest_files
       - *WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
     actions:
       label:
         add:
@@ -317,7 +310,6 @@ pull_request_rules:
       - *only_go_unittest_files
       - or: *WHEN_BUILD_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
     actions:
       label:
@@ -329,7 +321,6 @@ pull_request_rules:
       - *3X_BRANCH
       - *only_go_unittest_files
       - or: *WHEN_BUILD_UT_COV_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
     actions:
       label:
         add:
@@ -361,7 +352,6 @@ pull_request_rules:
       - *MASTER_BRANCH
       - title~=\[skip e2e\]
       - *WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - *source_code_files
     actions:
       label:
@@ -377,7 +367,6 @@ pull_request_rules:
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - *source_code_files
     actions:
       label:
@@ -389,7 +378,6 @@ pull_request_rules:
       - *3X_BRANCH
       - title~=\[skip e2e\]
       - or: *WHEN_BUILD_UT_COV_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - *source_code_files
     actions:
       label:
@@ -449,15 +437,6 @@ pull_request_rules:
         - and:
             - *morethan_go_unittest_files
             - *WHEN_MASTER_BUILD_UT_COV_GATE_FAILURE
-        # Code checker MacOS: remove if no success AND has failure
-        - and:
-            - not:
-                or:
-                  - status-success = Code Checker MacOS 13
-                  - status-success = Code Checker MacOS
-            - or:
-                - status-failure = Code Checker MacOS 13
-                - status-failure = Code Checker MacOS
         # E2E tests: remove only when E2E is required by the matching pass rule.
         - and:
             - -title~=\[skip e2e\]
@@ -538,15 +517,6 @@ pull_request_rules:
             - or:
                 - status-failure = Code Checker AMD64 Ubuntu 22.04
                 - status-failure = ci-v2/code-check
-        # Code checker MacOS: remove if no success AND has failure
-        - and:
-            - not:
-                or:
-                  - status-success = Code Checker MacOS 13
-                  - status-success = Code Checker MacOS
-            - or:
-                - status-failure = Code Checker MacOS 13
-                - status-failure = Code Checker MacOS
         # E2E tests: regular case - remove if no success AND has failure
         - and:
             - not:
@@ -587,14 +557,6 @@ pull_request_rules:
           - and:
               - -status-success = ci-v2/go-sdk
               - status-failure = ci-v2/go-sdk
-          - and:
-              - not:
-                  or:
-                    - status-success = Code Checker MacOS 13
-                    - status-success = Code Checker MacOS
-              - or:
-                  - status-failure = Code Checker MacOS 13
-                  - status-failure = Code Checker MacOS
     actions:
       label:
         remove:
