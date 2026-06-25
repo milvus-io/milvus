@@ -69,7 +69,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectType := privilegeExt.ObjectType.String()
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
-	dbName := GetCurDBNameFromContextOrDefault(ctx)
+	dbName := getRequestDBNameOrContext(ctx, req)
 
 	// Resolve alias to actual collection name for RBAC checks
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
@@ -177,6 +177,21 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 
 	return ctx, status.Error(codes.PermissionDenied,
 		fmt.Sprintf("%s: permission deny to %s in the `%s` database", objectPrivilege, username, dbName))
+}
+
+// getRequestDBNameOrContext picks the db name used for privilege enforcement.
+// It prefers the DbName carried by the request itself so that explicit per-call
+// targeting (e.g. DescribeDatabase("dbX") without a prior useDatabase) is
+// authorized against dbX rather than against the connection-context default.
+// When the request does not specify a db name, it falls back to the db name in
+// the gRPC metadata, and finally to the cluster default.
+func getRequestDBNameOrContext(ctx context.Context, req interface{}) string {
+	if r, ok := req.(interface{ GetDbName() string }); ok {
+		if name := r.GetDbName(); name != "" {
+			return name
+		}
+	}
+	return GetCurDBNameFromContextOrDefault(ctx)
 }
 
 // isCurUserObject Determine whether it is an Object of type User that operates on its own user information,

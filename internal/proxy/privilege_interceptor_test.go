@@ -29,7 +29,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 	t.Run("Authorization Disabled", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
@@ -42,7 +41,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.Error(t, err)
@@ -68,13 +66,11 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		}
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "foo:123456"), &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.Error(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "root:123456"), &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
@@ -82,12 +78,10 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		err = InitMetaCache(ctx, client)
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
@@ -102,25 +96,21 @@ func TestPrivilegeInterceptor(t *testing.T) {
 
 		fooCtx := GetContext(context.Background(), "foo:123456")
 		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.Error(t, err)
 		{
 			_, err = PrivilegeInterceptor(GetContext(context.Background(), "foo:"+util.PasswordHolder), &milvuspb.LoadCollectionRequest{
-				DbName:         "db_test",
 				CollectionName: "col1",
 			})
 			assert.Error(t, err)
 			assert.True(t, strings.Contains(err.Error(), "apikey user"))
 		}
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.InsertRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.Error(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.UpsertRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.Error(t, err)
@@ -134,19 +124,19 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Error(t, err)
 
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.FlushRequest{
-			DbName:          "db_test",
 			CollectionNames: []string{"col1"},
 		})
 		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 
+		// fooo only has policies on the `default` db; targeting `foo` db must
+		// be denied. With the fix, request DbName takes precedence over ctx.
 		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "foo"), &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "foo",
 			CollectionName: "col1",
 		})
 		assert.NotNil(t, err)
@@ -158,7 +148,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 				defer g.Done()
 				assert.NotPanics(t, func() {
 					PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
-						DbName:         "db_test",
 						CollectionName: "col1",
 					})
 				})
@@ -622,4 +611,91 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
 		assert.Error(t, err)
 	})
+}
+
+// TestPrivilegePreferRequestDBName verifies that PrivilegeInterceptor authorizes
+// against the DbName carried by the request itself rather than the connection
+// context. A user holding privileges on db_target should pass when calling
+// DescribeDatabase("db_target") without a prior useDatabase.
+func TestPrivilegePreferRequestDBName(t *testing.T) {
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	privilege.InitPrivilegeGroups()
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				// role_db_target only owns DescribeDatabase + Load on db_target.
+				// The Load privilege verifies that the "request DbName takes
+				// precedence" rule applies to other request types as well.
+				funcutil.PolicyForPrivilege("role_db_target", commonpb.ObjectType_Global.String(), "*",
+					commonpb.ObjectPrivilege_PrivilegeDescribeDatabase.String(), "db_target"),
+				funcutil.PolicyForPrivilege("role_db_target", commonpb.ObjectType_Collection.String(), "*",
+					commonpb.ObjectPrivilege_PrivilegeLoad.String(), "db_target"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("user_db_target", "role_db_target"),
+			},
+		}, nil
+	}
+	assert.NoError(t, InitMetaCache(context.Background(), client))
+	defer privilege.CleanPrivilegeCache()
+
+	// Caller uses an empty connection context (no useDatabase), but explicitly
+	// passes DbName=db_target in the request. With the fix, auth is enforced
+	// against db_target and should succeed.
+	ctx := GetContext(context.Background(), "user_db_target:123456")
+	_, err := PrivilegeInterceptor(ctx, &milvuspb.DescribeDatabaseRequest{DbName: "db_target"})
+	assert.NoError(t, err)
+
+	// Sanity: when the request carries no DbName and the context has no db
+	// either, it falls back to the cluster default and should be denied.
+	_, err = PrivilegeInterceptor(ctx, &milvuspb.DescribeDatabaseRequest{})
+	assert.Error(t, err)
+
+	// Sanity: a request explicitly targeting a different db (default) must
+	// still be denied because the user only has privileges on db_target.
+	_, err = PrivilegeInterceptor(ctx, &milvuspb.DescribeDatabaseRequest{DbName: util.DefaultDBName})
+	assert.Error(t, err)
+
+	// Cross-check: when the connection context is on db_other and the request
+	// explicitly targets db_target, the request DbName takes precedence and
+	// the call should succeed.
+	ctxOther := GetContextWithDB(context.Background(), "user_db_target:123456", "db_other")
+	_, err = PrivilegeInterceptor(ctxOther, &milvuspb.DescribeDatabaseRequest{DbName: "db_target"})
+	assert.NoError(t, err)
+
+	// Boundary regression: even when the connection context is on the
+	// privileged db (db_target), a request that explicitly targets a different
+	// db (default) must be denied.
+	ctxTarget := GetContextWithDB(context.Background(), "user_db_target:123456", "db_target")
+	_, err = PrivilegeInterceptor(ctxTarget, &milvuspb.DescribeDatabaseRequest{DbName: util.DefaultDBName})
+	assert.Error(t, err)
+
+	// Generality regression: the request-DbName preference is duck-typed via
+	// GetDbName(), so it must apply to every privileged request type. Verify
+	// with LoadCollectionRequest.
+	_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
+		DbName: "db_target", CollectionName: "c1",
+	})
+	assert.NoError(t, err)
+	_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
+		DbName: util.DefaultDBName, CollectionName: "c1",
+	})
+	assert.Error(t, err)
+	_, err = PrivilegeInterceptor(ctxOther, &milvuspb.LoadCollectionRequest{
+		DbName: "db_target", CollectionName: "c1",
+	})
+	assert.NoError(t, err)
+
+	// Escalation regression: the connection context is on the privileged db
+	// (db_target), but the request explicitly targets db_other where the user
+	// has no privileges. With the fix, auth is enforced against req.DbName and
+	// must be denied.
+	_, err = PrivilegeInterceptor(ctxTarget, &milvuspb.LoadCollectionRequest{
+		DbName: "db_other", CollectionName: "c1",
+	})
+	assert.Error(t, err)
 }
