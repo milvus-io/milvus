@@ -558,6 +558,30 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s2.Stop()
 }
 
+func TestAllowedCoordinatorSessionVersionDowngrade(t *testing.T) {
+	tests := []struct {
+		name           string
+		currentVersion string
+		sessionVersion string
+		want           bool
+	}{
+		{"3.0_beta_to_2.6", "2.6.18", "3.0.0-beta", true},
+		{"3.0_patch_to_2.6", "2.6.18", "3.0.1", true},
+		{"3.1_to_2.6", "2.6.18", "3.1.0", false},
+		{"3.0_to_2.5", "2.5.99", "3.0.0", false},
+		{"2.7_to_2.6", "2.6.18", "2.7.0", false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			currentVersion := semver.MustParse(test.currentVersion)
+			sessionVersion := semver.MustParse(test.sessionVersion)
+
+			assert.Equal(t, test.want, isAllowedCoordinatorSessionVersionDowngrade(currentVersion, sessionVersion))
+		})
+	}
+}
+
 func TestSessionEventType_String(t *testing.T) {
 	tests := []struct {
 		name string
@@ -801,6 +825,11 @@ func (s *SessionSuite) TestGetSessions() {
 }
 
 func (s *SessionSuite) TestVersionKey() {
+	originVersion := common.Version
+	defer func() {
+		common.Version = originVersion
+	}()
+
 	ctx := context.Background()
 	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init(typeutil.MixCoordRole, "normal", false, false)
@@ -859,6 +888,80 @@ func (s *SessionSuite) TestVersionKey() {
 	s.Require().NoError(err)
 	s.Equal(1, len(resp.Kvs))
 	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
+	session.Stop()
+}
+
+func (s *SessionSuite) TestRegisterAllowsVersionDowngradeFrom3To26() {
+	originVersion := common.Version
+	common.Version = semver.MustParse("2.6.18")
+	defer func() {
+		common.Version = originVersion
+	}()
+
+	ctx := context.Background()
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	session.Init(typeutil.MixCoordRole, "normal", false, false)
+
+	_, err := s.client.Put(ctx, session.versionKey, "3.0.0-beta")
+	s.Require().NoError(err)
+
+	session.Register()
+	defer session.Stop()
+
+	resp, err := s.client.Get(ctx, session.versionKey)
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
+}
+
+func (s *SessionSuite) TestActiveStandByAllowsVersionDowngradeFrom3To26OnPromotion() {
+	originVersion := common.Version
+	common.Version = semver.MustParse("2.6.18")
+	defer func() {
+		common.Version = originVersion
+	}()
+
+	ctx := context.Background()
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	session.Init(typeutil.MixCoordRole, "normal", true, true)
+	session.SetEnableActiveStandBy(true)
+
+	_, err := s.client.Put(ctx, session.versionKey, "3.0.0-beta")
+	s.Require().NoError(err)
+
+	session.Register()
+	defer session.Stop()
+
+	err = session.ProcessActiveStandBy(func() error { return nil })
+	s.Require().NoError(err)
+
+	resp, err := s.client.Get(ctx, session.versionKey)
+	s.Require().NoError(err)
+	s.Require().Len(resp.Kvs, 1)
+	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
+}
+
+func (s *SessionSuite) TestActiveStandByRejectsOtherVersionDowngradeOnPromotion() {
+	originVersion := common.Version
+	common.Version = semver.MustParse("2.6.18")
+	defer func() {
+		common.Version = originVersion
+	}()
+
+	ctx := context.Background()
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
+	session.Init(typeutil.MixCoordRole, "normal", true, true)
+	session.SetEnableActiveStandBy(true)
+
+	_, err := s.client.Put(ctx, session.versionKey, "3.1.0")
+	s.Require().NoError(err)
+
+	session.Register()
+	defer session.Stop()
+
+	err = session.ProcessActiveStandBy(func() error { return nil })
+	s.Require().Error(err)
+	s.ErrorIs(err, errSessionVersionCheckFailure)
 }
 
 func (s *SessionSuite) TestSessionLifetime() {
@@ -905,7 +1008,7 @@ func TestSessionSuite(t *testing.T) {
 
 func TestForceKill(t *testing.T) {
 	if os.Getenv("TEST_EXIT") == "1" {
-		testForceKill("testForceKill")
+		testForceKill(t, "testForceKill")
 		return
 	}
 
@@ -924,14 +1027,16 @@ func TestForceKill(t *testing.T) {
 	}
 }
 
-func testForceKill(serverName string) {
+func testForceKill(t *testing.T, serverName string) {
 	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	session := NewSessionWithEtcd(context.Background(), "test", etcdCli)
 	session.Init(serverName, "normal", false, false)
 	session.Register()
 
 	// trigger a force kill
-	etcdCli.Revoke(context.Background(), *session.LeaseID)
+	_, err := etcdCli.Revoke(context.Background(), *session.LeaseID)
+	require.NoError(t, err)
+	time.Sleep(5 * time.Second)
 }
 
 func TestGetResourceGroupName(t *testing.T) {
