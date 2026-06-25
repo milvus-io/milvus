@@ -257,6 +257,12 @@ func (node *DataNode) Start() error {
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		metrics.SetDataNodePoolCollectFn(
+			fmt.Sprint(node.GetNodeID()),
+			collectPoolStats,
+		)
+
 		mlog.Info(node.ctx, "datanode start successfully")
 	})
 	return startErr

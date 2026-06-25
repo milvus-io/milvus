@@ -485,6 +485,9 @@ queryNode:
   segcore:
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
     chunkRows: 128 # Row count by which Segcore divides a segment into chunks.
+    mutatePoolSizeFactor: 2 # Size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes.
+    dynamicPoolSizeFactor: 1 # Size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info.
+    deletePoolSizeFactor: 1 # Size factor (CPUNum * factor) of the DeleteBatch dispatch pool.
     interimIndex:
       # Whether to create a temporary index for growing segments and sealed segments not yet indexed, improving search performance.
       # Milvus will eventually seals and indexes all segments, but enabling this optimizes search performance for immediate queries following data insertion.
