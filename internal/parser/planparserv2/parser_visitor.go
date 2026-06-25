@@ -45,6 +45,8 @@ type ParserVisitor struct {
 	args   *ParserVisitorArgs
 	// currentStructArrayField stores the struct array field name when processing ElementFilter
 	currentStructArrayField string
+	// currentElementArrayField is set when inside MATCH_*/element_filter on a SCALAR array; nil otherwise.
+	currentElementArrayField *schemapb.FieldSchema
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
@@ -1137,6 +1139,9 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 
 	// Check if we're inside an ElementFilter context
 	if v.currentStructArrayField == "" {
+		if v.currentElementArrayField != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("scalar array element has no sub-fields; use $ instead of $[%s]", fieldName)
+		}
 		return nil, merr.WrapErrParameterInvalidMsg("$[%s] syntax can only be used inside ElementFilter", fieldName)
 	}
 
@@ -1165,6 +1170,31 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 		IsClusteringKey: field.IsClusteringKey,
 		ElementType:     elementType,
 		Nullable:        nullable,
+		IsElementLevel:  true, // Mark as element-level access
+	}, nil
+}
+
+// getColumnInfoFromElementSelf resolves the `$` element-self token to an element-level
+// ColumnInfo for the scalar array currently being matched (v.currentElementArrayField).
+func (v *ParserVisitor) getColumnInfoFromElementSelf() (*planpb.ColumnInfo, error) {
+	field := v.currentElementArrayField
+	if field == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("$ can only be used inside MATCH_*/element_filter on a scalar array field")
+	}
+
+	// `$` denotes a single array element, so it resolves to the array's element
+	// type rather than the ARRAY type itself.
+	elementType := field.GetElementType()
+
+	return &planpb.ColumnInfo{
+		FieldId:         field.GetFieldID(),
+		DataType:        elementType,
+		ElementType:     elementType,
+		IsPrimaryKey:    field.GetIsPrimaryKey(),
+		IsAutoID:        field.GetAutoID(),
+		IsPartitionKey:  field.GetIsPartitionKey(),
+		IsClusteringKey: field.GetIsClusteringKey(),
+		Nullable:        field.GetNullable(),
 		IsElementLevel:  true, // Mark as element-level access
 	}, nil
 }
@@ -1200,7 +1230,7 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 	}, nil
 }
 
-func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField, elementSelf antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
 		if err != nil {
@@ -1215,6 +1245,10 @@ func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, st
 
 	if structIndexField != nil {
 		return v.getColumnInfoFromStructIndexField(structIndexField.GetText())
+	}
+
+	if elementSelf != nil {
+		return v.getColumnInfoFromElementSelf()
 	}
 
 	return v.getColumnInfoFromJSONIdentifier(child.GetText())
@@ -1252,7 +1286,7 @@ func (v *ParserVisitor) getNullExprColumnInfo(identifier, child antlr.TerminalNo
 			return columnInfo, err
 		}
 	}
-	return v.getChildColumnInfo(identifier, child, nil, nil)
+	return v.getChildColumnInfo(identifier, child, nil, nil, nil)
 }
 
 func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
@@ -1291,6 +1325,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 		ctx.JSONIdentifier(),
 		ctx.StructSubFieldIdentifier(),
 		ctx.StructIndexFieldIdentifier(),
+		ctx.ElementSelf(),
 	)
 	if err != nil {
 		return err
@@ -1377,6 +1412,7 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 		ctx.JSONIdentifier(),
 		ctx.StructSubFieldIdentifier(),
 		ctx.StructIndexFieldIdentifier(),
+		ctx.ElementSelf(),
 	)
 	if err != nil {
 		return err
@@ -2291,7 +2327,7 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			}
 		}
 		if columnInfo == nil && err == nil {
-			columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+			columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil, nil)
 		}
 		if err != nil {
 			return err
@@ -2696,18 +2732,61 @@ func validateAndExtractMinShouldMatch(minShouldMatchExpr interface{}) ([]*planpb
 }
 
 // VisitElementFilter handles ElementFilter(structArrayField, elementExpr) syntax.
+// resolveArrayMatchTarget classifies the first argument of a MATCH_*/element_filter
+// expression so a clearly-invalid scalar target is rejected at parse time (rather
+// than succeeding here and failing later in segcore as a System error).
+//
+// Name resolution: scalar fields and struct SUB-fields live in the schema by name,
+// but a struct-array CONTAINER name does not (only its sub-fields do, under their
+// concatenated names). So:
+//   - name resolves to a scalar ARRAY field  -> scalar element path (return field)
+//   - name resolves to a non-array field      -> ParameterInvalid (e.g. Int64Field)
+//   - name does not resolve                   -> struct-array path (isStruct=true);
+//     its existence and sub-fields are validated later during $[subField]
+//     resolution, preserving the original struct-array behavior. (We intentionally
+//     do NOT use GetStructArrayFieldFromName here: it is not reliably populated in
+//     every schema/CGO path, so relying on it would reject valid struct arrays.)
+func (v *ParserVisitor) resolveArrayMatchTarget(fieldName, funcName string) (scalarArrayField *schemapb.FieldSchema, isStruct bool, err error) {
+	field, ferr := v.schema.GetFieldFromName(fieldName)
+	if ferr != nil {
+		// Not a scalar field nor a struct sub-field by name -> treat as a struct
+		// array container; defer validation to $[subField] resolution.
+		return nil, true, nil
+	}
+	// A scalar field with this exact name exists; for element matching it must be
+	// a scalar ARRAY. Anything else (Int64, VarChar, ...) is invalid input.
+	if field.GetDataType() != schemapb.DataType_Array {
+		return nil, false, merr.WrapErrParameterInvalidMsg(
+			"%s requires an array field, but %q has type %s",
+			funcName, fieldName, field.GetDataType().String())
+	}
+	return field, false, nil
+}
+
 func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) interface{} {
 	// Check for nested ElementFilter - not allowed
-	if v.currentStructArrayField != "" {
-		return merr.WrapErrParameterInvalidMsg("nested ElementFilter is not supported, already inside ElementFilter for field: %s", v.currentStructArrayField)
+	if v.currentStructArrayField != "" || v.currentElementArrayField != nil {
+		return merr.WrapErrParameterInvalidMsg("nested ElementFilter is not supported, already inside a match/element_filter expression")
 	}
 
-	// Get struct array field name (first parameter)
+	// Get array field name (first parameter)
 	arrayFieldName := ctx.Identifier().GetText()
 
-	// Set current context for element expression parsing
-	v.currentStructArrayField = arrayFieldName
-	defer func() { v.currentStructArrayField = "" }()
+	// Resolve the named field: scalar array vs struct array. Set the appropriate
+	// context (with a defer to reset it) for element expression parsing.
+	scalarArrayField, isStruct, err := v.resolveArrayMatchTarget(arrayFieldName, "element_filter")
+	if err != nil {
+		return err
+	}
+	if isStruct {
+		// struct array path (original behavior): sub-field validation happens
+		// during $[subField] resolution inside the predicate.
+		v.currentStructArrayField = arrayFieldName
+		defer func() { v.currentStructArrayField = "" }()
+	} else {
+		v.currentElementArrayField = scalarArrayField
+		defer func() { v.currentElementArrayField = nil }()
+	}
 
 	elementExpr := ctx.Expr().Accept(v)
 	if err := getError(elementExpr); err != nil {
@@ -2745,6 +2824,9 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 
 	// Check if we're inside an ElementFilter or MATCH_* context
 	if v.currentStructArrayField == "" {
+		if v.currentElementArrayField != nil {
+			return merr.WrapErrParameterInvalidMsg("scalar array element has no sub-fields; use $ instead of $[%s]", fieldName)
+		}
 		return merr.WrapErrParameterInvalidMsg("$[%s] syntax can only be used inside ElementFilter or MATCH_*", fieldName)
 	}
 
@@ -2786,18 +2868,50 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	}
 }
 
+// VisitElementSelf handles the `$` element-self token within MATCH_*/element_filter on a scalar array.
+func (v *ParserVisitor) VisitElementSelf(ctx *parser.ElementSelfContext) interface{} {
+	columnInfo, err := v.getColumnInfoFromElementSelf()
+	if err != nil {
+		return err
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: columnInfo,
+				},
+			},
+		},
+		dataType:      columnInfo.GetDataType(), // Expression evaluates to element type
+		nodeDependent: true,
+	}
+}
+
 // parseMatchExpr is a helper function for parsing match expressions
 // matchType: the type of match operation (MatchAll, MatchAny, MatchLeast, MatchMost)
 // count: for MatchLeast/MatchMost, the count parameter (N); for MatchAll/MatchAny, this is ignored (0)
 func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
 	// Check for nested match expression - not allowed
-	if v.currentStructArrayField != "" {
-		return merr.WrapErrParameterInvalidMsg("nested %s is not supported, already inside match expression for field: %s", funcName, v.currentStructArrayField)
+	if v.currentStructArrayField != "" || v.currentElementArrayField != nil {
+		return merr.WrapErrParameterInvalidMsg("nested %s is not supported, already inside a match/element_filter expression", funcName)
 	}
 
-	// Set current context for element expression parsing
-	v.currentStructArrayField = structArrayFieldName
-	defer func() { v.currentStructArrayField = "" }()
+	// Resolve the named field: scalar array vs struct array. Set the appropriate
+	// context (with a defer to reset it) for element expression parsing.
+	scalarArrayField, isStruct, err := v.resolveArrayMatchTarget(structArrayFieldName, funcName)
+	if err != nil {
+		return err
+	}
+	if isStruct {
+		// struct array path (original behavior): sub-field validation happens
+		// during $[subField] resolution inside the predicate.
+		v.currentStructArrayField = structArrayFieldName
+		defer func() { v.currentStructArrayField = "" }()
+	} else {
+		v.currentElementArrayField = scalarArrayField
+		defer func() { v.currentElementArrayField = nil }()
+	}
 
 	// Parse the predicate expression
 	predicate := exprCtx.Accept(v)

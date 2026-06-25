@@ -24,6 +24,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <random>
 #include <set>
@@ -31,6 +32,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/Array.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/IndexMeta.h"
@@ -296,6 +298,80 @@ class MatchExprTest : public ::testing::Test {
         std::cout << "==============================" << std::endl;
     }
 
+    // Execute retrieve and return results (full-scan, not top-K limited).
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    ExecuteRetrieve(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.Parse(filter_expr);
+        auto plan =
+            CreateRetrievePlanByExpr(schema_, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+
+        return seg_->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    }
+
+    // Compute the exact set of rows that should match, directly from the
+    // inserted data and the predicate semantics encoded by verify_func.
+    std::set<int64_t>
+    ComputeExpectedRows(int64_t threshold, VerifyFunc verify_func) const {
+        std::set<int64_t> expected;
+        for (size_t i = 0; i < N_; ++i) {
+            int match_count = CountMatchingElements(static_cast<int64_t>(i));
+            if (verify_func(match_count, array_len_, threshold)) {
+                expected.insert(static_cast<int64_t>(i));
+            }
+        }
+        return expected;
+    }
+
+    // Full-recall verification: issue a Retrieve with the same predicate and
+    // assert the returned offset set is EXACTLY the expected matched set
+    // (catches both false positives AND false negatives, unlike the top-K
+    // search check in VerifyResults).
+    void
+    VerifyRetrieveRecall(const std::string& match_type_name,
+                         const std::string& filter_expr,
+                         int64_t threshold,
+                         VerifyFunc verify_func) {
+        auto result = ExecuteRetrieve(filter_expr);
+        ASSERT_NE(result, nullptr);
+
+        auto expected_rows = ComputeExpectedRows(threshold, verify_func);
+
+        std::set<int64_t> actual_rows;
+        for (const auto& offset : result->offset()) {
+            actual_rows.insert(offset);
+        }
+
+        std::vector<int64_t> missing_rows;
+        for (auto row : expected_rows) {
+            if (actual_rows.find(row) == actual_rows.end()) {
+                missing_rows.push_back(row);
+            }
+        }
+        std::vector<int64_t> extra_rows;
+        for (auto row : actual_rows) {
+            if (expected_rows.find(row) == expected_rows.end()) {
+                extra_rows.push_back(row);
+            }
+        }
+
+        std::cout << "=== " << match_type_name
+                  << " Retrieve Recall (Growing) ===" << std::endl;
+        std::cout << "Expected rows: " << expected_rows.size()
+                  << ", Actual rows: " << actual_rows.size() << std::endl;
+
+        EXPECT_TRUE(missing_rows.empty())
+            << match_type_name << " has " << missing_rows.size()
+            << " false negatives";
+        EXPECT_TRUE(extra_rows.empty())
+            << match_type_name << " has " << extra_rows.size()
+            << " false positives";
+        EXPECT_EQ(expected_rows, actual_rows)
+            << match_type_name << " matched-row set mismatch";
+    }
+
     // Member variables
     std::shared_ptr<Schema> schema_;
     FieldId vec_fid_;
@@ -328,6 +404,15 @@ TEST_F(MatchExprTest, MatchAny) {
             // MatchAny: at least one element matches
             return match_count > 0;
         });
+
+    // Full-recall check: assert the Retrieve returns EXACTLY the expected set.
+    VerifyRetrieveRecall(
+        "MatchAny",
+        filter_expr,
+        0,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
 }
 
 TEST_F(MatchExprTest, MatchAll) {
@@ -340,6 +425,14 @@ TEST_F(MatchExprTest, MatchAll) {
         0,
         [](int match_count, int element_count, int64_t /*threshold*/) {
             // MatchAll: all elements must match
+            return match_count == element_count;
+        });
+
+    VerifyRetrieveRecall(
+        "MatchAll",
+        filter_expr,
+        0,
+        [](int match_count, int element_count, int64_t /*threshold*/) {
             return match_count == element_count;
         });
 }
@@ -357,6 +450,14 @@ TEST_F(MatchExprTest, MatchLeast) {
             // MatchLeast: at least N elements match
             return match_count >= threshold;
         });
+
+    VerifyRetrieveRecall(
+        "MatchLeast(3)",
+        filter_expr,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
 }
 
 TEST_F(MatchExprTest, MatchMost) {
@@ -370,6 +471,14 @@ TEST_F(MatchExprTest, MatchMost) {
         threshold,
         [](int match_count, int /*element_count*/, int64_t threshold) {
             // MatchMost: at most N elements match
+            return match_count <= threshold;
+        });
+
+    VerifyRetrieveRecall(
+        "MatchMost(2)",
+        filter_expr,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count <= threshold;
         });
 }
@@ -387,6 +496,14 @@ TEST_F(MatchExprTest, MatchExact) {
             // MatchExact: exactly N elements match
             return match_count == threshold;
         });
+
+    VerifyRetrieveRecall(
+        "MatchExact(2)",
+        filter_expr,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
 }
 
 // Edge case: MatchLeast with threshold = 1 (equivalent to MatchAny)
@@ -398,6 +515,14 @@ TEST_F(MatchExprTest, MatchLeastOne) {
     VerifyResults(
         result.get(),
         "MatchLeast(1)",
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
+
+    VerifyRetrieveRecall(
+        "MatchLeast(1)",
+        filter_expr,
         threshold,
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count >= threshold;
@@ -417,6 +542,14 @@ TEST_F(MatchExprTest, MatchMostZero) {
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count <= threshold;
         });
+
+    VerifyRetrieveRecall(
+        "MatchMost(0)",
+        filter_expr,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count <= threshold;
+        });
 }
 
 // Edge case: MatchExact with threshold = 0 (no elements should match)
@@ -428,6 +561,14 @@ TEST_F(MatchExprTest, MatchExactZero) {
     VerifyResults(
         result.get(),
         "MatchExact(0)",
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
+
+    VerifyRetrieveRecall(
+        "MatchExact(0)",
+        filter_expr,
         threshold,
         [](int match_count, int /*element_count*/, int64_t threshold) {
             return match_count == threshold;
@@ -1975,3 +2116,551 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<IntTypeTestParam>& info) {
         return info.param.type_name;
     });
+
+// ============================================================================
+// Scalar ARRAY field MATCH_*/element_filter tests.
+//
+// These exercise MATCH_* over a top-level scalar ARRAY field (not a struct
+// array sub-field). The expression syntax uses a bare `$` to refer to the
+// element value, e.g. `MATCH_ANY(scores, $ > 90)`. The plan is built through
+// the real Go planparserv2 (via ScopedSchemaHandle) and executed with
+// Retrieve so we can assert the exact set of matched rows.
+//
+// Runs for BOTH sealed and growing segments.
+// ============================================================================
+enum class ScalarArraySegType { kSealed, kGrowing };
+
+class ScalarArrayMatchExprTest
+    : public ::testing::TestWithParam<ScalarArraySegType> {
+ protected:
+    // Build an insert proto holding: pk (INT64) + a scalar Array<Int64>
+    // "scores" field with the given per-row contents.
+    std::unique_ptr<InsertRecordProto>
+    BuildInt64ArrayInsert(const Schema& schema,
+                          FieldId pk_fid,
+                          FieldId scores_fid,
+                          const std::vector<std::vector<int64_t>>& rows) {
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        const int64_t N = static_cast<int64_t>(rows.size());
+
+        std::vector<int64_t> ids(N);
+        std::iota(ids.begin(), ids.end(), 0);
+        auto id_array =
+            CreateDataArrayFrom(ids.data(), nullptr, N, schema[pk_fid]);
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        std::vector<milvus::proto::schema::ScalarField> scores(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (auto v : rows[i]) {
+                scores[i].mutable_long_data()->add_data(v);
+            }
+        }
+        auto scores_array =
+            CreateDataArrayFrom(scores.data(), nullptr, N, schema[scores_fid]);
+        insert_data->mutable_fields_data()->AddAllocated(
+            scores_array.release());
+
+        insert_data->set_num_rows(N);
+        return insert_data;
+    }
+
+    // Create a segment (sealed or growing per param) populated with the insert
+    // proto. Returns a SegmentInterface usable for Retrieve.
+    std::shared_ptr<SegmentInterface>
+    MakeSegment(SchemaPtr schema, std::unique_ptr<InsertRecordProto> insert) {
+        const int64_t N = insert->num_rows();
+        std::vector<idx_t> row_ids(N);
+        std::vector<Timestamp> tss(N);
+        for (int64_t i = 0; i < N; ++i) {
+            row_ids[i] = i;
+            tss[i] = i;
+        }
+
+        if (GetParam() == ScalarArraySegType::kGrowing) {
+            auto seg = CreateGrowingSegment(schema, empty_index_meta);
+            seg->PreInsert(N);
+            seg->Insert(0, N, row_ids.data(), tss.data(), insert.get());
+            return std::shared_ptr<SegmentInterface>(std::move(seg));
+        }
+
+        GeneratedData generated;
+        generated.schema_ = schema;
+        generated.raw_ = insert.release();
+        for (int64_t i = 0; i < N; ++i) {
+            generated.row_ids_.push_back(i);
+            generated.timestamps_.push_back(i);
+        }
+        auto seg = CreateSealedWithFieldDataLoaded(schema, generated);
+        return std::shared_ptr<SegmentInterface>(std::move(seg));
+    }
+
+    // Parse `expr` against `schema`, run Retrieve, and return the matched
+    // segment offsets as a set.
+    std::set<int64_t>
+    RetrieveMatchedRows(SegmentInterface* seg,
+                        const Schema& schema,
+                        SchemaPtr schema_ptr,
+                        const std::string& expr) {
+        ScopedSchemaHandle schema_handle(schema);
+        auto plan_str = schema_handle.Parse(expr);
+        auto plan = CreateRetrievePlanByExpr(
+            schema_ptr, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        auto result = seg->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+        EXPECT_NE(result, nullptr);
+        std::set<int64_t> rows;
+        for (const auto& offset : result->offset()) {
+            rows.insert(offset);
+        }
+        return rows;
+    }
+};
+
+TEST_P(ScalarArrayMatchExprTest, Int64Array) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto scores_fid =
+        schema->AddDebugArrayField("scores", DataType::INT64, false);
+
+    // Rows: [[95,80],[40],[100,100,100],[]]
+    std::vector<std::vector<int64_t>> rows = {
+        {95, 80}, {40}, {100, 100, 100}, {}};
+    auto insert = BuildInt64ArrayInsert(*schema, pk_fid, scores_fid, rows);
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(scores, $ > 90) -> rows {0, 2}
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, "MATCH_ANY(scores, $ > 90)"),
+              (std::set<int64_t>{0, 2}));
+
+    // MATCH_ALL(scores, $ >= 60): row0 (95,80) all>=60 true;
+    // row1 (40) false; row2 (100,100,100) true; row3 [] vacuous true.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, "MATCH_ALL(scores, $ >= 60)"),
+              (std::set<int64_t>{0, 2, 3}));
+
+    // MATCH_LEAST(scores, $ == 100, threshold=2) -> only row2 has >=2.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_LEAST(scores, $ == 100, threshold=2)"),
+              (std::set<int64_t>{2}));
+
+    // MATCH_EXACT(scores, $ == 100, threshold=3) -> only row2 has exactly 3.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_EXACT(scores, $ == 100, threshold=3)"),
+              (std::set<int64_t>{2}));
+
+    // MATCH_MOST(scores, $ > 90, threshold=0): match count <= 0.
+    // row0 (95,80) -> 1 match; row1 (40) -> 0; row2 (100,100,100) -> 3;
+    // row3 [] -> 0 (empty array). Only rows with 0 matches qualify -> {1, 3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_MOST(scores, $ > 90, threshold=0)"),
+              (std::set<int64_t>{1, 3}));
+
+    // Compound element predicate with two `$` references in one predicate.
+    // MATCH_ANY(scores, $ > 60 && $ < 90): an element matches when it is in
+    // (60, 90). row0 (95,80) -> 80 matches; row1 (40) -> none; row2 (100s) ->
+    // none; row3 [] -> none. -> {0}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(
+            seg.get(), *schema, schema, "MATCH_ANY(scores, $ > 60 && $ < 90)"),
+        (std::set<int64_t>{0}));
+
+    // MATCH_ALL(scores, $ >= 40 && $ <= 100): all elements in [40, 100].
+    // row0 (95,80) all in range; row1 (40) in range; row2 (100s) in range;
+    // row3 [] vacuously true. -> {0, 1, 2, 3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  "MATCH_ALL(scores, $ >= 40 && $ <= 100)"),
+              (std::set<int64_t>{0, 1, 2, 3}));
+
+    // Range form: the grammar accepts `$` inside a ternary range, lowering to a
+    // BinaryRangeExpr over the element. MATCH_ANY(scores, 60 < $ < 90) is
+    // equivalent to the compound `$ > 60 && $ < 90` above -> {0}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, "MATCH_ANY(scores, 60 < $ < 90)"),
+              (std::set<int64_t>{0}));
+
+    // Empty-array edge case made explicit. row3 holds an empty array:
+    //   - MATCH_ALL is vacuously true for it (no element violates the
+    //     predicate), so row3 IS included.
+    //   - MATCH_ANY requires at least one matching element, so an empty array
+    //     can never satisfy it and row3 is excluded.
+    auto match_all_60 = RetrieveMatchedRows(
+        seg.get(), *schema, schema, "MATCH_ALL(scores, $ >= 60)");
+    EXPECT_NE(match_all_60.find(3), match_all_60.end())
+        << "empty-array row must satisfy MATCH_ALL (vacuous truth)";
+    auto match_any_any = RetrieveMatchedRows(
+        seg.get(), *schema, schema, "MATCH_ANY(scores, $ >= 0)");
+    EXPECT_EQ(match_any_any.find(3), match_any_any.end())
+        << "empty-array row must never satisfy MATCH_ANY";
+
+    // NOTE(VERIFY): standalone `element_filter(scores, $ > 90)` is intentionally
+    // NOT asserted here. Although planparserv2 parses it, element_filter lowers
+    // to an element-level bitset (ElementFilterBitsNode) intended for
+    // element-level vector search; it is not a row-level Retrieve predicate (the
+    // proxy rejects it as such, see task_search.go). Row-level array filtering
+    // must use MATCH_ANY/MATCH_*. Adding a row-set assertion here would encode
+    // undefined behavior, so it is deliberately omitted.
+}
+
+TEST_P(ScalarArrayMatchExprTest, VarCharArray) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto tags_fid =
+        schema->AddDebugArrayField("tags", DataType::VARCHAR, false);
+
+    // Rows: [["x","y"],["z"],[],["x"]]
+    std::vector<std::vector<std::string>> rows = {{"x", "y"}, {"z"}, {}, {"x"}};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+
+    std::vector<milvus::proto::schema::ScalarField> tags(N);
+    for (int64_t i = 0; i < N; ++i) {
+        for (const auto& v : rows[i]) {
+            tags[i].mutable_string_data()->add_data(v);
+        }
+    }
+    auto tags_array = CreateDataArrayFrom(
+        tags.data(), nullptr, N, schema->operator[](tags_fid));
+    insert->mutable_fields_data()->AddAllocated(tags_array.release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(tags, $ == "x") -> rows {0, 3}
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ANY(tags, $ == "x"))"),
+              (std::set<int64_t>{0, 3}));
+
+    // MATCH_ALL(tags, $ != ""): every element is non-empty.
+    // row0 ("x","y") all non-empty; row1 ("z") non-empty; row2 [] vacuously
+    // true; row3 ("x") non-empty. -> {0, 1, 2, 3}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ALL(tags, $ != ""))"),
+              (std::set<int64_t>{0, 1, 2, 3}));
+
+    // Compound string-element predicate with two `$` references.
+    // MATCH_ANY(tags, $ == "x" || $ == "y"): row0 ("x","y") matches;
+    // row1 ("z") no; row2 [] no; row3 ("x") matches. -> {0, 3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ANY(tags, $ == "x" || $ == "y"))"),
+              (std::set<int64_t>{0, 3}));
+}
+
+// Nullable arrays: a scalar array (`tags`, referenced via `$`) and a struct
+// array sub-field (`st[val]`, referenced via `$[val]`) must behave IDENTICALLY
+// for NULL and empty rows.
+//
+// CURRENT BEHAVIOR (intentionally NOT yet Postgres-aligned): MatchExpr maps a
+// row to its element range purely via the lengths table, and a NULL array row
+// is written with length 0 -- so a NULL row is treated exactly like an empty
+// array `[]`. Under this behavior MATCH_ALL / MATCH_MOST(0) / MATCH_EXACT(0)
+// INCLUDE a NULL row (vacuous truth); MATCH_ANY / MATCH_LEAST(>=1) exclude it.
+//
+// TODO(scalar-array-null): a follow-up PR will align NULL semantics with
+// PostgreSQL three-valued logic -- a NULL array yields UNKNOWN for every
+// quantified comparison and is therefore excluded from ALL MATCH_* operators
+// (distinct from an empty array, which stays vacuously true for MATCH_ALL).
+// When that lands, drop the NULL row (index 1) from the MATCH_ALL / MATCH_MOST /
+// MATCH_EXACT expected sets below. The scalar-vs-struct equality assertion holds
+// regardless of which semantics is in effect.
+TEST_P(ScalarArrayMatchExprTest, NullableArrayScalarStructAligned) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    // Nullable scalar VarChar array, and a nullable struct array sub-field
+    // (struct name "st", sub-field "val").
+    auto tags_fid = schema->AddDebugArrayField("tags", DataType::VARCHAR, true);
+    auto st_val_fid =
+        schema->AddDebugArrayField("st[val]", DataType::VARCHAR, true);
+
+    // Shared layout for both fields. row1 is NULL (valid=false); row3 is an
+    // empty array (valid=true). row1 and row3 both have zero elements, so under
+    // current behavior they are indistinguishable.
+    const std::vector<std::vector<std::string>> rows = {
+        {"x", "y"}, {}, {"z"}, {}, {"x"}};
+    const std::vector<bool> row_valid = {true, false, true, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    // Build a string-array DataArray (with the shared null bitmap) for `fid`.
+    // `data`/`valid` are consumed synchronously (copied into the proto), so it
+    // is safe for them to go out of scope when this returns.
+    auto make_str_array = [&](FieldId fid) {
+        std::vector<milvus::proto::schema::ScalarField> data(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (const auto& v : rows[i]) {
+                data[i].mutable_string_data()->add_data(v);
+            }
+        }
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            valid[i] = row_valid[i];
+        }
+        return CreateDataArrayFrom(
+            data.data(), valid.data(), N, schema->operator[](fid));
+    };
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array =
+        CreateDataArrayFrom(ids.data(), nullptr, N, schema->operator[](pk_fid));
+    insert->mutable_fields_data()->AddAllocated(id_array.release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_str_array(tags_fid).release());
+    insert->mutable_fields_data()->AddAllocated(
+        make_str_array(st_val_fid).release());
+    insert->set_num_rows(N);
+
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    struct Case {
+        std::string scalar_expr;  // over `tags` using `$`
+        std::string struct_expr;  // over `st`   using `$[val]`
+        std::set<int64_t> expected;
+    };
+    const std::vector<Case> cases = {
+        // Only rows containing "x" -> {0,4}. NULL(1) and empty(3) excluded.
+        {R"(MATCH_ANY(tags, $ == "x"))",
+         R"(MATCH_ANY(st, $[val] == "x"))",
+         {0, 4}},
+        // Every element != "": row0/2/4 have only non-empty elements; NULL(1)
+        // and empty(3) are vacuously true under current behavior -> all rows.
+        {R"(MATCH_ALL(tags, $ != ""))",
+         R"(MATCH_ALL(st, $[val] != ""))",
+         {0, 1, 2, 3, 4}},
+        // At least one "x": {0,4}.
+        {R"(MATCH_LEAST(tags, $ == "x", threshold=1))",
+         R"(MATCH_LEAST(st, $[val] == "x", threshold=1))",
+         {0, 4}},
+        // At most zero "x" -> rows with no "x": {1,2,3} (NULL and empty count 0).
+        {R"(MATCH_MOST(tags, $ == "x", threshold=0))",
+         R"(MATCH_MOST(st, $[val] == "x", threshold=0))",
+         {1, 2, 3}},
+        // Exactly zero "x" -> {1,2,3}.
+        {R"(MATCH_EXACT(tags, $ == "x", threshold=0))",
+         R"(MATCH_EXACT(st, $[val] == "x", threshold=0))",
+         {1, 2, 3}},
+    };
+
+    for (const auto& c : cases) {
+        auto scalar_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.scalar_expr);
+        auto struct_rows =
+            RetrieveMatchedRows(seg.get(), *schema, schema, c.struct_expr);
+        EXPECT_EQ(scalar_rows, c.expected)
+            << "scalar expr result mismatch: " << c.scalar_expr;
+        EXPECT_EQ(struct_rows, c.expected)
+            << "struct expr result mismatch: " << c.struct_expr;
+        // Core guarantee: scalar array and struct array agree on NULL/empty.
+        EXPECT_EQ(scalar_rows, struct_rows)
+            << "scalar vs struct divergence: " << c.scalar_expr << " | "
+            << c.struct_expr;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SegTypes,
+    ScalarArrayMatchExprTest,
+    ::testing::Values(ScalarArraySegType::kSealed,
+                      ScalarArraySegType::kGrowing),
+    [](const ::testing::TestParamInfo<ScalarArraySegType>& info) {
+        return info.param == ScalarArraySegType::kSealed ? "Sealed" : "Growing";
+    });
+
+// Nullable scalar array, two ingestion paths must agree.
+//
+// A growing segment can receive array data two ways, and MATCH_*/element_filter
+// builds its per-row element-offset table differently for each:
+//   - "new" data  -> realtime Insert      -> ExtractArrayLengths
+//                                             (reads the dense insert proto)
+//   - "old" data  -> binlog LoadFieldData  -> ExtractArrayLengthsFromFieldData
+//                                             (reads in-memory FieldData, which
+//                                              is COMPACT for nullable arrays:
+//                                              a NULL row occupies no slot)
+//
+// The binlog-load path must therefore index the compact buffer by physical
+// (valid-only) position, not by logical row index -- otherwise a NULL row that
+// precedes valid rows shifts every later read and runs past the buffer end.
+// This test loads a nullable Int64 array whose NULLs are at the front/interior
+// (rows 0 and 2) through the binlog path, and builds a second growing segment
+// with the identical layout through Insert, then asserts both produce the SAME,
+// correct MATCH_* row sets.
+//
+// Behavior asserted is the *current* one (a NULL row is treated like an empty
+// array, length 0 -- see ScalarArrayMatchExprTest.NullableArrayScalarStructAligned
+// and the TODO(scalar-array-null) there); the point of this test is that the
+// load path and the insert path agree and neither corrupts lengths.
+TEST(ScalarArrayMatchNullableIngest, BinlogLoadAndInsertAgree) {
+    // row0=NULL, row1=[95,80], row2=NULL, row3=[100,100,100], row4=[40]
+    const std::vector<std::vector<int64_t>> rows = {
+        {}, {95, 80}, {}, {100, 100, 100}, {40}};
+    const std::vector<bool> row_valid = {false, true, false, true, true};
+    const int64_t N = static_cast<int64_t>(rows.size());
+
+    auto make_schema = [&]() {
+        auto schema = std::make_shared<Schema>();
+        auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+        schema->set_primary_field_id(pk_fid);
+        auto scores_fid =
+            schema->AddDebugArrayField("scores", DataType::INT64, true);
+        return std::make_tuple(schema, pk_fid, scores_fid);
+    };
+
+    // Parse `expr`, run a full-recall Retrieve, return matched segment offsets.
+    auto retrieve_rows = [](SegmentInterface* seg,
+                            const Schema& schema,
+                            const SchemaPtr& schema_ptr,
+                            const std::string& expr) {
+        ScopedSchemaHandle schema_handle(schema);
+        auto plan_str = schema_handle.Parse(expr);
+        auto plan = CreateRetrievePlanByExpr(
+            schema_ptr, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        auto result = seg->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+        EXPECT_NE(result, nullptr);
+        std::set<int64_t> out;
+        for (const auto& off : result->offset()) {
+            out.insert(off);
+        }
+        return out;
+    };
+
+    // ---- "old" data: build a growing segment via the binlog LoadFieldData path.
+    auto [load_schema, load_pk_fid, load_scores_fid] = make_schema();
+    auto loaded = CreateGrowingSegment(load_schema, empty_index_meta);
+    {
+        auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+
+        // The nullable Int64 array field. Build a dense Array vector (NULL rows
+        // are empty Arrays) plus a packed valid bitmap, mirroring how the
+        // storage layer materializes a nullable ARRAY FieldData.
+        FixedVector<Array> arrays;
+        arrays.reserve(N);
+        std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+        for (int64_t i = 0; i < N; ++i) {
+            milvus::proto::schema::ScalarField sf;
+            for (auto v : rows[i]) {
+                sf.mutable_long_data()->add_data(v);
+            }
+            arrays.emplace_back(Array(sf));
+            if (row_valid[i]) {
+                valid_bitmap[i >> 3] |= 1 << (i & 0x07);
+            }
+        }
+        auto scores_data =
+            storage::CreateFieldData(DataType::ARRAY, DataType::INT64, true);
+        scores_data->FillFieldData(arrays.data(), valid_bitmap.data(), N, 0);
+
+        // Plain INT64 helper for pk / row-id / timestamp system fields.
+        auto make_int64_data = [&](const std::vector<int64_t>& vals) {
+            auto fd = storage::CreateFieldData(
+                DataType::INT64, DataType::NONE, false, 1, N);
+            fd->FillFieldData(vals.data(), N);
+            return fd;
+        };
+
+        std::vector<int64_t> ids(N), row_ids(N), tss(N, 1);
+        std::iota(ids.begin(), ids.end(), 0);
+        std::iota(row_ids.begin(), row_ids.end(), 0);
+
+        struct Load {
+            int64_t field_id;
+            FieldDataPtr data;
+        };
+        for (const auto& l : std::vector<Load>{
+                 {load_scores_fid.get(), scores_data},
+                 {load_pk_fid.get(), make_int64_data(ids)},
+                 {RowFieldID.get(), make_int64_data(row_ids)},
+                 {TimestampFieldID.get(), make_int64_data(tss)}}) {
+            auto info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                       kPartitionID,
+                                                       kSegmentID,
+                                                       l.field_id,
+                                                       {l.data},
+                                                       cm);
+            loaded->LoadFieldData(info);
+        }
+    }
+
+    // ---- "new" data: build a growing segment with the same layout via Insert.
+    auto [ins_schema, ins_pk_fid, ins_scores_fid] = make_schema();
+    auto inserted = CreateGrowingSegment(ins_schema, empty_index_meta);
+    {
+        auto insert = std::make_unique<InsertRecordProto>();
+        std::vector<int64_t> ids(N);
+        std::iota(ids.begin(), ids.end(), 0);
+        auto id_array = CreateDataArrayFrom(
+            ids.data(), nullptr, N, ins_schema->operator[](ins_pk_fid));
+        insert->mutable_fields_data()->AddAllocated(id_array.release());
+
+        std::vector<milvus::proto::schema::ScalarField> scores(N);
+        FixedVector<bool> valid(N);
+        for (int64_t i = 0; i < N; ++i) {
+            for (auto v : rows[i]) {
+                scores[i].mutable_long_data()->add_data(v);
+            }
+            valid[i] = row_valid[i];
+        }
+        auto scores_array = CreateDataArrayFrom(
+            scores.data(), valid.data(), N, ins_schema->operator[](ins_scores_fid));
+        insert->mutable_fields_data()->AddAllocated(scores_array.release());
+        insert->set_num_rows(N);
+
+        std::vector<idx_t> row_ids(N);
+        std::vector<Timestamp> tss(N);
+        for (int64_t i = 0; i < N; ++i) {
+            row_ids[i] = i;
+            tss[i] = i;
+        }
+        inserted->PreInsert(N);
+        inserted->Insert(0, N, row_ids.data(), tss.data(), insert.get());
+    }
+
+    // Expected MATCH_* row sets under current behavior (NULL == empty, len 0):
+    //   $ > 90   : row1(95) and row3(100,100,100)               -> {1, 3}
+    //   $ >= 60  : row1 ok; row3 ok; NULL rows 0,2 vacuous true;
+    //              row4 (40) fails                                -> {0, 1, 2, 3}
+    //   $ < 50   : only row4 (40)                                 -> {4}
+    //   == 100, threshold>=2 : only row3 (three 100s)            -> {3}
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        {"MATCH_ANY(scores, $ > 90)", {1, 3}},
+        {"MATCH_ALL(scores, $ >= 60)", {0, 1, 2, 3}},
+        {"MATCH_ANY(scores, $ < 50)", {4}},
+        {"MATCH_LEAST(scores, $ == 100, threshold=2)", {3}},
+    };
+
+    for (const auto& [expr, expected] : cases) {
+        auto loaded_rows =
+            retrieve_rows(loaded.get(), *load_schema, load_schema, expr);
+        auto inserted_rows =
+            retrieve_rows(inserted.get(), *ins_schema, ins_schema, expr);
+        EXPECT_EQ(loaded_rows, expected)
+            << "binlog-load path wrong for: " << expr;
+        EXPECT_EQ(inserted_rows, expected)
+            << "insert path wrong for: " << expr;
+        // The two ingestion paths must agree on a nullable array.
+        EXPECT_EQ(loaded_rows, inserted_rows)
+            << "load vs insert divergence for: " << expr;
+    }
+}

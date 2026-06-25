@@ -139,10 +139,22 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            // For regular array types (INT32, FLOAT, etc.)
+            // For regular array types (INT32, FLOAT, etc.). Nullable array
+            // FieldData is stored compactly -- NULL rows occupy no slot in the
+            // underlying buffer -- so a valid row must be read by its physical
+            // index, not its logical row index (mirroring the VECTOR_ARRAY
+            // branch above). Indexing the compact buffer by the logical i would
+            // read the wrong element, and run past the buffer, once any NULL row
+            // precedes a valid one.
             auto* raw_data = static_cast<const ArrayView*>(data->Data());
+            int64_t physical_row = 0;
             for (int64_t i = 0; i < num_rows; ++i) {
-                array_lengths[offset + i] = raw_data[i].length();
+                if (data->IsNullable() && !data->is_valid(i)) {
+                    array_lengths[offset + i] = 0;
+                    continue;
+                }
+                auto source_index = data->IsNullable() ? physical_row++ : i;
+                array_lengths[offset + i] = raw_data[source_index].length();
             }
         }
         offset += num_rows;
@@ -276,10 +288,16 @@ SegmentGrowingImpl::InitializeArrayOffsets() {
     // Group fields by struct_name
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
+    // Scalar ARRAY fields (not part of a struct) that need their own
+    // ArrayOffsetsGrowing so MATCH_*/element_filter can resolve element ranges.
+    std::vector<FieldId> scalar_array_fields;
+
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         auto struct_name = GetStructNameForArrayField(field_meta);
         if (struct_name.has_value()) {
             struct_fields[*struct_name].push_back(field_id);
+        } else if (field_meta.get_data_type() == DataType::ARRAY) {
+            scalar_array_fields.push_back(field_id);
         }
     }
 
@@ -304,6 +322,17 @@ SegmentGrowingImpl::InitializeArrayOffsets() {
             struct_name,
             field_ids.size(),
             representative_field.get());
+    }
+
+    // Create one ArrayOffsetsGrowing per scalar ARRAY field. Each scalar array
+    // field is its own representative (no sibling fields share its offsets).
+    for (auto field_id : scalar_array_fields) {
+        auto array_offsets = std::make_shared<ArrayOffsetsGrowing>();
+        array_offsets_map_[field_id] = array_offsets;
+        struct_representative_fields_.insert(field_id);
+
+        LOG_INFO("Created ArrayOffsetsGrowing for scalar array field_id={}",
+                 field_id.get());
     }
 }
 
@@ -2786,6 +2815,20 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
     const FieldMeta& field_meta, int64_t row_count) {
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
+        // Plain scalar ARRAY field added via schema evolution: register its own
+        // ArrayOffsetsGrowing so MATCH_*/element_filter can resolve element
+        // ranges (mirrors the scalar branch in InitializeArrayOffsets).
+        if (field_meta.get_data_type() == DataType::ARRAY &&
+            array_offsets_map_.find(field_meta.get_id()) ==
+                array_offsets_map_.end()) {
+            auto array_offsets = std::make_shared<ArrayOffsetsGrowing>();
+            if (row_count > 0) {
+                std::vector<int32_t> zero_lengths(row_count, 0);
+                array_offsets->Insert(0, zero_lengths.data(), row_count);
+            }
+            array_offsets_map_[field_meta.get_id()] = array_offsets;
+            struct_representative_fields_.insert(field_meta.get_id());
+        }
         return;
     }
 

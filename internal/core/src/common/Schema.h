@@ -587,6 +587,12 @@ class Schema {
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name) const;
 
+    // Resolve the array field a MATCH_*/element_filter targets: accepts a scalar
+    // ARRAY/VECTOR_ARRAY field name (returns that field) or a struct array name
+    // (returns its first array sub-field).
+    const FieldMeta&
+    ResolveArrayElementField(const std::string& name) const;
+
     DataType
     GetFieldType(const FieldId& field_id) const {
         AssertInfo(fields_.count(field_id),
