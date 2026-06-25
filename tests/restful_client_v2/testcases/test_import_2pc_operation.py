@@ -8523,14 +8523,6 @@ class TestImport2PCRestOperation(TestBase):
             os.remove(file_path)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason=(
-            "milvus-io/milvus#50483: "
-            "AbortImport should be retry-safe/idempotent after the first abort moves a job to Failed; "
-            "current Milvus returns code=2100 for retry abort on Failed job"
-        ),
-        strict=True,
-    )
     def test_import_2pc_abort_is_idempotent_for_failed_job(self):
         """
         target: abort retry idempotency for terminal failed import job

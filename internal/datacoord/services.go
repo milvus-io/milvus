@@ -2908,6 +2908,9 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
 		func(job ImportJob) *commonpb.Status {
 			state := job.GetState()
+			if state == internalpb.ImportJobState_Failed && job.GetReason() == importJobReasonAbortedByUser {
+				return merr.Success()
+			}
 			if state == internalpb.ImportJobState_Failed ||
 				state == internalpb.ImportJobState_Committing ||
 				state == internalpb.ImportJobState_Completed {

@@ -5478,6 +5478,32 @@ func TestAbortImport_HappyPath(t *testing.T) {
 	assert.True(t, merr.Ok(resp))
 }
 
+func TestAbortImport_UserAbortedJobIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      2002,
+			State:      internalpb.ImportJobState_Failed,
+			Reason:     "aborted by user",
+			AutoCommit: false,
+		},
+	}
+
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(2002)).Return(job).Once()
+
+	server := &Server{
+		importMeta:    importMetaMock,
+		importJobLock: lock.NewKeyLock[int64](),
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2002})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp))
+}
+
 func TestHandleCommitVchannelRPC(t *testing.T) {
 	ctx := context.Background()
 
