@@ -11,24 +11,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
+func walFunctionRunnerKey(vchannel string) string {
+	return "WAL-" + vchannel
+}
+
 func (impl *shardInterceptor) allocFunctionRunners(collectionID int64, vchannel string, schema *schemapb.CollectionSchema) {
-	if !function.HasEmbeddingFunctions(schema) {
-		return
+	key := walFunctionRunnerKey(vchannel)
+	schemaVersion := function.LatestFunctionRunnerVersion
+	if schema != nil {
+		schemaVersion = schema.GetVersion()
 	}
-	schemaVersion := schema.GetVersion()
-	errCh := function.AllocFunctionRunners(collectionID, vchannel, schema)
-	if errCh == nil {
-		return
+	if err := function.AllocFunctionRunners(collectionID, key, schema); err != nil {
+		impl.shardManager.Logger().Warn("failed to allocate function runners",
+			zap.Int64("collectionID", collectionID),
+			zap.String("vchannel", vchannel),
+			zap.String("key", key),
+			zap.Int32("schemaVersion", schemaVersion),
+			zap.Error(err))
 	}
-	go func() {
-		if err := <-errCh; err != nil {
-			impl.shardManager.Logger().Warn("failed to allocate function runners",
-				zap.Int64("collectionID", collectionID),
-				zap.String("vchannel", vchannel),
-				zap.Int32("schemaVersion", schemaVersion),
-				zap.Error(err))
-		}
-	}()
 }
 
 type collectionSchemaProvider interface {

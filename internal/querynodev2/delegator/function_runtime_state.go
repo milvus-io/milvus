@@ -17,11 +17,11 @@
 package delegator
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -59,7 +59,7 @@ func functionRuntimeOutputFieldIDs(schema *schemapb.CollectionSchema, fn *schema
 		outputFieldIDs := append([]int64(nil), outputIDs...)
 		for _, outputFieldID := range outputFieldIDs {
 			if typeutil.GetField(schema, outputFieldID) == nil {
-				return nil, fmt.Errorf("function %s output field %d not found", fn.GetName(), outputFieldID)
+				return nil, merr.WrapErrFunctionFailedMsg("function %s output field %d not found", fn.GetName(), outputFieldID)
 			}
 		}
 		return outputFieldIDs, nil
@@ -67,14 +67,14 @@ func functionRuntimeOutputFieldIDs(schema *schemapb.CollectionSchema, fn *schema
 
 	outputNames := fn.GetOutputFieldNames()
 	if len(outputNames) == 0 {
-		return nil, fmt.Errorf("function %s output fields not found", fn.GetName())
+		return nil, merr.WrapErrFunctionFailedMsg("function %s output fields not found", fn.GetName())
 	}
 
 	outputFieldIDs := make([]int64, 0, len(outputNames))
 	for _, outputName := range outputNames {
 		field := typeutil.GetFieldByName(schema, outputName)
 		if field == nil {
-			return nil, fmt.Errorf("function %s output field %s not found", fn.GetName(), outputName)
+			return nil, merr.WrapErrFunctionFailedMsg("function %s output field %s not found", fn.GetName(), outputName)
 		}
 		outputFieldIDs = append(outputFieldIDs, field.GetFieldID())
 	}
