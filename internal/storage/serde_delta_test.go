@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -202,4 +203,62 @@ func TestLegacyDeltalogWriter_PathUsedInUploader(t *testing.T) {
 	// Verify the uploader received the correct path (not empty)
 	assert.Equal(t, testPath, uploadedPath, "uploader should receive the configured path")
 	assert.NotEmpty(t, uploadedData, "uploader should receive non-empty data")
+}
+
+func TestBuildPredicateDeleteRecord(t *testing.T) {
+	record, tsFrom, tsTo, err := BuildPredicateDeleteRecord([][]byte{{1, 2, 3}, {4, 5}}, []Timestamp{200, 100})
+	require.NoError(t, err)
+	defer record.Release()
+
+	assert.EqualValues(t, 100, tsFrom)
+	assert.EqualValues(t, 200, tsTo)
+	assert.Equal(t, PredicateDeleteArrowSchema(), record.(*simpleArrowRecord).r.Schema())
+	assert.EqualValues(t, 2, record.Len())
+	assert.EqualValues(t, 200, record.Column(predicateDeleteTimestampField).(*array.Int64).Value(0))
+	assert.Equal(t, []byte{1, 2, 3}, record.Column(predicateSerializedExprPlanField).(*array.Binary).Value(0))
+
+	_, _, _, err = BuildPredicateDeleteRecord(nil, nil)
+	assert.Error(t, err)
+	_, _, _, err = BuildPredicateDeleteRecord([][]byte{{1}}, nil)
+	assert.Error(t, err)
+}
+
+func TestPredicateDeltalogSerializeWriter(t *testing.T) {
+	const (
+		collectionID = int64(1)
+		partitionID  = int64(2)
+		segmentID    = int64(3)
+		logID        = int64(4)
+		path         = "/test/predicate-delta"
+	)
+
+	var uploadedPath string
+	var uploadedData []byte
+	uploader := func(ctx context.Context, kvs map[string][]byte) error {
+		for key, value := range kvs {
+			uploadedPath = key
+			uploadedData = value
+		}
+		return nil
+	}
+	writer, err := NewPredicateDeltalogWriter(
+		context.Background(), collectionID, partitionID, segmentID, logID, path,
+		WithVersion(StorageV1), WithUploader(uploader),
+	)
+	require.NoError(t, err)
+
+	record, _, _, err := BuildPredicateDeleteRecord([][]byte{{1, 2, 3}}, []Timestamp{100})
+	require.NoError(t, err)
+	defer record.Release()
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+
+	assert.Equal(t, path, uploadedPath)
+	assert.NotEmpty(t, uploadedData)
+	assert.Greater(t, writer.GetWrittenUncompressed(), uint64(0))
+
+	reader, err := NewBinlogReader(uploadedData)
+	require.NoError(t, err)
+	defer reader.Close()
+	assert.Equal(t, PredicateDeltaFormatVersion, reader.Extras[PredicateDeltaFormatVersionKey])
 }

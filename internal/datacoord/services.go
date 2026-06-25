@@ -657,9 +657,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			req.GetField2StatslogPaths(),
 			req.GetDeltalogs(),
 			req.GetField2Bm25LogPaths(),
+			req.GetPredicateDeltalogs(),
 		), UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints(), true))
 	} else {
-		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
+		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths(), req.GetPredicateDeltalogs()),
 			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
 	}
 
@@ -683,6 +684,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		mlog.Any("checkpoints", req.GetCheckPoints()),
 		mlog.Strings("binlogs", stringifyBinlogs(req.GetField2BinlogPaths())),
 		mlog.Strings("deltalogs", stringifyBinlogs(req.GetDeltalogs())),
+		mlog.Strings("predicateDeltalogs", stringifyBinlogs(req.GetPredicateDeltalogs())),
 		mlog.Strings("statslogs", stringifyBinlogs(req.GetField2StatslogPaths())),
 		mlog.Strings("bm25logs", stringifyBinlogs(req.GetField2Bm25LogPaths())),
 	)

@@ -429,6 +429,19 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 func (dt *DeleteMsg) CheckAligned() error {
 	numRows := dt.GetNumRows()
 
+	if len(dt.GetSerializedExprPlan()) > 0 {
+		if numRows != 0 {
+			return merr.WrapErrDataIntegrityMsg("predicate delete num_rows(%d) must be 0", numRows)
+		}
+		if len(dt.GetInt64PrimaryKeys()) != 0 || int64(typeutil.GetSizeOfIDs(dt.PrimaryKeys)) != 0 {
+			return merr.WrapErrDataIntegrityMsg("predicate delete must not carry primary keys")
+		}
+		if len(dt.GetTimestamps()) != 1 {
+			return merr.WrapErrDataIntegrityMsg("predicate delete must carry exactly one timestamp, got %d", len(dt.GetTimestamps()))
+		}
+		return nil
+	}
+
 	if numRows != int64(len(dt.GetTimestamps())) {
 		return merr.WrapErrDataIntegrityMsg("the num_rows(%d) of pks  is not equal to the num_rows(%d) of timestamps", numRows, len(dt.GetTimestamps()))
 	}

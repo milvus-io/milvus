@@ -594,6 +594,133 @@ func (w *LegacyDeltalogWriter) GetWrittenUncompressed() uint64 {
 	return w.writtenUncompressed
 }
 
+type PredicateDeltalogStreamWriter struct {
+	collectionID UniqueID
+	partitionID  UniqueID
+	segmentID    UniqueID
+
+	buf bytes.Buffer
+	rw  *multiFieldRecordWriter
+}
+
+func newPredicateDeltalogStreamWriter(collectionID, partitionID, segmentID UniqueID) *PredicateDeltalogStreamWriter {
+	return &PredicateDeltalogStreamWriter{
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		segmentID:    segmentID,
+	}
+}
+
+func (w *PredicateDeltalogStreamWriter) initRecordWriter() error {
+	if w.rw != nil {
+		return nil
+	}
+	rw, err := newMultiFieldRecordWriterWithSchema(PredicateDeleteFieldIDs(), PredicateDeleteArrowSchema(), &w.buf)
+	if err != nil {
+		return err
+	}
+	w.rw = rw
+	return nil
+}
+
+func (w *PredicateDeltalogStreamWriter) Write(rec Record) error {
+	if err := w.initRecordWriter(); err != nil {
+		return err
+	}
+	return w.rw.Write(rec)
+}
+
+func (w *PredicateDeltalogStreamWriter) GetWrittenUncompressed() uint64 {
+	if w.rw == nil {
+		return 0
+	}
+	return w.rw.GetWrittenUncompressed()
+}
+
+func (w *PredicateDeltalogStreamWriter) Finalize() (*Blob, error) {
+	if w.rw == nil {
+		return nil, io.ErrUnexpectedEOF
+	}
+	if err := w.rw.Close(); err != nil {
+		return nil, err
+	}
+
+	var b bytes.Buffer
+	if err := w.writeDeltalogHeaders(&b); err != nil {
+		return nil, err
+	}
+	if _, err := b.Write(w.buf.Bytes()); err != nil {
+		return nil, err
+	}
+	return &Blob{
+		Value:      b.Bytes(),
+		RowNum:     int64(w.rw.numRows),
+		MemorySize: int64(w.rw.writtenUncompressed),
+	}, nil
+}
+
+func (w *PredicateDeltalogStreamWriter) writeDeltalogHeaders(writer io.Writer) error {
+	if err := binary.Write(writer, common.Endian, MagicNumber); err != nil {
+		return err
+	}
+	de := NewBaseDescriptorEvent(w.collectionID, w.partitionID, w.segmentID)
+	de.PayloadDataType = schemapb.DataType_JSON
+	de.AddExtra(originalSizeKey, strconv.Itoa(int(w.rw.writtenUncompressed)))
+	de.AddExtra(PredicateDeltaFormatVersionKey, PredicateDeltaFormatVersion)
+	if err := de.Write(writer); err != nil {
+		return err
+	}
+	eh := newEventHeader(DeleteEventType)
+	ev := newDeleteEventData()
+	ev.StartTimestamp = 1
+	ev.EndTimestamp = 1
+	eh.EventLength = int32(w.buf.Len()) + eh.GetMemoryUsageInBytes() + int32(binary.Size(ev))
+	if err := eh.Write(writer); err != nil {
+		return err
+	}
+	return ev.WriteEventData(writer)
+}
+
+type LegacyPredicateDeltalogWriter struct {
+	path                string
+	eventWriter         *PredicateDeltalogStreamWriter
+	writtenUncompressed uint64
+	uploader            uploaderFn
+}
+
+var _ RecordWriter = (*LegacyPredicateDeltalogWriter)(nil)
+
+func NewLegacyPredicateDeltalogWriter(
+	collectionID, partitionID, segmentID, logID UniqueID, uploader uploaderFn, path string,
+) (*LegacyPredicateDeltalogWriter, error) {
+	return &LegacyPredicateDeltalogWriter{
+		path:        path,
+		eventWriter: newPredicateDeltalogStreamWriter(collectionID, partitionID, segmentID),
+		uploader:    uploader,
+	}, nil
+}
+
+func (w *LegacyPredicateDeltalogWriter) Write(rec Record) error {
+	if err := w.eventWriter.Write(rec); err != nil {
+		return err
+	}
+	w.writtenUncompressed = w.eventWriter.GetWrittenUncompressed()
+	return nil
+}
+
+func (w *LegacyPredicateDeltalogWriter) Close() error {
+	blob, err := w.eventWriter.Finalize()
+	if err != nil {
+		return err
+	}
+	w.writtenUncompressed = uint64(blob.MemorySize)
+	return w.uploader(context.Background(), map[string][]byte{w.path: blob.Value})
+}
+
+func (w *LegacyPredicateDeltalogWriter) GetWrittenUncompressed() uint64 {
+	return w.writtenUncompressed
+}
+
 // deleteLogToRecordReader wraps a DeserializeReaderImpl[*DeleteLog] and converts
 // DeleteLog entries to Records with pk and ts columns for use by common.readFromReader.
 type deleteLogToRecordReader struct {

@@ -70,6 +70,7 @@ func (kc *Catalog) ListSegments(ctx context.Context, collectionID int64) ([]*dat
 	segments := make([]*datapb.SegmentInfo, 0)
 	insertLogs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
 	deltaLogs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
+	predicateDeltaLogs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
 	statsLogs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
 	bm25Logs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
 
@@ -88,6 +89,15 @@ func (kc *Catalog) ListSegments(ctx context.Context, collectionID int64) ([]*dat
 	// execute list segment meta
 	executeFn(storage.InsertBinlog, insertLogs)
 	executeFn(storage.DeleteBinlog, deltaLogs)
+	group.Go(func() error {
+		ret, err := kc.listPredicateDeltalogs(ctx, collectionID)
+		if err != nil {
+			return err
+		}
+
+		maps.Copy(predicateDeltaLogs, ret)
+		return nil
+	})
 	executeFn(storage.StatsBinlog, statsLogs)
 	executeFn(storage.BM25Binlog, bm25Logs)
 	group.Go(func() error {
@@ -104,7 +114,7 @@ func (kc *Catalog) ListSegments(ctx context.Context, collectionID int64) ([]*dat
 		return nil, err
 	}
 
-	err = kc.applyBinlogInfo(segments, insertLogs, deltaLogs, statsLogs, bm25Logs)
+	err = kc.applyBinlogInfo(segments, insertLogs, deltaLogs, predicateDeltaLogs, statsLogs, bm25Logs)
 	if err != nil {
 		return nil, err
 	}
@@ -174,9 +184,6 @@ func (kc *Catalog) parseBinlogKey(key string) (int64, error) {
 }
 
 func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogType, collectionID int64) (map[typeutil.UniqueID][]*datapb.FieldBinlog, error) {
-	ret := make(map[typeutil.UniqueID][]*datapb.FieldBinlog)
-
-	var err error
 	var logPathPrefix string
 	switch binlogType {
 	case storage.InsertBinlog:
@@ -188,11 +195,17 @@ func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogTyp
 	case storage.BM25Binlog:
 		logPathPrefix = fmt.Sprintf("%s/%d", SegmentBM25logPathPrefix, collectionID)
 	default:
-		err = merr.WrapErrServiceInternalMsg("invalid binlog type: %d", binlogType)
+		return nil, merr.WrapErrServiceInternalMsg("invalid binlog type: %d", binlogType)
 	}
-	if err != nil {
-		return nil, err
-	}
+	return kc.listFieldBinlogs(ctx, logPathPrefix)
+}
+
+func (kc *Catalog) listPredicateDeltalogs(ctx context.Context, collectionID int64) (map[typeutil.UniqueID][]*datapb.FieldBinlog, error) {
+	return kc.listFieldBinlogs(ctx, fmt.Sprintf("%s/%d", SegmentPredicateDeltalogPathPrefix, collectionID))
+}
+
+func (kc *Catalog) listFieldBinlogs(ctx context.Context, logPathPrefix string) (map[typeutil.UniqueID][]*datapb.FieldBinlog, error) {
+	ret := make(map[typeutil.UniqueID][]*datapb.FieldBinlog)
 
 	applyFn := func(key []byte, value []byte) error {
 		fieldBinlog := &datapb.FieldBinlog{}
@@ -218,7 +231,7 @@ func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogTyp
 		return nil
 	}
 
-	err = kc.MetaKv.WalkWithPrefix(ctx, logPathPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, logPathPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +239,7 @@ func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogTyp
 }
 
 func (kc *Catalog) applyBinlogInfo(segments []*datapb.SegmentInfo, insertLogs, deltaLogs,
-	statsLogs, bm25Logs map[typeutil.UniqueID][]*datapb.FieldBinlog,
+	predicateDeltaLogs, statsLogs, bm25Logs map[typeutil.UniqueID][]*datapb.FieldBinlog,
 ) error {
 	var err error
 	for _, segmentInfo := range segments {
@@ -241,6 +254,13 @@ func (kc *Catalog) applyBinlogInfo(segments []*datapb.SegmentInfo, insertLogs, d
 			segmentInfo.Deltalogs = deltaLogs[segmentInfo.ID]
 		}
 		if err = binlog.CompressFieldBinlogs(segmentInfo.Deltalogs); err != nil {
+			return err
+		}
+
+		if len(segmentInfo.PredicateDeltalogs) == 0 {
+			segmentInfo.PredicateDeltalogs = predicateDeltaLogs[segmentInfo.ID]
+		}
+		if err = binlog.CompressFieldBinlogs(segmentInfo.PredicateDeltalogs); err != nil {
 			return err
 		}
 
@@ -328,6 +348,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 			segment.GetID(),
 			b.GetUpdateBinlogs(),
 			b.GetUpdateDeltalogs(),
+			b.GetUpdatePredicateDeltalogs(),
 			b.GetUpdateStatslogs(),
 			b.GetUpdateBm25Statslogs())
 		if err != nil {
@@ -371,7 +392,7 @@ func (kc *Catalog) handleDroppedSegment(ctx context.Context, segment *datapb.Seg
 	}
 	// To be compatible with previous implementation, we have to write binlogs on etcd for correct gc.
 	if !has {
-		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()), cloneLogs(segment.GetBm25Statslogs()))
+		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetPredicateDeltalogs()), cloneLogs(segment.GetStatslogs()), cloneLogs(segment.GetBm25Statslogs()))
 		if err != nil {
 			return kvs, err
 		}
@@ -406,13 +427,19 @@ func (kc *Catalog) hasBinlogPrefix(ctx context.Context, segment *datapb.SegmentI
 		return false, err
 	}
 
+	prefix = buildFieldPredicateDeltalogPathPrefix(collectionID, partitionID, segmentID)
+	hasPredicateDeltaPrefix, err := kc.MetaKv.HasPrefix(ctx, prefix)
+	if err != nil {
+		return false, err
+	}
+
 	prefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID)
 	hasStatsPrefix, err := kc.MetaKv.HasPrefix(ctx, prefix)
 	if err != nil {
 		return false, err
 	}
 
-	return hasBinlogPrefix || hasDeltaPrefix || hasStatsPrefix, nil
+	return hasBinlogPrefix || hasDeltaPrefix || hasPredicateDeltaPrefix || hasStatsPrefix, nil
 }
 
 func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error {
@@ -423,7 +450,7 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 	kvs := make(map[string]string)
 	for _, s := range segments {
 		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
-		noBinlogsSegment, _, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
+		noBinlogsSegment, _, _, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
 		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
 		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
 		segBytes, err := marshalSegmentInfo(noBinlogsSegment)
@@ -448,10 +475,11 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 	segKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	binlogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBinlogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	deltalogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentDeltalogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	predicateDeltalogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentPredicateDeltalogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	statelogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentStatslogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	bm25logPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBM25logPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 
-	keys := []string{segKey, binlogPrefix, deltalogPrefix, statelogPrefix, bm25logPrefix}
+	keys := []string{segKey, binlogPrefix, deltalogPrefix, predicateDeltalogPrefix, statelogPrefix, bm25logPrefix}
 	if err := kc.MetaKv.MultiSaveAndRemoveWithPrefix(ctx, nil, keys); err != nil {
 		return err
 	}

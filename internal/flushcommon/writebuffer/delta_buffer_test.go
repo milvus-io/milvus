@@ -42,6 +42,18 @@ func (s *DeltaBufferSuite) TestBuffer() {
 		// 19 = (3+8)(string pk) + 8(ts)
 		s.EqualValues(100*19, memSize)
 	})
+
+	s.Run("predicate", func() {
+		deltaBuffer := NewDeltaBuffer()
+
+		memSize := deltaBuffer.BufferPredicate([]byte("expr"), 100, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		// 12 = 4(expr) + 8(ts)
+		s.EqualValues(12, memSize)
+		s.EqualValues(1, deltaBuffer.rows)
+		s.EqualValues(12, deltaBuffer.size)
+		s.EqualValues(100, deltaBuffer.TimestampFrom)
+		s.EqualValues(100, deltaBuffer.TimestampTo)
+	})
 }
 
 func (s *DeltaBufferSuite) TestYield() {
@@ -62,6 +74,14 @@ func (s *DeltaBufferSuite) TestYield() {
 
 	s.ElementsMatch(tss, result.Tss)
 	s.ElementsMatch(pks, result.Pks)
+
+	deltaBuffer = NewDeltaBuffer()
+	deltaBuffer.BufferPredicate([]byte("expr"), 100, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+
+	result = deltaBuffer.Yield()
+	s.NotNil(result)
+	s.Equal([][]byte{[]byte("expr")}, result.SerializedExprPlans)
+	s.Equal([]uint64{100}, result.PredicateTss)
 }
 
 func (s *DeltaBufferSuite) SetupSuite() {

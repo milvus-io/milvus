@@ -33,12 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type PackWriter interface {
-	Write(ctx context.Context, pack *SyncPack) (
-		inserts []*datapb.Binlog, deletes *datapb.Binlog, stats *datapb.Binlog, bm25Stats *datapb.Binlog,
-		size int64, err error)
-}
-
 type BulkPackWriter struct {
 	metaCache      metacache.MetaCache
 	schema         *schemapb.CollectionSchema
@@ -67,6 +61,7 @@ func NewBulkPackWriter(metaCache metacache.MetaCache,
 func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
+	predicateDeltas *datapb.FieldBinlog,
 	stats map[int64]*datapb.FieldBinlog,
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	size int64,
@@ -74,24 +69,28 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 ) {
 	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to write insert data", mlog.Err(err))
-		return inserts, deltas, stats, bm25Stats, size, err
+		return inserts, deltas, predicateDeltas, stats, bm25Stats, size, err
 	}
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process stats blob", mlog.Err(err))
-		return inserts, deltas, stats, bm25Stats, size, err
+		return inserts, deltas, predicateDeltas, stats, bm25Stats, size, err
 	}
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process delta blob", mlog.Err(err))
-		return inserts, deltas, stats, bm25Stats, size, err
+		return inserts, deltas, predicateDeltas, stats, bm25Stats, size, err
+	}
+	if predicateDeltas, err = bw.writePredicateDelta(ctx, pack); err != nil {
+		mlog.Error(ctx, "failed to process predicate delta blob", mlog.Err(err))
+		return
 	}
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process bm25 stats blob", mlog.Err(err))
-		return inserts, deltas, stats, bm25Stats, size, err
+		return inserts, deltas, predicateDeltas, stats, bm25Stats, size, err
 	}
 
 	size = bw.sizeWritten
 
-	return inserts, deltas, stats, bm25Stats, size, err
+	return inserts, deltas, predicateDeltas, stats, bm25Stats, size, err
 }
 
 func (bw *BulkPackWriter) writeBlob(ctx context.Context, key string, blob []byte) error {
@@ -279,7 +278,7 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 }
 
 func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
-	if pack.deltaData == nil || pack.deltaData.RowCount == 0 {
+	if pack.deltaData == nil || !pack.deltaData.HasPrimaryKeyDeletes() {
 		return &datapb.FieldBinlog{}, nil
 	}
 
@@ -325,17 +324,77 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 	}
 
 	deltalog := &datapb.Binlog{
-		EntriesNum:    pack.deltaData.RowCount,
+		EntriesNum:    pack.deltaData.PrimaryKeyDeleteCount(),
 		TimestampFrom: tsFrom,
 		TimestampTo:   tsTo,
 		LogPath:       deltaPath,
-		LogSize:       pack.deltaData.Size() / 4,
-		MemorySize:    pack.deltaData.Size(),
+		LogSize:       pack.deltaData.PrimaryKeyDeleteSize() / 4,
+		MemorySize:    pack.deltaData.PrimaryKeyDeleteSize(),
 	}
 	bw.sizeWritten += deltalog.LogSize
 
 	return &datapb.FieldBinlog{
 		FieldID: pkField.GetFieldID(),
+		Binlogs: []*datapb.Binlog{deltalog},
+	}, nil
+}
+
+func (bw *BulkPackWriter) writePredicateDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
+	if pack.deltaData == nil || !pack.deltaData.HasPredicateDeletes() {
+		return &datapb.FieldBinlog{}, nil
+	}
+
+	logID, err := bw.allocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+
+	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, logID)
+	deltaPath := path.Join(bw.chunkManager.RootPath(), common.SegmentDeltaLogPath, k)
+
+	writer, err := storage.NewPredicateDeltalogWriter(
+		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, deltaPath,
+		storage.WithVersion(storage.StorageV1),
+		storage.WithUploader(func(_ context.Context, kvs map[string][]byte) error {
+			for k, blob := range kvs {
+				return bw.writeBlob(ctx, k, blob)
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	record, tsFrom, tsTo, err := storage.BuildPredicateDeleteRecord(pack.deltaData.SerializedExprPlans, pack.deltaData.PredicateTss)
+	if err != nil {
+		return nil, err
+	}
+	defer record.Release()
+
+	if err = writer.Write(record); err != nil {
+		return nil, err
+	}
+	if err = writer.Close(); err != nil {
+		return nil, err
+	}
+
+	deltalog := &datapb.Binlog{
+		LogID:         logID,
+		EntriesNum:    pack.deltaData.PredicateDeleteCount(),
+		TimestampFrom: tsFrom,
+		TimestampTo:   tsTo,
+		LogPath:       deltaPath,
+		LogSize:       int64(writer.GetWrittenUncompressed()),
+		MemorySize:    pack.deltaData.PredicateDeleteSize(),
+	}
+	bw.sizeWritten += deltalog.LogSize
+
+	return &datapb.FieldBinlog{
+		// Predicate deltalogs do not belong to a collection field. Delete-log
+		// path reconstruction ignores FieldID, so reuse the existing internal
+		// row-id sentinel instead of introducing a predicate-only field ID.
+		FieldID: common.RowIDField,
 		Binlogs: []*datapb.Binlog{deltalog},
 	}, nil
 }

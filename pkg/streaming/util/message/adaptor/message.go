@@ -234,11 +234,13 @@ func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, msg message.Immu
 	if deleteMsg.GetCollectionID() != header.GetCollectionId() {
 		panic("unreachable code, collection id is not equal")
 	}
-	timestamps := make([]uint64, len(deleteMsg.Timestamps))
-	for i := 0; i < len(timestamps); i++ {
-		timestamps[i] = timetick
+	if len(deleteMsg.GetSerializedExprPlan()) == 0 {
+		timestamps := make([]uint64, len(deleteMsg.Timestamps))
+		for i := 0; i < len(timestamps); i++ {
+			timestamps[i] = timetick
+		}
+		deleteMsg.Timestamps = timestamps
 	}
-	deleteMsg.Timestamps = timestamps
 	deleteMsg.ShardName = msg.VChannel()
 	return deleteMsg, nil
 }

@@ -3514,6 +3514,39 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
 	})
 
+	t.Run("update binlogs without predicate argument preserves predicate deltalogs", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		predicateDeltalogs := []*datapb.FieldBinlog{getFieldBinlogIDs(1, 700)}
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:                 1,
+			State:              commonpb.SegmentState_Growing,
+			PredicateDeltalogs: predicateDeltalogs,
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateBinlogsOperator(1, []*datapb.FieldBinlog{getFieldBinlogIDs(1, 701)}, nil, nil, nil),
+		)
+		require.NoError(t, err)
+
+		updated := meta.GetHealthySegment(context.TODO(), 1)
+		require.NotNil(t, updated)
+		assert.Equal(t, predicateDeltalogs, updated.GetPredicateDeltalogs())
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateBinlogsOperator(1, nil, nil, nil, nil, []*datapb.FieldBinlog{}),
+		)
+		require.NoError(t, err)
+
+		updated = meta.GetHealthySegment(context.TODO(), 1)
+		require.NotNil(t, updated)
+		assert.Empty(t, updated.GetPredicateDeltalogs())
+	})
+
 	t.Run("update binlogs from save binlog paths", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)

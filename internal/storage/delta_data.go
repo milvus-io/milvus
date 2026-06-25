@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"bytes"
 	"math"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -238,13 +240,51 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
-// timestamp represents the time when this instance was deleted
+// DeleteData saves delta delete messages. Existing PK deletes are represented as
+// {primary key, timestamp}; predicate deletes are represented as
+// {serialized expr plan, timestamp}. No existing primary-key wrapper can carry a
+// predicate expr without pretending it is a key, so DeleteData owns the minimal
+// extra predicate payload fields while reusing the same buffer/statistics layer.
 type DeleteData struct {
-	Pks      []PrimaryKey // primary keys
-	Tss      []Timestamp  // timestamps
-	RowCount int64
-	memSize  int64
+	Pks []PrimaryKey // primary keys
+	Tss []Timestamp  // primary-key delete timestamps
+
+	SerializedExprPlans [][]byte    // predicate delete expr plans
+	PredicateTss        []Timestamp // predicate delete timestamps
+	RowCount            int64
+	memSize             int64
+}
+
+const (
+	predicateDeleteTimestampField    FieldID = 0
+	predicateSerializedExprPlanField FieldID = 1
+	PredicateDeltaFormatVersionKey           = "milvus.predicate_delta.format_version"
+	PredicateDeltaFormatVersion              = "1"
+)
+
+func PredicateDeleteFieldIDs() []FieldID {
+	return []FieldID{predicateDeleteTimestampField, predicateSerializedExprPlanField}
+}
+
+func PredicateDeleteArrowSchema() *arrow.Schema {
+	metadata := arrow.NewMetadata(
+		[]string{PredicateDeltaFormatVersionKey},
+		[]string{PredicateDeltaFormatVersion},
+	)
+	return arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "delete_ts",
+			Type:     arrow.PrimitiveTypes.Int64,
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{packed.ArrowFieldIdMetadataKey}, []string{strconv.Itoa(int(predicateDeleteTimestampField))}),
+		},
+		{
+			Name:     "serialized_expr_plan",
+			Type:     arrow.BinaryTypes.Binary,
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{packed.ArrowFieldIdMetadataKey}, []string{strconv.Itoa(int(predicateSerializedExprPlanField))}),
+		},
+	}, &metadata)
 }
 
 func NewDeleteData(pks []PrimaryKey, tss []Timestamp) *DeleteData {
@@ -254,6 +294,14 @@ func NewDeleteData(pks []PrimaryKey, tss []Timestamp) *DeleteData {
 		RowCount: int64(len(pks)),
 		memSize:  lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8),
 	}
+}
+
+func NewPredicateDeleteData(serializedExprPlans [][]byte, tss []Timestamp) (*DeleteData, error) {
+	data := &DeleteData{}
+	if err := data.AppendPredicateBatch(serializedExprPlans, tss); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // Append append 1 pk&ts pair to DeleteData
@@ -272,14 +320,63 @@ func (data *DeleteData) AppendBatch(pks []PrimaryKey, tss []Timestamp) {
 	data.memSize += lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8)
 }
 
+func (data *DeleteData) AppendPredicate(serializedExprPlan []byte, ts Timestamp) {
+	data.SerializedExprPlans = append(data.SerializedExprPlans, bytes.Clone(serializedExprPlan))
+	data.PredicateTss = append(data.PredicateTss, ts)
+	data.RowCount++
+	data.memSize += int64(len(serializedExprPlan)) + int64(8)
+}
+
+func (data *DeleteData) AppendPredicateBatch(serializedExprPlans [][]byte, tss []Timestamp) error {
+	if len(serializedExprPlans) != len(tss) {
+		return merr.WrapErrServiceInternalMsg("length of predicate delete expr plans and timestamps must be equal")
+	}
+	for i := 0; i < len(serializedExprPlans); i++ {
+		data.AppendPredicate(serializedExprPlans[i], tss[i])
+	}
+	return nil
+}
+
+func (data *DeleteData) IsEmpty() bool {
+	return data == nil || data.RowCount == 0
+}
+
+func (data *DeleteData) HasPrimaryKeyDeletes() bool {
+	return len(data.Pks) > 0
+}
+
+func (data *DeleteData) HasPredicateDeletes() bool {
+	return len(data.SerializedExprPlans) > 0
+}
+
+func (data *DeleteData) PrimaryKeyDeleteCount() int64 {
+	return int64(len(data.Pks))
+}
+
+func (data *DeleteData) PredicateDeleteCount() int64 {
+	return int64(len(data.SerializedExprPlans))
+}
+
+func (data *DeleteData) PrimaryKeyDeleteSize() int64 {
+	return lo.SumBy(data.Pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(data.Tss)*8)
+}
+
+func (data *DeleteData) PredicateDeleteSize() int64 {
+	return lo.SumBy(data.SerializedExprPlans, func(serializedExprPlan []byte) int64 { return int64(len(serializedExprPlan)) }) + int64(len(data.PredicateTss)*8)
+}
+
 func (data *DeleteData) Merge(other *DeleteData) {
 	data.Pks = append(data.Pks, other.Pks...)
 	data.Tss = append(data.Tss, other.Tss...)
+	data.SerializedExprPlans = append(data.SerializedExprPlans, other.SerializedExprPlans...)
+	data.PredicateTss = append(data.PredicateTss, other.PredicateTss...)
 	data.RowCount += other.RowCount
 	data.memSize += other.Size()
 
 	other.Pks = nil
 	other.Tss = nil
+	other.SerializedExprPlans = nil
+	other.PredicateTss = nil
 	other.RowCount = 0
 	other.memSize = 0
 }
@@ -353,6 +450,46 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint
 	field2Col := map[FieldID]int{
 		0: 0, // pk column
 		1: 1, // ts column
+	}
+
+	return NewSimpleArrowRecord(record, field2Col), tsFrom, tsTo, nil
+}
+
+func BuildPredicateDeleteRecord(serializedExprPlans [][]byte, tss []Timestamp) (r Record, tsFrom uint64, tsTo uint64, err error) {
+	tsFrom = math.MaxUint64
+	tsTo = 0
+
+	if len(serializedExprPlans) == 0 {
+		return nil, 0, 0, merr.WrapErrServiceInternalMsg("empty predicate delete expr plans")
+	}
+	if len(serializedExprPlans) != len(tss) {
+		return nil, 0, 0, merr.WrapErrServiceInternalMsg("length of predicate delete expr plans and timestamps must be equal")
+	}
+
+	allocator := memory.DefaultAllocator
+	tsBuilder := array.NewInt64Builder(allocator)
+	defer tsBuilder.Release()
+	exprPlanBuilder := array.NewBinaryBuilder(allocator, arrow.BinaryTypes.Binary)
+	defer exprPlanBuilder.Release()
+
+	for i, serializedExprPlan := range serializedExprPlans {
+		ts := tss[i]
+		if ts < tsFrom {
+			tsFrom = ts
+		}
+		if ts > tsTo {
+			tsTo = ts
+		}
+		tsBuilder.Append(int64(ts))
+		exprPlanBuilder.Append(serializedExprPlan)
+	}
+
+	tsArray := tsBuilder.NewArray()
+	exprPlanArray := exprPlanBuilder.NewArray()
+	record := array.NewRecord(PredicateDeleteArrowSchema(), []arrow.Array{tsArray, exprPlanArray}, int64(len(serializedExprPlans)))
+	field2Col := map[FieldID]int{
+		predicateDeleteTimestampField:    0,
+		predicateSerializedExprPlanField: 1,
 	}
 
 	return NewSimpleArrowRecord(record, field2Col), tsFrom, tsTo, nil

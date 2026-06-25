@@ -65,3 +65,14 @@ func (db *DeltaBuffer) Buffer(pks []storage.PrimaryKey, tss []typeutil.Timestamp
 
 	return bufSize
 }
+
+func (db *DeltaBuffer) BufferPredicate(serializedExprPlan []byte, ts typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) (bufSize int64) {
+	beforeSize := db.buffer.Size()
+
+	db.buffer.AppendPredicate(serializedExprPlan, ts)
+
+	bufSize = db.buffer.Size() - beforeSize
+	db.UpdateStatistics(1, bufSize, TimeRange{timestampMin: ts, timestampMax: ts}, startPos, endPos)
+
+	return bufSize
+}

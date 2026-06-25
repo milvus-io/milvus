@@ -140,10 +140,11 @@ type BinlogsIncrement struct {
 }
 
 type BinlogsUpdateMask struct {
-	WithoutBinlogs       bool // if true, the binlogs will not be updated
-	WithoutDeltalogs     bool // if true, the deltalogs will not be updated
-	WithoutStatslogs     bool // if true, the statslogs will not be updated
-	WithoutBm25Statslogs bool // if true, the bm25 statslogs will not be updated
+	WithoutBinlogs            bool // if true, the binlogs will not be updated
+	WithoutDeltalogs          bool // if true, the deltalogs will not be updated
+	WithoutPredicateDeltalogs bool // if true, the predicate deltalogs will not be updated
+	WithoutStatslogs          bool // if true, the statslogs will not be updated
+	WithoutBm25Statslogs      bool // if true, the bm25 statslogs will not be updated
 }
 
 func (m *BinlogsIncrement) GetUpdateBinlogs() []*datapb.FieldBinlog {
@@ -158,6 +159,13 @@ func (m *BinlogsIncrement) GetUpdateDeltalogs() []*datapb.FieldBinlog {
 		return nil
 	}
 	return m.cloneBinlogs(m.Segment.GetDeltalogs())
+}
+
+func (m *BinlogsIncrement) GetUpdatePredicateDeltalogs() []*datapb.FieldBinlog {
+	if m.UpdateMask.WithoutPredicateDeltalogs {
+		return nil
+	}
+	return m.cloneBinlogs(m.Segment.GetPredicateDeltalogs())
 }
 
 func (m *BinlogsIncrement) GetUpdateStatslogs() []*datapb.FieldBinlog {

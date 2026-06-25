@@ -463,6 +463,10 @@ message SegmentInfo {
   // timestamps to commit_timestamp, then clears this field back to 0. L0 delete
   // compaction is excluded because it only compacts delete logs.
   uint64 commit_timestamp = 36;
+  // predicate_deltalogs records predicate delete log summaries separately from
+  // primary-key deltalogs so schedulers can distinguish them from etcd metadata
+  // without opening object-store manifests or data files.
+  repeated FieldBinlog predicate_deltalogs = 37;
 }
 
 message SegmentStartPosition {
@@ -489,6 +493,7 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog field2Bm25logPaths = 16;
   bool with_full_binlogs = 17; // report with full data for verification.
   string manifest_path = 18; //
+  repeated FieldBinlog predicate_deltalogs = 19;
 }
 
 message CheckPoint {
