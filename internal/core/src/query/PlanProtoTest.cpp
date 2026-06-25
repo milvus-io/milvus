@@ -30,16 +30,19 @@ BuildSchema() {
         "fakevec", milvus::DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", milvus::DataType::INT64);
     schema->set_primary_field_id(i64_fid);
+    schema->AddDebugField("score", milvus::DataType::INT64);
     return schema;
 }
 
 milvus::proto::plan::PlanNode
-BuildSearchPlanNode(float search_topk_ratio, float refine_topk_ratio) {
+BuildSearchPlanNode(float search_topk_ratio,
+                    float refine_topk_ratio,
+                    milvus::FieldId vector_field_id) {
     milvus::proto::plan::PlanNode plan_node;
     auto* vector_anns = plan_node.mutable_vector_anns();
     vector_anns->set_vector_type(milvus::proto::plan::VectorType::FloatVector);
     vector_anns->set_placeholder_tag("$0");
-    vector_anns->set_field_id(100);
+    vector_anns->set_field_id(vector_field_id.get());
 
     auto* query_info = vector_anns->mutable_query_info();
     query_info->set_topk(10);
@@ -67,10 +70,14 @@ TEST(PlanProto, NotSetUnsupported) {
 TEST(PlanProto, RejectsGlobalRefineRatiosBelowOne) {
     using namespace milvus::query;
 
-    ProtoParser parser(BuildSchema());
+    auto schema = BuildSchema();
+    auto vector_field_id = schema->get_field_id(milvus::FieldName("fakevec"));
+    ProtoParser parser(schema);
 
-    EXPECT_ANY_THROW(parser.PlanNodeFromProto(BuildSearchPlanNode(0.5f, 1.5f)));
-    EXPECT_ANY_THROW(parser.PlanNodeFromProto(BuildSearchPlanNode(1.5f, 0.5f)));
+    EXPECT_ANY_THROW(parser.PlanNodeFromProto(
+        BuildSearchPlanNode(0.5f, 1.5f, vector_field_id)));
+    EXPECT_ANY_THROW(parser.PlanNodeFromProto(
+        BuildSearchPlanNode(1.5f, 0.5f, vector_field_id)));
 }
 
 TEST(PlanProto, VectorArrayFieldIdGapInStructArray) {
@@ -132,4 +139,68 @@ TEST(PlanProto, VectorArrayFieldIdGapInStructArray) {
     const auto& involved_fields = plan->extra_info_opt_->involved_fields_;
     ASSERT_EQ(involved_fields.size(), 49);
     EXPECT_TRUE(involved_fields[48]);
+}
+
+TEST(PlanProto, SearchPlanCollectsFieldAccessInfo) {
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    auto vector_field_id = schema->get_field_id(milvus::FieldName("fakevec"));
+    auto predicate_field_id = schema->get_field_id(milvus::FieldName("age"));
+    auto output_field_id = schema->get_field_id(milvus::FieldName("score"));
+    auto plan_node = BuildSearchPlanNode(0.0f, 0.0f, vector_field_id);
+    plan_node.add_output_field_ids(output_field_id.get());
+
+    auto* query_info = plan_node.mutable_vector_anns()->mutable_query_info();
+    query_info->set_query_field_id(predicate_field_id.get());
+    query_info->add_group_by_field_ids(predicate_field_id.get());
+
+    auto* predicates = plan_node.mutable_vector_anns()->mutable_predicates();
+    auto* term_expr = predicates->mutable_term_expr();
+    auto* column_info = term_expr->mutable_column_info();
+    column_info->set_field_id(predicate_field_id.get());
+    column_info->set_data_type(milvus::proto::schema::DataType::Int64);
+
+    auto plan = milvus::query::CreateSearchPlanFromPlanNode(schema, plan_node);
+
+    EXPECT_EQ(plan->target_entries_,
+              std::vector<milvus::FieldId>({output_field_id}));
+    EXPECT_EQ(plan->access_entries_,
+              std::vector<milvus::FieldId>(
+                  {vector_field_id, predicate_field_id, output_field_id}));
+}
+
+TEST(PlanProto, RetrievePlanCollectsFieldAccessInfo) {
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    auto predicate_field_id = schema->get_field_id(milvus::FieldName("age"));
+    auto output_field_id = schema->get_field_id(milvus::FieldName("score"));
+
+    planpb::PlanNode plan_node;
+    plan_node.add_output_field_ids(output_field_id.get());
+
+    auto* query = plan_node.mutable_query();
+    query->set_limit(10);
+    query->add_group_by_field_ids(predicate_field_id.get());
+    auto* aggregate = query->add_aggregates();
+    aggregate->set_op(planpb::sum);
+    aggregate->set_field_id(predicate_field_id.get());
+    auto* order_by = query->add_order_by_fields();
+    order_by->set_field_id(predicate_field_id.get());
+
+    auto* predicates = query->mutable_predicates();
+    auto* term_expr = predicates->mutable_term_expr();
+    auto* column_info = term_expr->mutable_column_info();
+    column_info->set_field_id(predicate_field_id.get());
+    column_info->set_data_type(milvus::proto::schema::DataType::Int64);
+
+    auto plan = milvus::query::CreateRetrievePlanByExpr(
+        schema, plan_node.SerializeAsString().data(), plan_node.ByteSizeLong());
+
+    EXPECT_EQ(plan->field_ids_,
+              std::vector<milvus::FieldId>({output_field_id}));
+    EXPECT_EQ(
+        plan->access_entries_,
+        std::vector<milvus::FieldId>({predicate_field_id, output_field_id}));
 }
