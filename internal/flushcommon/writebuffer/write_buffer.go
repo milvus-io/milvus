@@ -521,17 +521,19 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 
 	ts := wb.checkpoint.GetTimestamp()
 	segmentIDs := wb.getSegmentsToSync(ts, policies...)
-
-	var futures []*conc.Future[struct{}]
+	var syncTasks []syncmgr.Task
 	if len(segmentIDs) > 0 {
 		logger.Info(context.TODO(), "evict buffer find segments to sync", mlog.Int64s("segmentIDs", segmentIDs))
-		futures = wb.syncSegments(context.Background(), segmentIDs)
+		syncTasks = wb.getSyncTasksLocked(context.Background(), segmentIDs)
 	}
 
 	wb.mut.Unlock()
 
-	if len(futures) > 0 {
-		conc.AwaitAll(futures...)
+	if len(syncTasks) > 0 {
+		futures := wb.submitSyncTasks(context.Background(), syncTasks)
+		if len(futures) > 0 {
+			conc.AwaitAll(futures...)
+		}
 	}
 }
 
@@ -729,15 +731,18 @@ func (wb *writeBufferBase) retryGrowingSourceProgress() {
 		wb.scheduleGrowingSourceRetryLocked()
 	}
 
-	var futures []*conc.Future[struct{}]
+	var syncTasks []syncmgr.Task
 	if len(segmentIDs) > 0 {
 		wb.logger.Info(context.TODO(), "retry growing-source source sync", mlog.Int64s("segmentIDs", segmentIDs))
-		futures = wb.syncSegments(context.Background(), segmentIDs)
+		syncTasks = wb.getSyncTasksLocked(context.Background(), segmentIDs)
 	}
 	wb.mut.Unlock()
 
-	if len(futures) > 0 {
-		conc.AwaitAll(futures...)
+	if len(syncTasks) > 0 {
+		futures := wb.submitSyncTasks(context.Background(), syncTasks)
+		if len(futures) > 0 {
+			conc.AwaitAll(futures...)
+		}
 	}
 }
 
@@ -813,8 +818,6 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp(), wb.syncPolicies...)
 	if len(segmentsToSync) > 0 {
 		mlog.Info(context.TODO(), "write buffer get segments to sync", mlog.Int64s("segmentIDs", segmentsToSync))
-		// ignore future here, use callback to handle error
-		wb.syncSegments(context.Background(), segmentsToSync)
 	}
 
 	return segmentsToSync
@@ -869,7 +872,16 @@ func (wb *writeBufferBase) dropPartitions(partitionIDs []int64) {
 }
 
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[struct{}] {
-	result := make([]*conc.Future[struct{}], 0, len(segmentIDs))
+	wb.mut.Lock()
+	syncTasks := wb.getSyncTasksLocked(ctx, segmentIDs)
+	wb.mut.Unlock()
+	return wb.submitSyncTasks(ctx, syncTasks)
+}
+
+// getSyncTasksLocked builds sync tasks and moves payload out of the write buffer.
+// The caller must hold wb.mut and submit the returned tasks after releasing it.
+func (wb *writeBufferBase) getSyncTasksLocked(ctx context.Context, segmentIDs []int64) []syncmgr.Task {
+	result := make([]syncmgr.Task, 0, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
 		syncTask, err := wb.getSyncTask(ctx, segmentID)
 		if err != nil {
@@ -887,7 +899,14 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 				mlog.Fatal(ctx, "failed to get sync task", mlog.FieldSegmentID(segmentID), mlog.Err(err))
 			}
 		}
+		result = append(result, syncTask)
+	}
+	return result
+}
 
+func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []syncmgr.Task) []*conc.Future[struct{}] {
+	result := make([]*conc.Future[struct{}], 0, len(syncTasks))
+	for _, syncTask := range syncTasks {
 		future, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
 			if wb.taskObserverCallback != nil {
 				wb.taskObserverCallback(syncTask, err)
@@ -935,10 +954,10 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 						}
 					}
 				}
-				if resyncGrowingSourceSegmentID != 0 {
-					wb.syncSegments(context.Background(), []int64{resyncGrowingSourceSegmentID})
-				}
 				wb.mut.Unlock()
+			}
+			if resyncGrowingSourceSegmentID != 0 {
+				wb.syncSegments(context.Background(), []int64{resyncGrowingSourceSegmentID})
 			}
 
 			if err != nil {
@@ -959,7 +978,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
 				growingSourceTask.ReleaseSource()
 			}
-			mlog.Fatal(ctx, "failed to sync data", mlog.Int64("segmentID", segmentID), mlog.Err(err))
+			mlog.Fatal(ctx, "failed to sync data", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
 		}
 		result = append(result, future)
 	}
@@ -1478,7 +1497,7 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		return
 	}
 
-	var futures []*conc.Future[struct{}]
+	var syncTasks []syncmgr.Task
 	segmentIDs := typeutil.NewSet[int64]()
 	for id := range wb.buffers {
 		segmentIDs.Insert(id)
@@ -1507,7 +1526,28 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		case *syncmgr.GrowingSourceSyncTask:
 			t.WithDrop()
 		}
+		syncTasks = append(syncTasks, syncTask)
+	}
+	wb.mut.Unlock()
 
+	futures := wb.submitDropSyncTasks(ctx, syncTasks)
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		mlog.Error(ctx, "failed to sink write buffer data", mlog.Err(err))
+		// TODO change to remove channel in the future
+		panic(err)
+	}
+	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
+	if err != nil {
+		mlog.Error(ctx, "failed to drop channel", mlog.Err(err))
+		// TODO change to remove channel in the future
+		panic(err)
+	}
+}
+
+func (wb *writeBufferBase) submitDropSyncTasks(ctx context.Context, syncTasks []syncmgr.Task) []*conc.Future[struct{}] {
+	futures := make([]*conc.Future[struct{}], 0, len(syncTasks))
+	for _, syncTask := range syncTasks {
 		f, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
 			if wb.taskObserverCallback != nil {
 				wb.taskObserverCallback(syncTask, err)
@@ -1527,24 +1567,11 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
 				growingSourceTask.ReleaseSource()
 			}
-			mlog.Fatal(ctx, "failed to sync segment", mlog.Int64("segmentID", id), mlog.Err(err))
+			mlog.Fatal(ctx, "failed to sync segment", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
 		}
 		futures = append(futures, f)
 	}
-	wb.mut.Unlock()
-
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		mlog.Error(ctx, "failed to sink write buffer data", mlog.Err(err))
-		// TODO change to remove channel in the future
-		panic(err)
-	}
-	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
-	if err != nil {
-		mlog.Error(ctx, "failed to drop channel", mlog.Err(err))
-		// TODO change to remove channel in the future
-		panic(err)
-	}
+	return futures
 }
 
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
