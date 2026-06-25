@@ -252,15 +252,12 @@ func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
 }
 
 func (s *DelegatorDataSuite) TearDownTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
+	function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
+	function.ReleaseFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName))
 }
 
 func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
-	errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, s.delegator.collection.Schema())
-	if errCh != nil {
-		s.Require().NoError(<-errCh)
-	}
+	s.Require().NoError(function.UpdateFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), s.delegator.collection.Schema()))
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {

@@ -104,7 +104,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	function.ReleaseFunctionRunners(dropCollectionMessage.Header().GetCollectionId(), dropCollectionMessage.VChannel())
+	function.ReleaseFunctionRunners(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
 
@@ -344,7 +344,7 @@ func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Contex
 func (impl *shardInterceptor) Close() {
 	if schemaProvider, ok := impl.shardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
-			function.ReleaseFunctionRunners(collectionID, schemaInfo.VChannel)
+			function.ReleaseFunctionRunners(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
 }

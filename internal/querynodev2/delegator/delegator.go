@@ -1322,6 +1322,7 @@ func (sd *shardDelegator) Close() {
 	if sd.functionState != nil {
 		sd.functionState.Close()
 	}
+	sd.releaseFunctionRunners()
 
 	// clean up l0 segment in delete buffer
 	start := time.Now()
@@ -1330,6 +1331,33 @@ func (sd *shardDelegator) Close() {
 
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
+}
+
+func (sd *shardDelegator) allocFunctionRunners(schema *schemapb.CollectionSchema) {
+	if err := function.AllocFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), schema); err != nil {
+		sd.warnFunctionRunnerInit(err, "allocate", schema)
+	}
+}
+
+func (sd *shardDelegator) warnFunctionRunnerInit(err error, operation string, schema *schemapb.CollectionSchema) {
+	schemaVersion := function.LatestFunctionRunnerVersion
+	if schema != nil {
+		schemaVersion = schema.GetVersion()
+	}
+	log.Warn("failed to initialize delegator function runners",
+		zap.Int64("collectionID", sd.collectionID),
+		zap.String("vchannel", sd.vchannelName),
+		zap.String("operation", operation),
+		zap.Int32("schemaVersion", schemaVersion),
+		zap.Error(err))
+}
+
+func (sd *shardDelegator) releaseFunctionRunners() {
+	function.ReleaseFunctionRunners(sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName))
+}
+
+func delegatorFunctionRunnerKey(vchannel string) string {
+	return "DELEGATOR-" + vchannel
 }
 
 // As partition stats is an optimization for search/query which is not mandatory for milvus instance,
@@ -1443,6 +1471,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		return nil, err
 	}
 	sd.functionState = functionState
+	sd.allocFunctionRunners(collection.Schema())
 
 	hasBM25Field := lo.ContainsBy(collection.Schema().GetFunctions(), func(tf *schemapb.FunctionSchema) bool {
 		return tf.GetType() == schemapb.FunctionType_BM25

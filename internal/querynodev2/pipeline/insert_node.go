@@ -44,8 +44,7 @@ type insertNode struct {
 	manager      *DataManager
 	delegator    delegator.ShardDelegator
 
-	functionRunners        map[int32][]function.FunctionRunner
-	functionOutputFieldIDs map[int32][]int64
+	functionStore *function.FunctionRunnerLocalStore
 }
 
 func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
@@ -97,56 +96,8 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		zap.Uint64("timestampMax", msg.EndTimestamp))
 }
 
-// fillEmbeddingData is only used to handle old insert messages that were not embedded before WAL append.
-func (iNode *insertNode) fillEmbeddingData(schema *schemapb.CollectionSchema, msg *InsertMsg) error {
-	if !function.HasEmbeddingFunctions(schema) {
-		return nil
-	}
-	schemaVersion := schema.GetVersion()
-	_, ok, err := function.TryMaterialize(iNode.collectionID, function.LatestFunctionRunnerVersion, msg.InsertRequest)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
-	}
-
-	runners, ok := iNode.functionRunners[schemaVersion]
-	if !ok {
-		runners, err = function.BuildEmbeddingRunners(schema)
-		if err != nil {
-			return err
-		}
-		iNode.functionRunners[schemaVersion] = runners
-	}
-	_, err = function.FillFunctionFields(runners, msg.InsertRequest)
-	return err
-}
-
-func (iNode *insertNode) getEmbeddingOutputFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
-	schemaVersion := schema.GetVersion()
-	if outputFieldIDs, ok := iNode.functionOutputFieldIDs[schemaVersion]; ok {
-		return outputFieldIDs, nil
-	}
-
-	if !function.HasEmbeddingFunctions(schema) {
-		iNode.functionOutputFieldIDs[schemaVersion] = nil
-		return nil, nil
-	}
-	outputFieldIDs, err := function.EmbeddingOutputFieldIDs(schema)
-	if err != nil {
-		return nil, err
-	}
-	iNode.functionOutputFieldIDs[schemaVersion] = outputFieldIDs
-	return outputFieldIDs, nil
-}
-
 func (iNode *insertNode) Close() {
-	for _, runners := range iNode.functionRunners {
-		function.CloseRunners(runners)
-	}
-	iNode.functionRunners = make(map[int32][]function.FunctionRunner)
-	iNode.functionOutputFieldIDs = make(map[int32][]int64)
+	iNode.functionStore.Close()
 	iNode.BaseNode.Close()
 }
 
@@ -166,7 +117,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 			panic("insertNode with collection not exist")
 		}
 		schema := collection.Schema()
-		functionOutputFieldIDs, err := iNode.getEmbeddingOutputFieldIDs(schema)
+		functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
 		if err != nil {
 			log.Error("failed to get embedding output fields", zap.String("channel", iNode.channel), zap.Error(err))
 			panic(err)
@@ -175,7 +126,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		insertDatas := make(map[UniqueID]*delegator.InsertData)
 		for _, msg := range nodeMsg.insertMsgs {
 			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
-				if err := iNode.fillEmbeddingData(schema, msg); err != nil {
+				if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schema, msg.InsertRequest); err != nil {
 					log.Error("failed to fill embedding data for insert message", zap.String("channel", iNode.channel), zap.Error(err))
 					panic(err)
 				}
@@ -204,15 +155,14 @@ func newInsertNode(
 	maxQueueLength int32,
 ) (*insertNode, error) {
 	iNode := &insertNode{
-		BaseNode:               base.NewBaseNode(fmt.Sprintf("InsertNode-%s", channel), maxQueueLength),
-		collectionID:           collectionID,
-		channel:                channel,
-		manager:                manager,
-		delegator:              delegator,
-		functionRunners:        make(map[int32][]function.FunctionRunner),
-		functionOutputFieldIDs: make(map[int32][]int64),
+		BaseNode:      base.NewBaseNode(fmt.Sprintf("InsertNode-%s", channel), maxQueueLength),
+		collectionID:  collectionID,
+		channel:       channel,
+		manager:       manager,
+		delegator:     delegator,
+		functionStore: function.NewFunctionRunnerLocalStore(),
 	}
-	if _, err := iNode.getEmbeddingOutputFieldIDs(schema); err != nil {
+	if _, err := iNode.functionStore.OutputFieldIDs(schema); err != nil {
 		return nil, err
 	}
 	return iNode, nil
