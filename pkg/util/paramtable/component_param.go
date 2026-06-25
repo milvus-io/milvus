@@ -571,8 +571,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 		Formatter: func(v string) string {
 			if getAsInt64(v) < 0 {
-				log.Warn("common.loadTransientBudgetBytes must be non-negative, using unlimited",
-					zap.String("configured", v))
+				mlog.Warn(context.TODO(), "common.loadTransientBudgetBytes must be non-negative, using unlimited",
+					mlog.String("configured", v))
 				return strconv.Itoa(DefaultLoadTransientBudgetBytes)
 			}
 			return v
