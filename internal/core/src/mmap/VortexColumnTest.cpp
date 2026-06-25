@@ -49,14 +49,14 @@ std::shared_ptr<arrow::Schema>
 MakeSchema() {
     return arrow::schema({
         arrow::field(std::to_string(kIntFieldId), arrow::int32(), false),
-        arrow::field(std::to_string(kStringFieldId), arrow::binary(), false),
+        arrow::field(std::to_string(kStringFieldId), arrow::utf8(), false),
     });
 }
 
 std::shared_ptr<arrow::RecordBatch>
 MakeRecordBatch(int64_t begin, int64_t count) {
     arrow::Int32Builder int_builder;
-    arrow::BinaryBuilder string_builder;
+    arrow::StringBuilder string_builder;
     EXPECT_TRUE(int_builder.Reserve(count).ok());
     EXPECT_TRUE(string_builder.Reserve(count).ok());
     for (int64_t i = begin; i < begin + count; ++i) {
@@ -202,8 +202,7 @@ ExpectedString(DataType type, int64_t row);
 
 bool
 IsVortexStringPushdownType(DataType type) {
-    return type == DataType::STRING || type == DataType::VARCHAR ||
-           type == DataType::TEXT;
+    return type == DataType::STRING || type == DataType::VARCHAR;
 }
 
 class ScopedVortexScanPushdownEnable {
@@ -346,6 +345,7 @@ ArrowTypeForNullableField(DataType type) {
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
+            return arrow::utf8();
         case DataType::JSON:
         case DataType::GEOMETRY:
             return arrow::binary();
@@ -493,7 +493,19 @@ BuildNullableArray(DataType type, int64_t begin, int64_t count) {
         }
         case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT:
+        case DataType::TEXT: {
+            arrow::StringBuilder builder;
+            for (int64_t row = begin; row < begin + count; ++row) {
+                if (!ExpectedValid(row)) {
+                    EXPECT_TRUE(builder.AppendNull().ok());
+                } else {
+                    EXPECT_TRUE(builder.Append(ExpectedString(type, row)).ok());
+                }
+            }
+            std::shared_ptr<arrow::Array> array;
+            EXPECT_TRUE(builder.Finish(&array).ok());
+            return array;
+        }
         case DataType::JSON:
         case DataType::GEOMETRY: {
             arrow::BinaryBuilder builder;
@@ -1028,6 +1040,13 @@ TEST(VortexColumnTest, NullableAllScalarTypesScanCorrectness) {
         CheckDataScan(column, type);
         if (IsVortexStringPushdownType(type)) {
             CheckNullableFilteredScanReturnsValidity(column, type);
+        } else if (type == DataType::TEXT) {
+            auto options = ChunkedColumnInterface::ScanOptions::ForUnary(
+                0,
+                kNullableRows,
+                proto::plan::OpType::Equal,
+                StringValue(ExpectedString(type, 8)));
+            EXPECT_FALSE(column.SupportsScanPushdown(options));
         }
     }
 

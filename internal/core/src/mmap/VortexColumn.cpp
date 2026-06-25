@@ -1464,7 +1464,6 @@ VortexColumn::SupportsScanPushdown(const ScanOptions& options) const {
     switch (data_type_) {
         case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT:
             break;
         default:
             return false;
