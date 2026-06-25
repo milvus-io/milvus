@@ -34,14 +34,12 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type cutoffDeleteEntry struct {
@@ -72,31 +70,26 @@ type restoreCutoffPlan struct {
 	importedRows int64
 }
 
+type cutoffInsertRewriteOptions struct {
+	readerVersion  int64
+	writerVersion  int64
+	targetBasePath string
+}
+
+type cutoffInsertRewriteResult struct {
+	binlogs      []*datapb.FieldBinlog
+	statsLog     *datapb.FieldBinlog
+	bm25StatsLog map[storage.FieldID]*datapb.FieldBinlog
+	manifestPath string
+	rowCount     int64
+	copiedFiles  []string
+}
+
 func classifyBinlogForCutoff(binlog *datapb.Binlog, cutoffTs uint64) cutoffLogAction {
 	if binlog.GetTimestampTo() > 0 && binlog.GetTimestampTo() <= cutoffTs {
 		return cutoffLogKeep
 	}
 	if binlog.GetTimestampFrom() > 0 && binlog.GetTimestampFrom() > cutoffTs {
-		return cutoffLogDrop
-	}
-	return cutoffLogRewrite
-}
-
-func classifyInsertBatchForCutoff(batch []*datapb.Binlog, cutoffTs uint64) cutoffLogAction {
-	keep := true
-	drop := true
-	for _, binlog := range batch {
-		if binlog.GetTimestampTo() == 0 || binlog.GetTimestampTo() > cutoffTs {
-			keep = false
-		}
-		if binlog.GetTimestampFrom() == 0 || binlog.GetTimestampFrom() <= cutoffTs {
-			drop = false
-		}
-	}
-	if keep {
-		return cutoffLogKeep
-	}
-	if drop {
 		return cutoffLogDrop
 	}
 	return cutoffLogRewrite
@@ -204,22 +197,6 @@ func prepareNonManifestRestoreCutoff(
 		mappings:   make(map[string]string),
 	}
 
-	insertMutated := false
-	if source.GetStorageVersion() == storage.StorageV2 {
-		copyInsert, metaInsert, mappings, files, mutated, err := rewriteV2InsertBinlogsForCutoff(
-			ctx, source, target, schema, storageConfig)
-		if err != nil {
-			return nil, err
-		}
-		copySource.InsertBinlogs = copyInsert
-		metaSource.InsertBinlogs = metaInsert
-		insertMutated = mutated
-		for src, dst := range mappings {
-			plan.mappings[src] = dst
-		}
-		plan.copiedFiles = append(plan.copiedFiles, files...)
-	}
-
 	copyDeltas, metaDeltas, mappings, files, retainedDeletes, err := rewriteDeltaFieldBinlogsForCutoff(
 		ctx, cm, source, target, schema, pkField.GetDataType(), source.GetDeltaBinlogs(), storageConfig)
 	if err != nil {
@@ -232,14 +209,86 @@ func prepareNonManifestRestoreCutoff(
 	}
 	plan.copiedFiles = append(plan.copiedFiles, files...)
 
-	if insertMutated {
-		clearCopiedDerivedData(copySource)
-		clearCopiedDerivedData(metaSource)
-	}
 	if isDeltaOnlyCutoffSource(source) {
 		plan.importedRows = retainedDeletes
 	}
 	return plan, nil
+}
+
+func rewriteNonManifestSegmentForCutoff(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+) (*datapb.CopySegmentResult, []string, error) {
+	if schema == nil {
+		return nil, nil, merr.WrapErrParameterInvalidMsg("cutoff requires collection schema")
+	}
+	if storageConfig == nil {
+		storageConfig = compaction.CreateStorageConfig()
+	}
+	pkField, err := findPrimaryKeyField(schema)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	insertResult, err := rewriteSegmentInsertsForCutoff(
+		ctx,
+		source,
+		target,
+		schema,
+		storageConfig,
+		cutoffInsertRewriteOptions{
+			readerVersion: storage.StorageV2,
+			writerVersion: storage.StorageV2,
+		},
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	copiedFiles := append([]string(nil), insertResult.copiedFiles...)
+
+	copyDeltas, metaDeltas, mappings, deltaFiles, _, err := rewriteDeltaFieldBinlogsForCutoff(
+		ctx, cm, source, target, schema, pkField.GetDataType(), source.GetDeltaBinlogs(), storageConfig)
+	if err != nil {
+		return nil, copiedFiles, err
+	}
+	copyMappings, err := generateMappingsFromFiles(&SegmentFiles{
+		DeltaBinlogs: extractFromPb(copyDeltas),
+	}, source, target)
+	if err != nil {
+		return nil, copiedFiles, err
+	}
+	for src, dst := range copyMappings {
+		mappings[src] = dst
+	}
+	copiedDeltaFiles, err := copyMappedCutoffFiles(ctx, cm, copyMappings)
+	if err != nil {
+		return nil, copiedFiles, err
+	}
+	copiedFiles = append(copiedFiles, copiedDeltaFiles...)
+	copiedFiles = append(copiedFiles, deltaFiles...)
+
+	targetDeltas, _, err := transformFieldBinlogs(metaDeltas, mappings, false, false)
+	if err != nil {
+		return nil, copiedFiles, err
+	}
+	statsLogs := fieldBinlogFromOptional(insertResult.statsLog)
+	bm25Logs := bm25StatsLogsToList(insertResult.bm25StatsLog)
+	if err := binlog.CompressBinLogs(insertResult.binlogs, statsLogs, targetDeltas, bm25Logs); err != nil {
+		return nil, copiedFiles, merr.Wrap(err, "failed to compress cutoff segment binlog paths")
+	}
+
+	return &datapb.CopySegmentResult{
+		SegmentId:    target.GetSegmentId(),
+		ImportedRows: insertResult.rowCount,
+		Binlogs:      insertResult.binlogs,
+		Statslogs:    statsLogs,
+		Deltalogs:    targetDeltas,
+		Bm25Logs:     bm25Logs,
+	}, copiedFiles, nil
 }
 
 func rewriteManifestSegmentForCutoff(
@@ -259,7 +308,6 @@ func rewriteManifestSegmentForCutoff(
 	if err != nil {
 		return nil, nil, err
 	}
-	rewriteSchema := buildCutoffRewriteSchema(schema)
 
 	targetManifestPath, err := transformManifestPath(source.GetManifestPath(), source, target)
 	if err != nil {
@@ -270,83 +318,31 @@ func rewriteManifestSegmentForCutoff(
 		return nil, nil, merr.Wrap(err, "failed to parse target manifest path")
 	}
 
-	reader, err := storage.NewManifestRecordReader(ctx, source.GetManifestPath(), rewriteSchema,
-		storage.WithVersion(storage.StorageV3),
-		storage.WithStorageConfig(storageConfig),
-		storage.WithBufferSize(packed.DefaultReadBufferSize),
-		storage.WithCollectionID(source.GetCollectionId()),
-		storage.WithCollectionProperties(rewriteSchema.GetProperties()))
-	if err != nil {
-		return nil, nil, merr.Wrap(err, "failed to create manifest reader for cutoff rewrite")
-	}
-	defer reader.Close()
-
-	writerOptions := []storage.RwOption{
-		storage.WithVersion(storage.StorageV3),
-		storage.WithStorageConfig(storageConfig),
-		storage.WithBufferSize(packed.DefaultWriteBufferSize),
-		storage.WithMultiPartUploadSize(packed.DefaultMultiPartUploadSize),
-		storage.WithCollectionID(target.GetCollectionId()),
-		storage.WithCollectionProperties(rewriteSchema.GetProperties()),
-	}
-	textColumnConfigs := buildCutoffTextColumnConfigs(rewriteSchema, path.Dir(targetBasePath))
-	if len(textColumnConfigs) > 0 {
-		writerOptions = append(writerOptions, storage.WithTextColumnConfigs(textColumnConfigs))
-	}
-
-	writer, err := storage.NewBinlogRecordWriter(
+	insertResult, err := rewriteSegmentInsertsForCutoff(
 		ctx,
-		target.GetCollectionId(),
-		target.GetPartitionId(),
-		target.GetSegmentId(),
-		rewriteSchema,
-		allocator.NewLocalAllocator(1, math.MaxInt64),
-		uint64(packed.DefaultWriteBufferSize),
-		math.MaxInt64,
-		writerOptions...,
-	)
-	if err != nil {
-		return nil, nil, merr.Wrap(err, "failed to create manifest writer for cutoff rewrite")
-	}
-
-	var predicateErr error
-	rowCount, _, err := storage.Sort(
-		uint64(packed.DefaultWriteBufferSize),
-		rewriteSchema,
-		[]storage.RecordReader{reader},
-		writer,
-		func(record storage.Record, _, row int) bool {
-			if predicateErr != nil {
-				return false
-			}
-			ts, err := timestampAt(record, row)
-			if err != nil {
-				predicateErr = err
-				return false
-			}
-			return ts <= source.GetCutoffTs()
+		source,
+		target,
+		schema,
+		storageConfig,
+		cutoffInsertRewriteOptions{
+			readerVersion:  storage.StorageV3,
+			writerVersion:  storage.StorageV3,
+			targetBasePath: targetBasePath,
 		},
-		nil,
 	)
 	if err != nil {
-		return nil, nil, merr.Wrap(err, "failed to rewrite manifest insert data for cutoff")
-	}
-	if predicateErr != nil {
-		return nil, nil, predicateErr
-	}
-	if err := writer.Close(); err != nil {
-		return nil, nil, merr.Wrap(err, "failed to close manifest cutoff writer")
+		return nil, nil, err
 	}
 
-	fieldBinlogs, statsLog, bm25StatsLogs, manifestPath, _ := writer.GetLogs()
+	manifestPath := insertResult.manifestPath
 	if manifestPath == "" {
 		manifestPath = packed.MarshalManifestPath(targetBasePath, packed.ManifestEarliest)
 	}
-	binlogs := storage.SortFieldBinlogs(fieldBinlogs)
-	copiedFiles := extractFromPb(binlogs)
+	binlogs := insertResult.binlogs
+	copiedFiles := append([]string(nil), insertResult.copiedFiles...)
 
 	var statsFiles []string
-	manifestPath, statsFiles, err = addWriterStatsToManifest(manifestPath, storageConfig, statsLog, bm25StatsLogs)
+	manifestPath, statsFiles, err = addWriterStatsToManifest(manifestPath, storageConfig, insertResult.statsLog, insertResult.bm25StatsLog)
 	if err != nil {
 		return nil, copiedFiles, merr.Wrap(err, "failed to add cutoff writer stats to manifest")
 	}
@@ -359,7 +355,7 @@ func rewriteManifestSegmentForCutoff(
 	}
 	copiedFiles = append(copiedFiles, deltaFiles...)
 	if len(deltaEntries) > 0 {
-		if rowCount > 0 {
+		if insertResult.rowCount > 0 {
 			manifestPath, err = packed.AddDeltaLogsToManifestOverwrite(manifestPath, storageConfig, deltaEntries)
 		} else {
 			manifestPath, err = packed.CommitManifestUpdates(
@@ -383,7 +379,7 @@ func rewriteManifestSegmentForCutoff(
 	}
 	return &datapb.CopySegmentResult{
 		SegmentId:    target.GetSegmentId(),
-		ImportedRows: int64(rowCount),
+		ImportedRows: insertResult.rowCount,
 		Binlogs:      binlogs,
 		ManifestPath: manifestPath,
 	}, copiedFiles, nil
@@ -428,6 +424,197 @@ func statEntryFiles(entries []packed.StatEntry) []string {
 		files = append(files, entry.Files...)
 	}
 	return files
+}
+
+func rewriteSegmentInsertsForCutoff(
+	ctx context.Context,
+	source *datapb.CopySegmentSource,
+	target *datapb.CopySegmentTarget,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	opts cutoffInsertRewriteOptions,
+) (*cutoffInsertRewriteResult, error) {
+	if schema == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("cutoff requires collection schema")
+	}
+	if storageConfig == nil {
+		storageConfig = compaction.CreateStorageConfig()
+	}
+	rewriteSchema := buildCutoffRewriteSchema(schema)
+
+	reader, err := newCutoffInsertReader(ctx, source, rewriteSchema, storageConfig, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	writer, err := newCutoffInsertWriter(ctx, target, rewriteSchema, storageConfig, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var predicateErr error
+	rowCount, _, err := storage.Sort(
+		uint64(packed.DefaultWriteBufferSize),
+		rewriteSchema,
+		[]storage.RecordReader{reader},
+		writer,
+		func(record storage.Record, _, row int) bool {
+			if predicateErr != nil {
+				return false
+			}
+			ts, err := timestampAt(record, row)
+			if err != nil {
+				predicateErr = err
+				return false
+			}
+			return ts <= source.GetCutoffTs()
+		},
+		nil,
+	)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to rewrite insert data for cutoff")
+	}
+	if predicateErr != nil {
+		return nil, predicateErr
+	}
+	if err := writer.Close(); err != nil {
+		return nil, merr.Wrap(err, "failed to close cutoff insert writer")
+	}
+
+	fieldBinlogs, statsLog, bm25StatsLogs, manifestPath, _ := writer.GetLogs()
+	binlogs := storage.SortFieldBinlogs(fieldBinlogs)
+	copiedFiles := extractFromPb(binlogs)
+	copiedFiles = append(copiedFiles, extractFromPb(fieldBinlogFromOptional(statsLog))...)
+	copiedFiles = append(copiedFiles, extractFromPb(bm25StatsLogsToList(bm25StatsLogs))...)
+
+	return &cutoffInsertRewriteResult{
+		binlogs:      binlogs,
+		statsLog:     statsLog,
+		bm25StatsLog: bm25StatsLogs,
+		manifestPath: manifestPath,
+		rowCount:     int64(rowCount),
+		copiedFiles:  copiedFiles,
+	}, nil
+}
+
+func newCutoffInsertReader(
+	ctx context.Context,
+	source *datapb.CopySegmentSource,
+	rewriteSchema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	opts cutoffInsertRewriteOptions,
+) (storage.RecordReader, error) {
+	readerOptions := []storage.RwOption{
+		storage.WithVersion(opts.readerVersion),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithBufferSize(packed.DefaultReadBufferSize),
+		storage.WithCollectionID(source.GetCollectionId()),
+		storage.WithCollectionProperties(rewriteSchema.GetProperties()),
+	}
+	if source.GetManifestPath() != "" {
+		reader, err := storage.NewManifestRecordReader(ctx, source.GetManifestPath(), rewriteSchema, readerOptions...)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to create manifest reader for cutoff rewrite")
+		}
+		return reader, nil
+	}
+	reader, err := storage.NewBinlogRecordReader(ctx, source.GetInsertBinlogs(), rewriteSchema, readerOptions...)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to create binlog reader for cutoff rewrite")
+	}
+	return reader, nil
+}
+
+func newCutoffInsertWriter(
+	ctx context.Context,
+	target *datapb.CopySegmentTarget,
+	rewriteSchema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	opts cutoffInsertRewriteOptions,
+) (storage.BinlogRecordWriter, error) {
+	writerOptions := []storage.RwOption{
+		storage.WithVersion(opts.writerVersion),
+		storage.WithStorageConfig(storageConfig),
+		storage.WithBufferSize(packed.DefaultWriteBufferSize),
+		storage.WithMultiPartUploadSize(packed.DefaultMultiPartUploadSize),
+		storage.WithCollectionID(target.GetCollectionId()),
+		storage.WithCollectionProperties(rewriteSchema.GetProperties()),
+	}
+	if opts.writerVersion == storage.StorageV2 {
+		writerOptions = append(writerOptions, storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			for key, blob := range kvs {
+				if err := packed.WriteFile(storageConfig, key, blob); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	}
+	if opts.writerVersion >= storage.StorageV3 && opts.targetBasePath != "" {
+		textColumnConfigs := buildCutoffTextColumnConfigs(rewriteSchema, path.Dir(opts.targetBasePath))
+		if len(textColumnConfigs) > 0 {
+			writerOptions = append(writerOptions, storage.WithTextColumnConfigs(textColumnConfigs))
+		}
+	}
+
+	writer, err := storage.NewBinlogRecordWriter(
+		ctx,
+		target.GetCollectionId(),
+		target.GetPartitionId(),
+		target.GetSegmentId(),
+		rewriteSchema,
+		allocator.NewLocalAllocator(1, math.MaxInt64),
+		uint64(packed.DefaultWriteBufferSize),
+		math.MaxInt64,
+		writerOptions...,
+	)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to create cutoff insert writer")
+	}
+	return writer, nil
+}
+
+func fieldBinlogFromOptional(field *datapb.FieldBinlog) []*datapb.FieldBinlog {
+	if field == nil {
+		return nil
+	}
+	return []*datapb.FieldBinlog{field}
+}
+
+func bm25StatsLogsToList(logs map[storage.FieldID]*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	if len(logs) == 0 {
+		return nil
+	}
+	return storage.SortFieldBinlogs(logs)
+}
+
+func copyMappedCutoffFiles(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	mappings map[string]string,
+) ([]string, error) {
+	if len(mappings) == 0 {
+		return nil, nil
+	}
+	if cm == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("cutoff requires chunk manager to copy retained files")
+	}
+	sourcePaths := make([]string, 0, len(mappings))
+	for sourcePath := range mappings {
+		sourcePaths = append(sourcePaths, sourcePath)
+	}
+	sort.Strings(sourcePaths)
+
+	copiedFiles := make([]string, 0, len(sourcePaths))
+	for _, sourcePath := range sourcePaths {
+		targetPath := mappings[sourcePath]
+		if err := copyFile(ctx, cm, sourcePath, targetPath); err != nil {
+			return copiedFiles, merr.Wrapf(err, "failed to copy file from %s to %s", sourcePath, targetPath)
+		}
+		copiedFiles = append(copiedFiles, targetPath)
+	}
+	return copiedFiles, nil
 }
 
 func rewriteManifestDeltasForCutoff(
@@ -515,14 +702,6 @@ func manifestStatsFiles(manifestPath string, storageConfig *indexpb.StorageConfi
 	return paths, nil
 }
 
-func clearCopiedDerivedData(source *datapb.CopySegmentSource) {
-	source.StatsBinlogs = nil
-	source.Bm25Binlogs = nil
-	source.IndexFiles = nil
-	source.TextIndexFiles = nil
-	source.JsonKeyIndexFiles = nil
-}
-
 func appendBinlogToField(builders map[int64]*datapb.FieldBinlog, field *datapb.FieldBinlog, binlog *datapb.Binlog) {
 	fieldID := field.GetFieldID()
 	dst, ok := builders[fieldID]
@@ -549,288 +728,6 @@ func fieldBinlogBuildersToList(builders map[int64]*datapb.FieldBinlog) []*datapb
 		}
 	}
 	return result
-}
-
-func rewriteV2InsertBinlogsForCutoff(
-	ctx context.Context,
-	source *datapb.CopySegmentSource,
-	target *datapb.CopySegmentTarget,
-	schema *schemapb.CollectionSchema,
-	storageConfig *indexpb.StorageConfig,
-) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, map[string]string, []string, bool, error) {
-	mappings := make(map[string]string)
-	if len(source.GetInsertBinlogs()) == 0 {
-		return nil, nil, mappings, nil, false, nil
-	}
-
-	fields := make([]*datapb.FieldBinlog, 0, len(source.GetInsertBinlogs()))
-	for _, field := range source.GetInsertBinlogs() {
-		fields = append(fields, proto.Clone(field).(*datapb.FieldBinlog))
-	}
-	sort.Slice(fields, func(i, j int) bool {
-		return fields[i].GetFieldID() < fields[j].GetFieldID()
-	})
-
-	batchCount := len(fields[0].GetBinlogs())
-	for _, field := range fields[1:] {
-		if len(field.GetBinlogs()) != batchCount {
-			return nil, nil, nil, nil, false, merr.WrapErrServiceInternalMsg(
-				"v2 cutoff requires aligned column-group binlogs: field %d has %d batches, expected %d",
-				field.GetFieldID(), len(field.GetBinlogs()), batchCount)
-		}
-	}
-
-	copyBuilders := make(map[int64]*datapb.FieldBinlog)
-	metaBuilders := make(map[int64]*datapb.FieldBinlog)
-	copiedFiles := make([]string, 0)
-	mutated := false
-	for batchIdx := 0; batchIdx < batchCount; batchIdx++ {
-		batch := make([]*datapb.Binlog, 0, len(fields))
-		batchFields := make([]*datapb.FieldBinlog, 0, len(fields))
-		for _, field := range fields {
-			batch = append(batch, field.GetBinlogs()[batchIdx])
-			batchFields = append(batchFields, &datapb.FieldBinlog{
-				FieldID:     field.GetFieldID(),
-				ChildFields: append([]int64(nil), field.GetChildFields()...),
-				Binlogs:     []*datapb.Binlog{proto.Clone(field.GetBinlogs()[batchIdx]).(*datapb.Binlog)},
-				Format:      field.GetFormat(),
-			})
-		}
-
-		switch classifyInsertBatchForCutoff(batch, source.GetCutoffTs()) {
-		case cutoffLogKeep:
-			for i, field := range fields {
-				appendBinlogToField(copyBuilders, field, batch[i])
-				appendBinlogToField(metaBuilders, field, batch[i])
-			}
-		case cutoffLogDrop:
-			mutated = true
-		case cutoffLogRewrite:
-			mutated = true
-			rewritten, batchMappings, batchFiles, err := rewriteV2InsertBatchForCutoff(
-				ctx, source, target, schema, storageConfig, batchFields)
-			if err != nil {
-				return nil, nil, nil, nil, false, err
-			}
-			for _, rewrittenField := range rewritten {
-				for _, binlog := range rewrittenField.GetBinlogs() {
-					appendBinlogToField(metaBuilders, rewrittenField, binlog)
-				}
-			}
-			for src, dst := range batchMappings {
-				mappings[src] = dst
-			}
-			copiedFiles = append(copiedFiles, batchFiles...)
-		}
-	}
-
-	return fieldBinlogBuildersToList(copyBuilders),
-		fieldBinlogBuildersToList(metaBuilders),
-		mappings,
-		copiedFiles,
-		mutated,
-		nil
-}
-
-func rewriteV2InsertBatchForCutoff(
-	ctx context.Context,
-	source *datapb.CopySegmentSource,
-	target *datapb.CopySegmentTarget,
-	schema *schemapb.CollectionSchema,
-	storageConfig *indexpb.StorageConfig,
-	batchFields []*datapb.FieldBinlog,
-) ([]*datapb.FieldBinlog, map[string]string, []string, error) {
-	rewriteSchema := buildCutoffRewriteSchema(schema)
-	columnGroups, logIDStart, err := columnGroupsFromFieldBinlogs(rewriteSchema, batchFields)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	reader, err := storage.NewBinlogRecordReader(ctx, batchFields, rewriteSchema,
-		storage.WithVersion(storage.StorageV2),
-		storage.WithStorageConfig(storageConfig),
-		storage.WithCollectionID(source.GetCollectionId()),
-		storage.WithCollectionProperties(rewriteSchema.GetProperties()))
-	if err != nil {
-		return nil, nil, nil, merr.Wrap(err, "failed to create v2 binlog reader for cutoff rewrite")
-	}
-	defer reader.Close()
-
-	writer, err := storage.NewBinlogRecordWriter(
-		ctx,
-		target.GetCollectionId(),
-		target.GetPartitionId(),
-		target.GetSegmentId(),
-		rewriteSchema,
-		allocator.NewLocalAllocator(logIDStart, math.MaxInt64),
-		uint64(packed.DefaultWriteBufferSize),
-		math.MaxInt64,
-		storage.WithVersion(storage.StorageV2),
-		storage.WithStorageConfig(storageConfig),
-		storage.WithBufferSize(packed.DefaultWriteBufferSize),
-		storage.WithMultiPartUploadSize(packed.DefaultMultiPartUploadSize),
-		storage.WithColumnGroups(columnGroups),
-		storage.WithCollectionID(target.GetCollectionId()),
-		storage.WithCollectionProperties(rewriteSchema.GetProperties()),
-		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
-			for key, blob := range kvs {
-				if err := packed.WriteFile(storageConfig, key, blob); err != nil {
-					return err
-				}
-			}
-			return nil
-		}),
-	)
-	if err != nil {
-		return nil, nil, nil, merr.Wrap(err, "failed to create v2 binlog writer for cutoff rewrite")
-	}
-
-	var predicateErr error
-	rowCount, _, err := storage.Sort(
-		uint64(packed.DefaultWriteBufferSize),
-		rewriteSchema,
-		[]storage.RecordReader{reader},
-		writer,
-		func(record storage.Record, _, row int) bool {
-			if predicateErr != nil {
-				return false
-			}
-			ts, err := timestampAt(record, row)
-			if err != nil {
-				predicateErr = err
-				return false
-			}
-			return ts <= source.GetCutoffTs()
-		},
-		nil,
-	)
-	if err != nil {
-		return nil, nil, nil, merr.Wrap(err, "failed to rewrite v2 insert binlog for cutoff")
-	}
-	if predicateErr != nil {
-		return nil, nil, nil, predicateErr
-	}
-	if rowCount == 0 {
-		return nil, nil, nil, nil
-	}
-	if err := writer.Close(); err != nil {
-		return nil, nil, nil, merr.Wrap(err, "failed to close v2 cutoff insert writer")
-	}
-
-	sourceByField := make(map[int64]*datapb.Binlog, len(batchFields))
-	for _, field := range batchFields {
-		if len(field.GetBinlogs()) != 1 {
-			return nil, nil, nil, merr.WrapErrServiceInternalMsg("cutoff rewrite expects one binlog per column group")
-		}
-		sourceByField[field.GetFieldID()] = field.GetBinlogs()[0]
-	}
-
-	fieldBinlogs, _, _, _, _ := writer.GetLogs()
-	rewritten := storage.SortFieldBinlogs(fieldBinlogs)
-	mappings := make(map[string]string, len(rewritten))
-	copiedFiles := make([]string, 0, len(rewritten))
-	for _, field := range rewritten {
-		sourceBinlog := sourceByField[field.GetFieldID()]
-		if sourceBinlog == nil || len(field.GetBinlogs()) != 1 {
-			return nil, nil, nil, merr.WrapErrServiceInternalMsg("cutoff rewrite produced unexpected field binlog")
-		}
-		sourcePath := sourceBinlog.GetLogPath()
-		targetPath := field.GetBinlogs()[0].GetLogPath()
-		logID, err := binlogLogID(sourceBinlog)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-
-		rewrittenField := proto.Clone(field).(*datapb.FieldBinlog)
-		rewrittenField.Binlogs[0].LogPath = sourcePath
-		rewrittenField.Binlogs[0].LogID = logID
-		mappings[sourcePath] = targetPath
-		copiedFiles = append(copiedFiles, targetPath)
-		field.Binlogs = rewrittenField.Binlogs
-	}
-	return rewritten, mappings, copiedFiles, nil
-}
-
-func columnGroupsFromFieldBinlogs(
-	schema *schemapb.CollectionSchema,
-	fieldBinlogs []*datapb.FieldBinlog,
-) ([]storagecommon.ColumnGroup, int64, error) {
-	if len(fieldBinlogs) == 0 {
-		return nil, 0, merr.WrapErrServiceInternalMsg("empty field binlogs for cutoff rewrite")
-	}
-	fields := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
-	for _, field := range fieldBinlogs {
-		fields = append(fields, field)
-	}
-	sort.Slice(fields, func(i, j int) bool {
-		return fields[i].GetFieldID() < fields[j].GetFieldID()
-	})
-
-	allFields := typeutil.GetAllFieldSchemas(schema)
-	fieldColumn := make(map[int64]int, len(allFields))
-	for idx, field := range allFields {
-		fieldColumn[field.GetFieldID()] = idx
-	}
-	explicitFields := make(map[int64]struct{})
-	for _, field := range fields {
-		if len(field.GetChildFields()) > 0 {
-			for _, fieldID := range field.GetChildFields() {
-				explicitFields[fieldID] = struct{}{}
-			}
-			continue
-		}
-		if field.GetFieldID() != storagecommon.DefaultShortColumnGroupID {
-			explicitFields[field.GetFieldID()] = struct{}{}
-		}
-	}
-
-	logIDStart, err := binlogLogID(fields[0].GetBinlogs()[0])
-	if err != nil {
-		return nil, 0, err
-	}
-	columnGroups := make([]storagecommon.ColumnGroup, 0, len(fields))
-	for idx, field := range fields {
-		if len(field.GetBinlogs()) != 1 {
-			return nil, 0, merr.WrapErrServiceInternalMsg("cutoff rewrite expects one binlog per column group")
-		}
-		logID, err := binlogLogID(field.GetBinlogs()[0])
-		if err != nil {
-			return nil, 0, err
-		}
-		if logID != logIDStart+int64(idx) {
-			return nil, 0, merr.WrapErrParameterInvalidMsg(
-				"cutoff rewrite requires contiguous v2 column-group log IDs, got %d want %d",
-				logID, logIDStart+int64(idx))
-		}
-
-		groupFields := append([]int64(nil), field.GetChildFields()...)
-		if len(groupFields) == 0 {
-			if field.GetFieldID() == storagecommon.DefaultShortColumnGroupID {
-				for _, schemaField := range allFields {
-					if _, ok := explicitFields[schemaField.GetFieldID()]; !ok {
-						groupFields = append(groupFields, schemaField.GetFieldID())
-					}
-				}
-			} else {
-				groupFields = []int64{field.GetFieldID()}
-			}
-		}
-		columns := make([]int, 0, len(groupFields))
-		for _, fieldID := range groupFields {
-			column, ok := fieldColumn[fieldID]
-			if !ok {
-				return nil, 0, merr.WrapErrServiceInternalMsg("field %d not found in cutoff rewrite schema", fieldID)
-			}
-			columns = append(columns, column)
-		}
-		columnGroups = append(columnGroups, storagecommon.ColumnGroup{
-			GroupID: field.GetFieldID(),
-			Columns: columns,
-			Fields:  groupFields,
-			Format:  field.GetFormat(),
-		})
-	}
-	return columnGroups, logIDStart, nil
 }
 
 func rewriteDeltaFieldBinlogsForCutoff(

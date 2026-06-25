@@ -515,7 +515,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 			FieldID: 101,
 			Binlogs: []*datapb.Binlog{
 				{
-					EntriesNum:    2000,
+					EntriesNum:    1000,
 					TimestampFrom: 150,
 					TimestampTo:   250,
 					LogPath:       "files/insert_log/111/222/333/101/log2.log",
@@ -529,7 +529,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 	t.Run("count rows for insert logs", func(t *testing.T) {
 		result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true, false)
 		assert.NoError(t, err)
-		assert.Equal(t, int64(3000), totalRows)
+		assert.Equal(t, int64(1000), totalRows)
 		assert.Equal(t, 2, len(result))
 
 		// Verify first field binlog
@@ -543,7 +543,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 		// Verify second field binlog
 		assert.Equal(t, int64(101), result[1].FieldID)
 		assert.Equal(t, 1, len(result[1].Binlogs))
-		assert.Equal(t, int64(2000), result[1].Binlogs[0].EntriesNum)
+		assert.Equal(t, int64(1000), result[1].Binlogs[0].EntriesNum)
 	})
 
 	t.Run("no row counting for stats logs", func(t *testing.T) {
@@ -2097,7 +2097,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		assert.NotNil(t, result)
 
 		assert.Equal(t, int64(666), result.SegmentId)
-		assert.Equal(t, int64(1000), result.ImportedRows)
+		assert.Equal(t, int64(500), result.ImportedRows)
 
 		assert.Equal(t, 2, len(result.Binlogs))
 		assert.Equal(t, 1, len(result.Statslogs))

@@ -132,7 +132,7 @@ func TestBuildCutoffTextColumnConfigs_UsesRewriteMode(t *testing.T) {
 	assert.Equal(t, paramtable.Get().DataNodeCfg.TextFlushThresholdBytes.GetAsInt64(), configs[0].FlushThresholdBytes)
 }
 
-func TestRewriteV2InsertBinlogsForCutoff_RewritesCrossingBatch(t *testing.T) {
+func TestRewriteSegmentInsertsForCutoff_RewritesStorageV2Segment(t *testing.T) {
 	paramtable.Init()
 
 	const dim = 2
@@ -211,25 +211,29 @@ func TestRewriteV2InsertBinlogsForCutoff_RewritesCrossingBatch(t *testing.T) {
 		StorageVersion: storage.StorageV2,
 	}
 	target := &datapb.CopySegmentTarget{CollectionId: 444, PartitionId: 555, SegmentId: 666}
-	copyInsert, metaInsert, mappings, copiedFiles, mutated, err := rewriteV2InsertBinlogsForCutoff(
-		ctx, source, target, userSchema, storageConfig)
+	rewritten, err := rewriteSegmentInsertsForCutoff(
+		ctx,
+		source,
+		target,
+		userSchema,
+		storageConfig,
+		cutoffInsertRewriteOptions{
+			readerVersion: storage.StorageV2,
+			writerVersion: storage.StorageV2,
+		},
+	)
 	require.NoError(t, err)
-	assert.True(t, mutated)
-	assert.Empty(t, copyInsert)
-	require.Len(t, metaInsert, 2)
-	assert.Len(t, mappings, 2)
-	assert.Len(t, copiedFiles, 2)
-	for _, field := range metaInsert {
+	require.NotNil(t, rewritten)
+	assert.Equal(t, int64(1), rewritten.rowCount)
+	require.Len(t, rewritten.binlogs, 2)
+	assert.Len(t, rewritten.copiedFiles, 3)
+	for _, field := range rewritten.binlogs {
 		require.Len(t, field.GetBinlogs(), 1)
 		assert.Equal(t, int64(1), field.GetBinlogs()[0].GetEntriesNum())
-		sourcePath := field.GetBinlogs()[0].GetLogPath()
-		targetPath := mappings[sourcePath]
-		require.NotEmpty(t, targetPath)
-		field.GetBinlogs()[0].LogPath = targetPath
 	}
 
 	rewriteSchema := buildCutoffRewriteSchema(userSchema)
-	reader, err := storage.NewBinlogRecordReader(ctx, metaInsert, rewriteSchema,
+	reader, err := storage.NewBinlogRecordReader(ctx, rewritten.binlogs, rewriteSchema,
 		storage.WithVersion(storage.StorageV2),
 		storage.WithStorageConfig(storageConfig),
 		storage.WithCollectionID(target.GetCollectionId()),
@@ -551,23 +555,29 @@ func TestCopySegmentAndIndexFiles_V2WithCutoff(t *testing.T) {
 		PartitionId:  555,
 		SegmentId:    666,
 	}
-	copySource := proto.Clone(source).(*datapb.CopySegmentSource)
-	copySource.DeltaBinlogs = nil
-	metaSource := proto.Clone(copySource).(*datapb.CopySegmentSource)
-	metaSource.DeltaBinlogs = []*datapb.FieldBinlog{{
-		FieldID: 100,
-		Binlogs: []*datapb.Binlog{{
-			LogPath:    "files/delta_log/111/222/333/31",
-			EntriesNum: 1,
-		}},
-	}}
-	mockPrepare := mockey.Mock(prepareNonManifestRestoreCutoff).Return(&restoreCutoffPlan{
-		copySource:  copySource,
-		metaSource:  metaSource,
-		mappings:    map[string]string{"files/delta_log/111/222/333/31": "files/delta_log/444/555/666/31"},
-		copiedFiles: []string{"files/delta_log/444/555/666/31"},
-	}, nil).Build()
-	defer mockPrepare.UnPatch()
+	mockRewrite := mockey.Mock(rewriteNonManifestSegmentForCutoff).Return(
+		&datapb.CopySegmentResult{
+			SegmentId:    666,
+			ImportedRows: 1,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{
+					LogPath:    "files/insert_log/444/555/666/100/11",
+					EntriesNum: 1,
+				}},
+			}},
+			Deltalogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{
+					LogPath:    "files/delta_log/444/555/666/31",
+					EntriesNum: 1,
+				}},
+			}},
+		},
+		[]string{"files/insert_log/444/555/666/100/11", "files/delta_log/444/555/666/31"},
+		nil,
+	).Build()
+	defer mockRewrite.UnPatch()
 
 	copiedSrcPaths := make([]string, 0)
 	mockCopy := mockey.Mock(copyFile).To(func(_ context.Context, _ storage.ChunkManager, src, dst string) error {
@@ -589,13 +599,12 @@ func TestCopySegmentAndIndexFiles_V2WithCutoff(t *testing.T) {
 	)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(3), result.GetImportedRows())
+	assert.Equal(t, int64(1), result.GetImportedRows())
 	assert.Len(t, result.GetDeltalogs(), 1)
 	assert.Equal(t, int64(100), result.GetDeltalogs()[0].GetFieldID())
 	assert.Equal(t, int64(1), result.GetDeltalogs()[0].GetBinlogs()[0].GetEntriesNum())
-	assert.Contains(t, copiedSrcPaths, "files/insert_log/111/222/333/0/11")
-	assert.Contains(t, copiedSrcPaths, "files/stats_log/111/222/333/100/21")
-	assert.NotContains(t, copiedSrcPaths, "files/delta_log/111/222/333/31")
+	assert.Empty(t, copiedSrcPaths)
+	assert.Contains(t, copiedFiles, "files/insert_log/444/555/666/100/11")
 	assert.Contains(t, copiedFiles, "files/delta_log/444/555/666/31")
 }
 
@@ -686,5 +695,45 @@ func TestCopySegmentAndIndexFiles_L0WithCutoff(t *testing.T) {
 		assert.Equal(t, int64(0), result.GetImportedRows())
 		assert.Empty(t, result.GetDeltalogs())
 		assert.Empty(t, copiedFiles)
+	})
+
+	t.Run("storage v2 delta only uses delta cutoff path", func(t *testing.T) {
+		sourceV2 := proto.Clone(source).(*datapb.CopySegmentSource)
+		sourceV2.StorageVersion = storage.StorageV2
+		copySource := proto.Clone(sourceV2).(*datapb.CopySegmentSource)
+		copySource.DeltaBinlogs = nil
+		metaSource := proto.Clone(copySource).(*datapb.CopySegmentSource)
+		metaSource.DeltaBinlogs = []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				LogPath:    "files/delta_log/111/-1/333/1",
+				EntriesNum: 1,
+			}},
+		}}
+		mockPrepare := mockey.Mock(prepareNonManifestRestoreCutoff).Return(&restoreCutoffPlan{
+			copySource:   copySource,
+			metaSource:   metaSource,
+			mappings:     map[string]string{"files/delta_log/111/-1/333/1": "files/delta_log/444/-1/666/1"},
+			copiedFiles:  []string{"files/delta_log/444/-1/666/1"},
+			importedRows: 1,
+		}, nil).Build()
+		defer mockPrepare.UnPatch()
+
+		result, copiedFiles, err := CopySegmentAndIndexFiles(
+			context.Background(),
+			&struct{ storage.ChunkManager }{},
+			sourceV2,
+			target,
+			nil,
+			CopySegmentFileOptions{
+				Schema:        schema,
+				StorageConfig: &indexpb.StorageConfig{RootPath: "files"},
+			},
+		)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), result.GetImportedRows())
+		assert.Len(t, result.GetDeltalogs(), 1)
+		assert.Equal(t, []string{"files/delta_log/444/-1/666/1"}, copiedFiles)
 	})
 }

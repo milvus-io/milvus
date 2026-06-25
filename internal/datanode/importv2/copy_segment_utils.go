@@ -426,6 +426,9 @@ func CopySegmentAndIndexFiles(
 	if useManifest && source.GetCutoffTs() > 0 {
 		return rewriteManifestSegmentForCutoff(ctx, source, target, fileOptions.Schema, fileOptions.StorageConfig)
 	}
+	if source.GetCutoffTs() > 0 && source.GetStorageVersion() == storage.StorageV2 && !deltaOnlyCutoffSource {
+		return rewriteNonManifestSegmentForCutoff(ctx, cm, source, target, fileOptions.Schema, fileOptions.StorageConfig)
+	}
 
 	copySource := source
 	metaSource := source
