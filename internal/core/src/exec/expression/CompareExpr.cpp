@@ -49,11 +49,15 @@ PhyCompareFilterExpr::CanUseBothDataCompare(OffsetVector* input) const {
         return false;
     }
 
-    const auto is_left_string = expr_->left_data_type_ == DataType::VARCHAR ||
-                                expr_->left_data_type_ == DataType::TEXT;
-    const auto is_right_string = expr_->right_data_type_ == DataType::VARCHAR ||
-                                 expr_->right_data_type_ == DataType::TEXT;
-    if (is_left_string || is_right_string) {
+    const auto can_compare_string_type = [](DataType data_type) {
+        return data_type == DataType::VARCHAR || data_type == DataType::STRING;
+    };
+    if (IsStringDataType(expr_->left_data_type_) ||
+        IsStringDataType(expr_->right_data_type_)) {
+        const auto is_left_string =
+            can_compare_string_type(expr_->left_data_type_);
+        const auto is_right_string =
+            can_compare_string_type(expr_->right_data_type_);
         if (!is_left_string || !is_right_string) {
             return false;
         }
@@ -364,8 +368,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
             return ExecCompareLeftType<float>(context);
         case DataType::DOUBLE:
             return ExecCompareLeftType<double>(context);
+        case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT:
             return ExecCompareLeftType<std::string_view>(context);
         default:
             ThrowInfo(
@@ -415,8 +419,8 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
                 return ExecCompareRightType<T, double>(context);
             }
             break;
+        case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT:
             if constexpr (IsCompareStringViewType<T>) {
                 return ExecCompareRightType<T, std::string_view>(context);
             }
