@@ -964,10 +964,10 @@ func (sm *snapshotManager) RestoreData(
 
 	cutoffTs, err := snapshotCreateTsCutoff(snapshotData)
 	if err != nil {
-		mlog.Error(context.TODO(), "invalid snapshot create ts", mlog.Err(err))
+		mlog.Error(ctx, "invalid snapshot create ts", mlog.Err(err))
 		return 0, err
 	}
-	mlog.Info(context.TODO(), "snapshot create ts cutoff derived", mlog.Uint64("cutoffTs", cutoffTs))
+	mlog.Info(ctx, "snapshot create ts cutoff derived", mlog.Uint64("cutoffTs", cutoffTs))
 
 	// ========== Phase 2: Build partition mapping ==========
 	partitionMapping, err := sm.buildPartitionMapping(ctx, snapshotData, collectionID)

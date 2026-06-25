@@ -1560,7 +1560,7 @@ func collectSegmentFiles(
 				return nil, merr.WrapErrParameterInvalidMsg("storage_version=%d requires manifest_path but it is empty (segmentID=%d)",
 					source.GetStorageVersion(), source.GetSegmentId())
 			}
-			mlog.Info(context.TODO(), "using delta-only cutoff source without manifest",
+			mlog.Info(ctx, "using delta-only cutoff source without manifest",
 				mlog.Int64("segmentID", source.GetSegmentId()),
 				mlog.Int64("storageVersion", source.GetStorageVersion()))
 		} else {
@@ -1587,7 +1587,7 @@ func collectSegmentFiles(
 			} else {
 				files.InsertBinlogs = allFiles
 			}
-			mlog.Info(context.TODO(), "collected InsertBinlogs from manifest",
+			mlog.Info(ctx, "collected InsertBinlogs from manifest",
 				mlog.String("basePath", basePath),
 				mlog.Int("fileCount", len(files.InsertBinlogs)),
 				mlog.Int64("storageVersion", source.GetStorageVersion()))
@@ -1600,14 +1600,14 @@ func collectSegmentFiles(
 			storageConfig := compaction.CreateStorageConfig()
 			lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, storageConfig)
 			if lobErr != nil {
-				mlog.Debug(context.TODO(), "no LOB files found in manifest (may not have TEXT fields)",
+				mlog.Debug(ctx, "no LOB files found in manifest (may not have TEXT fields)",
 					mlog.String("manifestPath", manifestPath),
 					mlog.Err(lobErr))
 			} else if len(lobFileInfos) > 0 {
 				// GetManifestLobFiles returns absolute paths (the manifest
 				// deserializer calls ToAbsolute internally), so use them directly.
 				files.LobFiles = lobFileInfosToPaths(lobFileInfos)
-				mlog.Info(context.TODO(), "collected LOB files from segment manifest",
+				mlog.Info(ctx, "collected LOB files from segment manifest",
 					mlog.String("manifestPath", manifestPath),
 					mlog.Int("lobFileCount", len(files.LobFiles)))
 			}
