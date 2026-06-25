@@ -1815,6 +1815,23 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 continue;  // skip RowID system field
             }
 
+            // A field present in schema_ but absent from the InsertRecord can only be
+            // a function-output field. SegmentGrowingImpl::Reopen() adds a newly added
+            // field to schema_ on a schema bump, but for function outputs it
+            // deliberately skips fill_empty_field (is_function_output -> continue),
+            // while every other added field gets a default-valued data slot. A growing
+            // segment reopened to a newer schema (e.g. by a query carrying the new
+            // schema, via LazyCheckSchema) before it flushes therefore has the field in
+            // schema_ but no data slot, and get_data_base below would assert (segcore
+            // 2001). Skip it: this segment has no data for that field. The
+            // is_function_output guard is a bumper -- if any other field is unexpectedly
+            // slot-less, fall through and let get_data_base assert to surface the real
+            // bug rather than silently dropping a column. See issue #50799.
+            if (schema.is_function_output(field_id) &&
+                !insert_record.is_data_exist(field_id)) {
+                continue;
+            }
+
             const auto& field_meta = schema[field_id];
 
             // Timestamp is stored in insert_record.timestamps_, not in data_ map
