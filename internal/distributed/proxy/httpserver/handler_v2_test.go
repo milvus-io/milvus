@@ -4447,6 +4447,75 @@ func TestCommitImportJob(t *testing.T) {
 	})
 }
 
+func TestCreateImportJobAutoCommitOptionValidation(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("accepts omitted true and false strings", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
+			return len(req.GetOptions()) == 0
+		})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "0"}, nil).Once()
+		mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
+			return kvPairsToMap(req.GetOptions())["auto_commit"] == "true"
+		})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "1"}, nil).Once()
+		mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
+			return kvPairsToMap(req.GetOptions())["auto_commit"] == "false"
+		})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "2"}, nil).Once()
+		mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
+			return kvPairsToMap(req.GetOptions())["auto_commit"] == "False"
+		})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "3"}, nil).Once()
+		mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
+			return kvPairsToMap(req.GetOptions())["priority"] == ""
+		})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "4"}, nil).Once()
+		testEngine := initHTTPServerV2(mp, false)
+
+		for _, body := range []string{
+			`{"collectionName": "book", "files": [["a.parquet"]]}`,
+			`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": "true"}}`,
+			`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": "false"}}`,
+			`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": "False"}}`,
+			`{"collectionName": "book", "files": [["a.parquet"]], "options": {"priority": null}}`,
+		} {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction), bytes.NewReader([]byte(body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, merr.Code(nil), returnBody.Code)
+		}
+	})
+
+	for _, testcase := range []requestBodyTestCase{
+		{
+			path:        versionalV2(ImportJobCategory, CreateAction),
+			requestBody: []byte(`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": null}}`),
+			errCode:     merr.Code(merr.ErrIncorrectParameterFormat),
+			errMsg:      "options.auto_commit must be one of \"true\" or \"false\"",
+		},
+		{
+			path:        versionalV2(ImportJobCategory, CreateAction),
+			requestBody: []byte(`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": ""}}`),
+			errCode:     merr.Code(merr.ErrIncorrectParameterFormat),
+			errMsg:      "options.auto_commit must be one of \"true\" or \"false\"",
+		},
+		{
+			path:        versionalV2(ImportJobCategory, CreateAction),
+			requestBody: []byte(`{"collectionName": "book", "files": [["a.parquet"]], "options": {"auto_commit": "yes"}}`),
+			errCode:     merr.Code(merr.ErrIncorrectParameterFormat),
+			errMsg:      "options.auto_commit must be one of \"true\" or \"false\"",
+		},
+	} {
+		t.Run(string(testcase.requestBody), func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			testEngine := initHTTPServerV2(mp, false)
+			sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+		})
+	}
+}
+
 func TestAbortImportJob(t *testing.T) {
 	paramtable.Init()
 

@@ -2948,10 +2948,6 @@ class TestImport2PCRestOperation(TestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(
-        reason="milvus-io/milvus#50460: Milvus accepts options.auto_commit=null and creates an import job; REST option values should be strings",
-        strict=True,
-    )
     def test_import_2pc_create_rejects_null_auto_commit_option(self):
         """
         target: import create auto_commit option null validation
@@ -4051,31 +4047,23 @@ class TestImport2PCRestOperation(TestBase):
             os.remove(file_path)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_import_2pc_auto_commit_non_false_value_defaults_to_true_and_completes(self):
+    def test_import_2pc_create_rejects_invalid_auto_commit_option(self):
         """
         target: auto_commit option contract
-        method: create import job with auto_commit set to a value other than false
-        expected: option is treated as true, job reaches Completed automatically, and rows become visible
+        method: create import job with auto_commit set to a value other than true or false
+        expected: request is rejected synchronously with a readable auto_commit validation error and no jobId
         """
         collection_name = gen_collection_name(prefix="import_2pc_auto_invalid")
         self._create_base_collection(collection_name)
 
-        rows = self._make_rows(3006, 4, phase=3006)
-        file_name = f"import_2pc_auto_invalid_{uuid4()}.parquet"
-        file_path = self._write_parquet_and_upload(rows, file_name)
-
-        job_id = self._create_import_job(collection_name, file_name, options={"auto_commit": "not-a-bool"})
-        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Completed", timeout=IMPORT_2PC_TIMEOUT)
-        assert ok, rsp
-        assert rsp["data"]["importedRows"] == len(rows), rsp
-        assert rsp["data"]["totalRows"] == len(rows), rsp
-
-        expected_ids = {row["id"] for row in rows}
-        seen_ids, visible = self._wait_imported_ids_visible(collection_name, expected_ids, timeout=120)
-        assert visible, {"expected": expected_ids, "seen": seen_ids}
-
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        self._assert_import_create_rejected(
+            {
+                "collectionName": collection_name,
+                "files": [["import_2pc_auto_invalid.parquet"]],
+                "options": {"auto_commit": "not-a-bool"},
+            },
+            ("auto_commit", "true", "false"),
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_import_2pc_auto_commit_uppercase_false_stops_at_uncommitted(self):
