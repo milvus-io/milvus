@@ -27,6 +27,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
@@ -143,6 +144,12 @@ func (provider *TwelveLabsEmbeddingProvider) embed(ctx context.Context, text str
 	}
 	if err := writer.Close(); err != nil {
 		return nil, err
+	}
+
+	if provider.timeoutMs > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(provider.timeoutMs)*time.Millisecond)
+		defer cancel()
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.url, &buf)
