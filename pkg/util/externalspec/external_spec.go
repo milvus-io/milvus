@@ -146,7 +146,7 @@ var secretExtfsKeys = map[string]bool{
 func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	spec, err := specutil.ParseExternalSpec(specStr)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("%s", err.Error())
+		return nil, merr.Wrap(err, "parse external spec")
 	}
 	return spec, nil
 }

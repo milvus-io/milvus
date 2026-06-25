@@ -714,7 +714,7 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		// existing transient path so a real outage still gets retried.
 		if errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
 			errors.Is(err, packed.ErrLoonTransient) ||
-			errors.Is(err, packed.ErrMilvusTableStorageV2ManifestListMissing) {
+			packed.IsMilvusTableStorageV2ManifestListMissing(err) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
 		}
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")
@@ -943,7 +943,7 @@ func validateMilvusTableRefreshSchema(job *datapb.ExternalCollectionRefreshJob, 
 		},
 	)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "read milvus-table snapshot metadata for schema validation")
+		return merr.Wrap(err, "read milvus-table snapshot metadata for schema validation")
 	}
 	sourceSchema := metadata.GetCollection().GetSchema()
 	if sourceSchema == nil {

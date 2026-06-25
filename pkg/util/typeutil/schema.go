@@ -2842,7 +2842,7 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 		}
 		mappedSourceFields[sourceName] = targetName
 		if err := validateMilvusTableFieldIdentity(targetField, sourceField, requireFieldID, targetUsesVirtualPK, IsFunctionOutputField(source, sourceField)); err != nil {
-			return merr.WrapErrParameterInvalidErr(err, "field %q mapped to source field %q", targetName, sourceName)
+			return merr.Wrapf(err, "field %q mapped to source field %q", targetName, sourceName)
 		}
 	}
 	for sourceName := range requiredSourceFields {

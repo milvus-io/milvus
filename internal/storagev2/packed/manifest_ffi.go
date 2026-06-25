@@ -231,11 +231,11 @@ func CreateMilvusTableManifestFromSegmentManifests(
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return "", merr.WrapErrServiceInternalErr(err, "failed to create properties")
+		return "", merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return "", merr.WrapErrServiceInternalErr(err, "inject extfs")
+		return "", merr.Wrap(err, "inject extfs")
 	}
 
 	cBasePath := C.CString(basePath)
@@ -573,7 +573,7 @@ func readColumnGroupsFromManifest(
 	cgroups := &manifest.column_groups
 	manifestDeltalogs, err := deltaLogsFromManifest(manifest)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "read delta logs from manifest %s", manifestPath)
+		return nil, merr.Wrapf(err, "read delta logs from manifest %s", manifestPath)
 	}
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
 		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)

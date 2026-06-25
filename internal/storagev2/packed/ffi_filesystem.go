@@ -103,11 +103,11 @@ func ReadFileWithExternalSpec(
 ) ([]byte, error) {
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to create properties")
+		return nil, merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "inject extfs")
+		return nil, merr.Wrap(err, "inject extfs")
 	}
 
 	filesystemPath, normalizedFilePath, err := normalizeExternalPathForFilesystem(filePath, cProperties, extfs)
@@ -123,7 +123,7 @@ func ReadFileWithExternalSpec(
 	defer C.free(unsafe.Pointer(cFilesystemPath))
 	result := C.loon_filesystem_get(cProperties, cFilesystemPath, C.uint32_t(len(filesystemPath)), &fsHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to get filesystem")
+		return nil, merr.Wrap(err, "failed to get filesystem")
 	}
 	defer C.loon_filesystem_destroy(fsHandle)
 
@@ -131,7 +131,7 @@ func ReadFileWithExternalSpec(
 	var outSize C.uint64_t
 	result = C.loon_filesystem_read_file_all(fsHandle, cPath, pathLen, &outData, &outSize)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "read file %s via filesystem %s", normalizedFilePath, filesystemPath)
+		return nil, merr.Wrapf(err, "read file %s via filesystem %s", normalizedFilePath, filesystemPath)
 	}
 	if outData == nil || outSize == 0 {
 		return nil, nil

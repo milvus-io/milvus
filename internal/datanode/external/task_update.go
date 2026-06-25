@@ -407,7 +407,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			}
 			patchedSegment = updatedSegment
 			mlog.Info(context.TODO(), "Segment kept with refreshed milvus-table deltalogs",
-				mlog.Int64("segmentID", seg.GetID()),
+				mlog.FieldSegmentID(seg.GetID()),
 				mlog.String("oldManifestPath", seg.GetManifestPath()),
 				mlog.String("newManifestPath", updatedSegment.GetManifestPath()))
 		}
@@ -425,7 +425,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			}
 			patchedSegment = patchedWithColumns
 			mlog.Info(context.TODO(), "Segment patched with missing external columns",
-				mlog.Int64("segmentID", seg.GetID()),
+				mlog.FieldSegmentID(seg.GetID()),
 				mlog.Strings("missingColumns", missingColumns))
 		}
 

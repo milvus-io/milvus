@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -1311,7 +1310,7 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_NoStorageV2(t *testing.T)
 	_, err = buildMilvusTableFileInfosFromSnapshotMetadata(metadataBytes, nil, nil)
 
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrMilvusTableStorageV2ManifestListMissing))
+	assert.True(t, IsMilvusTableStorageV2ManifestListMissing(err))
 	assert.Contains(t, err.Error(), "storagev2_manifest_list")
 	assert.Contains(t, err.Error(), "common.storage.useLoonFFI=true")
 }

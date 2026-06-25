@@ -32,11 +32,15 @@ import (
 
 const milvusTableExploreManifestFile = "milvus-table-explore.json"
 
-var ErrMilvusTableStorageV2ManifestListMissing = errors.New(
+var errMilvusTableStorageV2ManifestListMissing = errors.New(
 	"milvus-table requires storagev2_manifest_list in snapshot metadata; " +
 		"create the source snapshot from a StorageV3 collection " +
 		"(enable common.storage.useLoonFFI=true before writing source data)",
 )
+
+func IsMilvusTableStorageV2ManifestListMissing(err error) bool {
+	return errors.Is(err, errMilvusTableStorageV2ManifestListMissing)
+}
 
 // milvusTableExploreManifest is the Go-side explore result persisted for
 // milvus-table sources. Its FileInfo.NumRows stores source segment row counts,
@@ -103,11 +107,11 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 ) ([]FileInfo, error) {
 	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "parse milvus snapshot metadata")
+		return nil, merr.Wrap(err, "parse milvus snapshot metadata")
 	}
 	manifestList := metadata.GetStoragev2ManifestList()
 	if len(manifestList) == 0 {
-		return nil, ErrMilvusTableStorageV2ManifestListMissing
+		return nil, errMilvusTableStorageV2ManifestListMissing
 	}
 	if resolveManifestPath == nil {
 		resolveManifestPath = func(manifestPath string) (string, error) {
@@ -124,7 +128,7 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 	for _, manifestPath := range metadata.GetManifestList() {
 		segment, err := getSegmentDescription(manifestPath, metadata.GetFormatVersion())
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "read source segment manifest %s", manifestPath)
+			return nil, merr.Wrapf(err, "read source segment manifest %s", manifestPath)
 		}
 		if segment == nil {
 			return nil, merr.WrapErrServiceInternalMsg("read source segment manifest %s: empty segment", manifestPath)
@@ -234,11 +238,11 @@ func ReadMilvusTableSnapshotMetadata(
 		milvusTableReadFileExtfs(externalSource, extfs),
 	)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "read milvus snapshot metadata")
+		return nil, merr.Wrap(err, "read milvus snapshot metadata")
 	}
 	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "parse milvus snapshot metadata")
+		return nil, merr.Wrap(err, "parse milvus snapshot metadata")
 	}
 	return metadata, nil
 }
@@ -310,7 +314,7 @@ func readMilvusSnapshotSegmentManifest(
 	}
 	segment, err := snapshotio.ParseSegmentManifest(data, int(formatVersion))
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "parse source segment manifest %s", manifestPath)
+		return nil, merr.Wrapf(err, "parse source segment manifest %s", manifestPath)
 	}
 	return segment, nil
 }

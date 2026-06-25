@@ -162,7 +162,7 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	extfs := t.milvusTableExternalSpecContext()
 	deltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(manifestPath, t.req.GetStorageConfig(), extfs)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source manifest deltalogs %s", manifestPath)
+		return nil, merr.Wrapf(err, "read milvus-table source manifest deltalogs %s", manifestPath)
 	}
 	if err := validateMilvusTableStorageV3Deltalogs(deltalogs); err != nil {
 		return nil, err
@@ -362,7 +362,7 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb
 	sourceSchema := metadata.GetCollection().GetSchema()
 	sourcePKField, err := typeutil.GetPrimaryFieldSchema(sourceSchema)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "milvus-table source schema primary key")
+		return nil, merr.Wrap(err, "milvus-table source schema primary key")
 	}
 	switch sourcePKField.GetDataType() {
 	case schemapb.DataType_Int64, schemapb.DataType_VarChar:
@@ -465,7 +465,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 		t.milvusTableExternalSpecContext(),
 	)
 	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "read milvus-table source primary key column %s", fragment.FilePath)
+		return merr.Wrapf(err, "read milvus-table source primary key column %s", fragment.FilePath)
 	}
 	defer reader.Close()
 
@@ -479,7 +479,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 			break
 		}
 		if err != nil {
-			return merr.WrapErrServiceInternalErr(err, "read milvus-table source primary key batch %s", fragment.FilePath)
+			return merr.Wrapf(err, "read milvus-table source primary key batch %s", fragment.FilePath)
 		}
 		if err := appendMilvusTableSourcePKOffsetsFromRecord(
 			record,
@@ -549,7 +549,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 	}
 	reader, err := t.newMilvusTableSourceDeltalogReader(ctx, ref, sourcePKType)
 	if err != nil {
-		return milvusTableSourceDeltalogDeletes{}, nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source deltalog %s", ref.sourcePath)
+		return milvusTableSourceDeltalogDeletes{}, nil, merr.Wrapf(err, "read milvus-table source deltalog %s", ref.sourcePath)
 	}
 
 	deletes := milvusTableSourceDeltalogDeletes{ref: ref}
@@ -564,7 +564,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableSourceDeltalogDeletes(
 		}
 		if err != nil {
 			_ = reader.Close()
-			return milvusTableSourceDeltalogDeletes{}, nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source deltalog %s", ref.sourcePath)
+			return milvusTableSourceDeltalogDeletes{}, nil, merr.Wrapf(err, "read milvus-table source deltalog %s", ref.sourcePath)
 		}
 		if err := appendMilvusTableSourceDeleteEventsFromRecord(
 			record,
@@ -620,7 +620,7 @@ func (t *RefreshExternalCollectionTask) readMilvusTableSourceFiles(ctx context.C
 		}
 		data, err := packed.ReadFileWithExternalSpec(t.req.GetStorageConfig(), filePath, extfs)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "read milvus-table source file %s", filePath)
+			return nil, merr.Wrapf(err, "read milvus-table source file %s", filePath)
 		}
 		files = append(files, data)
 	}
@@ -692,7 +692,7 @@ func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 		storage.WithStorageConfig(t.req.GetStorageConfig()),
 	)
 	if err != nil {
-		return packed.DeltaLogEntry{}, merr.WrapErrServiceInternalErr(err, "create milvus-table target deltalog %s", targetPath)
+		return packed.DeltaLogEntry{}, merr.Wrapf(err, "create milvus-table target deltalog %s", targetPath)
 	}
 	writerClosed := false
 	defer func() {
@@ -701,11 +701,11 @@ func (t *RefreshExternalCollectionTask) writeMilvusTableVirtualPKDeltalog(
 		}
 	}()
 	if err := writer.Write(record); err != nil {
-		return packed.DeltaLogEntry{}, merr.WrapErrServiceInternalErr(err, "write milvus-table target deltalog %s", targetPath)
+		return packed.DeltaLogEntry{}, merr.Wrapf(err, "write milvus-table target deltalog %s", targetPath)
 	}
 	if err := writer.Close(); err != nil {
 		writerClosed = true
-		return packed.DeltaLogEntry{}, merr.WrapErrServiceInternalErr(err, "write milvus-table target deltalog %s", targetPath)
+		return packed.DeltaLogEntry{}, merr.Wrapf(err, "write milvus-table target deltalog %s", targetPath)
 	}
 	writerClosed = true
 	return packed.DeltaLogEntry{

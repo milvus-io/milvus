@@ -195,7 +195,7 @@ func GetDeltaLogsFromManifestWithExtfs(
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "inject extfs")
+		return nil, merr.Wrap(err, "inject extfs")
 	}
 
 	cBasePath := C.CString(basePath)

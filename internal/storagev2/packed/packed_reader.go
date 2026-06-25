@@ -68,12 +68,12 @@ func NewPackedReaderWithExtfs(
 		}
 		properties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "failed to create properties")
+			return nil, merr.Wrap(err, "failed to create properties")
 		}
 		cProperties = properties
 		defer C.loon_properties_free(cProperties)
 		if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "inject extfs")
+			return nil, merr.Wrap(err, "inject extfs")
 		}
 		var filesystemPath string
 		normalizedPaths := make([]string, 0, len(filePaths))

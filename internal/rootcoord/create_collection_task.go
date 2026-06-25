@@ -540,7 +540,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		field.FieldID = sourceField.GetFieldID()
 	}
 	if err := assignFunctionIDsFromFieldNames(schema); err != nil {
-		return merr.WrapErrServiceInternalErr(err, "align milvus-table function field IDs")
+		return merr.Wrap(err, "align milvus-table function field IDs")
 	}
 	t.preserveFieldID = true
 	t.Req.Properties = upsertCreateCollectionProperty(t.Req.GetProperties(), util.PreserveFieldIdsKey, "true")

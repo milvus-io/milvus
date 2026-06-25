@@ -372,7 +372,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 						segment.SetPKCandidate(bfs)
 						bfs.Charge()
 						mlog.Info(context.TODO(), "using external real-PK bloom filter candidate",
-							mlog.Int64("segmentID", loadInfo.GetSegmentID()))
+							mlog.FieldSegmentID(loadInfo.GetSegmentID()))
 					}
 					if !segment.PkCandidateExist() {
 						return merr.WrapErrServiceInternalMsg("milvus-table real-PK segment missing bloom filter stats")
@@ -387,7 +387,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 				if candidate != nil {
 					segment.SetPKCandidate(candidate)
 					mlog.Info(context.TODO(), "using external collection PK candidate",
-						mlog.Int64("segmentID", loadInfo.GetSegmentID()),
+						mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 						mlog.Bool("realPK", isMilvusTableRealPK))
 				}
 
