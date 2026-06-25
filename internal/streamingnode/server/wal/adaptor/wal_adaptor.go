@@ -206,7 +206,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		})
 	metricsGuard.FinishAppend()
 	if err != nil {
-		appendMetrics.Done(nil, err)
+		appendMetrics.Done(ctx, nil, err)
 		if errors.Is(err, walimpls.ErrFenced) {
 			// if the append operation of wal is fenced, we should report the error to the client.
 			if w.isFenced.CompareAndSwap(false, true) {
@@ -243,7 +243,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		TxnCtx:                 extraAppendResult.TxnCtx,
 		Extra:                  extra,
 	}
-	appendMetrics.Done(r, nil)
+	appendMetrics.Done(ctx, r, nil)
 	return r, nil
 }
 
