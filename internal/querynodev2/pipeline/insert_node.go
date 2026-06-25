@@ -17,7 +17,6 @@
 package pipeline
 
 import (
-	"context"
 	"fmt"
 	"sort"
 
@@ -126,16 +125,17 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		sort.Slice(nodeMsg.insertMsgs, func(i, j int) bool {
 			return nodeMsg.insertMsgs[i].BeginTs() < nodeMsg.insertMsgs[j].BeginTs()
 		})
+		ctx := nodeMsg.insertMsgs[0].TraceCtx()
 
 		collection := iNode.manager.Collection.Get(iNode.collectionID)
 		if collection == nil {
-			mlog.Error(context.TODO(), "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
+			mlog.Error(ctx, "insertNode with collection not exist", mlog.Int64("collection", iNode.collectionID))
 			panic("insertNode with collection not exist")
 		}
 		schema := collection.Schema()
 		functionOutputFieldIDs, err := iNode.functionStore.OutputFieldIDs(schema)
 		if err != nil {
-			mlog.Error(context.TODO(), "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
+			mlog.Error(ctx, "failed to get embedding output fields", mlog.String("channel", iNode.channel), mlog.Err(err))
 			panic(err)
 		}
 
@@ -143,7 +143,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		for _, msg := range nodeMsg.insertMsgs {
 			if len(functionOutputFieldIDs) > 0 && !function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
 				if err := iNode.functionStore.FillEmbeddingData(iNode.collectionID, schema, msg.InsertRequest); err != nil {
-					mlog.Error(context.TODO(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
+					mlog.Error(msg.TraceCtx(), "failed to fill embedding data for insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 					panic(err)
 				}
 			}

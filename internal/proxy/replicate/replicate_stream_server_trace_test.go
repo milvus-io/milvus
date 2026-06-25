@@ -28,7 +28,7 @@ import (
 
 // TestHandleReplicateMessage_OpensWalReplicateAppendSpan verifies that
 // handleReplicateMessage extracts the replicated message trace context,
-// opens a "replicate.server" child span, and keeps the source message
+// opens a "replicate.secondary" child span, and keeps the source message
 // trace context in the local mutable message before append.
 func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 	defer mockey.UnPatchAll()
@@ -87,19 +87,19 @@ func TestHandleReplicateMessage_OpensWalReplicateAppendSpan(t *testing.T) {
 	// Flush the provider to ensure all spans are exported.
 	_ = tp.ForceFlush(context.Background())
 
-	// Assert that a "replicate.server" span was emitted with the right trace ID.
+	// Assert that a "replicate.secondary" span was emitted with the right trace ID.
 	spans := exporter.GetSpans()
 	var walSpan tracetest.SpanStub
 	for _, s := range spans {
-		if s.Name == message.SpanNameReplicateServer {
+		if s.Name == message.SpanNameReplicateSecondary {
 			walSpan = s
 			assert.Equal(t, expectedTraceID, s.SpanContext.TraceID(),
-				"replicate.server span must share the source trace ID")
+				"replicate.secondary span must share the source trace ID")
 		}
 	}
-	assert.Equal(t, message.SpanNameReplicateServer, walSpan.Name, "a 'replicate.server' span must be emitted")
+	assert.Equal(t, message.SpanNameReplicateSecondary, walSpan.Name, "a 'replicate.secondary' span must be emitted")
 	assert.Equal(t, sourceSC.SpanID(), walSpan.Parent.SpanID(),
-		"replicate.server should be a child of the source message span")
+		"replicate.secondary should be a child of the source message span")
 
 	// Also verify that the ctx passed to Append carries the same trace ID.
 	if capturedCtx != nil {

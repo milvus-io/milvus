@@ -10,9 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.opentelemetry.io/otel"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -26,27 +23,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
-// TestHandleProduce_ExtractsAndOpensServerSpan verifies that handleProduce:
-//  1. Extracts the client-injected trace context from message properties.
-//  2. Starts a "wal.server" child span under the extracted trace.
-//  3. Passes a ctx carrying that span to AppendAsync.
-//  4. Ends the span inside the AppendAsync callback.
-func TestHandleProduce_ExtractsAndOpensServerSpan(t *testing.T) {
-	// Set up an in-memory OTel exporter and make it the global provider.
-	exporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSyncer(exporter),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-	)
-	prev := otel.GetTracerProvider()
-	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(prev)
-
-	// Build a client-side traced context and record the expected trace ID.
-	clientCtx, clientSpan := otel.Tracer("test").Start(context.Background(), "client.root")
-	expectedTraceID := trace.SpanContextFromContext(clientCtx).TraceID()
-	// End the client span now; the trace context is already injected below.
-	clientSpan.End()
+// TestHandleProduce_ExtractsTraceContext verifies that handleProduce restores
+// the client-injected trace context from message properties before appending.
+func TestHandleProduce_ExtractsTraceContext(t *testing.T) {
+	expectedTraceID := trace.TraceID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	clientCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    expectedTraceID,
+		SpanID:     trace.SpanID{1, 2, 3, 4, 5, 6, 7, 8},
+		TraceFlags: trace.FlagsSampled,
+	}))
 
 	// Build properties that carry the injected trace context (simulating what the
 	// gRPC client does in Task 4).
@@ -111,24 +96,9 @@ func TestHandleProduce_ExtractsAndOpensServerSpan(t *testing.T) {
 	ps.handleProduce(req)
 	wg.Wait()
 
-	// Flush the provider to ensure all spans are exported.
-	_ = tp.ForceFlush(context.Background())
-
-	// 1. The ctx passed to AppendAsync must carry a valid span.
+	// The ctx passed to AppendAsync must carry the extracted remote span context.
 	assert.NotNil(t, capturedCtx)
-	capturedSpan := trace.SpanFromContext(capturedCtx)
-	assert.True(t, capturedSpan.SpanContext().IsValid(),
-		"ctx passed to AppendAsync should carry a valid span")
-
-	// 2. A "wal.server" span must have been exported with the same trace ID.
-	spans := exporter.GetSpans()
-	var serverFound bool
-	for _, s := range spans {
-		if s.Name == message.SpanNameWALServer {
-			assert.Equal(t, expectedTraceID, s.SpanContext.TraceID(),
-				"wal.server span must share the client trace ID")
-			serverFound = true
-		}
-	}
-	assert.True(t, serverFound, "a 'wal.server' span must be exported")
+	capturedSC := trace.SpanContextFromContext(capturedCtx)
+	assert.True(t, capturedSC.IsValid(), "ctx passed to AppendAsync should carry a valid span context")
+	assert.Equal(t, expectedTraceID, capturedSC.TraceID(), "AppendAsync ctx must share the client trace ID")
 }

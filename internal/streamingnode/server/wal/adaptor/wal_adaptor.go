@@ -6,6 +6,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -150,11 +151,20 @@ func (w *walAdaptorImpl) GetSalvageCheckpoint() []*utility.ReplicateCheckpoint {
 }
 
 // Append writes a record to the log.
-func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
+func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (_ *wal.AppendResult, err error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
+
+	ctx, span := message.StartSpan(ctx, message.SpanNameWALAppend)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
 
 	if w.isFenced.Load() {
 		// if the wal is fenced, we should reject all append operations.
@@ -264,7 +274,13 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 
 	// An append operation should be retried until it succeeds or some unrecoverable error occurs.
 	for i := 0; ; i++ {
-		msgID, err := w.rwWALImpls.Append(ctx, msg)
+		appendCtx, span := message.StartSpan(ctx, message.SpanNameWALAppendImpl)
+		msgID, err := w.rwWALImpls.Append(appendCtx, msg)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
 		if err == nil {
 			if msg.MessageType() == message.MessageTypeAlterWAL {
 				// if the append operation is a alter WAL message, we should log the message

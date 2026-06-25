@@ -241,7 +241,7 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 	immutableMessage := msg.IntoImmutableMessageProto()
 
 	ctx := message.ExtractTraceContext(context.Background(), message.MilvusMessageToImmutableMessage(immutableMessage))
-	_, span := message.StartSpan(ctx, message.SpanNameReplicateClient)
+	_, span := message.StartSpan(ctx, message.SpanNameReplicatePrimary)
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
