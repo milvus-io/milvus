@@ -1964,6 +1964,18 @@ func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {
 	})
 }
 
+func TestIsSnapshotSegmentCandidate_IncludesSegmentAtSnapshotTs(t *testing.T) {
+	seg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            1,
+		State:         commonpb.SegmentState_Flushed,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 5000},
+		Binlogs:       []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+	}}
+
+	assert.True(t, isSnapshotSegmentCandidate(seg, 5000),
+		"snapshot should include segments whose effective timestamp equals snapshotTs")
+}
+
 // TestGenSnapshot_CommitTimestamp verifies that import segments with a
 // commit_timestamp are correctly included/excluded based on snapshotTs.
 func TestGenSnapshot_CommitTimestamp(t *testing.T) {

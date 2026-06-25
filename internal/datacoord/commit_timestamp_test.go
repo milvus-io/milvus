@@ -203,18 +203,6 @@ func TestGenSnapshot_ImportSegment_IncludedAfterCommitTs(t *testing.T) {
 		"import segment with commit_ts=5000 MUST pass snapshot filter at snapshotTs=6000")
 }
 
-func TestGenSnapshot_SegmentIncludedAtSnapshotTs(t *testing.T) {
-	seg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:            1,
-		State:         commonpb.SegmentState_Flushed,
-		StartPosition: &msgpb.MsgPosition{Timestamp: 5000},
-		Binlogs:       []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
-	}}
-
-	assert.True(t, isSnapshotSegmentCandidate(seg, 5000),
-		"snapshot should include segments whose effective timestamp equals snapshotTs")
-}
-
 func TestGenSnapshot_NormalSegment_UnchangedBehavior(t *testing.T) {
 	seg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:            2,
