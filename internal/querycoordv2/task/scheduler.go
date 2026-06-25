@@ -267,6 +267,8 @@ type segmentDeltaRecord struct {
 	collectionID int64
 	nodeID       int64
 	segmentID    int64
+	channelName  string
+	scope        querypb.DataScope
 	actionType   ActionType
 	delta        int
 }
@@ -350,6 +352,8 @@ func (delta *SegmentTaskDelta) Add(task *SegmentTask) {
 			collectionID: task.CollectionID(),
 			nodeID:       segmentAction.Node(),
 			segmentID:    segmentAction.GetSegmentID(),
+			channelName:  segmentAction.GetShard(),
+			scope:        segmentAction.GetScope(),
 			actionType:   segmentAction.Type(),
 			delta:        segmentAction.WorkLoadEffect(),
 		})
@@ -407,17 +411,12 @@ func (record segmentDeltaRecord) isSegmentDistMatched(distMgr *meta.Distribution
 		return false
 	}
 
-	segments := distMgr.SegmentDistManager.GetByFilter(
-		meta.WithNodeID(record.nodeID),
-		meta.WithSegmentID(record.segmentID),
-	)
-	segmentInDist := len(segments) > 0
-
+	inDist := segmentInDist(distMgr, record.nodeID, record.channelName, record.segmentID, record.scope)
 	switch record.actionType {
 	case ActionTypeGrow:
-		return segmentInDist
+		return inDist
 	case ActionTypeReduce:
-		return !segmentInDist
+		return !inDist
 	default:
 		// Only grow/reduce actions affect segment presence; other segment
 		// actions have zero workload effect and are treated as reflected.
