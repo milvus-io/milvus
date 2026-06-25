@@ -2594,12 +2594,16 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 	return partitionNames, nil
 }
 
-func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
-	insertMsg.HashValues = typeutil.HashPK2Channels(pks, channelNames)
+func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
+	if err != nil {
+		return nil, err
+	}
+	insertMsg.HashValues = hashValues
 
 	numChannels := len(channelNames)
 	if numChannels == 0 {
-		return nil
+		return nil, nil
 	}
 
 	numRows := len(insertMsg.HashValues)
@@ -2621,7 +2625,7 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
 	}
 
-	return channel2RowOffsets
+	return channel2RowOffsets, nil
 }
 
 func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {

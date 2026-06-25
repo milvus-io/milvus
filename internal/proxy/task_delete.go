@@ -153,7 +153,10 @@ func repackDeleteMsgByHash(
 	dbName string,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
 	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	hashValues := typeutil.HashPK2Channels(primaryKeys, vChannels)
+	hashValues, err := typeutil.HashPK2Channels(primaryKeys, vChannels)
+	if err != nil {
+		return nil, 0, err
+	}
 	// repack delete msg by dmChannel
 	result := make(map[uint32][]*msgstream.DeleteMsg)
 	lastMessageSize := map[uint32]int{}
