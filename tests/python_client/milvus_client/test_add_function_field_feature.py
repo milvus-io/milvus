@@ -54,7 +54,6 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                         f"attempts={attempts}, hit_ids={hit_ids}"
                     )
                     log.info(ready_msg)
-                    print(ready_msg)
                     return search_res
                 last_error = f"{label} search returned ids={hit_ids}"
             except Exception as exc:
@@ -296,7 +295,6 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                         f"attempts={attempts}, hit_ids={hit_ids}"
                     )
                     log.info(ready_msg)
-                    print(ready_msg)
                     break
                 last_error = f"BM25 search returned ids={hit_ids}"
             except Exception as exc:
@@ -3178,3 +3176,266 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         assert final_desc.get("functions", []) == before_desc.get("functions", [])
 
         self.drop_collection(client, mismatch_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_add_bm25_function_field_large_segment_true_index_build(self):
+        """
+        TC-36: Large sealed segment triggers real sparse index build.
+
+        target: verify added BM25 output field can build sparse index on a segment above index build threshold
+        method: insert 3000 sealed rows, add BM25 function field, create sparse index, then search old sealed data
+        expected: sparse index finishes for all 3000 rows and old sealed rows are searchable after load/reload
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        row_count = 3000
+        batch_size = 1000
+
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("text", DataType.VARCHAR, max_length=1024, enable_analyzer=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+        client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+
+        for start in range(0, row_count, batch_size):
+            rows = []
+            for i in range(start, min(start + batch_size, row_count)):
+                rows.append(
+                    {
+                        "id": i,
+                        "text": f"tc36 large sealed true index token_{i} document",
+                        "vec": [
+                            float(i % 17) / 17.0,
+                            float(i % 23) / 23.0,
+                            float(i % 29) / 29.0,
+                            float(i % 31) / 31.0,
+                        ],
+                    }
+                )
+            client.insert(collection_name=collection_name, data=rows)
+
+        client.flush(collection_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=180)
+        client.load_collection(collection_name)
+
+        sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
+        bm25_function = Function(
+            name="bm25_fn",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse"],
+        )
+        client.add_function_field(collection_name, sparse_field, bm25_function)
+
+        sparse_index = client.prepare_index_params()
+        sparse_index.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
+        client.create_index(collection_name, sparse_index, timeout=180)
+
+        assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=240)
+        sparse_index_info = client.describe_index(collection_name, index_name="sparse")
+        assert sparse_index_info["total_rows"] >= row_count
+        assert sparse_index_info["indexed_rows"] >= row_count
+        assert sparse_index_info["pending_index_rows"] == 0
+
+        client.load_collection(collection_name)
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=["token_2048"],
+            anns_field="sparse",
+            expected_id=2048,
+            label="BM25 large sealed true index",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id", "text"],
+            timeout=60,
+        )
+
+        self.release_collection(client, collection_name)
+        client.load_collection(collection_name)
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=["token_2999"],
+            anns_field="sparse",
+            expected_id=2999,
+            label="BM25 large sealed true index after release/load",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id", "text"],
+            timeout=60,
+        )
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_add_bm25_function_field_snapshot_restore(self):
+        """
+        TC-29: Snapshot restore.
+
+        target: verify snapshot restore preserves added BM25 function field schema and search semantics
+        method: add BM25 function field, create snapshot, restore to a new collection, then verify schema/index/search
+        expected: restored collection has added field/function and BM25 search works for old and post-add sealed rows
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        restored_collection_name = f"{collection_name}_restored"
+        snapshot_name = cf.gen_unique_str("tc29_snapshot")
+        old_row_count = 1500
+        batch_size = 500
+
+        def make_vec(seed):
+            return [
+                float(seed % 17) / 17.0,
+                float(seed % 23) / 23.0,
+                float(seed % 29) / 29.0,
+                float(seed % 31) / 31.0,
+            ]
+
+        def wait_for_restore_complete(job_id, timeout=180):
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                state, _ = self.get_restore_snapshot_state(client, job_id)
+                if state.state == "RestoreSnapshotCompleted":
+                    return state
+                if state.state == "RestoreSnapshotFailed":
+                    raise AssertionError(f"restore snapshot failed: {state.reason}")
+                time.sleep(1)
+            raise AssertionError(f"restore snapshot job {job_id} did not complete within {timeout}s")
+
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("text", DataType.VARCHAR, max_length=1024, enable_analyzer=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+        client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+
+        for start in range(0, old_row_count, batch_size):
+            rows = []
+            for i in range(start, min(start + batch_size, old_row_count)):
+                rows.append(
+                    {
+                        "id": i,
+                        "text": f"tc29snapold{i} historical snapshot restore document",
+                        "vec": make_vec(i),
+                    }
+                )
+            client.insert(collection_name=collection_name, data=rows)
+
+        client.flush(collection_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=180)
+        client.load_collection(collection_name)
+
+        sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
+        bm25_function = Function(
+            name="bm25_fn",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse"],
+        )
+        client.add_function_field(collection_name, sparse_field, bm25_function)
+
+        sparse_index = client.prepare_index_params()
+        sparse_index.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
+        client.create_index(collection_name, sparse_index, timeout=180)
+        assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=240)
+
+        post_add_rows = [
+            {"id": 2000, "text": "tc29snappost2000 post add sealed snapshot document", "vec": make_vec(2000)},
+            {"id": 2001, "text": "tc29snappost2001 post add sealed snapshot document", "vec": make_vec(2001)},
+        ]
+        client.insert(collection_name=collection_name, data=post_add_rows)
+        client.flush(collection_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=180)
+
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=["tc29snapold1200"],
+            anns_field="sparse",
+            expected_id=1200,
+            label="BM25 snapshot source old sealed",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id", "text"],
+            timeout=60,
+        )
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=["tc29snappost2000"],
+            anns_field="sparse",
+            expected_id=2000,
+            label="BM25 snapshot source post-add sealed",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id", "text"],
+            timeout=60,
+        )
+
+        self.create_snapshot(
+            client,
+            snapshot_name,
+            collection_name,
+            description="TC-29 add function field snapshot restore",
+        )
+
+        job_id, _ = self.restore_snapshot(client, snapshot_name, collection_name, restored_collection_name)
+        assert job_id > 0
+        wait_for_restore_complete(job_id)
+
+        restored_desc = client.describe_collection(restored_collection_name)
+        assert "sparse" in [field["name"] for field in restored_desc["fields"]]
+        assert "bm25_fn" in [func["name"] for func in restored_desc.get("functions", [])]
+
+        restored_indexes = set(client.list_indexes(restored_collection_name))
+        if "vec" not in restored_indexes:
+            dense_index = client.prepare_index_params()
+            dense_index.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+            client.create_index(restored_collection_name, dense_index, timeout=180)
+        assert self.wait_for_index_ready(client, restored_collection_name, index_name="vec", timeout=180)
+
+        if "sparse" not in restored_indexes:
+            restored_sparse_index = client.prepare_index_params()
+            restored_sparse_index.add_index(field_name="sparse", index_type="AUTOINDEX", metric_type="BM25")
+            client.create_index(restored_collection_name, restored_sparse_index, timeout=180)
+        assert self.wait_for_index_ready(client, restored_collection_name, index_name="sparse", timeout=240)
+
+        client.load_collection(restored_collection_name)
+        self.wait_for_search_hit(
+            client,
+            restored_collection_name,
+            data=["tc29snapold1200"],
+            anns_field="sparse",
+            expected_id=1200,
+            label="BM25 snapshot restored old sealed",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id", "text"],
+            timeout=60,
+        )
+        self.wait_for_search_hit(
+            client,
+            restored_collection_name,
+            data=["tc29snappost2000"],
+            anns_field="sparse",
+            expected_id=2000,
+            label="BM25 snapshot restored post-add sealed",
+            search_params={"metric_type": "BM25"},
+            output_fields=["id", "text"],
+            timeout=60,
+        )
+
+        self.drop_snapshot(client, snapshot_name, collection_name)
+        self.drop_collection(client, restored_collection_name)
+        self.drop_collection(client, collection_name)

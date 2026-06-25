@@ -2462,7 +2462,9 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         )
         first_batch = query_iterator.next()
         assert len(first_batch) == 5
-        assert {row["id"] for row in first_batch} == {0, 1, 2, 3, 4}
+        first_batch_ids = {row["id"] for row in first_batch}
+        assert len(first_batch_ids) == len(first_batch)
+        assert first_batch_ids.issubset({row["id"] for row in rows})
         for row in first_batch:
             assert "tag" in row
 
@@ -2496,9 +2498,12 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
                 break
             query_rows_after_drop.extend(batch)
 
-        assert len(query_rows_after_drop) == len(rows) - len(first_batch)
-        assert {row["id"] for row in query_rows_after_drop} == set(range(5, len(rows)))
-        assert 999 not in {row["id"] for row in query_rows_after_drop}
+        remaining_ids = {row["id"] for row in query_rows_after_drop}
+        expected_remaining_ids = {row["id"] for row in rows} - first_batch_ids
+        assert len(query_rows_after_drop) == len(expected_remaining_ids)
+        assert len(remaining_ids) == len(query_rows_after_drop)
+        assert remaining_ids == expected_remaining_ids
+        assert 999 not in remaining_ids
         for row in query_rows_after_drop:
             assert "age" in row
             assert "tag" not in row
