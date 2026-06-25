@@ -872,10 +872,7 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 		},
 	}
 
-	errCh := function.AllocFunctionRunners(1, "v1", collSchema)
-	if errCh != nil {
-		assert.NoError(t, <-errCh)
-	}
+	assert.NoError(t, function.AllocFunctionRunners(1, "v1", collSchema))
 	_, err := function.FillFunctionData(context.Background(), 1, collSchema, insertMsg.InsertRequest)
 	assert.NoError(t, err)
 	defer function.ReleaseFunctionRunners(1, "v1")

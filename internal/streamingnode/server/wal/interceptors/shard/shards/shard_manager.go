@@ -22,6 +22,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// latestCollectionSchemaVersion asks GetCollectionSchema to use the latest
+// schema snapshot. Zero is a valid schema version and must stay explicit.
+const latestCollectionSchemaVersion int32 = -1
+
 var (
 	ErrCollectionExists                = errors.New("collection exists")
 	ErrCollectionNotFound              = errors.New("collection not found")

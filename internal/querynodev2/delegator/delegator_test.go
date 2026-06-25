@@ -189,8 +189,10 @@ func (s *DelegatorSuite) SetupTest() {
 }
 
 func (s *DelegatorSuite) TearDownTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
-	s.delegator.Close()
+	if s.delegator != nil {
+		s.delegator.Close()
+	}
+	function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
 	s.delegator = nil
 }
 
@@ -259,8 +261,9 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
+		defer delegator.Close()
 	})
 }
 
@@ -1506,12 +1509,8 @@ func (s *DelegatorSuite) ResetDelegator() {
 }
 
 func (s *DelegatorSuite) allocFunctionRunnersForTest() {
-	function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
 	sd := s.delegator.(*shardDelegator)
-	errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, sd.collection.Schema())
-	if errCh != nil {
-		s.Require().NoError(<-errCh)
-	}
+	s.Require().NoError(function.UpdateFunctionRunners(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), sd.collection.Schema()))
 }
 
 func (s *DelegatorSuite) nextSchemaBarrierLoadMeta() *querypb.LoadMetaInfo {
@@ -2884,10 +2883,8 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		s.Require().NoError(err)
 		defer delegator.Close()
 
-		function.ReleaseFunctionRunners(s.collectionID, s.vchannelName)
-		errCh := function.AllocFunctionRunners(s.collectionID, s.vchannelName, schema1)
-		s.Require().NotNil(errCh)
-		s.NoError(<-errCh)
+		function.ReleaseFunctionRunners(s.collectionID, "WAL-"+s.vchannelName)
+		s.NoError(function.AllocFunctionRunners(s.collectionID, "WAL-"+s.vchannelName, schema1))
 
 		changed, err := function.FillFunctionData(context.Background(), s.collectionID, schema1, &msgpb.InsertRequest{
 			FieldsData: []*schemapb.FieldData{{
@@ -2912,7 +2909,8 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		manager := segments.NewManager()
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
+		defer delegator.Close()
 	})
 }
