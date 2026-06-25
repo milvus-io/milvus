@@ -1156,6 +1156,15 @@ The default value is 1, which is enough for most cases.`,
 		DefaultValue: "10",
 		Doc:          "The number of retry attempts for reading from object storage; only retryable errors will trigger a retry.",
 		Export:       false,
+		Formatter: func(value string) string {
+			// Guard against a misconfigured 0: retry.Attempts(0) means unbounded retry,
+			// which would spin a single storage read forever under a SlowDown storm.
+			attempts := getAsInt(value)
+			if attempts < 1 {
+				return "10"
+			}
+			return strconv.Itoa(attempts)
+		},
 	}
 	p.StorageReadRetryAttempts.Init(base.mgr)
 

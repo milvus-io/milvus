@@ -108,6 +108,49 @@ func TestGetFilesSizeWithRetry_ExhaustsRetries(t *testing.T) {
 	assert.Equal(t, 3, callCount, "should exhaust all retry attempts")
 }
 
+// Codes the chunk manager's Size() already retries internally (IsRetryableErr:
+// ErrIoTooManyRequests / ErrIoUnexpectEOF) must NOT be retried again by this outer
+// layer, otherwise the two layers stack (up to retryAttempts^2 HEAD calls).
+func TestGetFilesSizeWithRetry_InnerRetryableNotDoubleRetried(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+
+	callCount := 0
+	cm.EXPECT().Size(mock.Anything, "file1").
+		RunAndReturn(func(ctx context.Context, path string) (int64, error) {
+			callCount++
+			return 0, merr.WrapErrIoTooManyRequests("file1", errors.New("SlowDown"))
+		}).Once()
+
+	_, err := getFilesSizeWithRetry(ctx, cm, []string{"file1"}, 5)
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrIoTooManyRequests))
+	assert.Equal(t, 1, callCount, "outer layer must not re-retry inner-retryable codes")
+}
+
+// A canceled/expired context fails fast and surfaces the context error (not a
+// timeout mapped to ErrIoFailed).
+func TestGetFilesSizeWithRetry_ContextCanceledFailsFast(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+
+	callCount := 0
+	cm.EXPECT().Size(mock.Anything, "file1").
+		RunAndReturn(func(ctx context.Context, path string) (int64, error) {
+			callCount++
+			return 0, context.Canceled
+		}).Once()
+
+	_, err := getFilesSizeWithRetry(ctx, cm, []string{"file1"}, 5)
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled))
+	assert.Equal(t, 1, callCount, "should not retry a canceled context")
+}
+
 // Retry is per-file: a file that already succeeded is not re-stated when a later
 // file hits a transient error.
 func TestGetFilesSizeWithRetry_PerFileRetry(t *testing.T) {
