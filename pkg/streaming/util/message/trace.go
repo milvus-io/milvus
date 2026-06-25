@@ -12,13 +12,14 @@ import (
 const (
 	tracerName = "milvus.streaming.wal"
 
-	SpanNameWALAutocommit   = "wal.autocommit"
-	SpanNameWALTxn          = "wal.txn"
-	SpanNameWALBroadcast    = "wal.broadcast"
-	SpanNameWALServer       = "wal.server"
-	SpanNameReplicateClient = "replicate.client"
-	SpanNameReplicateServer = "replicate.server"
-	SpanNameWALBCCallback   = "wal.bc_callback"
+	SpanNameWALAutocommit      = "wal.autocommit"
+	SpanNameWALTxn             = "wal.txn"
+	SpanNameWALBroadcast       = "wal.broadcast"
+	SpanNameWALAppend          = "wal.append"
+	SpanNameWALAppendImpl      = "wal.appendimpl"
+	SpanNameReplicatePrimary   = "replicate.primary"
+	SpanNameReplicateSecondary = "replicate.secondary"
+	SpanNameWALBCCallback      = "wal.bc_callback"
 )
 
 func StartSpan(ctx context.Context, spanName string) (context.Context, trace.Span) {

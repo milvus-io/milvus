@@ -130,7 +130,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	// Extract trace context carried by the replicated immutable message, then
 	// keep it in the local mutable message if it already exists.
 	msgCtx := message.ExtractTraceContext(p.streamServer.Context(), msg)
-	msgCtx, span := message.StartSpan(msgCtx, message.SpanNameReplicateServer)
+	msgCtx, span := message.StartSpan(msgCtx, message.SpanNameReplicateSecondary)
 	defer span.End()
 	message.InjectTraceContext(msgCtx, msg)
 
