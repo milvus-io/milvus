@@ -165,11 +165,13 @@ func TestTwoStageMatchesLL_Invalid(t *testing.T) {
 
 func TestTwoStageMatchesLL_Corpus(t *testing.T) {
 	for _, tc := range corpusExprs {
-		llAst, llErr := benchLexParseLL(tc.expr)
-		tsAst, tsErr := benchLexParseTwoStage(tc.expr)
+		llTree, llErr := parseTree(tc.expr, false)
+		tsTree, tsErr := parseTree(tc.expr, true)
 		require.Equal(t, llErr == nil, tsErr == nil, "%s: accept/reject differs for %q (LL=%v two-stage=%v)", tc.name, tc.expr, llErr, tsErr)
 		if llErr == nil && tsErr == nil {
-			require.Equal(t, llAst.GetText(), tsAst.GetText(), "%s: parse tree differs for %q", tc.name, tc.expr)
+			// Structural (ToStringTree) comparison, not GetText: it must catch any
+			// precedence/associativity divergence between SLL and LL.
+			require.Equal(t, llTree, tsTree, "%s: parse tree differs for %q", tc.name, tc.expr)
 		}
 	}
 }

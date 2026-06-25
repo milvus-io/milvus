@@ -58,16 +58,46 @@ func benchLexParseTwoStage(expr string) (gen.IExprContext, error) {
 	return ast, err
 }
 
+// parseTree parses expr (LL or SLL-first two-stage) and returns a structural
+// S-expression of the parse tree plus the accept/reject error. ToStringTree
+// encodes rule nesting, so unlike GetText (which only concatenates leaf tokens
+// and is identical for any parse over the same token stream) it can detect a
+// precedence/associativity divergence between the two strategies. The tree is
+// computed while the parser is still alive, before it returns to the pool.
+func parseTree(expr string, twoStage bool) (string, error) {
+	listener := &errorListenerImpl{}
+	is := antlr.NewInputStream(convertHanToASCII(expr))
+	lexer := getLexer(is, listener)
+	parser := getParser(lexer, listener)
+	var ast gen.IExprContext
+	if twoStage {
+		ast = parseExpr(parser, listener)
+	} else {
+		parser.SetErrorHandler(antlr.NewDefaultErrorStrategy())
+		parser.GetInterpreter().SetPredictionMode(antlr.PredictionModeLL)
+		ast = parser.Expr()
+	}
+	err := eofErr(parser, listener)
+	tree := ""
+	if err == nil && ast != nil {
+		tree = antlr.TreesStringTree(ast, parser.GetRuleNames(), parser)
+	}
+	putLexer(lexer)
+	putParser(parser)
+	return tree, err
+}
+
 // TestTwoStageMatchesLL guarantees the SLL-first two-stage parse yields exactly
-// the same tree (and the same accept/reject decision) as a pure LL parse for the
-// whole benchmark corpus — the correctness contract behind the optimization.
+// the same parse tree (structural, via ToStringTree) and the same accept/reject
+// decision as a pure LL parse for the whole benchmark corpus — the correctness
+// contract behind the optimization.
 func TestTwoStageMatchesLL(t *testing.T) {
 	for _, tc := range benchmarkExprs {
-		llAst, llErr := benchLexParseLL(tc.expr)
-		tsAst, tsErr := benchLexParseTwoStage(tc.expr)
+		llTree, llErr := parseTree(tc.expr, false)
+		tsTree, tsErr := parseTree(tc.expr, true)
 		require.Equal(t, llErr == nil, tsErr == nil, "accept/reject differs for %q (LL err=%v, two-stage err=%v)", tc.expr, llErr, tsErr)
 		if llErr == nil && tsErr == nil {
-			require.Equal(t, llAst.GetText(), tsAst.GetText(), "parse tree differs for %q", tc.expr)
+			require.Equal(t, llTree, tsTree, "parse tree differs for %q", tc.expr)
 		}
 	}
 }

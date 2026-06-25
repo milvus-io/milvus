@@ -53,14 +53,17 @@ func ParseExprParams(vals map[string]*schemapb.TemplateValue) *ExprParams {
 
 // parseExpr parses an expression with a two-stage strategy:
 //
-//	Stage 1 (fast): SLL prediction + BailErrorStrategy. For the overwhelmingly
-//	  common unambiguous filter expression this skips the expensive adaptive-LL
-//	  prediction entirely. A prediction conflict makes BailErrorStrategy panic,
-//	  which we recover and fall through to stage 2 — no error is recorded.
-//	Stage 2 (accurate): full LL prediction + default error recovery, with the
-//	  real error listener attached, so a genuine syntax error is reported exactly
-//	  as a pure-LL parse would. SLL never accepts input that LL rejects, so the
-//	  successful result is identical to a pure-LL parse.
+//	Stage 1 (fast): SLL prediction with a throwaway probe listener. For the
+//	  overwhelmingly common unambiguous filter expression SLL parses cleanly and
+//	  the result is identical to a full LL parse, so we return it directly. We do
+//	  not use BailErrorStrategy here: antlr-go's BailErrorStrategy can reach an
+//	  unimplemented ParseCancellationException path ("panic: implement me"), so
+//	  "SLL could not decide" is detected via a syntax error on the probe listener
+//	  instead of a bail/recover.
+//	Stage 2 (accurate): only if stage 1 saw an error. Rewind the tokens and reparse
+//	  with full LL prediction + default error recovery and the real error listener,
+//	  so the result/error is exactly what a pure-LL parse would produce. SLL never
+//	  accepts input that LL rejects, so a clean stage-1 parse equals the LL parse.
 func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) planparserv2.IExprContext {
 	interp := parser.GetInterpreter()
 
