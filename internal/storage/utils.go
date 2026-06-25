@@ -18,7 +18,6 @@ package storage
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -1538,18 +1537,6 @@ func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath stri
 		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
 		objectstorage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
 		objectstorage.CreateBucket(true))
-}
-
-func GetFilesSize(ctx context.Context, paths []string, cm ChunkManager) (int64, error) {
-	totalSize := int64(0)
-	for _, filePath := range paths {
-		size, err := cm.Size(ctx, filePath)
-		if err != nil {
-			return 0, err
-		}
-		totalSize += size
-	}
-	return totalSize, nil
 }
 
 type NullableInt struct {
