@@ -513,12 +513,12 @@ class TestCollectionSearchJSON(TestcaseBase):
         collection_w.load()
         expression = f"{expr_prefix}({ct.default_string_array_field_name}, '1000')"
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"cannot parse expression: {expression}, "
-                             f"error: ContainsAll operation element must be an array"}
+                 ct.err_msg: f"cannot parse expression: {expression}: "
+                             f"ContainsAll operation element must be an array"}
         if expr_prefix in ["array_contains_any", "ARRAY_CONTAINS_ANY"]:
             error = {ct.err_code: 1100,
-                     ct.err_msg: f"cannot parse expression: {expression}, "
-                                 f"error: ContainsAny operation element must be an array"}
+                     ct.err_msg: f"cannot parse expression: {expression}: "
+                                 f"ContainsAny operation element must be an array"}
         collection_w.search(vectors[:default_nq], default_search_field, {},
                             limit=ct.default_nb, expr=expression,
                             check_task=CheckTasks.err_res, check_items=error)
