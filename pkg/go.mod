@@ -17,7 +17,6 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/dave/jennifer v1.7.1
 	github.com/expr-lang/expr v1.15.7
-	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.174
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
@@ -38,9 +37,8 @@ require (
 	github.com/tidwall/gjson v1.17.0
 	github.com/tikv/client-go/v2 v2.0.8-0.20260610031342-e999c1f9c7c3
 	github.com/twpayne/go-geom v1.6.1
-	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	github.com/x448/float16 v0.8.4
-	github.com/zilliztech/woodpecker v0.1.32
+	github.com/zilliztech/woodpecker v0.1.33
 	go.etcd.io/etcd/api/v3 v3.5.23
 	go.etcd.io/etcd/client/v3 v3.5.23
 	go.etcd.io/etcd/server/v3 v3.5.23
@@ -141,6 +139,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.8 // indirect
+	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
@@ -204,6 +203,7 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
 	github.com/twmb/murmur3 v1.1.3 // indirect
+	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
