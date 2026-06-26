@@ -73,6 +73,10 @@ type ShardInfo struct {
 	VChannelName         string              // the vchannel name of the shard, it is the same with the virtual channel name.
 	LastTruncateTimeTick uint64              // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
 	State                schemapb.ShardState // the lifecycle state during shard split, ShardNormal by default.
+	// SourceVChannel, on an in-progress split target (ShardCreating, kept until
+	// the source is released), is the source vchannel it is being carved from, so
+	// consumers can group a source with exactly its own targets. Empty otherwise.
+	SourceVChannel string
 	// Ranges is the range-routing predicate of the shard: the half-open key
 	// ranges it owns. Usually one range; more than one after a carve-out leaves a
 	// shard with disjoint pieces. Empty for a legacy hash-routed shard. Only
@@ -112,6 +116,8 @@ func (s *ShardInfo) ToPB() *schemapb.CollectionShardInfo {
 	si := &schemapb.CollectionShardInfo{
 		LastTruncateTimeTick: s.LastTruncateTimeTick,
 		State:                s.State,
+		VchannelName:         s.VChannelName,
+		SourceVchannel:       s.SourceVChannel,
 	}
 	if len(s.Ranges) > 0 {
 		pbRanges := make([]*schemapb.RoutingKeyRange, len(s.Ranges))
@@ -310,6 +316,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 					si := updates.ShardInfos[i]
 					info.LastTruncateTimeTick = si.GetLastTruncateTimeTick()
 					info.State = si.GetState()
+					info.SourceVChannel = si.GetSourceVchannel()
 					info.Ranges = routingKeyRangesFromPB(si.GetRangeRouting().GetRanges())
 				}
 				shardInfos[vchannel] = info
@@ -347,6 +354,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 				PChannelName:         coll.PhysicalChannelNames[idx],
 				LastTruncateTimeTick: coll.ShardInfos[idx].GetLastTruncateTimeTick(),
 				State:                coll.ShardInfos[idx].GetState(),
+				SourceVChannel:       coll.ShardInfos[idx].GetSourceVchannel(),
 				Ranges:               routingKeyRangesFromPB(coll.ShardInfos[idx].GetRangeRouting().GetRanges()),
 			}
 		}
