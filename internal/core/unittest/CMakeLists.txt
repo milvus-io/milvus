@@ -110,7 +110,8 @@ if (LINUX)
 endif()
 
 add_compile_definitions(
-        MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output")
+        MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output"
+        MILVUS_UNIT_TEST)
 
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
