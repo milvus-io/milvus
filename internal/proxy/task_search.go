@@ -836,7 +836,7 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 			return err
 		}
 	}
-	return h.initHighlightQueries(t)
+	return h.initHighlightQueries(t, analyzerName)
 }
 
 func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {

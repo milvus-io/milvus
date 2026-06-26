@@ -59,6 +59,57 @@ import (
 
 // delegator data related part
 
+const defaultAnalyzerName = "default"
+
+func normalizeAnalyzerNames(analyzerNames []string, textNum int) ([]string, error) {
+	if textNum == 0 {
+		return []string{}, nil
+	}
+
+	switch len(analyzerNames) {
+	case 0:
+		names := make([]string, textNum)
+		for i := range names {
+			names[i] = defaultAnalyzerName
+		}
+		return names, nil
+	case 1:
+		name := analyzerNames[0]
+		if name == "" {
+			name = defaultAnalyzerName
+		}
+		names := make([]string, textNum)
+		for i := range names {
+			names[i] = name
+		}
+		return names, nil
+	case textNum:
+		names := append([]string(nil), analyzerNames...)
+		for i, name := range names {
+			if name == "" {
+				names[i] = defaultAnalyzerName
+			}
+		}
+		return names, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("analyzer names size must be 0, 1, or equal to text size, got analyzer names size [%d], text size [%d]", len(analyzerNames), textNum)
+	}
+}
+
+func normalizeHighlightAnalyzerNames(analyzerNames []string, textNum int) ([]string, error) {
+	if len(analyzerNames) != textNum {
+		return nil, merr.WrapErrServiceInternalMsg("highlight analyzer names size must equal text size, got analyzer names size [%d], text size [%d]", len(analyzerNames), textNum)
+	}
+
+	names := append([]string(nil), analyzerNames...)
+	for i, name := range names {
+		if name == "" {
+			names[i] = defaultAnalyzerName
+		}
+	}
+	return names, nil
+}
+
 // segmentEffectiveTs returns the timestamp for delete-buffer pin/ListAfter.
 // For import segments with commit_timestamp, only deletes from T_commit onwards
 // are applied via the buffer (pre-commit deletes are in the delta log or L0 path).
@@ -1367,7 +1418,11 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 				return analyzeErr
 			}
 			if len(analyzer.GetInputFields()) == 2 {
-				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzerNames())
+				analyzerNames, err := normalizeHighlightAnalyzerNames(task.GetAnalyzerNames(), len(task.GetTexts()))
+				if err != nil {
+					return err
+				}
+				results, analyzeErr = analyzer.BatchAnalyze(true, false, task.GetTexts(), analyzerNames)
 				return analyzeErr
 			}
 			return nil

@@ -113,7 +113,7 @@ func (h *LexicalHighlighter) addTaskWithSearchText(collInfo *schemaInfo, fieldID
 	return nil
 }
 
-func (h *LexicalHighlighter) addTaskWithQuery(fieldID int64, query *highlightQuery) {
+func (h *LexicalHighlighter) addTaskWithQuery(collInfo *schemaInfo, fieldID int64, query *highlightQuery, analyzerName string) error {
 	task, ok := h.tasks[fieldID]
 	if !ok {
 		task = &highlightTask{
@@ -133,16 +133,33 @@ func (h *LexicalHighlighter) addTaskWithQuery(fieldID int64, query *highlightQue
 	task.Queries = append(task.Queries, &querypb.HighlightQuery{
 		Type: query.highlightType,
 	})
+
+	nameFieldID, err := collInfo.GetMultiAnalyzerNameFieldID(fieldID)
+	if err != nil {
+		return err
+	}
+	if nameFieldID > 0 {
+		if analyzerName == "" {
+			analyzerName = "default"
+		}
+		task.AnalyzerNames = append(task.AnalyzerNames, analyzerName)
+		if !lo.Contains(h.extraFields, nameFieldID) {
+			h.extraFields = append(h.extraFields, nameFieldID)
+		}
+	}
+	return nil
 }
 
-func (h *LexicalHighlighter) initHighlightQueries(t *searchTask) error {
+func (h *LexicalHighlighter) initHighlightQueries(t *searchTask, analyzerName string) error {
 	// add query to highlight tasks
 	for _, query := range h.queries {
 		fieldID, ok := t.schema.MapFieldID(query.fieldName)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("highlight field not found in schema: %s", query.fieldName)
 		}
-		h.addTaskWithQuery(fieldID, query)
+		if err := h.addTaskWithQuery(t.schema, fieldID, query, analyzerName); err != nil {
+			return err
+		}
 	}
 	return nil
 }

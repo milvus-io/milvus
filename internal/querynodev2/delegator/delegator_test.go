@@ -1651,7 +1651,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 		s.Equal(2, len(result[1].GetTokens()))
 	})
 
-	s.Run("error multi analyzer but no analyzer name", func() {
+	s.Run("multi analyzer defaults analyzer name", func() {
 		err := s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
 			Version: s.nextSchemaVersion(),
 			Fields: []*schemapb.FieldSchema{
@@ -1702,6 +1702,13 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 		_, err = s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
 			FieldId:     100,
 			Placeholder: [][]byte{[]byte("test doc")},
+		})
+		s.Require().NoError(err)
+
+		_, err = s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:       100,
+			Placeholder:   [][]byte{[]byte("test doc")},
+			AnalyzerNames: []string{"default", "standard"},
 		})
 		s.Require().Error(err)
 	})
@@ -1865,6 +1872,66 @@ func (s *DelegatorSuite) TestGetHighlight() {
 		})
 		s.Require().NoError(err)
 		s.Require().Equal(2, len(result))
+
+		result, err = s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document"},
+					AnalyzerNames: []string{"default", "default", "default"},
+					SearchTextNum: 1,
+					CorpusTextNum: 1,
+					Queries:       []*querypb.HighlightQuery{{Type: querypb.HighlightQueryType_TextMatch}},
+				},
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(1, len(result))
+
+		_, err = s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document"},
+					SearchTextNum: 1,
+					CorpusTextNum: 1,
+					Queries:       []*querypb.HighlightQuery{{Type: querypb.HighlightQueryType_TextMatch}},
+				},
+			},
+		})
+		s.Require().Error(err)
+
+		_, err = s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document"},
+					AnalyzerNames: []string{"standard"},
+					SearchTextNum: 1,
+					CorpusTextNum: 1,
+					Queries:       []*querypb.HighlightQuery{{Type: querypb.HighlightQueryType_TextMatch}},
+				},
+			},
+		})
+		s.Require().Error(err)
+
+		_, err = s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document"},
+					AnalyzerNames: []string{"default", "standard"},
+					SearchTextNum: 1,
+					CorpusTextNum: 1,
+					Queries:       []*querypb.HighlightQuery{{Type: querypb.HighlightQueryType_TextMatch}},
+				},
+			},
+		})
+		s.Require().Error(err)
 	})
 
 	s.Run("empty target texts", func() {
