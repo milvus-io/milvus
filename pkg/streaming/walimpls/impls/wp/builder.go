@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"go.uber.org/zap"
 	"net"
 
 	"github.com/zilliztech/woodpecker/common/config"
@@ -19,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -235,7 +235,7 @@ func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerC
 		}
 		var v []config.QuorumBufferPool
 		if err := json.Unmarshal([]byte(newValue), &v); err != nil {
-			return fmt.Errorf("invalid quorum buffer pools JSON %q: %w", newValue, err)
+			return merr.Wrapf(err, "invalid quorum buffer pools JSON %q", newValue)
 		}
 		return nil
 	})
@@ -245,7 +245,7 @@ func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerC
 		}
 		var v []config.CustomPlacement
 		if err := json.Unmarshal([]byte(newValue), &v); err != nil {
-			return fmt.Errorf("invalid quorum custom placement JSON %q: %w", newValue, err)
+			return merr.Wrapf(err, "invalid quorum custom placement JSON %q", newValue)
 		}
 		return nil
 	})
@@ -258,7 +258,7 @@ func validateQuorumJSON(label, raw string, parse func([]byte) error) {
 	}
 	if err := parse([]byte(raw)); err != nil {
 		mlog.Warn(context.TODO(), "invalid quorum JSON config at startup, will fall back to static default",
-			zap.String("config", label),
+			mlog.String("config", label),
 			mlog.String("json", raw),
 			mlog.Err(err))
 	}
