@@ -88,9 +88,12 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
         auto err =
             reader->Read(left_size, reinterpret_cast<void*>(cipher_str.data()));
         // Preserve the typed code BinlogReader stamped (e.g. DataFormatBroken
-        // for a truncated binlog) instead of collapsing it via AssertInfo.
+        // for a truncated binlog) instead of collapsing it via AssertInfo,
+        // while keeping the call-site context in the message.
         if (!err.ok()) {
-            throw err;
+            throw SegcoreError(
+                err.get_error_code(),
+                fmt::format("read binlog failed: {}", err.what()));
         }
 
         auto decrypted_str = decryptor->Decrypt(cipher_str);
