@@ -1,3 +1,5 @@
+# ruff: noqa
+# fmt: off
 import threading
 import pytest
 import time
