@@ -1570,7 +1570,8 @@ OpArithCompareImpl<int8_t, AOp, CmpOp>::op_arith_compare(
     const ArithHighPrecisionType<int8_t>& value,
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mul || AOp == ArithOpType::Div ||
-                  AOp == ArithOpType::Mod) {
+                  AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
+                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor) {
         return false;
     } else {
         // the restriction of the API
@@ -1621,7 +1622,8 @@ OpArithCompareImpl<int16_t, AOp, CmpOp>::op_arith_compare(
     const ArithHighPrecisionType<int16_t>& value,
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mul || AOp == ArithOpType::Div ||
-                  AOp == ArithOpType::Mod) {
+                  AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
+                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor) {
         return false;
     } else {
         // the restriction of the API
@@ -1671,7 +1673,8 @@ OpArithCompareImpl<int32_t, AOp, CmpOp>::op_arith_compare(
     const ArithHighPrecisionType<int32_t>& value,
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mul || AOp == ArithOpType::Div ||
-                  AOp == ArithOpType::Mod) {
+                  AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
+                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor) {
         return false;
     } else {
         // the restriction of the API
@@ -1720,7 +1723,8 @@ OpArithCompareImpl<int64_t, AOp, CmpOp>::op_arith_compare(
     const ArithHighPrecisionType<int64_t>& value,
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mul || AOp == ArithOpType::Div ||
-                  AOp == ArithOpType::Mod) {
+                  AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
+                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor) {
         return false;
     } else {
         // the restriction of the API
