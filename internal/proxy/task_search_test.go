@@ -5741,6 +5741,49 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "order_by and function_score cannot be used together")
 	})
 
+	t.Run("regular search with multi-field group_by_fields and order_by should fail", func(t *testing.T) {
+		ctx := context.Background()
+		qt := &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Search,
+					Timestamp: uint64(time.Now().UnixNano()),
+				},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_collection",
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: ParamsKey, Value: `{"nprobe": 10}`},
+					{Key: AnnsFieldKey, Value: "vec"},
+					{Key: TopKKey, Value: "10"},
+					{Key: RoundDecimalKey, Value: "-1"},
+					{Key: GroupByFieldsKey, Value: "category,brand"},
+					{Key: OrderByFieldsKey, Value: "price:asc"},
+				},
+			},
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+						{FieldID: 101, Name: "price", DataType: schemapb.DataType_Float},
+						{FieldID: 102, Name: "category", DataType: schemapb.DataType_VarChar},
+						{FieldID: 103, Name: "brand", DataType: schemapb.DataType_VarChar},
+						{FieldID: 104, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+					},
+				},
+			},
+		}
+		qt.schema.schemaHelper, _ = typeutil.CreateSchemaHelper(qt.schema.CollectionSchema)
+		qt.schema.pkField = &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+
+		err := qt.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "order_by_fields is not supported with multi-field group_by_fields")
+	})
+
 	t.Run("regular search with invalid order_by direction should fail", func(t *testing.T) {
 		ctx := context.Background()
 		qt := &searchTask{

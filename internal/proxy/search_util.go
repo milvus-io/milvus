@@ -606,6 +606,10 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	if err != nil {
 		return nil, err
 	}
+	if len(groupByFieldIds) > 1 && len(orderByFields) > 0 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"order_by_fields is not supported with multi-field group_by_fields")
+	}
 
 	// 8. validate iterator + order_by combination is not allowed
 	if isIterator && len(orderByFields) > 0 {
