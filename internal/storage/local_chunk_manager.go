@@ -38,6 +38,25 @@ type LocalChunkManager struct {
 	localPath string
 }
 
+// wrapLocalIoError maps a local filesystem error to the proper Milvus IO error.
+// Permanent errors (not-found, permission denied) are classified to denylist codes
+// (ErrIoKeyNotFound / ErrIoPermissionDenied) so the import retry wrappers fail fast
+// instead of retrying them as a generic, non-classified ErrIoFailed; anything else
+// stays ErrIoFailed.
+func wrapLocalIoError(filePath string, err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return merr.WrapErrIoKeyNotFound(filePath, err.Error())
+	case errors.Is(err, os.ErrPermission):
+		return merr.WrapErrIoPermissionDenied(filePath, err)
+	default:
+		return merr.WrapErrIoFailed(filePath, err)
+	}
+}
+
 var _ ChunkManager = (*LocalChunkManager)(nil)
 
 // NewLocalChunkManager create a new local manager object.
@@ -115,7 +134,7 @@ func (lcm *LocalChunkManager) Exist(ctx context.Context, filePath string) (bool,
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, merr.WrapErrIoFailed(filePath, err)
+		return false, wrapLocalIoError(filePath, err)
 	}
 	return true, nil
 }
@@ -180,10 +199,7 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 
 		f, err := os.Stat(filePath)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return merr.WrapErrIoKeyNotFound(filePath)
-			}
-			return merr.WrapErrIoFailed(filePath, err)
+			return wrapLocalIoError(filePath, err)
 		}
 		if !walkFunc(&ChunkObjectInfo{FilePath: filePath, ModifyTime: f.ModTime()}) {
 			return nil
@@ -214,20 +230,13 @@ func (lcm *LocalChunkManager) ReadAt(ctx context.Context, filePath string, off i
 
 func (lcm *LocalChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
 	reader, err := mmap.Open(path.Clean(filePath))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, merr.WrapErrIoKeyNotFound(filePath, err.Error())
-	}
-
-	return reader, merr.WrapErrIoFailed(filePath, err)
+	return reader, wrapLocalIoError(filePath, err)
 }
 
 func (lcm *LocalChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
 	fi, err := os.Stat(filePath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 0, merr.WrapErrIoKeyNotFound(filePath, err.Error())
-		}
-		return 0, merr.WrapErrIoFailed(filePath, err)
+		return 0, wrapLocalIoError(filePath, err)
 	}
 	// get the size
 	size := fi.Size()

@@ -333,7 +333,7 @@ func (r *reader) Size() (int64, error) {
 	if size := r.fileSize.Load(); size != 0 {
 		return size, nil
 	}
-	size, err := storage.GetFilesSize(r.ctx, lo.Flatten(lo.Values(r.insertLogs)), r.cm)
+	size, err := importcommon.GetFilesSizeWithRetry(r.ctx, r.cm, lo.Flatten(lo.Values(r.insertLogs)))
 	if err != nil {
 		return 0, err
 	}

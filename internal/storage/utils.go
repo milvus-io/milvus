@@ -18,7 +18,6 @@ package storage
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -53,10 +52,8 @@ import (
 func Open(filepath string) (*os.File, error) {
 	// NOLINT
 	reader, err := os.Open(filepath)
-	if os.IsNotExist(err) {
-		return nil, merr.WrapErrIoKeyNotFound(filepath)
-	} else if err != nil {
-		return nil, merr.WrapErrIoFailed(filepath, err)
+	if err != nil {
+		return nil, wrapLocalIoError(filepath, err)
 	}
 
 	return reader, nil
@@ -67,10 +64,8 @@ func Open(filepath string) (*os.File, error) {
 func ReadFile(filepath string) ([]byte, error) {
 	// NOLINT
 	data, err := os.ReadFile(filepath)
-	if os.IsNotExist(err) {
-		return nil, merr.WrapErrIoKeyNotFound(filepath)
-	} else if err != nil {
-		return nil, merr.WrapErrIoFailed(filepath, err)
+	if err != nil {
+		return nil, wrapLocalIoError(filepath, err)
 	}
 
 	return data, nil
@@ -1538,18 +1533,6 @@ func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath stri
 		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
 		objectstorage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
 		objectstorage.CreateBucket(true))
-}
-
-func GetFilesSize(ctx context.Context, paths []string, cm ChunkManager) (int64, error) {
-	totalSize := int64(0)
-	for _, filePath := range paths {
-		size, err := cm.Size(ctx, filePath)
-		if err != nil {
-			return 0, err
-		}
-		totalSize += size
-	}
-	return totalSize, nil
 }
 
 type NullableInt struct {

@@ -101,7 +101,7 @@ func (r *reader) Size() (int64, error) {
 	if size := r.fileSize.Load(); size != 0 {
 		return size, nil
 	}
-	size, err := storage.GetFilesSize(r.ctx, r.paths, r.cm)
+	size, err := common.GetFilesSizeWithRetry(r.ctx, r.cm, r.paths)
 	if err != nil {
 		return 0, err
 	}

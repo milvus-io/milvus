@@ -151,6 +151,13 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.sync.taskPoolReleaseTimeoutSeconds", "100")
 		assert.Equal(t, 100*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
 
+		assert.Equal(t, 10, params.CommonCfg.StorageReadRetryAttempts.GetAsInt())
+		params.Save("common.storage.readRetryAttempts", "3")
+		assert.Equal(t, 3, params.CommonCfg.StorageReadRetryAttempts.GetAsInt())
+		// 0 (or negative) means unbounded retry in retry.Attempts; clamp to the default.
+		params.Save("common.storage.readRetryAttempts", "0")
+		assert.Equal(t, 10, params.CommonCfg.StorageReadRetryAttempts.GetAsInt())
+
 		assert.Equal(t, 1, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 		params.Save("common.storage.zstd.concurrency", "2")
 		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
