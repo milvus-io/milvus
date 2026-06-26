@@ -37,6 +37,9 @@ service QueryCoord {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
+    rpc GetQueryViewSegmentLoadInfo(GetQueryViewSegmentLoadInfoRequest)
+        returns (GetQueryViewSegmentLoadInfoResponse) {
+    }
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
 
@@ -309,6 +312,18 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
     common.Status status = 1;
     repeated SegmentInfo infos = 2;
+}
+
+message GetQueryViewSegmentLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    repeated int64 segmentIDs = 3;
+}
+
+message GetQueryViewSegmentLoadInfoResponse {
+    common.Status status = 1;
+    repeated SegmentLoadInfo infos = 2;
+    repeated index.IndexInfo index_info_list = 3;
 }
 
 message GetShardLeadersRequest {

@@ -86,6 +86,10 @@ func (m *GrpcQueryCoordClient) GetLoadSegmentInfo(ctx context.Context, in *query
 	return &querypb.GetSegmentInfoResponse{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) GetQueryViewSegmentLoadInfo(ctx context.Context, in *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return &querypb.GetQueryViewSegmentLoadInfoResponse{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

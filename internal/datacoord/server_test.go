@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -594,6 +595,111 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.Equal(t, 1, len(resp.GetChannelCheckpoint()))
 		assert.Equal(t, mockPChannel, resp.ChannelCheckpoint[mockVChannel].ChannelName)
 		assert.Equal(t, Timestamp(1000), resp.ChannelCheckpoint[mockVChannel].Timestamp)
+	})
+}
+
+func TestGetQueryViewSegmentLoadInfo(t *testing.T) {
+	t.Run("packs complete segment load info and collection indexes", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		collectionID := int64(100)
+		partitionID := int64(10)
+		segmentID := int64(1000)
+		indexID := int64(200)
+		buildID := int64(300)
+		fieldID := int64(101)
+		startPos := &msgpb.MsgPosition{ChannelName: "vchan", Timestamp: 11}
+		dmlPos := &msgpb.MsgPosition{ChannelName: "vchan", Timestamp: 22}
+		segment := &datapb.SegmentInfo{
+			ID:              segmentID,
+			CollectionID:    collectionID,
+			PartitionID:     partitionID,
+			InsertChannel:   "vchan",
+			State:           commonpb.SegmentState_Flushed,
+			NumOfRows:       100,
+			Binlogs:         []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+			Statslogs:       []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
+			Deltalogs:       []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 3}}}},
+			Bm25Statslogs:   []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 4}}}},
+			StartPosition:   startPos,
+			DmlPosition:     dmlPos,
+			Level:           datapb.SegmentLevel_L1,
+			StorageVersion:  2,
+			IsSorted:        true,
+			DataVersion:     7,
+			CommitTimestamp: 99,
+		}
+		require.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment)))
+		require.NoError(t, svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+			CollectionID: collectionID,
+			FieldID:      fieldID,
+			IndexID:      indexID,
+			IndexName:    "vec_idx",
+			IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "IVF_FLAT"}},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MmapEnabledKey, Value: "true"},
+			},
+		}))
+		require.NoError(t, svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID:             segmentID,
+			CollectionID:          collectionID,
+			PartitionID:           partitionID,
+			IndexID:               indexID,
+			BuildID:               buildID,
+			IndexVersion:          4,
+			IndexState:            commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"idx/1"},
+			IndexSerializedSize:   123,
+			IndexMemSize:          456,
+			NumRows:               100,
+			CurrentIndexVersion:   5,
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		}))
+
+		resp, err := svr.GetQueryViewSegmentLoadInfo(context.Background(), &querypb.GetQueryViewSegmentLoadInfoRequest{
+			CollectionID: collectionID,
+			SegmentIDs:   []int64{segmentID},
+		})
+
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetInfos(), 1)
+		require.Len(t, resp.GetIndexInfoList(), 1)
+		info := resp.GetInfos()[0]
+		assert.Equal(t, segmentID, info.GetSegmentID())
+		assert.Equal(t, partitionID, info.GetPartitionID())
+		assert.Equal(t, collectionID, info.GetCollectionID())
+		assert.Equal(t, "vchan", info.GetInsertChannel())
+		assert.Equal(t, startPos, info.GetStartPosition())
+		assert.Equal(t, dmlPos, info.GetDeltaPosition())
+		assert.Equal(t, datapb.SegmentLevel_L1, info.GetLevel())
+		assert.Equal(t, int64(2), info.GetStorageVersion())
+		assert.True(t, info.GetIsSorted())
+		assert.Equal(t, int32(7), info.GetDataVersion())
+		assert.Equal(t, uint64(99), info.GetCommitTimestamp())
+		assert.Equal(t, commonpb.LoadPriority_HIGH, info.GetPriority())
+		require.Len(t, info.GetIndexInfos(), 1)
+		indexInfo := info.GetIndexInfos()[0]
+		assert.Equal(t, fieldID, indexInfo.GetFieldID())
+		assert.Equal(t, "vec_idx", indexInfo.GetIndexName())
+		assert.Equal(t, indexID, indexInfo.GetIndexID())
+		assert.Equal(t, buildID, indexInfo.GetBuildID())
+		assert.Contains(t, indexInfo.GetIndexParams(), &commonpb.KeyValuePair{Key: common.LoadPriorityKey, Value: commonpb.LoadPriority_HIGH.String()})
+		assert.Contains(t, indexInfo.GetIndexParams(), &commonpb.KeyValuePair{Key: common.MmapEnabledKey, Value: "true"})
+	})
+
+	t.Run("returns segment not found on missing segment", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		resp, err := svr.GetQueryViewSegmentLoadInfo(context.Background(), &querypb.GetQueryViewSegmentLoadInfoRequest{
+			CollectionID: 100,
+			SegmentIDs:   []int64{404},
+		})
+
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrSegmentNotFound)
 	})
 }
 

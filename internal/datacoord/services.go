@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -47,12 +48,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -1251,6 +1256,152 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 		resp.Bm25Resources = append(resp.Bm25Resources, resource)
 	}
 	return resp, nil
+}
+
+func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	resp := &querypb.GetQueryViewSegmentLoadInfoResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	if req.GetCollectionID() == 0 {
+		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("collection id is zero"))
+		return resp, nil
+	}
+	if len(req.GetSegmentIDs()) == 0 {
+		return resp, nil
+	}
+
+	indexInfos := s.queryViewCollectionIndexInfos(req.GetCollectionID())
+	segmentIndexes := s.meta.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
+	resp.IndexInfoList = indexInfos
+	resp.Infos = make([]*querypb.SegmentLoadInfo, 0, len(req.GetSegmentIDs()))
+	for _, segmentID := range req.GetSegmentIDs() {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if segment == nil {
+			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, "missing segment info for query view"))
+			return resp, nil
+		}
+		if segment.GetCollectionID() != req.GetCollectionID() {
+			resp.Status = merr.Status(merr.WrapErrSegmentNotFound(segmentID, fmt.Sprintf("segment does not belong to collection %d", req.GetCollectionID())))
+			return resp, nil
+		}
+		cloned := segment.Clone()
+		segmentutil.ReCalcRowCount(segment.SegmentInfo, cloned.SegmentInfo)
+		resp.Infos = append(resp.Infos, s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes[segmentID]))
+	}
+	return resp, nil
+}
+
+func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
+	indexes := s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+	return lo.Map(indexes, func(index *model.Index, _ int) *indexpb.IndexInfo {
+		return &indexpb.IndexInfo{
+			CollectionID:    index.CollectionID,
+			FieldID:         index.FieldID,
+			IndexName:       index.IndexName,
+			IndexID:         index.IndexID,
+			TypeParams:      index.TypeParams,
+			IndexParams:     index.IndexParams,
+			IsAutoIndex:     index.IsAutoIndex,
+			UserIndexParams: index.UserIndexParams,
+		}
+	})
+}
+
+func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, indexInfos []*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) *querypb.SegmentLoadInfo {
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:       segment.GetID(),
+		PartitionID:     segment.GetPartitionID(),
+		CollectionID:    segment.GetCollectionID(),
+		BinlogPaths:     segment.GetBinlogs(),
+		NumOfRows:       segment.GetNumOfRows(),
+		Deltalogs:       segment.GetDeltalogs(),
+		CompactionFrom:  segment.GetCompactionFrom(),
+		IndexInfos:      s.packQueryViewFieldIndexInfos(segmentIndexes, indexInfos),
+		InsertChannel:   segment.GetInsertChannel(),
+		StartPosition:   segment.GetStartPosition(),
+		DeltaPosition:   segment.GetDmlPosition(),
+		Level:           segment.GetLevel(),
+		StorageVersion:  segment.GetStorageVersion(),
+		IsSorted:        segment.GetIsSorted(),
+		Priority:        commonpb.LoadPriority_HIGH,
+		ManifestPath:    segment.GetManifestPath(),
+		DataVersion:     segment.GetDataVersion(),
+		CommitTimestamp: segment.GetCommitTimestamp(),
+	}
+	if segment.GetManifestPath() == "" {
+		loadInfo.Statslogs = segment.GetStatslogs()
+		loadInfo.TextStatsLogs = segment.GetTextStatsLogs()
+		loadInfo.Bm25Logs = segment.GetBm25Statslogs()
+		loadInfo.JsonKeyStatsLogs = segment.GetJsonKeyStats()
+	}
+	return loadInfo
+}
+
+func (s *Server) packQueryViewFieldIndexInfos(segmentIndexes map[int64]*model.SegmentIndex, collectionIndexes []*indexpb.IndexInfo) []*querypb.FieldIndexInfo {
+	if len(segmentIndexes) == 0 {
+		return nil
+	}
+	collectionIndexByID := lo.SliceToMap(collectionIndexes, func(index *indexpb.IndexInfo) (int64, *indexpb.IndexInfo) {
+		return index.GetIndexID(), index
+	})
+	infos := make([]*querypb.FieldIndexInfo, 0, len(segmentIndexes))
+	for _, segmentIndex := range segmentIndexes {
+		if segmentIndex.IndexState != commonpb.IndexState_Finished {
+			continue
+		}
+		indexParams := s.meta.indexMeta.GetIndexParams(segmentIndex.CollectionID, segmentIndex.IndexID)
+		indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segmentIndex.CollectionID, segmentIndex.IndexID)...)
+		for _, param := range indexParams {
+			if param.Key == common.IndexTypeKey && segmentIndex.IndexType != "" && segmentIndex.IndexType != param.Value {
+				param.Value = segmentIndex.IndexType
+				break
+			}
+		}
+		indexName := s.meta.indexMeta.GetIndexNameByID(segmentIndex.CollectionID, segmentIndex.IndexID)
+		if segmentIndex.IndexType != "" && segmentIndex.IndexType != indexName {
+			indexName = segmentIndex.IndexType
+		}
+		if collectionIndex, ok := collectionIndexByID[segmentIndex.IndexID]; ok {
+			params := funcutil.KeyValuePair2Map(indexParams)
+			for _, kv := range collectionIndex.GetUserIndexParams() {
+				if indexparams.IsConfigableIndexParam(kv.GetKey()) {
+					params[kv.GetKey()] = kv.GetValue()
+				}
+			}
+			indexParams = funcutil.Map2KeyValuePair(params)
+		}
+		indexParams = append(indexParams, &commonpb.KeyValuePair{
+			Key:   common.LoadPriorityKey,
+			Value: commonpb.LoadPriority_HIGH.String(),
+		})
+		builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
+			segmentIndex.IndexStorePathVersion,
+			segmentIndex.CollectionID,
+			segmentIndex.PartitionID,
+			segmentIndex.SegmentID,
+			segmentIndex.BuildID,
+			segmentIndex.IndexVersion)
+		infos = append(infos, &querypb.FieldIndexInfo{
+			FieldID:                   s.meta.indexMeta.GetFieldIDByIndexID(segmentIndex.CollectionID, segmentIndex.IndexID),
+			EnableIndex:               true,
+			IndexName:                 indexName,
+			IndexID:                   segmentIndex.IndexID,
+			BuildID:                   segmentIndex.BuildID,
+			IndexParams:               indexParams,
+			IndexFilePaths:            builder.BuildFilePaths(segmentIndex.IndexFileKeys),
+			IndexSize:                 int64(segmentIndex.IndexMemSize),
+			IndexVersion:              segmentIndex.IndexVersion,
+			NumRows:                   segmentIndex.NumRows,
+			CurrentIndexVersion:       segmentIndex.CurrentIndexVersion,
+			CurrentScalarIndexVersion: segmentIndex.CurrentScalarIndexVersion,
+			IndexStorePathVersion:     segmentIndex.IndexStorePathVersion,
+		})
+	}
+	return infos
 }
 
 func dataViewShard(dataView *viewpb.DataViewOfCollection, vchannel string) *viewpb.DataViewOfShard {

@@ -964,6 +964,10 @@ func (s *mixCoordImpl) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetS
 	return s.queryCoordServer.GetLoadSegmentInfo(ctx, req)
 }
 
+func (s *mixCoordImpl) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return s.datacoordServer.GetQueryViewSegmentLoadInfo(ctx, req)
+}
+
 func (s *mixCoordImpl) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.LoadBalance(ctx, req)
 }
