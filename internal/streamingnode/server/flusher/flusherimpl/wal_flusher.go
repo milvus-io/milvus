@@ -127,8 +127,14 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 			}
 			impl.metrics.ObserveMetrics(msg.TimeTick())
 			if err := impl.dispatch(msg); err != nil {
-				// The error is always context canceled.
-				return nil
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+					return nil
+				}
+				impl.logger.Error(impl.notifier.Context(), "wal flusher dispatch failed with unexpected error",
+					mlog.FieldVChannel(msg.VChannel()),
+					mlog.String("messageType", msg.MessageType().String()),
+					mlog.Err(err))
+				return err
 			}
 		}
 	}
@@ -331,7 +337,7 @@ func (impl *WALFlusherImpl) dispatchCommitImport(msg message.ImmutableMessage) e
 	// fence for this dispatch and must not be repeated on every retry.
 	// This retry blocks the whole pchannel flusher until DataCoord accepts the
 	// commit fence, preserving WAL replay order for later messages on the pchannel.
-	impl.logger.Warn(context.TODO(), "HandleCommitVchannel may block the pchannel flusher until DataCoord accepts the commit fence",
+	impl.logger.Info(impl.notifier.Context(), "HandleCommitVchannel waits until DataCoord accepts the commit fence",
 		mlog.FieldJobID(jobID),
 		mlog.FieldVChannel(vchannel),
 		mlog.Uint64("commitTs", msg.TimeTick()))
