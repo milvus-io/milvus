@@ -129,6 +129,34 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	// atler a property of a collection.
 	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 1)
+
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "set namespace mode",
+			properties: []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "delete namespace mode",
+			deleteKeys: []string{common.NamespaceModeKey},
+		},
+	} {
+		t.Run("reject "+tc.name, func(t *testing.T) {
+			resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Properties:     tc.properties,
+				DeleteKeys:     tc.deleteKeys,
+			})
+			alterErr := merr.CheckRPCCall(resp, err)
+			require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
+			require.ErrorContains(t, alterErr, common.NamespaceModeKey)
+		})
+	}
+
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -185,6 +213,46 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "true"}, {Key: common.CollectionReplicaNumber, Value: "1"}},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func TestValidateNamespaceModeImmutable(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "set namespace mode",
+			properties: []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "set namespace mode with wrong case",
+			properties: []*commonpb.KeyValuePair{{Key: "Namespace.Mode", Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "delete namespace mode",
+			deleteKeys: []string{common.NamespaceModeKey},
+		},
+		{
+			name:       "delete namespace mode with wrong case",
+			deleteKeys: []string{"Namespace.Mode"},
+		},
+	} {
+		t.Run("reject "+tc.name, func(t *testing.T) {
+			err := validateNamespaceModeImmutable(tc.properties, tc.deleteKeys)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, common.NamespaceModeKey)
+		})
+	}
+
+	require.NoError(t, validateNamespaceModeImmutable(
+		[]*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "2"}},
+		nil,
+	))
+	require.NoError(t, validateNamespaceModeImmutable(
+		nil,
+		[]string{common.CollectionReplicaNumber},
+	))
 }
 
 func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *testing.T) {

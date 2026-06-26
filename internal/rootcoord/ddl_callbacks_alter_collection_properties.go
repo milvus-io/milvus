@@ -2,6 +2,7 @@ package rootcoord
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -48,6 +49,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	}
 
 	if err := common.ValidateNamespaceShardingEnabledNotAltered(req.GetProperties(), req.GetDeleteKeys()); err != nil {
+		return err
+	}
+
+	if err := validateNamespaceModeImmutable(req.GetProperties(), req.GetDeleteKeys()); err != nil {
 		return err
 	}
 
@@ -203,6 +208,26 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateNamespaceModeImmutable(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, prop := range properties {
+		if prop.GetKey() == common.NamespaceModeKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter %s via alter_collection_properties; namespace mode is immutable after collection creation", common.NamespaceModeKey)
+		}
+		if strings.EqualFold(prop.GetKey(), common.NamespaceModeKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", prop.GetKey(), common.NamespaceModeKey)
+		}
+	}
+	for _, key := range deleteKeys {
+		if key == common.NamespaceModeKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete %s; namespace mode is immutable after collection creation", common.NamespaceModeKey)
+		}
+		if strings.EqualFold(key, common.NamespaceModeKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, common.NamespaceModeKey)
+		}
 	}
 	return nil
 }

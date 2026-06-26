@@ -689,22 +689,16 @@ func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
 	return GetNamespaceMode(kvs...) == NamespaceModePartition
 }
 
-type namespaceModeError string
-
-func (e namespaceModeError) Error() string {
-	return string(e)
-}
-
 func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
 	for _, kv := range kvs {
 		if kv.GetKey() == NamespaceModeKey {
 			if _, ok := normalizeNamespaceMode(kv.GetValue()); !ok {
-				return namespaceModeError("invalid namespace.mode value " + strconv.Quote(kv.GetValue()) + ", valid values: [" + ValidNamespaceModes + "]")
+				return merr.WrapErrParameterInvalidMsg("invalid namespace.mode value %q, valid values: [%s]", kv.GetValue(), ValidNamespaceModes)
 			}
 			return nil
 		}
 		if strings.EqualFold(kv.GetKey(), NamespaceModeKey) {
-			return namespaceModeError("invalid property key " + strconv.Quote(kv.GetKey()) + ", did you mean " + strconv.Quote(NamespaceModeKey) + "?")
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), NamespaceModeKey)
 		}
 	}
 	return nil

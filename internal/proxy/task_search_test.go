@@ -567,7 +567,8 @@ func TestSearchTask_NamespacePartitionModeSkipsRequery(t *testing.T) {
 	ctx := context.Background()
 
 	schema := &schemapb.CollectionSchema{
-		Name: "test_collection",
+		Name:            "test_collection",
+		EnableNamespace: true,
 		Properties: []*commonpb.KeyValuePair{
 			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
 		},
@@ -577,6 +578,14 @@ func TestSearchTask_NamespacePartitionModeSkipsRequery(t *testing.T) {
 		},
 	}
 	schemaInfo := newSchemaInfo(schema)
+
+	t.Run("namespace disabled does not skip", func(t *testing.T) {
+		disabledSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+		disabledSchema.EnableNamespace = false
+		task := &searchTask{schema: newSchemaInfo(disabledSchema)}
+
+		require.False(t, task.skipRequeryByNamespacePartitionMode())
+	})
 
 	makePlaceholderGroup := func() []byte {
 		phg := &commonpb.PlaceholderGroup{
