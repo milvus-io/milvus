@@ -668,6 +668,12 @@ message GetDataDistributionRequest {
     int64 lastUpdateTs = 3;
 }
 
+message CacheShardDiskUsageStats {
+    string data_type = 1;
+    string shard = 2;
+    double disk_bytes = 3;
+}
+
 message GetDataDistributionResponse {
     common.Status status = 1;
     int64 nodeID = 2;
@@ -677,6 +683,7 @@ message GetDataDistributionResponse {
     int64 lastModifyTs = 6;
     double memCapacityInMB = 7;
     int64 cpu_num = 8;
+    repeated CacheShardDiskUsageStats cache_shard_disk_usage_stats = 9;
 }
 
 message LeaderView {
@@ -963,6 +970,7 @@ message GetQueryNodeDistributionResponse {
   int64 ID = 2;
   repeated string channel_names = 3;
   repeated int64 sealed_segmentIDs = 4;
+  repeated CacheShardDiskUsageStats cache_shard_disk_usage_stats = 5;
 }
 
 message SuspendBalanceRequest {

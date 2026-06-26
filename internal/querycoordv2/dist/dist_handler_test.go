@@ -215,6 +215,41 @@ func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 	suite.Require().Greater(notifyCounter.Load(), int32(0))
 }
 
+func TestHandleDistRespUpdatesCacheShardDiskUsageStatsWithoutDistributionChange(t *testing.T) {
+	ctx := context.Background()
+	nodeID := int64(1)
+	resp := &querypb.GetDataDistributionResponse{
+		Status:       merr.Success(),
+		NodeID:       nodeID,
+		LastModifyTs: 1,
+		CacheShardDiskUsageStats: []*querypb.CacheShardDiskUsageStats{
+			{
+				DataType:  "scalar_field",
+				Shard:     "channel-1",
+				DiskBytes: 1024,
+			},
+		},
+	}
+
+	nodeManager := session.NewNodeManager()
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	})
+	nodeManager.Add(nodeInfo)
+
+	handler := &distHandler{
+		nodeID:       nodeID,
+		nodeManager:  nodeManager,
+		lastUpdateTs: 10,
+	}
+
+	handler.handleDistResp(ctx, resp)
+
+	assert.Equal(t, resp.GetCacheShardDiskUsageStats(), nodeInfo.CacheShardDiskUsageStats())
+}
+
 // TestHeartbeatMetricsRecording tests that heartbeat metrics are properly recorded
 func TestHeartbeatMetricsRecording(t *testing.T) {
 	// Arrange: Create test response with a unique nodeID to avoid test interference

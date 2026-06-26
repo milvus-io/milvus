@@ -171,6 +171,7 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 	now := time.Now()
 	node.SetLastHeartbeat(now)
 	metrics.QueryCoordLastHeartbeatTimeStamp.WithLabelValues(fmt.Sprint(resp.GetNodeID())).Set(float64(now.UnixNano()))
+	node.UpdateStats(session.WithCacheShardDiskUsageStats(resp.GetCacheShardDiskUsageStats()))
 
 	// skip  update dist if no distribution change happens in query node
 	if resp.GetLastModifyTs() != 0 && resp.GetLastModifyTs() <= dh.lastUpdateTs {
