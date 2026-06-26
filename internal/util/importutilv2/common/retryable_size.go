@@ -88,12 +88,11 @@ func getFilesSizeWithRetry(ctx context.Context, cm storage.ChunkManager,
 			// inner-retryable or permanent codes here would stack the two layers (up to
 			// retryAttempts^2 HEAD calls under a SlowDown storm), so bail out on both.
 			//
-			// Note ErrIoFailed is a catch-all: on the Remote import path known-permanent
-			// errors are classified to denylist codes (KeyNotFound / PermissionDenied /
-			// BucketNotFound / ...) and fail fast, so only genuinely-unknown errors are
-			// retried here. A non-classifying ChunkManager (e.g. LocalChunkManager, which
-			// is not used for remote imports) would retry a permanent OS error before
-			// failing -- the same trade-off the existing read/walk denylist retries make.
+			// Note ErrIoFailed is a catch-all: known-permanent errors are classified to
+			// denylist codes (KeyNotFound / PermissionDenied / BucketNotFound / ...) and
+			// fail fast on both the Remote and the Local paths, so only genuinely-unknown
+			// errors are retried here -- the same trade-off the existing read/walk denylist
+			// retries make.
 			if merr.IsNonRetryableErr(e) || merr.IsRetryableErr(e) {
 				return retry.Unrecoverable(e)
 			}
