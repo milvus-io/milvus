@@ -3172,32 +3172,72 @@ func TestDML(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
-func TestQueryRejectsInvalidExprParamsBeforeProxyDispatch(t *testing.T) {
+func TestInvalidExprParamsRejectBeforeProxyDispatch(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Once()
-	testEngine := initHTTPServerV2(mp, false)
+	testCases := []struct {
+		name           string
+		path           string
+		body           string
+		proxyMethod    string
+		expectedErrMsg string
+	}{
+		{
+			name:           "query",
+			path:           versionalV2(EntityCategory, QueryAction),
+			body:           `{"collectionName":"book","filter":"book_id in {ids}","exprParams":{"ids":[]},"outputFields":["book_id"],"limit":10}`,
+			proxyMethod:    "Query",
+			expectedErrMsg: "exprParams array value cannot be empty",
+		},
+		{
+			name:           "delete",
+			path:           versionalV2(EntityCategory, DeleteAction),
+			body:           `{"collectionName":"book","filter":"book_id in {ids}","exprParams":{"ids":null}}`,
+			proxyMethod:    "Delete",
+			expectedErrMsg: "unsupported exprParams value type <nil>",
+		},
+		{
+			name:           "search",
+			path:           versionalV2(EntityCategory, SearchAction),
+			body:           `{"collectionName":"book","ids":[1],"filter":"book_id in {ids}","exprParams":{"ids":{"nested":"value"}}}`,
+			proxyMethod:    "Search",
+			expectedErrMsg: "unsupported exprParams value type map[string]interface {}",
+		},
+		{
+			name: HybridSearchAction,
+			path: versionalV2(EntityCategory, HybridSearchAction),
+			body: `{"collectionName":"book","search":[{"data":[[0.1,0.2]],"annsField":"book_intro","filter":"book_id in {ids}","exprParams":{"ids":[]},` +
+				`"metricType":"L2","limit":3}],"rerank":{"strategy":"rrf","params":{}}}`,
+			proxyMethod:    "HybridSearch",
+			expectedErrMsg: "exprParams array value cannot be empty",
+		},
+	}
 
-	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, QueryAction), bytes.NewReader([]byte(
-		`{"collectionName": "book", "filter": "book_id in {ids}", "exprParams": {"ids": []}, "outputFields": ["book_id"], "limit": 10}`,
-	)))
-	w := httptest.NewRecorder()
-	testEngine.ServeHTTP(w, req)
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionName: DefaultCollectionName,
+				Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+				ShardsNum:      ShardNumDefault,
+				Status:         &StatusSuccess,
+			}, nil).Once()
+			testEngine := initHTTPServerV2(mp, false)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	returnBody := &ReturnErrMsg{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
-	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
-	assert.Contains(t, returnBody.Message, "exprParams array value cannot be empty")
-	mp.AssertNotCalled(t, "Query", mock.Anything, mock.Anything)
+			req := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewReader([]byte(testCase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+			assert.Contains(t, returnBody.Message, testCase.expectedErrMsg)
+			mp.AssertNotCalled(t, testCase.proxyMethod, mock.Anything, mock.Anything)
+		})
+	}
 }
 
 func TestAllowInt64(t *testing.T) {
