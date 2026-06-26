@@ -36,7 +36,7 @@ func TestRunAckCallbackWithTrace_OpensChildSpan(t *testing.T) {
 
 	var innerCalled bool
 	var childTraceID trace.TraceID
-	err := runAckCallbackWithTrace(msg, func(spanCtx context.Context) error {
+	err := runAckCallbackWithTrace(context.Background(), msg, func(spanCtx context.Context) error {
 		innerCalled = true
 		childTraceID = trace.SpanContextFromContext(spanCtx).TraceID()
 		return nil
@@ -55,4 +55,25 @@ func TestRunAckCallbackWithTrace_OpensChildSpan(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "wal.bc_callback span must be emitted")
+}
+
+func TestRunAckCallbackWithTrace_PreservesBaseCancellation(t *testing.T) {
+	originCtx, originSpan := otel.Tracer("test").Start(context.Background(), "ddl.caller")
+	originTraceID := trace.SpanContextFromContext(originCtx).TraceID()
+	originSpan.End()
+
+	msg := buildTestBroadcastMessageForTrace(t)
+	message.InjectTraceContext(originCtx, msg)
+
+	baseCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var childTraceID trace.TraceID
+	err := runAckCallbackWithTrace(baseCtx, msg, func(spanCtx context.Context) error {
+		childTraceID = trace.SpanContextFromContext(spanCtx).TraceID()
+		return spanCtx.Err()
+	})
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, originTraceID, childTraceID, "ack callback span must still use the persisted trace")
 }
