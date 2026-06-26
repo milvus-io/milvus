@@ -2430,6 +2430,7 @@ class SegmentExpr : public Expr {
             self->EnsureExecPathDetermined();
             if (self->exec_path_ == ExprExecPath::RawData) {
                 self->PrefetchRawData();
+                self->prefetched_ = true;
             }
         }));
     }

@@ -78,8 +78,6 @@ PhyVectorSearchNode::AddInput(RowVectorPtr& input) {
 
 RowVectorPtr
 PhyVectorSearchNode::GetOutput() {
-    WaitPrefetch();
-
     milvus::exec::checkCancellation(query_context_);
 
     if (is_finished_ || !no_more_input_) {
@@ -94,6 +92,7 @@ PhyVectorSearchNode::GetOutput() {
         return nullptr;
     }
 
+    WaitPrefetch();
     span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
     span.GetSpan()->SetAttribute("topk", search_info_.topk_);
 
