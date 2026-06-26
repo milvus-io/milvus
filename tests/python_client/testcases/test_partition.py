@@ -355,7 +355,7 @@ class TestPartitionParams(TestcaseBase):
         query_res, _ = partition_w.query(expr=f"{ct.default_int64_field_name} in [0]")
         assert len(query_res) == 1
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_load_replica_greater_than_querynodes(self):
         """
         target: test load with replicas that greater than querynodes
