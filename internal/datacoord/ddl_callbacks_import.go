@@ -227,10 +227,24 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		mlog.Warn(ctx, "CommitImport: job not found, skipping", mlog.FieldJobID(jobID))
 		return nil
 	}
-	if job.GetState() != internalpb.ImportJobState_Uncommitted {
-		mlog.Info(ctx, "CommitImport: job not in Uncommitted state, no-op",
+	switch job.GetState() {
+	case internalpb.ImportJobState_Uncommitted:
+		// proceed
+	case internalpb.ImportJobState_Committing, internalpb.ImportJobState_Completed:
+		mlog.Info(ctx, "CommitImport: job already committing or completed, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return nil
+	case internalpb.ImportJobState_Failed:
+		mlog.Info(ctx, "CommitImport: job already failed, no-op",
+			mlog.FieldJobID(jobID))
+		return nil
+	default:
+		// CommitImport may be replicated before the local import task reaches
+		// Uncommitted. Returning an error keeps the broadcast task alive so the
+		// callback can retry after the import task finishes writing local meta.
+		mlog.Info(ctx, "CommitImport: job is not ready, retry later",
+			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
+		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
 	if err := c.importMeta.UpdateJob(ctx, jobID,

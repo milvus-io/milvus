@@ -5594,6 +5594,29 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 	}
 }
 
+func TestHandleCommitVchannelRPC_MissingJobReturnsError(t *testing.T) {
+	ctx := context.Background()
+
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+
+	importMeta, err := NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+
+	server := &Server{
+		importMeta: importMeta,
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
+		JobId:    3001,
+		Vchannel: "vchan-0",
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrImportSysFailed)
+}
+
 // Named helper types for mockey interface-method patching. Using named types
 // instead of anonymous struct{ Iface } avoids a go1.26 `go vet` printf-pass
 // panic in x/tools refactor/satisfy on method expressions of *struct{...}.
