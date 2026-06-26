@@ -3912,9 +3912,9 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
     def gen_file_with_local_bulk_writer(
         self, schema, data: list[dict[str, Any]], file_type: str = "PARQUET"
-    ) -> tuple[str, dict]:
+    ) -> tuple[list[list[str]], dict]:
         """
-        Generate import file using LocalBulkWriter from insert-format data
+        Generate import files using LocalBulkWriter from insert-format data
 
         Args:
             schema: Collection schema
@@ -3922,7 +3922,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             file_type: Output file type, "PARQUET" or "JSON"
 
         Returns:
-            Tuple of (directory path containing generated files, original data dict for verification)
+            Tuple of (LocalBulkWriter batch files, original data dict for verification)
         """
         # Convert file_type string to BulkFileType enum
         bulk_file_type = BulkFileType.PARQUET if file_type == "PARQUET" else BulkFileType.JSON
@@ -3980,9 +3980,12 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             if not minio_client.bucket_exists(self.bucket_name):
                 raise Exception(f"MinIO bucket '{self.bucket_name}' doesn't exist")
 
-            # Upload file
+            # Upload file. LocalBulkWriter uses deterministic file names such as 1.parquet/1.json
+            # inside a unique UUID directory, so keep the directory name in remote object path to
+            # avoid overwriting files from concurrent or previous runs.
             filename = os.path.basename(local_file_path)
-            minio_file_path = os.path.join(self.REMOTE_DATA_PATH, filename)
+            parent_dir = os.path.basename(os.path.dirname(local_file_path))
+            minio_file_path = os.path.join(self.REMOTE_DATA_PATH, parent_dir, filename)
             minio_client.fput_object(self.bucket_name, minio_file_path, local_file_path)
 
             log.info(f"Uploaded file to MinIO: {minio_file_path}")
@@ -4006,6 +4009,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             url=url,
             collection_name=collection_name,
             files=batch_files,
+            api_key=cf.param_info.param_token,
         )
 
         job_id = resp.json()["data"]["jobId"]
@@ -4017,7 +4021,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         while time.time() - start_time < timeout:
             time.sleep(5)
 
-            resp = get_import_progress(url=url, job_id=job_id)
+            resp = get_import_progress(url=url, job_id=job_id, api_key=cf.param_info.param_token)
             state = resp.json()["data"]["state"]
             progress = resp.json()["data"]["progress"]
 
