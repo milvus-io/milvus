@@ -161,7 +161,8 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 		}, nil
 	}
 
-	if s.nodeMgr.Get(req.GetNodeID()) == nil {
+	node := s.nodeMgr.Get(req.GetNodeID())
+	if node == nil {
 		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
 		log.Warn(ctx, errMsg, mlog.Err(err))
 		return &querypb.GetQueryNodeDistributionResponse{
@@ -172,9 +173,10 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetNodeID()))
 	channels := s.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(req.GetNodeID()))
 	return &querypb.GetQueryNodeDistributionResponse{
-		Status:           merr.Success(),
-		ChannelNames:     lo.Map(channels, func(c *meta.DmChannel, _ int) string { return c.GetChannelName() }),
-		SealedSegmentIDs: lo.Map(segments, func(s *meta.Segment, _ int) int64 { return s.GetID() }),
+		Status:                   merr.Success(),
+		ChannelNames:             lo.Map(channels, func(c *meta.DmChannel, _ int) string { return c.GetChannelName() }),
+		SealedSegmentIDs:         lo.Map(segments, func(s *meta.Segment, _ int) int64 { return s.GetID() }),
+		CacheShardDiskUsageStats: node.CacheShardDiskUsageStats(),
 	}, nil
 }
 
