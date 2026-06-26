@@ -4832,7 +4832,7 @@ user-task-polling:
 
 	p.MutatePoolSizeFactor = ParamItem{
 		Key:          "queryNode.segcore.mutatePoolSizeFactor",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "2",
 		Doc:          "size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes",
 		Export:       true,
@@ -4841,7 +4841,7 @@ user-task-polling:
 
 	p.DynamicPoolSizeFactor = ParamItem{
 		Key:          "queryNode.segcore.dynamicPoolSizeFactor",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "1",
 		Doc:          "size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info",
 		Export:       true,
@@ -4850,7 +4850,7 @@ user-task-polling:
 
 	p.DeletePoolSizeFactor = ParamItem{
 		Key:          "queryNode.segcore.deletePoolSizeFactor",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "1",
 		Doc:          "size factor (CPUNum * factor) of the DeleteBatch dispatch pool",
 		Export:       true,
