@@ -4048,7 +4048,7 @@ If set to 0, time based eviction is disabled.`,
 
 	p.TieredRejectRemoteVectorOutput = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.rejectRemoteVectorOutput",
-		Version:      "2.6.14",
+		Version:      "3.0.0",
 		DefaultValue: "false",
 		Doc:          "When true, search/query fails instead of loading remote vector field data for output fields that are not already cached in local memory or disk.",
 		Export:       false,

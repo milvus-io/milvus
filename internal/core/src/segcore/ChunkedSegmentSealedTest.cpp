@@ -283,7 +283,7 @@ TEST(test_chunk_segment, RejectRemoteVectorOutputFailsWhenVectorCellsAreCold) {
         chunked->TestFillTargetEntry(&plan, result);
         FAIL() << "expected cold vector output to be rejected";
     } catch (const SegcoreError& err) {
-        EXPECT_EQ(err.get_error_code(), FieldNotLoaded);
+        EXPECT_EQ(err.get_error_code(), RetrieveError);
         EXPECT_NE(std::string(err.what()).find("vector field"),
                   std::string::npos);
     }
@@ -320,7 +320,7 @@ TEST(test_chunk_segment,
         (void)results;
         FAIL() << "expected cold vector output to be rejected";
     } catch (const SegcoreError& err) {
-        EXPECT_EQ(err.get_error_code(), FieldNotLoaded);
+        EXPECT_EQ(err.get_error_code(), RetrieveError);
         EXPECT_NE(std::string(err.what()).find("vector field"),
                   std::string::npos);
     }
