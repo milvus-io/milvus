@@ -109,6 +109,21 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
         // No-op - no data to prefetch
     }
 
+    bool
+    CellsLoaded(const int64_t* offsets, int64_t count) const override {
+        if (count == 0) {
+            return true;
+        }
+        AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
+        for (int64_t i = 0; i < count; i++) {
+            AssertInfo(offsets[i] >= 0 && offsets[i] < num_rows_,
+                       "offset {} is out of range, num_rows: {}",
+                       offsets[i],
+                       num_rows_);
+        }
+        return true;
+    }
+
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,

@@ -141,6 +141,7 @@ ConfigureTieredStorage(
     const char* disk_path,
     const int64_t loading_timeout_ms,
     const int64_t warmup_loading_timeout_ms,
+    const bool reject_remote_vector_output,
     // async warmup prefetch pool threads
     const uint32_t prefetch_pool_threads);
 
@@ -148,6 +149,7 @@ void
 UpdateTieredStorageConfig(const int64_t loading_timeout_ms,
                           const int64_t warmup_loading_timeout_ms,
                           const bool storage_usage_tracking_enabled,
+                          const bool reject_remote_vector_output,
                           const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                           const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
                           const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,

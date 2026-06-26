@@ -3587,6 +3587,7 @@ type queryNodeConfig struct {
 	TieredLoadingTimeoutMs          ParamItem `refreshable:"true"`
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
+	TieredRejectRemoteVectorOutput  ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -4054,6 +4055,15 @@ If set to 0, time based eviction is disabled.`,
 		Export:       true,
 	}
 	p.StorageUsageTrackingEnabled.Init(base.mgr)
+
+	p.TieredRejectRemoteVectorOutput = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.rejectRemoteVectorOutput",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "When true, search/query fails instead of loading remote vector field data for output fields that are not already cached in local memory or disk.",
+		Export:       false,
+	}
+	p.TieredRejectRemoteVectorOutput.Init(base.mgr)
 
 	p.TieredLoadingResourceFactor = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",

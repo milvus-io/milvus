@@ -52,6 +52,24 @@ constexpr int64_t kTestRows = 5;
 constexpr int64_t kVecDim = 4;
 constexpr int64_t kBinaryVecDim = 16;
 
+class ScopedRejectRemoteVectorOutput {
+ public:
+    explicit ScopedRejectRemoteVectorOutput(bool enabled)
+        : old_value_(SegcoreConfig::default_config()
+                         .get_reject_remote_vector_output()) {
+        SegcoreConfig::default_config().set_reject_remote_vector_output(
+            enabled);
+    }
+
+    ~ScopedRejectRemoteVectorOutput() {
+        SegcoreConfig::default_config().set_reject_remote_vector_output(
+            old_value_);
+    }
+
+ private:
+    bool old_value_;
+};
+
 std::string
 BuildDenseVectorBytes(int row, int byte_width, int seed) {
     std::string bytes(byte_width, '\0');
@@ -2416,6 +2434,36 @@ TEST(ExternalTakeAccessMode, RetrieveEnabledUsesTake) {
     EXPECT_EQ(results->fields_data(0).scalars().long_data().data_size(), size);
 }
 
+TEST(ExternalTakeAccessMode, RetrieveRejectRemoteVectorOutputReturnsFalse) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {vec_id};
+
+    ScopedRejectRemoteVectorOutput scoped_config(true);
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+    bool ok = segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(results->fields_data_size(), 0);
+}
+
 // use_take_for_output=false: TryTakeForSearch returns false
 TEST(ExternalTakeAccessMode, SearchDisabledReturnsFalse) {
     auto [schema,
@@ -2476,6 +2524,36 @@ TEST(ExternalTakeAccessMode, SearchEnabledUsesTake) {
     EXPECT_EQ(int64_arr->scalars().long_data().data(0), 0);
     EXPECT_EQ(int64_arr->scalars().long_data().data(1), 20000);
     EXPECT_EQ(int64_arr->scalars().long_data().data(2), 40000);
+}
+
+TEST(ExternalTakeAccessMode, SearchRejectRemoteVectorOutputReturnsFalse) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(schema);
+    plan->target_entries_ = {vec_id};
+
+    ScopedRejectRemoteVectorOutput scoped_config(true);
+
+    SearchResult results;
+    std::vector<int64_t> offsets = {0, 2, 4};
+    bool ok = segment->TestTryTakeForSearch(
+        plan.get(), offsets.data(), offsets.size(), results);
+    EXPECT_FALSE(ok);
+    EXPECT_TRUE(results.output_fields_data_.empty());
 }
 
 // NormalizeVectorArraysToFixedSizeBinary tests are skipped in this file
