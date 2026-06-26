@@ -172,8 +172,11 @@ func (c *consumerImpl) recvLoop() (err error) {
 				resp.Consume.GetMessage().GetPayload(),
 				resp.Consume.GetMessage().GetProperties(),
 			)
+			msgCtx, span := message.StartSpan(message.ExtractTraceContext(c.ctx, newImmutableMsg), message.SpanNameWALDistConsume)
+			message.OverwriteTraceContext(msgCtx, newImmutableMsg)
+			span.End()
 			if newImmutableMsg.TxnContext() != nil {
-				if err := c.handleTxnMessage(newImmutableMsg); err != nil {
+				if err := c.handleTxnMessage(msgCtx, newImmutableMsg); err != nil {
 					return err
 				}
 			} else {
@@ -181,7 +184,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 					panic("unreachable code: txn builder should be nil if we receive a non-txn message")
 				}
 				if result := c.msgHandler.Handle(message.HandleParam{
-					Ctx:     c.ctx,
+					Ctx:     msgCtx,
 					Message: newImmutableMsg,
 				}); result.Error != nil {
 					c.logger.Warn(c.ctx, "message handle canceled", mlog.Err(err))
@@ -222,7 +225,7 @@ func (c *consumerImpl) createVChannelConsumer() error {
 	return nil
 }
 
-func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
+func (c *consumerImpl) handleTxnMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	switch msg.MessageType() {
 	case message.MessageTypeBeginTxn:
 		if c.txnBuilder != nil {
@@ -250,8 +253,9 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 			c.logger.Warn(c.ctx, "failed to build txn message", mlog.Any("messageID", commitMsg.MessageID()), mlog.Err(err))
 			return nil
 		}
+		message.OverwriteTraceContext(ctx, msg)
 		if result := c.msgHandler.Handle(message.HandleParam{
-			Ctx:     c.ctx,
+			Ctx:     ctx,
 			Message: msg,
 		}); result.Error != nil {
 			c.logger.Warn(c.ctx, "message handle canceled at txn", mlog.Err(result.Error))

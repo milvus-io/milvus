@@ -189,13 +189,13 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 
 	p.appendWG.Add(1)
 	msg := message.NewMutableMessageBeforeAppend(req.GetMessage().GetPayload(), req.GetMessage().GetProperties())
-	msgCtx := message.ExtractTraceContext(p.produceServer.Context(), msg)
-	p.logger.Debug(msgCtx, "recv produce message from client", mlog.Int64("requestID", req.RequestId))
+	ctx := message.ExtractTraceContext(p.produceServer.Context(), msg)
+	p.logger.Debug(ctx, "recv produce message from client", mlog.Int64("requestID", req.RequestId))
 	// Update metrics.
 	metricsGuard := p.metrics.StartProduce()
 	if err := p.validateMessage(msg); err != nil {
-		p.logger.Warn(msgCtx, "produce message validation failed", mlog.Int64("requestID", req.RequestId), mlog.Err(err))
-		p.sendProduceResult(msgCtx, req.RequestId, nil, err)
+		p.logger.Warn(ctx, "produce message validation failed", mlog.Int64("requestID", req.RequestId), mlog.Err(err))
+		p.sendProduceResult(ctx, req.RequestId, nil, err)
 		metricsGuard.Finish(err)
 		p.appendWG.Done()
 		return
@@ -203,12 +203,12 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 
 	// Append message to wal.
 	// Concurrent append request can be executed concurrently.
-	p.wal.AppendAsync(msgCtx, msg, func(appendResult *wal.AppendResult, err error) {
+	p.wal.AppendAsync(ctx, msg, func(appendResult *wal.AppendResult, err error) {
 		defer func() {
 			metricsGuard.Finish(err)
 			p.appendWG.Done()
 		}()
-		p.sendProduceResult(msgCtx, req.RequestId, appendResult, err)
+		p.sendProduceResult(ctx, req.RequestId, appendResult, err)
 	})
 }
 

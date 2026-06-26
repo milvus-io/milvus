@@ -8,6 +8,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
@@ -110,6 +115,63 @@ func TestConsumerWithCancellation(t *testing.T) {
 	assert.ErrorIs(t, c.consumer.Error(), context.Canceled)
 }
 
+func TestRemoteConsumerOverwritesTraceContextWithDistConsumeSpan(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALConsume)
+	sourceSC := trace.SpanContextFromContext(sourceCtx)
+	sourceSpan.End()
+
+	h := &captureTraceHandler{ch: make(chan message.HandleParam, 1)}
+	c := newMockedConsumerImpl(t, context.Background(), h)
+
+	mmsg, _ := message.NewInsertMessageBuilderV1().
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithVChannel("test-1").
+		BuildMutable()
+	message.InjectTraceContext(sourceCtx, mmsg)
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(1), mmsg)
+
+	var param message.HandleParam
+	select {
+	case param = <-h.ch:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for consumed message")
+	}
+
+	c.consumer.Close()
+	<-c.consumer.Done()
+	require.NoError(t, c.consumer.Error())
+
+	spans := exporter.GetSpans()
+	var distConsume tracetest.SpanStub
+	for _, s := range spans {
+		if s.Name == message.SpanNameWALDistConsume {
+			distConsume = s
+			break
+		}
+	}
+	require.Equal(t, message.SpanNameWALDistConsume, distConsume.Name)
+	assert.Equal(t, sourceSC.TraceID(), distConsume.SpanContext.TraceID())
+	assert.Equal(t, sourceSC.SpanID(), distConsume.Parent.SpanID())
+
+	ctxSC := trace.SpanContextFromContext(param.Ctx)
+	assert.Equal(t, distConsume.SpanContext.TraceID(), ctxSC.TraceID())
+	assert.Equal(t, distConsume.SpanContext.SpanID(), ctxSC.SpanID())
+
+	msgSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), param.Message))
+	assert.Equal(t, distConsume.SpanContext.TraceID(), msgSC.TraceID())
+	assert.Equal(t, distConsume.SpanContext.SpanID(), msgSC.SpanID())
+}
+
 type mockedConsumer struct {
 	consumer Consumer
 	recvCh   chan *streamingpb.ConsumeResponse
@@ -187,4 +249,16 @@ func newConsumeResponse(id message.MessageID, msg message.MutableMessage) *strea
 			},
 		},
 	}
+}
+
+type captureTraceHandler struct {
+	ch chan message.HandleParam
+}
+
+func (h *captureTraceHandler) Handle(param message.HandleParam) message.HandleResult {
+	h.ch <- param
+	return message.HandleResult{MessageHandled: true}
+}
+
+func (h *captureTraceHandler) Close() {
 }
