@@ -80,23 +80,21 @@ func getFilesSizeWithRetry(ctx context.Context, cm storage.ChunkManager,
 			)
 			// Map raw storage error to Milvus IO error for consistent classification.
 			e = storage.ToMilvusIoError(filePath, e)
-			// RemoteChunkManager.Size() already retries retryable codes
-			// (ErrIoUnexpectEOF / ErrIoTooManyRequests) internally on its own allowlist.
-			// This outer layer only fills the gap that inner retry leaves: a transient
-			// error it does not cover -- ErrIoFailed, e.g. "net/http: timeout awaiting
-			// response headers" -- that is not a permanent/validation error. Retrying
-			// inner-retryable or permanent codes here would stack the two layers (up to
-			// retryAttempts^2 HEAD calls under a SlowDown storm), so bail out on both.
-			//
-			// Note ErrIoFailed is a catch-all: known-permanent errors are classified to
-			// denylist codes (KeyNotFound / PermissionDenied / BucketNotFound / ...) and
-			// fail fast on both the Remote and the Local paths, so only genuinely-unknown
-			// errors are retried here -- the same trade-off the existing read/walk denylist
-			// retries make.
-			if merr.IsNonRetryableErr(e) || merr.IsRetryableErr(e) {
-				return retry.Unrecoverable(e)
+			// This outer layer exists only to cover the gap the chunk manager's inner
+			// retry leaves: a transient transport failure that maps to the catch-all
+			// ErrIoFailed, e.g. "net/http: timeout awaiting response headers". Everything
+			// else is handled elsewhere and must NOT be retried here:
+			//   - permanent codes (KeyNotFound / PermissionDenied / BucketNotFound / ...)
+			//     are on the denylist and must fail fast;
+			//   - inner-retryable codes (ErrIoTooManyRequests / ErrIoUnexpectEOF) are
+			//     already retried by RemoteChunkManager.Size() on its own allowlist, so
+			//     retrying them again here would stack the two layers (up to
+			//     retryAttempts^2 HEAD calls under a SlowDown storm).
+			// So retry only ErrIoFailed, and stop on everything else.
+			if errors.Is(e, merr.ErrIoFailed) {
+				return e
 			}
-			return e
+			return retry.Unrecoverable(e)
 		}, retry.Attempts(retryAttempts))
 		if err != nil {
 			return 0, err
