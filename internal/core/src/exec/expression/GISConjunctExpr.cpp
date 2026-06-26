@@ -64,7 +64,7 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 
     // Phase 1: build B_coarse once for the whole segment.
-    if (!st_->coarse_done.load()) {
+    if (!st_->coarse_done) {
         TargetBitmap cand(active_count_, st_->is_and);  // AND -> 1s / OR -> 0s
         for (auto& p : st_->preds) {
             if (p.has_index) {
@@ -83,12 +83,19 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         st_->coarse_candidates =
             std::make_shared<TargetBitmap>(std::move(cand));
-        st_->coarse_done.store(true);
+        st_->coarse_done = true;
     }
 
     // Phase 2: emit slice [current_pos_, +real_batch_size).
     TargetBitmap out;
     out.append(*st_->coarse_candidates, current_pos_, real_batch_size);
+    // valid is all-ones intentionally (see also the Refine node): split is only
+    // applied INSIDE a pure conjunction chain (ReorderConjunctExpr recurses only
+    // into PhyConjunctFilterExpr; NOT compiles to PhyLogicalUnaryExpr), and the
+    // three-valued And/Or result bits never consume `valid` (only Not does).
+    // Geometry null rows keep their res bit false on both the baseline and the
+    // split path, so the selection set is identical even though `valid` here
+    // diverges from the baseline's not-null bitmap. See PR #50675 review.
     TargetBitmap valid(real_batch_size, true);
 
     MoveCursor();
@@ -122,6 +129,10 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     const auto seg_offset = current_pos_;
 
     TargetBitmap res(real_batch_size, false);
+    // valid_res is all-ones intentionally; see the rationale on the Coarse
+    // node's `valid` above (split runs only inside pure conjunctions, where the
+    // result bits never consume `valid`, so this divergence from the baseline's
+    // not-null bitmap is unobservable in the selection set).
     TargetBitmap valid_res(real_batch_size, true);
 
     // Survivors = batch slice of (bitmap_input == scalars ∧ B_coarse) ∧ B_coarse.

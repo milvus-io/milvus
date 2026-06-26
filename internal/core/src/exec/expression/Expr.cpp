@@ -378,12 +378,28 @@ SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         if (!g) {
             return nullptr;
         }
-        // DWithin carries a distance; not grouped in this pass.
-        if (g->GetGISExpr()->op_ ==
-            proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
-            return nullptr;
+        // Whitelist only the binary topological predicates the coarse/refine
+        // split + fusion path actually supports: they carry a non-empty query
+        // WKT and have a case in EvaluateGISPreparedOp. Everything else is left
+        // on the baseline per-predicate path. In particular:
+        //   - DWithin carries a distance (not handled by the prepared fusion);
+        //   - STIsValid is a UNARY op with an EMPTY query WKT and is routed to
+        //     RawData by DetermineExecPath -- grouping it would construct a
+        //     Geometry from "" (GEOS returns null -> AssertInfo throws) and has
+        //     no EvaluateGISPreparedOp case, crashing valid queries.
+        switch (g->GetGISExpr()->op_) {
+            case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
+            case proto::plan::GISFunctionFilterExpr_GISOp_Within:
+                return g;
+            default:
+                // DWithin, STIsValid, Invalid, and any future op: not grouped.
+                return nullptr;
         }
-        return g;
     };
 
     auto emit_split_nodes =
