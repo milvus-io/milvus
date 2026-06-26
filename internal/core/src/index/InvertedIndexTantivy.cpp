@@ -812,16 +812,18 @@ InvertedIndexTantivy<T>::build_index_for_array_nested(
     int64_t row_offset = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++, row_offset++) {
             if (schema_.nullable() && !data->is_valid(i)) {
                 // Record null row offset, no elements to add
                 null_offset_.push_back(row_offset);
                 continue;
             }
-            auto length = array_column[i].length();
+            // RawValue maps logical->physical so compact nullable array
+            // FieldData is read correctly (Data()[i] would overrun).
+            auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
+            auto length = array->length();
             wrapper_->template add_data<ElementType>(
-                reinterpret_cast<const ElementType*>(array_column[i].data()),
+                reinterpret_cast<const ElementType*>(array->data()),
                 length,
                 offset);
             offset += length;
@@ -838,22 +840,23 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
     std::vector<std::string> output;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++, row_offset++) {
             if (schema_.nullable() && !data->is_valid(i)) {
                 // Record null row offset, no elements to add
                 null_offset_.push_back(row_offset);
                 continue;
             }
-            Assert(IsStringDataType(array_column[i].get_element_type()));
+            // RawValue maps logical->physical so compact nullable array
+            // FieldData is read correctly (Data()[i] would overrun).
+            auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
+            Assert(IsStringDataType(array->get_element_type()));
             Assert(IsStringDataType(
                 static_cast<DataType>(schema_.element_type())));
 
             output.clear();
-            auto length = array_column[i].length();
+            auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                output.push_back(
-                    array_column[i].template get_data<std::string>(j));
+                output.push_back(array->get_data<std::string>(j));
             }
             wrapper_->add_data(output.data(), length, offset);
             offset += length;

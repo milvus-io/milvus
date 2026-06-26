@@ -5085,9 +5085,7 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
 
     auto it = struct_to_array_offsets_.find(*struct_name);
     if (it == struct_to_array_offsets_.end()) {
-        std::vector<int32_t> row_to_element_start(row_count + 1, 0);
-        auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
-            std::move(row_to_element_start));
+        auto array_offsets = ArrayOffsetsSealed::BuildAllZeros(row_count);
         it =
             struct_to_array_offsets_.emplace(*struct_name, array_offsets).first;
     }

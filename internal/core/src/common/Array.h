@@ -540,7 +540,12 @@ class ArrayView {
                     : offsets_ptr_[index + 1] - offsets_ptr_[index];
             return T(data_ + offsets_ptr_[index], element_length);
         }
+        // Note: INT8/INT16 array elements are physically stored as int32_t, so
+        // int8_t/int16_t must go through this branch (4-byte stride, then
+        // narrow) rather than the raw reinterpret_cast below. This mirrors
+        // Array::get_data and keeps the offset-input element path correct.
         if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
+                      std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
                       std::is_same_v<T, float> || std::is_same_v<T, double>) {
             switch (element_type_) {
                 case DataType::INT8:

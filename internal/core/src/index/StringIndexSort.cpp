@@ -220,10 +220,13 @@ StringIndexSort::BuildWithFieldData(
     if (is_nested_index_) {
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
-            auto array_column = static_cast<const Array*>(data->Data());
             for (int64_t i = 0; i < n; i++) {
                 if (data->is_valid(i)) {
-                    total_num_rows_ += array_column[i].length();
+                    // RawValue maps logical->physical so compact nullable array
+                    // FieldData is read correctly (Data()[i] would overrun).
+                    total_num_rows_ +=
+                        reinterpret_cast<const Array*>(data->RawValue(i))
+                            ->length();
                 }
             }
         }
@@ -838,13 +841,14 @@ StringIndexSortMemoryImpl::BuildFromArrayDataNested(
     size_t element_id = 0;
     for (const auto& field_data : field_datas) {
         auto n = field_data->get_num_rows();
-        auto array_column = static_cast<const Array*>(field_data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (!field_data->is_valid(i)) {
                 continue;
             }
-            for (int64_t j = 0; j < array_column[i].length(); j++) {
-                auto value = array_column[i].get_data<std::string>(j);
+            auto* array =
+                reinterpret_cast<const Array*>(field_data->RawValue(i));
+            for (int64_t j = 0; j < array->length(); j++) {
+                auto value = array->get_data<std::string>(j);
                 map[value].push_back(static_cast<int32_t>(element_id));
                 valid_bitset.set(element_id);
                 element_id++;

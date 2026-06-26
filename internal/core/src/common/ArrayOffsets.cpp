@@ -189,7 +189,7 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
             "ArrayOffsetsSealed::BuildFromSegment: empty segment for struct "
             "'{}'",
             field_meta.get_name().get());
-        return std::make_shared<ArrayOffsetsSealed>(std::vector<int32_t>{0});
+        return ArrayOffsetsSealed::BuildAllZeros(0);
     }
 
     FieldId field_id = field_meta.get_id();
