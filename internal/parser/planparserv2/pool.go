@@ -44,6 +44,14 @@ func getParser(lexer *antlrparser.PlanLexer, listeners ...antlr.ErrorListener) *
 	}
 	parser.BuildParseTrees = true
 	parser.SetInputStream(tokenStream)
+	// Hand the parser out in the default LL prediction mode. parseExpr flips it to
+	// SLL for stage 1 and only restores LL on the (rare) stage-2 path, so a parser
+	// returned to the pool after a clean stage-1 parse is still in SLL mode —
+	// antlr-go's SetInputStream/reset does not restore predictionMode. Reset it
+	// here so the pool always yields an LL parser and any caller that runs the
+	// pooled parser directly (e.g. parser.Expr() in tests/benchmarks) never
+	// inherits SLL-only behavior that could reject inputs full LL accepts.
+	parser.GetInterpreter().SetPredictionMode(antlr.PredictionModeLL)
 	return parser
 }
 
