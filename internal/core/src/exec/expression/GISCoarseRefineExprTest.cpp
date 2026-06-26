@@ -95,6 +95,10 @@ EquivExprs() {
         R"expr(age >= 0 and st_intersects(geo, "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))") and st_within(geo, "POLYGON((-100 -100, 100 -100, 100 100, -100 100, -100 -100))"))expr",
         // (6) single GIS only (no conjunction -> fusion must be a no-op)
         R"expr(st_intersects(geo, "POINT(0 0)"))expr",
+        // NOTE: the master PR also covers an STIsValid case (st_isvalid must stay
+        // off the split-fusion group path). The ST_IsValid GIS op does not exist
+        // on 2.6 (plan proto GISOp stops at DWithin), so that case is omitted
+        // here; the as_groupable_gis whitelist still defends against it.
     };
     return exprs;
 }
@@ -129,10 +133,10 @@ AssertFusionEquivalence(const std::shared_ptr<Schema>& schema,
 }
 
 std::shared_ptr<Schema>
-MakeGISSchema() {
+MakeGISSchema(bool nullable_geo = false) {
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->AddDebugField("geo", DataType::GEOMETRY, nullable_geo);
     schema->AddDebugField("age", DataType::INT64);
     schema->AddDebugField(
         "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -173,6 +177,46 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionWithGeometryCache) {
     ASSERT_NE(milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
                   seg->get_segment_id(), geo_fid),
               nullptr);
+
+    AssertFusionEquivalence(schema, handle, seg.get(), N);
+}
+
+// Equivalence with a NULLABLE geometry field, so ~50% of rows carry null
+// geometry (DataGen's deterministic i%2 valid pattern). Exercises the
+// null-handling branches in the Coarse/Refine nodes (the `valid` bitmaps and
+// the Refine null-skip), which the non-nullable schema never reaches. The
+// split path must still produce exactly the baseline selection on null rows.
+TEST(GISCoarseRefineExprTest, EquivalenceFusionNullableGeometry) {
+    auto schema = MakeGISSchema(/*nullable_geo=*/true);
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
+    ScopedSchemaHandle handle(*schema);
+
+    // Sanity: the nullable geo column must actually contain null rows, else this
+    // test degenerates into the non-nullable case.
+    auto geo_fid = schema->get_field_id(FieldName("geo"));
+    const auto& valid = dataset.get_col_valid(geo_fid);
+    ASSERT_NE(std::count(valid.begin(), valid.end(), false), 0)
+        << "nullable geo column produced no null rows";
+
+    AssertFusionEquivalence(schema, handle, seg.get(), N);
+}
+
+// Equivalence on a GROWING segment. The baseline GIS path takes different
+// data-type branches for growing vs. sealed segments (std::string vs.
+// std::string_view chunk access), so the sealed-only tests above cannot lock
+// down the growing path. No R-Tree index exists on a growing segment, so this
+// also covers the Coarse node's "no index -> full coarse set" degenerate path.
+TEST(GISCoarseRefineExprTest, EquivalenceFusionGrowingSegment) {
+    auto schema = MakeGISSchema();
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateGrowingWithFieldDataLoaded(schema,
+                                                milvus::empty_index_meta,
+                                                SegcoreConfig::default_config(),
+                                                dataset);
+    ScopedSchemaHandle handle(*schema);
 
     AssertFusionEquivalence(schema, handle, seg.get(), N);
 }
