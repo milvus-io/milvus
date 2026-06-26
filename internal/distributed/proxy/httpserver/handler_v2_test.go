@@ -1612,7 +1612,24 @@ func TestCreateCollection(t *testing.T) {
 
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(15)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+		hasNegativeTTL := false
+		for _, prop := range req.GetProperties() {
+			if prop.GetKey() == common.CollectionTTLConfigKey && prop.GetValue() == "-100" {
+				hasNegativeTTL = true
+				break
+			}
+		}
+		if hasNegativeTTL {
+			for _, prop := range req.GetProperties() {
+				if prop.GetKey() == "ttl.seconds" && prop.GetValue() == "-100" {
+					return merr.Status(merr.WrapErrParameterInvalidMsg("unexpected ttl.seconds property forwarded")), nil
+				}
+			}
+			return merr.Status(merr.WrapErrParameterInvalidMsg("collection TTL is out of range, expect [-1, 3155760000], got -100")), nil
+		}
+		return commonSuccessStatus, nil
+	}).Times(17)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(8)
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
@@ -1646,6 +1663,34 @@ func TestCreateCollection(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
 			`"params": {"max_length": 256, "enableDynamicField": false, "shardsNum": 2, "consistencyLevel": "unknown", "ttlSeconds": 3600}}`),
 		errMsg:  "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded: invalid parameter[expected=Strong, Session, Bounded, Eventually, Customized][actual=unknown]",
+		errCode: 1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": 256}, "properties": {"collection.ttl.seconds": -100}}`),
+		errMsg:  "collection TTL is out of range, expect [-1, 3155760000], got -100: invalid parameter",
+		errCode: 1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": 256}, "properties": {"ttl.seconds": -100}}`),
+		errMsg:  "collection TTL is out of range, expect [-1, 3155760000], got -100: invalid parameter",
+		errCode: 1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": 256, "ttlSeconds": 3600}, "properties": {"collection.ttl.seconds": 3600}}`),
+		errMsg:  "collection TTL is specified multiple times: invalid parameter",
+		errCode: 1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": 256}, "properties": {"collection.ttl.seconds": 3600, "ttl.seconds": 3600}}`),
+		errMsg:  "collection TTL is specified multiple times: invalid parameter",
 		errCode: 1100, // ErrParameterInvalid
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{

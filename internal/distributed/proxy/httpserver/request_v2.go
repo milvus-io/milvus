@@ -898,6 +898,7 @@ type CollectionReq struct {
 	Schema           CollectionSchema       `json:"schema"`
 	IndexParams      []IndexParam           `json:"indexParams"`
 	Params           map[string]interface{} `json:"params"`
+	Properties       map[string]interface{} `json:"properties"`
 	Description      string                 `json:"description"`
 	// Top-level external config is accepted only for explicit rejection.
 	// Create external collection must use schema.externalSource/schema.externalSpec.
