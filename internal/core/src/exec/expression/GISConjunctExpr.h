@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,7 +53,10 @@ struct GISGroupState {
     // B_coarse = combine(Ci) over all preds. Filled by the Coarse node, read by
     // the Refine node. Cached once per segment for the whole query.
     std::shared_ptr<TargetBitmap> coarse_candidates;
-    std::atomic<bool> coarse_done{false};
+    // A fresh GISGroupState is created per segment (SplitFuseGISConjunct) and
+    // per-segment batch execution is single-threaded, so this guard needs no
+    // atomicity -- it is only read/written inside PhyGISCoarseConjunctExpr::Eval.
+    bool coarse_done{false};
 };
 
 using GISGroupStatePtr = std::shared_ptr<GISGroupState>;
