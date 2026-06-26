@@ -38,24 +38,26 @@ Milvus Snapshot mechanism provides complete collection-level data snapshot capab
 
 **Execution Steps**:
 
-1. **Acquire Snapshot Timestamp**: Obtain the minimum timestamp from channel seek positions as snapshotTs
-2. **Filter Segments**: Select all non-dropped segments where StartPosition < snapshotTs
-3. **Collect Metadata**: Retrieve collection schema, index definitions, and segment details (binlog/deltalog/indexfile paths)
-4. **Write to S3**: Write complete metadata, schema, index, and segment information to S3 in manifest format
-5. **Write to Etcd**: Save basic SnapshotInfo to Etcd and establish segment/index references
+1. **Acquire Channel Seek Positions**: Obtain a `MsgPosition` for each collection channel. These positions form the snapshot's per-channel data boundary.
+2. **Compute Compatibility CreateTs**: Store `create_ts = min(channel_seek_positions.timestamp)` for legacy display and sorting.
+3. **Filter Segments By Channel**: Select each non-dropped segment only when `segmentEffectiveTs(segment) < channel_seek_positions[segment.channel_name].timestamp`.
+4. **Collect Metadata**: Retrieve collection schema, index definitions, and segment details (binlog/deltalog/indexfile paths).
+5. **Write to S3**: Write complete metadata, schema, index, and segment information to S3 in manifest format.
+6. **Write to Etcd**: Save basic SnapshotInfo to Etcd and establish segment/index references.
 
 **Important Notes**:
 
 - **CreateSnapshot does not actively flush data**: Only collects existing sealed segments
-- **SnapshotTs Source**: Obtained from the minimum value of current consumption positions (seek positions) across all channels
-- **Data Coverage**: All segments where StartPosition < snapshotTs
-- **Best Practice (Strongly Recommended)**: Call Flush API before creating snapshot to ensure latest data is persisted. Flush is not mandatory but highly recommended to avoid missing data in growing segments
+- **Channel Boundary Source**: Each channel boundary is obtained from that channel's seek position.
+- **CreateTs Semantics**: `create_ts` is a compatibility summary equal to the minimum channel seek timestamp. It is not a global cross-channel visibility boundary.
+- **Data Coverage**: A segment is included according to the seek timestamp of its own insert channel.
+- **Best Practice (Strongly Recommended)**: Call Flush API before creating snapshot to ensure latest data is persisted. Flush is not mandatory but highly recommended to avoid missing data in growing segments.
 
 **Data Point-in-Time**:
 
-- Snapshot contains all sealed segment data before snapshotTs
-- To include latest data, it is strongly recommended to call Flush API before creating snapshot (not mandatory)
-- Data in growing segments will not be included in the snapshot
+- Snapshot contains sealed segment data before each segment channel's seek timestamp.
+- To include latest data, it is strongly recommended to call Flush API before creating snapshot.
+- Data in growing segments will not be included in the snapshot.
 
 ## Snapshot Storage Implementation
 
@@ -359,8 +361,9 @@ func (gc *garbageCollector) recycleUnusedIndexes() {
 ```
 Create:
   User Request -> Proxy CreateSnapshot -> DataCoord
-    -> GetSnapshotTs() (obtain minimum timestamp from channels)
-    -> SelectSegments() (filter segments where StartPosition < snapshotTs)
+    -> GetSnapshotSeekPositions() (obtain one seek position per channel)
+    -> compute create_ts as min(channel_seek_positions.timestamp)
+    -> SelectSegments() (filter each segment by its own channel seek timestamp)
     -> Collect Schema/Indexes/Segment detailed information
     -> SnapshotWriter.Save() (write to S3)
     -> SnapshotMeta.SaveSnapshot() (write to Etcd + memory)
@@ -796,11 +799,11 @@ message CreateSnapshotResponse {
 ```
 
 **Implementation Details**:
-1. Obtain minimum timestamp from current channels as snapshotTs
-2. Filter sealed segments where StartPosition < snapshotTs (exclude dropped/importing segments)
-3. Collect collection schema, index definitions, segment detailed information
-4. Write complete data to S3 in manifest format
-5. Save SnapshotInfo in Etcd and establish reference relationships
+1. Obtain a seek position for each current channel and store the minimum timestamp as compatibility `create_ts`.
+2. Filter sealed segments by their own insert channel seek timestamp (exclude dropped/importing segments).
+3. Collect collection schema, index definitions, segment detailed information.
+4. Write complete data to S3 in manifest format.
+5. Save SnapshotInfo in Etcd and establish reference relationships.
 
 **Notes**:
 - Does not actively flush data, only collects existing sealed segments
