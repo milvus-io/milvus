@@ -420,8 +420,12 @@ class ArrayBitmapIndexTest : public testing::Test {
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTest);
 
 TYPED_TEST_P(ArrayBitmapIndexTest, CountFuncTest) {
+    // Array bitmap indexes are now nested (element-level): Count() returns the
+    // total ELEMENT count (array_len * valid rows), not the row count. Row-level
+    // counts come from raw / the segment, not the index. Here all rows are valid
+    // and each has array_len=10 elements.
     auto count = this->index_->Count();
-    EXPECT_EQ(count, this->nb_);
+    EXPECT_EQ(count, this->nb_ * 10);
 }
 
 TYPED_TEST_P(ArrayBitmapIndexTest, INFuncTest) {
@@ -463,8 +467,10 @@ class ArrayBitmapIndexTestV1 : public ArrayBitmapIndexTest<T> {
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTestV1);
 
 TYPED_TEST_P(ArrayBitmapIndexTestV1, CountFuncTest) {
+    // Nested (element-level) array index: Count() == total elements
+    // (array_len=10 * nb_ valid rows).
     auto count = this->index_->Count();
-    EXPECT_EQ(count, this->nb_);
+    EXPECT_EQ(count, this->nb_ * 10);
 }
 
 template <typename T>
@@ -486,8 +492,10 @@ class ArrayBitmapIndexTestNullable : public ArrayBitmapIndexTest<T> {
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTestNullable);
 
 TYPED_TEST_P(ArrayBitmapIndexTestNullable, CountFuncTest) {
+    // Nested (element-level) array index: Count() == total elements over VALID
+    // rows. Half the rows are null (i%2), each valid row has array_len=10.
     auto count = this->index_->Count();
-    EXPECT_EQ(count, this->nb_);
+    EXPECT_EQ(count, (this->nb_ / 2) * 10);
 }
 
 template <typename T>
@@ -510,12 +518,11 @@ class ArrayBitmapIndexTestV2 : public ArrayBitmapIndexTest<T> {
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTestV2);
 
 TYPED_TEST_P(ArrayBitmapIndexTestV2, CountFuncTest) {
+    // Nested (element-level) array index: Count() == total elements over VALID
+    // rows (array_len=10 * nb_/2). Lack-binlog rows carry no elements, so they
+    // do not change the element count.
     auto count = this->index_->Count();
-    if (this->has_lack_binlog_row_) {
-        EXPECT_EQ(count, this->nb_ + this->lack_binlog_row_);
-    } else {
-        EXPECT_EQ(count, this->nb_);
-    }
+    EXPECT_EQ(count, (this->nb_ / 2) * 10);
 }
 
 using BitmapTypeV1 = testing::Types<int32_t, int64_t, std::string>;
@@ -577,7 +584,9 @@ TEST(BitmapIndexArrayNestedTest, BuildAndLoadElementLevelBitmap) {
     auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
     index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
     ASSERT_TRUE(index->IsNestedIndex());
-    ASSERT_TRUE(index->HasRawData());
+    // Nested array indexes report HasRawData()==false so the loader keeps the
+    // raw field data; row-level reads (IsNull, output) go to raw, not the index.
+    ASSERT_FALSE(index->HasRawData());
     ASSERT_EQ(index->Count(), 4);
 
     auto binary_set = index->Serialize({});
@@ -902,24 +911,25 @@ class BitmapIndexArrayRegressionTest
     template <typename T>
     void
     AssertNullSemanticsImpl(index::ScalarIndex<T>* index_ptr) const {
+        // Array bitmap indexes are now nested (element-level). IsNull()/
+        // IsNotNull() therefore return ELEMENT-level validity (one entry per
+        // indexed element), NOT row-level. Row-level null/validity for an array
+        // field is served by raw data -- PhyNullExpr falls back to RawData when
+        // the index is nested -- so the redesign deliberately stops the index
+        // from carrying row-level validity for arrays (tracked in
+        // milvus-io/milvus#50814). Only valid rows' elements are indexed (rows
+        // 0/3 are empty -> no elements; row 2 is null -> skipped), and every
+        // indexed element is valid, so the element-level result is all-non-null.
         auto is_null = index_ptr->IsNull();
         auto is_not_null = index_ptr->IsNotNull();
 
-        ASSERT_EQ(is_null.size(), num_rows_);
-        ASSERT_EQ(is_not_null.size(), num_rows_);
-
-        EXPECT_FALSE(is_null[0]) << "empty array row should stay non-null";
-        EXPECT_TRUE(is_not_null[0]) << "empty array row should stay non-null";
-
-        EXPECT_FALSE(is_null[1]) << "non-empty array row should stay non-null";
-        EXPECT_TRUE(is_not_null[1])
-            << "non-empty array row should stay non-null";
-
-        EXPECT_TRUE(is_null[2]) << "null array row should stay null";
-        EXPECT_FALSE(is_not_null[2]) << "null array row should stay null";
-
-        EXPECT_FALSE(is_null[3]) << "empty array row should stay non-null";
-        EXPECT_TRUE(is_not_null[3]) << "empty array row should stay non-null";
+        ASSERT_EQ(is_null.size(), is_not_null.size());
+        for (size_t i = 0; i < is_null.size(); ++i) {
+            EXPECT_FALSE(is_null[i])
+                << "nested array index elements are all valid";
+            EXPECT_TRUE(is_not_null[i])
+                << "nested array index elements are all valid";
+        }
     }
 };
 
@@ -1015,26 +1025,33 @@ TEST_P(BitmapIndexArrayRegressionTest,
 
         switch (param.element_type) {
             case proto::schema::DataType::Int32: {
-                auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx);
+                // Build a nested (element-level) array bitmap, matching the
+                // factory path the V3 param uses (arrays are now always nested).
+                auto index = std::make_unique<index::BitmapIndex<int32_t>>(
+                    ctx, /*is_nested_index=*/true);
                 index->BuildWithFieldData(
                     std::vector<FieldDataPtr>{field_data});
                 auto binary_set = index->Serialize({});
 
                 auto loaded_index =
-                    std::make_unique<index::BitmapIndex<int32_t>>(ctx);
+                    std::make_unique<index::BitmapIndex<int32_t>>(
+                        ctx, /*is_nested_index=*/true);
                 loaded_index->Load(binary_set, load_config);
                 AssertNullSemantics(loaded_index.get(), param.element_type);
                 break;
             }
             case proto::schema::DataType::String: {
-                auto index =
-                    std::make_unique<index::BitmapIndex<std::string>>(ctx);
+                // Build a nested (element-level) array bitmap, matching the
+                // factory path the V3 param uses (arrays are now always nested).
+                auto index = std::make_unique<index::BitmapIndex<std::string>>(
+                    ctx, /*is_nested_index=*/true);
                 index->BuildWithFieldData(
                     std::vector<FieldDataPtr>{field_data});
                 auto binary_set = index->Serialize({});
 
                 auto loaded_index =
-                    std::make_unique<index::BitmapIndex<std::string>>(ctx);
+                    std::make_unique<index::BitmapIndex<std::string>>(
+                        ctx, /*is_nested_index=*/true);
                 loaded_index->Load(binary_set, load_config);
                 AssertNullSemantics(loaded_index.get(), param.element_type);
                 break;

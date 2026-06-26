@@ -166,7 +166,15 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        return true;
+        // A nested (array-element) index flattens elements and drops row
+        // boundaries plus null/empty rows, so it cannot reconstruct the per-row
+        // array structure that IArrayOffsets -- and thus MATCH_*/element_filter
+        // and array_length -- require. Report false so the segment loader keeps
+        // the raw array data and the offsets get built, instead of loading the
+        // index alone and aborting on a missing-offsets assert at query time.
+        // TODO(scalar-array-index-only): persist per-row element counts (incl.
+        // null/empty rows) in the index to enable a true index-only path.
+        return !is_nested_index_;
     }
 
     void

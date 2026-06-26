@@ -1092,8 +1092,16 @@ IndexFactory::CreateScalarIndex(
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);
         case DataType::ARRAY: {
-            return CreateCompositeScalarIndex(create_index_info,
-                                              file_manager_context);
+            // All array scalar indexes are built as nested (element-level) so
+            // that MATCH_*/element_filter can use them. Row-level array queries
+            // (array_contains, array_length) keep working: the expression
+            // framework converts a nested index's element-level result back to
+            // row-level via IArrayOffsets. Legacy non-nested array indexes
+            // still load; MATCH_* falls back to brute force on them (see the
+            // element-level exec-path guard in the Unary/Range/Term exprs).
+            return CreateNestedIndex(create_index_info.index_type,
+                                     create_index_info.tantivy_index_version,
+                                     file_manager_context);
         }
         case DataType::JSON: {
             return CreateJsonIndex(create_index_info, file_manager_context);

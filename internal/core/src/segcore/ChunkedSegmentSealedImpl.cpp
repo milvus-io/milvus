@@ -5119,6 +5119,20 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
     const FieldMeta& field_meta, int64_t row_count) {
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
+        // Scalar ARRAY field (not part of a struct). When such a field is
+        // materialized for old sealed rows via FillDefaultValueFields(), the
+        // load path that normally builds its ArrayOffsetsSealed is bypassed, so
+        // register an all-zeros offsets here (every old row is an empty array).
+        // Without this, MATCH_*/element_filter would hit a missing-offsets
+        // assert instead of treating the filled rows as empty arrays.
+        if (field_meta.get_data_type() == DataType::ARRAY &&
+            array_offsets_map_.find(field_meta.get_id()) ==
+                array_offsets_map_.end()) {
+            std::vector<int32_t> row_to_element_start(row_count + 1, 0);
+            array_offsets_map_[field_meta.get_id()] =
+                std::make_shared<ArrayOffsetsSealed>(
+                    std::move(row_to_element_start));
+        }
         return;
     }
 

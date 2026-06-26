@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -167,7 +167,7 @@ func (s *ScalarArrayMatchSuite) setupCollection(ctx context.Context, collectionN
 	})
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
-	log.Info("CreateCollection done", zap.String("collection", collectionName))
+	mlog.Info(ctx, "CreateCollection done", zap.String("collection", collectionName))
 
 	// insert known rows
 	pkColumn := newExplicitInt64PKFieldData(integration.Int64Field, rowNum)
@@ -238,7 +238,7 @@ func (s *ScalarArrayMatchSuite) setupCollection(ctx context.Context, collectionN
 	err = merr.CheckRPCCall(loadStatus, err)
 	s.NoError(err)
 	s.WaitForLoad(ctx, collectionName)
-	log.Info("setupCollection done", zap.Bool("withScalarIndex", withScalarIndex))
+	mlog.Info(ctx, "setupCollection done", zap.Bool("withScalarIndex", withScalarIndex))
 }
 
 // queryPKs runs a Query with the given expr and returns the matched Int64 primary keys (sorted).
