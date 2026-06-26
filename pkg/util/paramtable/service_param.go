@@ -54,6 +54,7 @@ type ServiceParam struct {
 	KafkaCfg        KafkaConfig
 	RocksmqCfg      RocksmqConfig
 	MinioCfg        MinioConfig
+	HdfsCfg         HDFSConfig
 	ProfileCfg      ProfileConfig
 }
 
@@ -68,6 +69,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
+	p.HdfsCfg.Init(bt)
 	p.ProfileCfg.Init(bt)
 }
 
@@ -1457,6 +1459,43 @@ Set an easy-to-identify root key prefix for Milvus if etcd service already exist
 		Export:       true,
 	}
 	r.CompressionTypes.Init(base.mgr)
+}
+
+// /////////////////////////////////////////////////////////////////////////////
+// --- hdfs ---
+type HDFSConfig struct {
+	Address  ParamItem `refreshable:"false"`
+	User     ParamItem `refreshable:"false"`
+	RootPath ParamItem `refreshable:"false"`
+}
+
+func (p *HDFSConfig) Init(base *BaseTable) {
+	p.Address = ParamItem{
+		Key:          "hdfs.address",
+		Version:      "2.6.0",
+		DefaultValue: "localhost:9000",
+		Doc:          "Address of the HDFS NameNode (host:port).",
+		Export:       true,
+	}
+	p.Address.Init(base.mgr)
+
+	p.User = ParamItem{
+		Key:          "hdfs.user",
+		Version:      "2.6.0",
+		DefaultValue: "hdfs",
+		Doc:          "HDFS user for authentication.",
+		Export:       true,
+	}
+	p.User.Init(base.mgr)
+
+	p.RootPath = ParamItem{
+		Key:          "hdfs.rootPath",
+		Version:      "2.6.0",
+		DefaultValue: "milvus",
+		Doc:          "Root path in HDFS where Milvus stores data.",
+		Export:       true,
+	}
+	p.RootPath.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
