@@ -23,6 +23,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/BitsetView.h"
+#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
@@ -89,8 +90,11 @@ class CachedSearchIterator {
     using DisIdPair = std::pair<float, int64_t>;
     using IterIdx = size_t;
     using IterIdDisIdPair = std::pair<IterIdx, DisIdPair>;
-    using GetChunkDataFunc =
-        std::function<std::pair<const void*, int64_t>(int64_t)>;
+    struct RawChunkData {
+        dataset::RawDataset raw_dataset;
+        dataset::RawIdMapView raw_id_map;
+    };
+    using GetChunkDataFunc = std::function<RawChunkData(int64_t)>;
 
     // used only for sealed segment with chunked data
     std::vector<milvus::cachinglayer::PinWrapper<const void*>> pin_wrappers_;
@@ -99,6 +103,7 @@ class CachedSearchIterator {
     // a separate VectorArray with its own backing allocation, so we flatten
     // per-chunk here and keep the buffers alive alongside the iterators.
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_;
+    OffsetMappingSnapshot offset_mapping_snapshot_;
     int64_t batch_size_ = 0;
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
     int8_t sign_ = 1;

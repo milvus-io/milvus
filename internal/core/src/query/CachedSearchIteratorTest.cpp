@@ -833,15 +833,12 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
     column->BuildValidRowIds(nullptr);
 
-    // Verify offset_mapping setup
-    const auto& offset_mapping = column->GetOffsetMapping();
-    ASSERT_TRUE(offset_mapping.IsEnabled());
-    ASSERT_EQ(offset_mapping.GetValidCount(), total_valid);
+    ASSERT_EQ(column->GetValidCount(), total_valid);
 
     // Build query from first valid vector
     std::vector<float> query_data(base_data.begin(), base_data.begin() + dim);
 
-    // Create an all-zero bitset (no filtering) for the physical data range
+    // Create an all-zero bitset (no filtering) for the compact valid-row range.
     TargetBitmap search_bitset(total_valid, false);
     BitsetView search_bitview(search_bitset);
 
@@ -862,8 +859,7 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     iter_v2_info.batch_size = batch_size;
     search_info.iterator_v2_info_ = iter_v2_info;
 
-    // Create CachedSearchIterator - this tests Fix 1:
-    // The lambda should use valid_count_per_chunk[chunk_id] as chunk_size
+    // The iterator should use valid_count_per_chunk[chunk_id] as chunk_size.
     CachedSearchIterator iter(column.get(),
                               search_dataset,
                               search_info,
@@ -877,8 +873,8 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     ASSERT_EQ(result.seg_offsets_.size(), batch_size);
     ASSERT_EQ(result.distances_.size(), batch_size);
 
-    // All returned offsets should be physical offsets in [0, total_valid)
-    // (TransformOffset is NOT called here - that's the caller's job)
+    // All returned offsets should be external segment offsets that point to
+    // valid rows. Knowhere owns the internal-to-external id mapping.
     int valid_count = 0;
     for (auto& offset : result.seg_offsets_) {
         if (offset == INVALID_SEG_OFFSET) {
@@ -886,9 +882,8 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
         }
         valid_count++;
         ASSERT_GE(offset, 0);
-        ASSERT_LT(offset, total_valid)
-            << "Physical offset " << offset << " exceeds valid count "
-            << total_valid;
+        ASSERT_LT(offset, chunk_rows * num_chunks);
+        ASSERT_EQ(offset % 2, 0) << "Expected a valid external row offset";
     }
     ASSERT_GT(valid_count, 0);
 }

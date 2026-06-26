@@ -1001,7 +1001,7 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
         }
 
         // For nullable vector fields, FillTargetEntry compacts the vector
-        // buffer via FilterVectorValidOffsets (null rows dropped), while the
+        // buffer via FilterValidOffsets (null rows dropped), while the
         // valid_data bitmap keeps its logical length. MergeDataArray reads
         // vectors at physical_offset = getValidDataOffset(), which falls back
         // to the logical offset unless we set it. Compute the per-row physical

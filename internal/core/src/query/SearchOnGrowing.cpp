@@ -29,7 +29,6 @@
 #include "common/FastMem.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
@@ -181,43 +180,22 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
-        const auto& offset_mapping = vec_ptr->get_offset_mapping();
         const bool is_element_level_search =
             data_type == DataType::VECTOR_ARRAY &&
             info.array_offsets_ != nullptr;
         search_result.element_level_ = is_element_level_search;
-        const auto has_offset_mapping =
-            offset_mapping.IsEnabled() && !is_element_level_search;
-
-        TargetBitmap transformed_bitset;
-        BitsetView search_bitset = bitset;
-        if (has_offset_mapping && !bitset.empty()) {
-            auto status =
-                offset_mapping.TransformBitset(bitset, transformed_bitset);
-            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
-                FillEmptySearchResult(search_result, num_queries, info.topk_);
-                return;
-            }
-            if (status == OffsetMapping::BitsetTransformStatus::NoFilter) {
-                search_bitset = BitsetView{};
-            }
-        }
-
-        auto active_count = has_offset_mapping
-                                ? offset_mapping.GetValidCount()
-                                : std::min(int64_t(bitset.size()),
-                                           segment.get_active_count(timestamp));
+        auto logical_active_count = std::min(
+            int64_t(bitset.size()), segment.get_active_count(timestamp));
+        auto offset_mapping_snapshot =
+            vec_ptr->get_offset_mapping().GetSnapshot();
+        auto active_count = offset_mapping_snapshot.GetVisiblePhysicalCount(
+            logical_active_count);
 
         // Check for nullable vector field with all null values
         if (active_count == 0) {
             // All vectors are null, return empty result
             FillEmptySearchResult(search_result, num_queries, info.topk_);
             return;
-        }
-        if (has_offset_mapping && !bitset.empty() &&
-            !transformed_bitset.empty()) {
-            search_bitset =
-                search_result.PinBitset(std::move(transformed_bitset));
         }
 
         // Element-level search (embedding-search-embedding): knowhere sees
@@ -240,16 +218,21 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                              active_count,
                                              info,
                                              index_info,
-                                             search_bitset,
+                                             bitset,
                                              iter_data_type);
             cached_iter.NextBatch(info, search_result);
-            FinalizeVectorSearchOffsets(
-                search_result, offset_mapping, info.array_offsets_.get());
+            FinalizeVectorSearchOffsets(search_result,
+                                        info.array_offsets_.get());
             return;
         }
 
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
         auto max_chunk = upper_div(active_count, vec_size_per_chunk);
+        const bool has_offset_mapping =
+            offset_mapping_snapshot.IsEnabled() && !is_element_level_search;
+        if (use_vector_iterator && has_offset_mapping) {
+            search_result.offset_mapping_snapshot_ = offset_mapping_snapshot;
+        }
 
         // Track cumulative element offset for element-level search.
         // begin_id must be the cumulative element count (not row offset),
@@ -265,12 +248,29 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             auto row_end =
                 std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
             auto size_per_chunk = row_end - row_begin;
+            auto raw_id_map = query::dataset::RawIdMapView{};
+            if (has_offset_mapping) {
+                const auto* ids = offset_mapping_snapshot.GetLogicalOffsets(
+                    row_begin, static_cast<size_t>(size_per_chunk));
+                AssertInfo(ids != nullptr,
+                           "invalid growing offset mapping snapshot for chunk "
+                           "begin {}, size {}",
+                           row_begin,
+                           size_per_chunk);
+                raw_id_map = query::dataset::RawIdMapView{
+                    ids, static_cast<size_t>(size_per_chunk)};
+            }
+            const auto has_id_map = !raw_id_map.empty();
 
             query::dataset::RawDataset sub_data;
             std::unique_ptr<uint8_t[]> buf = nullptr;
             if (data_type != DataType::VECTOR_ARRAY) {
-                sub_data = query::dataset::RawDataset{
-                    row_begin, dim, size_per_chunk, chunk_data};
+                sub_data =
+                    query::dataset::RawDataset{has_id_map ? 0 : row_begin,
+                                               dim,
+                                               size_per_chunk,
+                                               chunk_data,
+                                               nullptr};
             } else {
                 // TODO(SpadeA): For VectorArray(Embedding List), data is
                 // discreted stored in FixedVector which means we will copy the
@@ -311,11 +311,12 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                         offset += vec_ptr[i].length();
                         offsets.push_back(offset);
                     }
-                    sub_data = query::dataset::RawDataset{row_begin,
-                                                          dim,
-                                                          size_per_chunk,
-                                                          buf.get(),
-                                                          offsets.data()};
+                    sub_data =
+                        query::dataset::RawDataset{has_id_map ? 0 : row_begin,
+                                                   dim,
+                                                   size_per_chunk,
+                                                   buf.get(),
+                                                   offsets.data()};
                 }
             }
 
@@ -331,17 +332,19 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 auto sub_qr =
                     PackBruteForceSearchIteratorsIntoSubResult(search_dataset,
                                                                sub_data,
+                                                               raw_id_map,
                                                                info,
                                                                index_info,
-                                                               search_bitset,
+                                                               bitset,
                                                                iter_data_type);
                 final_qr.merge(sub_qr);
             } else {
                 auto sub_qr = BruteForceSearch(search_dataset,
                                                sub_data,
+                                               raw_id_map,
                                                info,
                                                index_info,
-                                               search_bitset,
+                                               bitset,
                                                iter_data_type,
                                                element_type,
                                                op_context);
@@ -352,15 +355,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             bool larger_is_closer = PositivelyRelated(info.metric_type_);
             // Element-level search skips row-level mapping (element IDs are
             // not row-aligned); see ChunkMergeIterator ctor.
-            const milvus::OffsetMapping* iter_offset_mapping =
-                (is_element_level_search || !has_offset_mapping)
-                    ? nullptr
-                    : &offset_mapping;
             search_result.AssembleChunkVectorIterators(
                 num_queries,
                 max_chunk,
                 final_qr.chunk_iterators(),
-                iter_offset_mapping,
                 larger_is_closer);
         } else {
             // See FinalizeVectorSearchOffsets for the rationale:
@@ -373,9 +371,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 search_result.element_indices_ = std::move(elem_indicies);
                 search_result.element_level_ = true;
             } else {
-                if (has_offset_mapping) {
-                    offset_mapping.TransformOffsets(final_qr.mutable_offsets());
-                }
                 search_result.seg_offsets_ =
                     std::move(final_qr.mutable_offsets());
             }

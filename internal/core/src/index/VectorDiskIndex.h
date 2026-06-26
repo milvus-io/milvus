@@ -52,14 +52,12 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        const auto& offset_mapping = GetOffsetMapping();
-        if (offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0) {
+        if (IsEmptyVectorIndex()) {
             return 0;
         }
-        if (IsEmptyEmbListIndex()) {
-            return 0;
-        }
-        return index_.Count();
+        const auto count = index_.GetIdMap().GetSnapshot().GetCount();
+        return count != 0 && elem_type_ == DataType::NONE ? count
+                                                          : index_.Count();
     }
 
     void
@@ -89,17 +87,27 @@ class VectorDiskAnnIndex : public VectorIndex {
     bool
     IsIndexRefineEnabled() const override;
 
-    std::vector<uint8_t>
+    VectorRetrieveResult
     GetVector(const DatasetPtr dataset) const override;
 
-    std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    EmbListRetrieveResult
     GetEmbListByIds(const DatasetPtr dataset,
                     const std::string& metric_type) const override;
 
-    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
+    SparseVectorRetrieveResult
     GetSparseVector(const DatasetPtr dataset) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "get sparse vector not supported for disk index");
+    }
+
+    knowhere::IdMap&
+    GetIdMap() override {
+        return index_.GetIdMap();
+    }
+
+    const knowhere::IdMap&
+    GetIdMap() const override {
+        return index_.GetIdMap();
     }
 
     knowhere::expected<knowhere::DataSetPtr>
@@ -120,8 +128,8 @@ class VectorDiskAnnIndex : public VectorIndex {
 
  private:
     bool
-    IsEmptyEmbListIndex() const {
-        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+    IsEmptyVectorIndex() const {
+        return empty_vector_index_;
     }
 
     knowhere::Json
@@ -134,6 +142,7 @@ class VectorDiskAnnIndex : public VectorIndex {
     // used for embedding list only
     DataType elem_type_;
     std::vector<size_t> empty_emb_list_offsets_;
+    bool empty_vector_index_ = false;
 };
 
 template <typename T>

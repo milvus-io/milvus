@@ -156,6 +156,7 @@ class TestFloatSearchBruteForce : public ::testing::Test {
         auto raw_dataset = query::dataset::RawDataset{0, dim, nb, base.data()};
         auto result = BruteForceSearch(query_dataset,
                                        raw_dataset,
+                                       query::dataset::RawIdMapView{},
                                        search_info,
                                        index_info,
                                        bitset_view,

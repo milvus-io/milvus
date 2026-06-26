@@ -34,9 +34,10 @@ CheckBruteForceSearchParam(const FieldMeta& field,
 SubSearchResult
 BruteForceSearch(const dataset::SearchDataset& query_ds,
                  const dataset::RawDataset& raw_ds,
+                 const dataset::RawIdMapView& raw_id_map,
                  const SearchInfo& search_info,
                  const std::map<std::string, std::string>& index_info,
-                 const BitsetView& bitset,
+                 BitsetView bitset,
                  DataType data_type,
                  DataType element_type,
                  milvus::OpContext* op_context);
@@ -45,15 +46,17 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 GetBruteForceSearchIterators(
     const dataset::SearchDataset& query_ds,
     const dataset::RawDataset& raw_ds,
+    const dataset::RawIdMapView& raw_id_map,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
-    const BitsetView& bitset,
+    BitsetView bitset,
     DataType data_type);
 
 SubSearchResult
 PackBruteForceSearchIteratorsIntoSubResult(
     const dataset::SearchDataset& query_ds,
     const dataset::RawDataset& raw_ds,
+    const dataset::RawIdMapView& raw_id_map,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,

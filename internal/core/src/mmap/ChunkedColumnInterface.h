@@ -16,11 +16,13 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
+#include <utility>
+#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
-#include "common/OffsetMapping.h"
 #include "common/bson_view.h"
 namespace milvus {
 
@@ -28,6 +30,17 @@ using namespace milvus::cachinglayer;
 
 class ChunkedColumnInterface {
  public:
+    struct RawDataIdMapView {
+        int64_t chunk_size = 0;
+        const int32_t* internal_to_external_ids = nullptr;
+        size_t internal_to_external_ids_count = 0;
+
+        bool
+        has_id_map() const {
+            return internal_to_external_ids_count != 0;
+        }
+    };
+
     virtual ~ChunkedColumnInterface() = default;
 
     // Check if this column is part of a multi-field column group.
@@ -191,6 +204,16 @@ class ChunkedColumnInterface {
     }
 
     int64_t
+    GetValidCount() const {
+        if (!IsNullable()) {
+            return NumRows();
+        }
+        AssertInfo(!num_valid_rows_until_chunk_.empty(),
+                   "Valid row mapping is not built for nullable column");
+        return num_valid_rows_until_chunk_.back();
+    }
+
+    int64_t
     GetValidCountInChunk(int64_t chunk_id) const {
         if (!IsNullable()) {
             return chunk_row_nums(chunk_id);
@@ -206,9 +229,33 @@ class ChunkedColumnInterface {
         return valid_count_per_chunk_[chunk_id];
     }
 
-    const OffsetMapping&
-    GetOffsetMapping() const {
-        return offset_mapping_;
+    std::pair<const int32_t*, size_t>
+    GetValidRowIdsInChunk(int64_t chunk_id) const {
+        if (!IsNullable()) {
+            return {nullptr, 0};
+        }
+        AssertInfo(!num_valid_rows_until_chunk_.empty(),
+                   "Valid row mapping is not built for nullable column");
+        AssertInfo(chunk_id >= 0 &&
+                       chunk_id + 1 < static_cast<int64_t>(
+                                          num_valid_rows_until_chunk_.size()),
+                   "Chunk id {} out of range, valid row id chunks {}",
+                   chunk_id,
+                   num_valid_rows_until_chunk_.size());
+        const auto begin = num_valid_rows_until_chunk_[chunk_id];
+        const auto end = num_valid_rows_until_chunk_[chunk_id + 1];
+        const auto count = end - begin;
+        return {count == 0 ? nullptr : valid_row_ids_.data() + begin,
+                static_cast<size_t>(count)};
+    }
+
+    RawDataIdMapView
+    GetRawDataIdMapInChunk(int64_t chunk_id, bool use_compact_id_map) const {
+        if (!use_compact_id_map || !IsNullable()) {
+            return {chunk_row_nums(chunk_id), nullptr, 0};
+        }
+        auto ids = GetValidRowIdsInChunk(chunk_id);
+        return {GetValidCountInChunk(chunk_id), ids.first, ids.second};
     }
 
     virtual void
@@ -219,7 +266,7 @@ class ChunkedColumnInterface {
         if (valid_row_ids_built_.load(std::memory_order_acquire)) {
             return;
         }
-        std::lock_guard<std::mutex> lock(offset_mapping_build_mutex_);
+        std::lock_guard<std::mutex> lock(valid_row_ids_build_mutex_);
         if (valid_row_ids_built_.load(std::memory_order_relaxed)) {
             return;
         }
@@ -229,6 +276,8 @@ class ChunkedColumnInterface {
 
         valid_data_.resize(total_rows);
         valid_count_per_chunk_.assign(total_chunks, 0);
+        valid_row_ids_.clear();
+        valid_row_ids_.reserve(total_rows);
 
         int64_t logical_offset = 0;
         for (int64_t i = 0; i < total_chunks; i++) {
@@ -238,7 +287,11 @@ class ChunkedColumnInterface {
             for (int64_t j = 0; j < rows; j++) {
                 const bool v = chunk->isValid(j);
                 valid_data_[logical_offset + j] = v;
-                valid_count += v ? 1 : 0;
+                if (v) {
+                    valid_row_ids_.push_back(
+                        static_cast<int32_t>(logical_offset + j));
+                    ++valid_count;
+                }
             }
             valid_count_per_chunk_[i] = valid_count;
             logical_offset += rows;
@@ -251,16 +304,7 @@ class ChunkedColumnInterface {
             num_valid_rows_until_chunk_.push_back(
                 num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
         }
-        BuildOffsetMapping();
         valid_row_ids_built_.store(true, std::memory_order_release);
-    }
-
-    // Build offset mapping from valid_data
-    void
-    BuildOffsetMapping() {
-        if (!valid_data_.empty()) {
-            offset_mapping_.Build(valid_data_.data(), valid_data_.size());
-        }
     }
 
     virtual void
@@ -373,9 +417,9 @@ class ChunkedColumnInterface {
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
-    SealedOffsetMapping offset_mapping_;
+    std::vector<int32_t> valid_row_ids_;
     std::atomic<bool> valid_row_ids_built_{false};
-    std::mutex offset_mapping_build_mutex_;
+    std::mutex valid_row_ids_build_mutex_;
 
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {

@@ -12,8 +12,10 @@
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -578,6 +580,822 @@ TEST(GrowingIndexNullableVectorTest,
         }
     }
     EXPECT_TRUE(found_exact_query_row);
+}
+
+TEST(GrowingIndexNullableVectorTest,
+     IndexedSearchUsesTimestampBitsetForAppendedTail) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t first_batch_rows = 50;
+    constexpr int64_t tail_rows = 6;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {"metric_type", knowhere::metric::L2},
+        {"nlist", "1"}};
+    std::map<std::string, std::string> type_params = {
+        {"dim", std::to_string(dim)}};
+    FieldIndexMeta field_index_meta(
+        vec, std::move(index_params), std::move(type_params));
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 1024;
+    interim_config.nlist = 1;
+    interim_config.nprobe = 1;
+    interim_config.dense_vector_interim_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
+    IndexMetaPtr meta =
+        std::make_shared<CollectionIndexMeta>(100, std::move(field_map));
+    auto segment_growing = CreateGrowingSegment(schema, meta, 1, config);
+
+    auto insert_batch = [&](int64_t row_begin,
+                            int64_t row_count,
+                            Timestamp ts,
+                            const FixedVector<bool>& valid_data,
+                            const std::vector<float>& compact_vectors) {
+        std::vector<int64_t> pks(row_count);
+        std::vector<idx_t> row_ids(row_count);
+        std::vector<Timestamp> timestamps(row_count, ts);
+        for (int64_t i = 0; i < row_count; ++i) {
+            pks[i] = row_begin + i;
+            row_ids[i] = row_begin + i;
+        }
+
+        auto valid_count = static_cast<int64_t>(
+            std::count(valid_data.begin(), valid_data.end(), true));
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        auto pk_array =
+            CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk]);
+        auto vec_array = CreateVectorDataArrayFrom(compact_vectors.data(),
+                                                   valid_data.data(),
+                                                   row_count,
+                                                   valid_count,
+                                                   (*schema)[vec]);
+        insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+        insert_data->set_num_rows(row_count);
+
+        auto reserved_offset = segment_growing->PreInsert(row_count);
+        segment_growing->Insert(reserved_offset,
+                                row_count,
+                                row_ids.data(),
+                                timestamps.data(),
+                                insert_data.get());
+    };
+
+    FixedVector<bool> first_valid(first_batch_rows);
+    std::fill(first_valid.begin(), first_valid.end(), true);
+    first_valid[0] = false;
+    const auto first_valid_count = static_cast<int64_t>(
+        std::count(first_valid.begin(), first_valid.end(), true));
+    std::vector<float> first_vectors(first_valid_count * dim, 100.0F);
+    insert_batch(0, first_batch_rows, 100, first_valid, first_vectors);
+
+    FixedVector<bool> tail_valid(tail_rows);
+    std::fill(tail_valid.begin(), tail_valid.end(), true);
+    tail_valid[1] = false;
+    tail_valid[tail_rows - 1] = false;
+    const auto tail_valid_count = static_cast<int64_t>(
+        std::count(tail_valid.begin(), tail_valid.end(), true));
+    std::vector<float> tail_vectors(tail_valid_count * dim, 200.0F);
+    std::fill(tail_vectors.begin(), tail_vectors.begin() + dim, 0.0F);
+    insert_batch(first_batch_rows, tail_rows, 200, tail_valid, tail_vectors);
+
+    auto* segment_impl =
+        dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment_impl, nullptr);
+    ASSERT_TRUE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+
+    std::array<int64_t, 5> retrieve_offsets = {
+        0,
+        1,
+        first_batch_rows,
+        first_batch_rows + 1,
+        first_batch_rows + tail_rows - 1};
+    auto retrieve_result = segment_impl->bulk_subscript(
+        nullptr, vec, retrieve_offsets.data(), retrieve_offsets.size());
+    ASSERT_NE(retrieve_result, nullptr);
+    ASSERT_EQ(retrieve_result->valid_data_size(), retrieve_offsets.size());
+    EXPECT_FALSE(retrieve_result->valid_data(0));
+    EXPECT_TRUE(retrieve_result->valid_data(1));
+    EXPECT_TRUE(retrieve_result->valid_data(2));
+    EXPECT_FALSE(retrieve_result->valid_data(3));
+    EXPECT_FALSE(retrieve_result->valid_data(4));
+
+    const auto& retrieved_values =
+        retrieve_result->vectors().float_vector().data();
+    ASSERT_EQ(retrieved_values.size(), 2 * dim);
+    for (int64_t d = 0; d < dim; ++d) {
+        EXPECT_FLOAT_EQ(retrieved_values[d], 100.0F);
+        EXPECT_FLOAT_EQ(retrieved_values[dim + d], 0.0F);
+    }
+
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch(
+        "", "embeddings", 3, knowhere::metric::L2, R"({"nprobe": 1})", -1);
+    auto plan =
+        query::CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    std::array<float, dim> query = {0.0F, 0.0F, 0.0F, 0.0F};
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob(1, dim, query.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto old_snapshot_result =
+        segment_growing->Search(plan.get(), ph_group.get(), 100);
+    ASSERT_EQ(old_snapshot_result->seg_offsets_.size(), 3);
+    for (auto offset : old_snapshot_result->seg_offsets_) {
+        ASSERT_GE(offset, 0);
+        EXPECT_LT(offset, first_batch_rows);
+    }
+
+    auto full_snapshot_result =
+        segment_growing->Search(plan.get(), ph_group.get(), 200);
+    bool found_tail = false;
+    for (size_t i = 0; i < full_snapshot_result->seg_offsets_.size(); ++i) {
+        EXPECT_NE(full_snapshot_result->seg_offsets_[i], first_batch_rows + 1);
+        EXPECT_NE(full_snapshot_result->seg_offsets_[i],
+                  first_batch_rows + tail_rows - 1);
+        if (full_snapshot_result->seg_offsets_[i] == first_batch_rows) {
+            EXPECT_FLOAT_EQ(full_snapshot_result->distances_[i], 0.0F);
+            found_tail = true;
+        }
+    }
+    EXPECT_TRUE(found_tail);
+}
+
+TEST(GrowingIndexNullableVectorTest,
+     BruteForceSearchAndGetReturnEmptyForAllNullVector) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 6;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    schema->set_primary_field_id(pk);
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.enable_interim_segment_index = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto* segment_impl =
+        dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    std::vector<int64_t> pks(row_count);
+    std::vector<idx_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count, 100);
+    for (int64_t i = 0; i < row_count; ++i) {
+        pks[i] = i;
+        row_ids[i] = i;
+    }
+
+    FixedVector<bool> valid_data(row_count);
+    std::fill(valid_data.begin(), valid_data.end(), false);
+    std::vector<float> compact_vectors;
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk]);
+    auto vec_array = CreateVectorDataArrayFrom(compact_vectors.data(),
+                                               valid_data.data(),
+                                               row_count,
+                                               0,
+                                               (*schema)[vec]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+    insert_data->set_num_rows(row_count);
+
+    auto reserved_offset = segment_growing->PreInsert(row_count);
+    segment_growing->Insert(reserved_offset,
+                            row_count,
+                            row_ids.data(),
+                            timestamps.data(),
+                            insert_data.get());
+
+    ASSERT_FALSE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+
+    std::array<int64_t, 3> retrieve_offsets = {0, 3, row_count - 1};
+    auto retrieve_result = segment_impl->bulk_subscript(
+        nullptr, vec, retrieve_offsets.data(), retrieve_offsets.size());
+    ASSERT_NE(retrieve_result, nullptr);
+    ASSERT_EQ(retrieve_result->valid_data_size(), retrieve_offsets.size());
+    for (int i = 0; i < retrieve_result->valid_data_size(); ++i) {
+        EXPECT_FALSE(retrieve_result->valid_data(i));
+    }
+    EXPECT_TRUE(retrieve_result->vectors().float_vector().data().empty());
+
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch(
+        "", "embeddings", 3, knowhere::metric::L2, R"({"nprobe": 1})", -1);
+    auto plan =
+        query::CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    std::array<float, dim> query = {0.0F, 0.0F, 0.0F, 0.0F};
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob(1, dim, query.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto result = segment_growing->Search(plan.get(), ph_group.get(), 100);
+    ASSERT_EQ(result->seg_offsets_.size(), 3);
+    ASSERT_EQ(result->distances_.size(), 3);
+    for (size_t i = 0; i < result->seg_offsets_.size(); ++i) {
+        EXPECT_EQ(result->seg_offsets_[i], INVALID_SEG_OFFSET);
+        EXPECT_FLOAT_EQ(result->distances_[i], 0.0F);
+    }
+}
+
+TEST(GrowingIndexNullableVectorTest,
+     BruteForceSearchUsesLogicalBitsetForNullableVector) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t first_batch_rows = 10;
+    constexpr int64_t tail_rows = 3;
+    constexpr int64_t filtered_logical_row = 2;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    schema->set_primary_field_id(pk);
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.enable_interim_segment_index = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto* segment_impl =
+        dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto insert_batch = [&](int64_t row_begin,
+                            int64_t row_count,
+                            Timestamp ts,
+                            const FixedVector<bool>& valid_data,
+                            const std::vector<float>& compact_vectors) {
+        std::vector<int64_t> pks(row_count);
+        std::vector<idx_t> row_ids(row_count);
+        std::vector<Timestamp> timestamps(row_count, ts);
+        for (int64_t i = 0; i < row_count; ++i) {
+            pks[i] = row_begin + i;
+            row_ids[i] = row_begin + i;
+        }
+
+        auto valid_count = static_cast<int64_t>(
+            std::count(valid_data.begin(), valid_data.end(), true));
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        auto pk_array =
+            CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk]);
+        auto vec_array = CreateVectorDataArrayFrom(compact_vectors.data(),
+                                                   valid_data.data(),
+                                                   row_count,
+                                                   valid_count,
+                                                   (*schema)[vec]);
+        insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+        insert_data->set_num_rows(row_count);
+
+        auto reserved_offset = segment_growing->PreInsert(row_count);
+        segment_growing->Insert(reserved_offset,
+                                row_count,
+                                row_ids.data(),
+                                timestamps.data(),
+                                insert_data.get());
+    };
+
+    FixedVector<bool> first_valid(first_batch_rows);
+    std::fill(first_valid.begin(), first_valid.end(), true);
+    first_valid[0] = false;
+    first_valid[4] = false;
+    const auto first_valid_count = static_cast<int64_t>(
+        std::count(first_valid.begin(), first_valid.end(), true));
+    std::vector<float> first_vectors(first_valid_count * dim, 100.0F);
+    int64_t physical_row = 0;
+    for (int64_t logical_row = 0; logical_row < first_batch_rows;
+         ++logical_row) {
+        if (!first_valid[logical_row]) {
+            continue;
+        }
+        if (logical_row == filtered_logical_row) {
+            std::fill(first_vectors.begin() + physical_row * dim,
+                      first_vectors.begin() + (physical_row + 1) * dim,
+                      0.0F);
+        }
+        ++physical_row;
+    }
+    insert_batch(0, first_batch_rows, 100, first_valid, first_vectors);
+
+    FixedVector<bool> tail_valid(tail_rows);
+    std::fill(tail_valid.begin(), tail_valid.end(), true);
+    std::vector<float> tail_vectors(tail_rows * dim, 200.0F);
+    std::fill(tail_vectors.begin(), tail_vectors.begin() + dim, 0.0F);
+    insert_batch(first_batch_rows, tail_rows, 200, tail_valid, tail_vectors);
+
+    ASSERT_FALSE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+
+    std::array<int64_t, 5> retrieve_offsets = {0, 2, 4, 10, 12};
+    auto retrieve_result = segment_impl->bulk_subscript(
+        nullptr, vec, retrieve_offsets.data(), retrieve_offsets.size());
+    ASSERT_NE(retrieve_result, nullptr);
+    ASSERT_EQ(retrieve_result->valid_data_size(), retrieve_offsets.size());
+    EXPECT_FALSE(retrieve_result->valid_data(0));
+    EXPECT_TRUE(retrieve_result->valid_data(1));
+    EXPECT_FALSE(retrieve_result->valid_data(2));
+    EXPECT_TRUE(retrieve_result->valid_data(3));
+    EXPECT_TRUE(retrieve_result->valid_data(4));
+
+    const auto& retrieved_values =
+        retrieve_result->vectors().float_vector().data();
+    ASSERT_EQ(retrieved_values.size(), 3 * dim);
+    for (int64_t i = 0; i < dim; ++i) {
+        EXPECT_FLOAT_EQ(retrieved_values[i], 0.0F);
+        EXPECT_FLOAT_EQ(retrieved_values[dim + i], 0.0F);
+        EXPECT_FLOAT_EQ(retrieved_values[2 * dim + i], 200.0F);
+    }
+
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch("pk != 2",
+                                              "embeddings",
+                                              3,
+                                              knowhere::metric::L2,
+                                              R"({"nprobe": 1})",
+                                              -1);
+    auto plan =
+        query::CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    std::array<float, dim> query = {0.0F, 0.0F, 0.0F, 0.0F};
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob(1, dim, query.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto old_snapshot_result =
+        segment_growing->Search(plan.get(), ph_group.get(), 100);
+    ASSERT_EQ(old_snapshot_result->seg_offsets_.size(), 3);
+    for (auto offset : old_snapshot_result->seg_offsets_) {
+        ASSERT_GE(offset, 0);
+        EXPECT_LT(offset, first_batch_rows);
+        EXPECT_NE(offset, filtered_logical_row);
+        EXPECT_TRUE(first_valid[offset]);
+    }
+
+    auto full_snapshot_result =
+        segment_growing->Search(plan.get(), ph_group.get(), 200);
+    bool found_tail = false;
+    for (size_t i = 0; i < full_snapshot_result->seg_offsets_.size(); ++i) {
+        EXPECT_NE(full_snapshot_result->seg_offsets_[i], filtered_logical_row);
+        if (full_snapshot_result->seg_offsets_[i] == first_batch_rows) {
+            EXPECT_FLOAT_EQ(full_snapshot_result->distances_[i], 0.0F);
+            found_tail = true;
+        }
+    }
+    EXPECT_TRUE(found_tail);
+
+    auto iterator_plan_str =
+        schema_handle.ParseSearchIterator("pk != 2",
+                                          "embeddings",
+                                          3,
+                                          knowhere::metric::L2,
+                                          R"({"nprobe": 1})",
+                                          3,
+                                          "",
+                                          std::nullopt,
+                                          -1);
+    auto iterator_plan = query::CreateSearchPlanByExpr(
+        schema, iterator_plan_str.data(), iterator_plan_str.size());
+    auto iterator_ph_group = ParsePlaceholderGroup(
+        iterator_plan.get(), ph_group_raw.SerializeAsString());
+
+    auto iterator_old_snapshot_result = segment_growing->Search(
+        iterator_plan.get(), iterator_ph_group.get(), 100);
+    ASSERT_EQ(iterator_old_snapshot_result->seg_offsets_.size(), 3);
+    for (auto offset : iterator_old_snapshot_result->seg_offsets_) {
+        ASSERT_GE(offset, 0);
+        EXPECT_LT(offset, first_batch_rows);
+        EXPECT_NE(offset, filtered_logical_row);
+        EXPECT_TRUE(first_valid[offset]);
+    }
+
+    auto iterator_full_snapshot_result = segment_growing->Search(
+        iterator_plan.get(), iterator_ph_group.get(), 200);
+    bool iterator_found_tail = false;
+    for (size_t i = 0; i < iterator_full_snapshot_result->seg_offsets_.size();
+         ++i) {
+        EXPECT_NE(iterator_full_snapshot_result->seg_offsets_[i],
+                  filtered_logical_row);
+        if (iterator_full_snapshot_result->seg_offsets_[i] ==
+            first_batch_rows) {
+            EXPECT_FLOAT_EQ(iterator_full_snapshot_result->distances_[i], 0.0F);
+            iterator_found_tail = true;
+        }
+    }
+    EXPECT_TRUE(iterator_found_tail);
+}
+
+TEST(GrowingIndexNullableVectorTest,
+     BruteForceSearchUsesLogicalBitsetForNullableEmbList) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t first_batch_rows = 10;
+    constexpr int64_t tail_rows = 3;
+    constexpr int64_t filtered_logical_row = 2;
+
+    auto make_emb_list = [](int64_t dim, std::initializer_list<float> values) {
+        VectorFieldProto row;
+        row.set_dim(dim);
+        auto* data = row.mutable_float_vector()->mutable_data();
+        data->Add(values.begin(), values.end());
+        return row;
+    };
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugVectorArrayField("embeddings",
+                                                DataType::VECTOR_FLOAT,
+                                                dim,
+                                                knowhere::metric::MAX_SIM_IP,
+                                                true);
+    schema->set_primary_field_id(pk);
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.enable_interim_segment_index = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto* segment_impl =
+        dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto insert_batch =
+        [&](int64_t row_begin,
+            int64_t row_count,
+            Timestamp ts,
+            const FixedVector<bool>& valid_data,
+            const std::vector<VectorFieldProto>& compact_lists) {
+            std::vector<int64_t> pks(row_count);
+            std::vector<idx_t> row_ids(row_count);
+            std::vector<Timestamp> timestamps(row_count, ts);
+            for (int64_t i = 0; i < row_count; ++i) {
+                pks[i] = row_begin + i;
+                row_ids[i] = row_begin + i;
+            }
+
+            auto valid_count = static_cast<int64_t>(
+                std::count(valid_data.begin(), valid_data.end(), true));
+            ASSERT_EQ(valid_count, static_cast<int64_t>(compact_lists.size()));
+
+            auto insert_data = std::make_unique<InsertRecordProto>();
+            auto pk_array = CreateDataArrayFrom(
+                pks.data(), nullptr, row_count, (*schema)[pk]);
+            auto vec_array = CreateVectorDataArrayFrom(compact_lists.data(),
+                                                       valid_data.data(),
+                                                       row_count,
+                                                       valid_count,
+                                                       (*schema)[vec]);
+            insert_data->mutable_fields_data()->AddAllocated(
+                pk_array.release());
+            insert_data->mutable_fields_data()->AddAllocated(
+                vec_array.release());
+            insert_data->set_num_rows(row_count);
+
+            auto reserved_offset = segment_growing->PreInsert(row_count);
+            segment_growing->Insert(reserved_offset,
+                                    row_count,
+                                    row_ids.data(),
+                                    timestamps.data(),
+                                    insert_data.get());
+        };
+
+    FixedVector<bool> first_valid(first_batch_rows);
+    std::fill(first_valid.begin(), first_valid.end(), true);
+    first_valid[0] = false;
+    first_valid[4] = false;
+
+    std::vector<VectorFieldProto> first_lists;
+    for (int64_t logical_row = 0; logical_row < first_batch_rows;
+         ++logical_row) {
+        if (!first_valid[logical_row]) {
+            continue;
+        }
+        if (logical_row == filtered_logical_row) {
+            first_lists.push_back(make_emb_list(
+                dim, {20.0F, 0.0F, 0.0F, 0.0F, 19.0F, 0.0F, 0.0F, 0.0F}));
+        } else {
+            first_lists.push_back(make_emb_list(
+                dim, {-1.0F, 0.0F, 0.0F, 0.0F, -2.0F, 0.0F, 0.0F, 0.0F}));
+        }
+    }
+    insert_batch(0, first_batch_rows, 100, first_valid, first_lists);
+
+    FixedVector<bool> tail_valid(tail_rows);
+    std::fill(tail_valid.begin(), tail_valid.end(), true);
+    std::vector<VectorFieldProto> tail_lists;
+    tail_lists.push_back(
+        make_emb_list(dim, {30.0F, 0.0F, 0.0F, 0.0F, 29.0F, 0.0F, 0.0F, 0.0F}));
+    for (int64_t i = 1; i < tail_rows; ++i) {
+        tail_lists.push_back(make_emb_list(
+            dim, {1.0F, 0.0F, 0.0F, 0.0F, 0.5F, 0.0F, 0.0F, 0.0F}));
+    }
+    insert_batch(first_batch_rows, tail_rows, 200, tail_valid, tail_lists);
+
+    ASSERT_FALSE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+
+    std::array<int64_t, 5> retrieve_offsets = {0, 2, 4, 10, 12};
+    auto retrieve_result = segment_impl->bulk_subscript(
+        nullptr, vec, retrieve_offsets.data(), retrieve_offsets.size());
+    ASSERT_NE(retrieve_result, nullptr);
+    ASSERT_EQ(retrieve_result->valid_data_size(), retrieve_offsets.size());
+    EXPECT_FALSE(retrieve_result->valid_data(0));
+    EXPECT_TRUE(retrieve_result->valid_data(1));
+    EXPECT_FALSE(retrieve_result->valid_data(2));
+    EXPECT_TRUE(retrieve_result->valid_data(3));
+    EXPECT_TRUE(retrieve_result->valid_data(4));
+
+    const auto& retrieved_lists =
+        retrieve_result->vectors().vector_array().data();
+    ASSERT_EQ(retrieved_lists.size(), retrieve_offsets.size());
+    EXPECT_TRUE(retrieved_lists.Get(0).float_vector().data().empty());
+    EXPECT_TRUE(retrieved_lists.Get(2).float_vector().data().empty());
+
+    auto expect_emb_list = [](const VectorFieldProto& row,
+                              std::initializer_list<float> expected) {
+        const auto& values = row.float_vector().data();
+        ASSERT_EQ(values.size(), expected.size());
+        size_t i = 0;
+        for (auto value : expected) {
+            EXPECT_FLOAT_EQ(values.Get(i++), value);
+        }
+    };
+    expect_emb_list(retrieved_lists.Get(1),
+                    {20.0F, 0.0F, 0.0F, 0.0F, 19.0F, 0.0F, 0.0F, 0.0F});
+    expect_emb_list(retrieved_lists.Get(3),
+                    {30.0F, 0.0F, 0.0F, 0.0F, 29.0F, 0.0F, 0.0F, 0.0F});
+    expect_emb_list(retrieved_lists.Get(4),
+                    {1.0F, 0.0F, 0.0F, 0.0F, 0.5F, 0.0F, 0.0F, 0.0F});
+
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch("pk != 2",
+                                              "embeddings",
+                                              3,
+                                              knowhere::metric::MAX_SIM_IP,
+                                              R"({"nprobe": 1})",
+                                              -1);
+    auto plan =
+        query::CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    std::array<float, dim> query = {1.0F, 0.0F, 0.0F, 0.0F};
+    std::vector<size_t> query_offsets = {0, 1};
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+        1, dim, query.data(), query_offsets);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto old_snapshot_result =
+        segment_growing->Search(plan.get(), ph_group.get(), 100);
+    ASSERT_EQ(old_snapshot_result->seg_offsets_.size(), 3);
+    for (auto offset : old_snapshot_result->seg_offsets_) {
+        ASSERT_GE(offset, 0);
+        EXPECT_LT(offset, first_batch_rows);
+        EXPECT_NE(offset, filtered_logical_row);
+        EXPECT_TRUE(first_valid[offset]);
+    }
+
+    auto full_snapshot_result =
+        segment_growing->Search(plan.get(), ph_group.get(), 200);
+    bool found_tail = false;
+    for (auto offset : full_snapshot_result->seg_offsets_) {
+        EXPECT_NE(offset, filtered_logical_row);
+        if (offset == first_batch_rows) {
+            found_tail = true;
+        }
+    }
+    EXPECT_TRUE(found_tail);
+}
+
+TEST(GrowingIndexNullableVectorTest,
+     BruteForceSearchAndGetReturnEmptyForAllNullEmbList) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 6;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugVectorArrayField("embeddings",
+                                                DataType::VECTOR_FLOAT,
+                                                dim,
+                                                knowhere::metric::MAX_SIM_IP,
+                                                true);
+    schema->set_primary_field_id(pk);
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.enable_interim_segment_index = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto* segment_impl =
+        dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    std::vector<int64_t> pks(row_count);
+    std::vector<idx_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count, 100);
+    for (int64_t i = 0; i < row_count; ++i) {
+        pks[i] = i;
+        row_ids[i] = i;
+    }
+
+    FixedVector<bool> valid_data(row_count);
+    std::fill(valid_data.begin(), valid_data.end(), false);
+    std::vector<VectorFieldProto> compact_lists;
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk]);
+    auto vec_array = CreateVectorDataArrayFrom(
+        compact_lists.data(), valid_data.data(), row_count, 0, (*schema)[vec]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+    insert_data->set_num_rows(row_count);
+
+    auto reserved_offset = segment_growing->PreInsert(row_count);
+    segment_growing->Insert(reserved_offset,
+                            row_count,
+                            row_ids.data(),
+                            timestamps.data(),
+                            insert_data.get());
+
+    ASSERT_FALSE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+
+    std::array<int64_t, 3> retrieve_offsets = {0, 3, row_count - 1};
+    auto retrieve_result = segment_impl->bulk_subscript(
+        nullptr, vec, retrieve_offsets.data(), retrieve_offsets.size());
+    ASSERT_NE(retrieve_result, nullptr);
+    ASSERT_EQ(retrieve_result->valid_data_size(), retrieve_offsets.size());
+    const auto& retrieved_lists =
+        retrieve_result->vectors().vector_array().data();
+    ASSERT_EQ(retrieved_lists.size(), retrieve_offsets.size());
+    for (int i = 0; i < retrieve_result->valid_data_size(); ++i) {
+        EXPECT_FALSE(retrieve_result->valid_data(i));
+        EXPECT_TRUE(retrieved_lists.Get(i).float_vector().data().empty());
+    }
+
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch("",
+                                              "embeddings",
+                                              3,
+                                              knowhere::metric::MAX_SIM_IP,
+                                              R"({"nprobe": 1})",
+                                              -1);
+    auto plan =
+        query::CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    std::array<float, dim> query = {1.0F, 0.0F, 0.0F, 0.0F};
+    std::vector<size_t> query_offsets = {0, 1};
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+        1, dim, query.data(), query_offsets);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto result = segment_growing->Search(plan.get(), ph_group.get(), 100);
+    ASSERT_EQ(result->seg_offsets_.size(), 3);
+    ASSERT_EQ(result->distances_.size(), 3);
+    for (size_t i = 0; i < result->seg_offsets_.size(); ++i) {
+        EXPECT_EQ(result->seg_offsets_[i], INVALID_SEG_OFFSET);
+        EXPECT_FLOAT_EQ(result->distances_[i], 0.0F);
+    }
+}
+
+TEST(GrowingIndexNullableVectorTest,
+     BruteForceSearchAndGetKeepValidForEmptyValidEmbList) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t row_count = 6;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugVectorArrayField("embeddings",
+                                                DataType::VECTOR_FLOAT,
+                                                dim,
+                                                knowhere::metric::MAX_SIM_IP,
+                                                true);
+    schema->set_primary_field_id(pk);
+
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    InterimIndexConfigForTest interim_config;
+    interim_config.enable_interim_segment_index = false;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    auto segment_growing =
+        CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    auto* segment_impl =
+        dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    std::vector<int64_t> pks(row_count);
+    std::vector<idx_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count, 100);
+    for (int64_t i = 0; i < row_count; ++i) {
+        pks[i] = i;
+        row_ids[i] = i;
+    }
+
+    FixedVector<bool> valid_data(row_count);
+    std::fill(valid_data.begin(), valid_data.end(), false);
+    valid_data[1] = true;
+    valid_data[2] = true;
+    valid_data[4] = true;
+
+    VectorFieldProto empty_row;
+    empty_row.set_dim(dim);
+    empty_row.mutable_float_vector();
+    std::vector<VectorFieldProto> compact_lists = {
+        empty_row,
+        empty_row,
+        empty_row,
+    };
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto pk_array =
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk]);
+    auto vec_array = CreateVectorDataArrayFrom(compact_lists.data(),
+                                               valid_data.data(),
+                                               row_count,
+                                               compact_lists.size(),
+                                               (*schema)[vec]);
+    insert_data->mutable_fields_data()->AddAllocated(pk_array.release());
+    insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+    insert_data->set_num_rows(row_count);
+
+    auto reserved_offset = segment_growing->PreInsert(row_count);
+    segment_growing->Insert(reserved_offset,
+                            row_count,
+                            row_ids.data(),
+                            timestamps.data(),
+                            insert_data.get());
+
+    ASSERT_FALSE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+
+    std::array<int64_t, 4> retrieve_offsets = {0, 1, 3, 4};
+    auto retrieve_result = segment_impl->bulk_subscript(
+        nullptr, vec, retrieve_offsets.data(), retrieve_offsets.size());
+    ASSERT_NE(retrieve_result, nullptr);
+    ASSERT_EQ(retrieve_result->valid_data_size(), retrieve_offsets.size());
+    EXPECT_FALSE(retrieve_result->valid_data(0));
+    EXPECT_TRUE(retrieve_result->valid_data(1));
+    EXPECT_FALSE(retrieve_result->valid_data(2));
+    EXPECT_TRUE(retrieve_result->valid_data(3));
+    const auto& retrieved_lists =
+        retrieve_result->vectors().vector_array().data();
+    ASSERT_EQ(retrieved_lists.size(), retrieve_offsets.size());
+    for (int i = 0; i < retrieve_result->valid_data_size(); ++i) {
+        EXPECT_TRUE(retrieved_lists.Get(i).float_vector().data().empty());
+    }
+
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch("",
+                                              "embeddings",
+                                              3,
+                                              knowhere::metric::MAX_SIM_IP,
+                                              R"({"nprobe": 1})",
+                                              -1);
+    auto plan =
+        query::CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    std::array<float, dim> query = {1.0F, 0.0F, 0.0F, 0.0F};
+    std::vector<size_t> query_offsets = {0, 1};
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+        1, dim, query.data(), query_offsets);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto result = segment_growing->Search(plan.get(), ph_group.get(), 100);
+    ASSERT_EQ(result->seg_offsets_.size(), 3);
+    ASSERT_EQ(result->distances_.size(), 3);
+    for (size_t i = 0; i < result->seg_offsets_.size(); ++i) {
+        EXPECT_EQ(result->seg_offsets_[i], INVALID_SEG_OFFSET);
+        EXPECT_FLOAT_EQ(result->distances_[i],
+                        std::numeric_limits<float>::min());
+    }
 }
 
 TEST_P(GrowingIndexTest, MissIndexMeta) {

@@ -9,7 +9,6 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
-#include "common/OffsetMapping.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "index/Index.h"
@@ -120,20 +119,15 @@ InterimSealedIndexTranslator::get_cells(
 
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
     auto num_chunk = vec_data_->num_chunks();
-    if (vec_data_->IsNullable()) {
-        vec_data_->BuildValidRowIds(ctx);
-    }
-    const auto& offset_mapping = vec_data_->GetOffsetMapping();
-    bool nullable = offset_mapping.IsEnabled();
+    vec_data_->BuildValidRowIds(ctx);
+    bool nullable = vec_data_->IsNullable();
 
     if (!is_sparse_) {
         auto rows_until_chunk = std::make_shared<std::vector<int64_t>>();
         rows_until_chunk->reserve(num_chunk + 1);
         rows_until_chunk->push_back(0);
         for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-            const auto chunk_rows =
-                nullable ? vec_data_->GetValidCountInChunk(chunk_id)
-                         : vec_data_->chunk_row_nums(chunk_id);
+            const auto chunk_rows = vec_data_->GetValidCountInChunk(chunk_id);
             rows_until_chunk->push_back(rows_until_chunk->back() + chunk_rows);
         }
 
@@ -193,13 +187,19 @@ InterimSealedIndexTranslator::get_cells(
             false);
     }
 
-    int64_t total_valid_count =
-        nullable ? offset_mapping.GetValidCount() : vec_data_->NumRows();
+    int64_t total_valid_count = vec_data_->GetValidCount();
+    if (nullable) {
+        const auto& valid_data = vec_data_->GetValidData();
+        vec_index->GetIdMap().SetValidBitmap(valid_data.data(),
+                                             valid_data.size());
+    }
 
     if (total_valid_count == 0) {
         if (nullable) {
-            const auto& valid_data = vec_data_->GetValidData();
-            vec_index->BuildValidData(valid_data.data(), valid_data.size());
+            auto dataset = knowhere::GenDataSet(0, dim_, nullptr);
+            dataset->SetIsOwner(false);
+            dataset->SetIsSparse(is_sparse_);
+            vec_index->BuildWithDataset(dataset, build_config_);
         }
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
             result;
@@ -212,8 +212,7 @@ InterimSealedIndexTranslator::get_cells(
         auto pw = vec_data_->GetChunk(ctx, i);
         auto chunk = pw.get();
 
-        int64_t actual_row_count = nullable ? vec_data_->GetValidCountInChunk(i)
-                                            : vec_data_->chunk_row_nums(i);
+        int64_t actual_row_count = vec_data_->GetValidCountInChunk(i);
 
         if (actual_row_count == 0) {
             continue;
@@ -232,10 +231,6 @@ InterimSealedIndexTranslator::get_cells(
         }
     }
 
-    if (nullable) {
-        const auto& valid_data = vec_data_->GetValidData();
-        vec_index->BuildValidData(valid_data.data(), valid_data.size());
-    }
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
         result;
     result.emplace_back(std::make_pair(0, std::move(vec_index)));

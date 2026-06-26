@@ -36,6 +36,7 @@
 
 #include "arrow/api.h"
 #include "arrow/filesystem/filesystem.h"
+#include "bitset/detail/element_wise.h"
 #include "boost/filesystem/path.hpp"
 #include "common/Common.h"
 #include "common/Consts.h"
@@ -532,11 +533,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
                             static_cast<int64_t>(valid_bitmap.size())) {
                             valid_bitmap.resize(new_size, 0);
                         }
-                        for (int64_t i = 0; i < rows; ++i) {
-                            if (field_data->is_valid(i)) {
-                                set_bit(valid_bitmap, total_num_rows + i);
-                            }
-                        }
+                        bitset::detail::ElementWiseBitsetPolicy<
+                            uint8_t>::op_copy(field_data->ValidData(),
+                                              0,
+                                              valid_bitmap.data(),
+                                              total_num_rows,
+                                              rows);
                         total_num_rows += rows;
                     }
                 }
@@ -840,11 +842,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         num_rows += uint32_t(field_data->get_valid_rows());
         if (nullable) {
             auto rows = field_data->get_num_rows();
-            for (int64_t i = 0; i < rows; ++i) {
-                if (field_data->is_valid(i)) {
-                    set_bit(valid_bitmap, chunk_offset + i);
-                }
-            }
+            bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                field_data->ValidData(),
+                0,
+                valid_bitmap.data(),
+                chunk_offset,
+                rows);
             chunk_offset += rows;
         }
 

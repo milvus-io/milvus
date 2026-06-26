@@ -29,7 +29,6 @@
 
 #include "common/Consts.h"
 #include "common/FastMem.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/RangeSearchHelper.h"
@@ -136,7 +135,7 @@ WriteDiskEmptyEmbListOffsets(const LocalChunkManagerPtr& local_chunk_manager,
         local_chunk_manager->CreateFile(empty_offsets_path);
     }
 
-    auto count = ToValidDataCount(offsets.size());
+    auto count = static_cast<uint64_t>(offsets.size());
     int64_t write_pos = 0;
     local_chunk_manager->Write(
         empty_offsets_path, write_pos, &dim, sizeof(int64_t));
@@ -173,7 +172,7 @@ ReadDiskEmptyEmbListOffsets(const LocalChunkManagerPtr& local_chunk_manager,
         empty_offsets_path, read_pos, &wire_count, sizeof(uint64_t));
     read_pos += sizeof(uint64_t);
 
-    auto count = FromValidDataCount(wire_count);
+    auto count = static_cast<size_t>(wire_count);
     AssertInfo(count > 0, "empty emb_list offsets count is invalid");
     AssertInfo(file_size >= read_pos + count * sizeof(size_t),
                "empty emb_list offsets payload is too small");
@@ -218,7 +217,7 @@ ReadDiskValidData(const LocalChunkManagerPtr& local_chunk_manager,
     uint64_t wire_count = 0;
     local_chunk_manager->Read(
         valid_data_path, 0, &wire_count, sizeof(uint64_t));
-    valid_data.total_count = FromValidDataCount(wire_count);
+    valid_data.total_count = static_cast<size_t>(wire_count);
     valid_data.bitmap.resize(GetValidDataBitmapSize(valid_data.total_count));
     AssertInfo(file_size >= sizeof(uint64_t) + valid_data.bitmap.size(),
                "nullable vector disk valid_data bitmap file is too small");
@@ -237,20 +236,20 @@ template <typename LocalChunkManagerPtr>
 void
 WriteDiskValidData(const LocalChunkManagerPtr& local_chunk_manager,
                    const std::string& valid_data_path,
-                   const OffsetMapping& offset_mapping) {
-    auto total_count = static_cast<size_t>(offset_mapping.GetTotalCount());
-    auto wire_count = ToValidDataCount(total_count);
-    auto packed_data = PackValidDataBitmap(offset_mapping);
+                   size_t total_count,
+                   const uint8_t* bitmap) {
+    auto wire_count = static_cast<uint64_t>(total_count);
     if (!local_chunk_manager->Exist(valid_data_path)) {
         local_chunk_manager->CreateFile(valid_data_path);
     }
     local_chunk_manager->Write(
         valid_data_path, 0, &wire_count, sizeof(uint64_t));
-    if (!packed_data.empty()) {
+    const auto bitmap_size = GetValidDataBitmapSize(total_count);
+    if (bitmap_size != 0) {
         local_chunk_manager->Write(valid_data_path,
                                    sizeof(uint64_t),
-                                   packed_data.data(),
-                                   packed_data.size());
+                                   const_cast<uint8_t*>(bitmap),
+                                   bitmap_size);
     }
 }
 
@@ -335,17 +334,28 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
+    auto disk_valid_data = ReadDiskValidData(
+        local_chunk_manager, local_index_path_prefix + "/" + VALID_DATA_KEY);
+    if (disk_valid_data.found) {
+        index_.GetIdMap().SetValidBitmap(
+            disk_valid_data.bitmap.data(),
+            static_cast<int64_t>(disk_valid_data.total_count));
+        if (disk_valid_data.valid_count == 0) {
+            FinalizeIdMapForEmptyIndex(
+                index_, ErrorCode::UnexpectedError, "empty disk index");
+            auto dim = GetValueFromConfig<int64_t>(config, DIM_KEY);
+            AssertInfo(dim.has_value() && dim.value() > 0,
+                       "dim is missing when load empty disk vector index");
+            SetDim(dim.value());
+            empty_vector_index_ = true;
+            return;
+        }
+    }
 
-    auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-    auto disk_valid_data =
-        ReadDiskValidData(local_chunk_manager, valid_data_path);
-    bool all_null_nullable = disk_valid_data.found &&
-                             disk_valid_data.total_count > 0 &&
-                             disk_valid_data.valid_count == 0;
     auto empty_emb_list_state = ReadDiskEmptyEmbListOffsets(
         local_chunk_manager,
         local_index_path_prefix + "/" + EMPTY_EMB_LIST_OFFSET_KEY);
-    if (!all_null_nullable && !empty_emb_list_state.has_value()) {
+    if (!empty_emb_list_state.has_value()) {
         // start engine load index span
         auto span_load_engine =
             milvus::tracer::StartSpan("SegCoreEngineLoadDiskIndex", &ctx);
@@ -360,20 +370,14 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                       KnowhereStatusString(stat));
         span_load_engine->End();
         SetDim(index_.Dim());
-    } else {
-        auto dim = GetValueFromConfig<int64_t>(load_config, DIM_KEY);
-        if (dim.has_value()) {
-            SetDim(dim.value());
-        }
+        empty_vector_index_ = false;
     }
     if (empty_emb_list_state.has_value()) {
         SetDim(empty_emb_list_state->dim);
         empty_emb_list_offsets_ = std::move(empty_emb_list_state->offsets);
-    }
-
-    if (disk_valid_data.found) {
-        BuildValidDataFromBitmap(
-            this, disk_valid_data.total_count, disk_valid_data.bitmap.data());
+        FinalizeIdMapForEmptyIndex(
+            index_, ErrorCode::UnexpectedError, "empty disk index");
+        empty_vector_index_ = true;
     }
 }
 
@@ -381,8 +385,7 @@ template <typename T>
 IndexStatsPtr
 VectorDiskAnnIndex<T>::Upload(const Config& config) {
     BinarySet ret;
-    const auto& offset_mapping = GetOffsetMapping();
-    if (!IsAllNullNullable(offset_mapping) && !IsEmptyEmbListIndex()) {
+    if (!IsEmptyVectorIndex()) {
         auto stat = index_.Serialize(ret);
         if (stat != knowhere::Status::success) {
             ThrowInfo(ErrorCode::UnexpectedError,
@@ -433,21 +436,28 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
     auto disk_valid_data =
         ReadDiskValidData(local_chunk_manager, valid_data_path);
-    if (disk_valid_data.found) {
-        BuildValidDataFromBitmap(
-            this, disk_valid_data.total_count, disk_valid_data.bitmap.data());
-        if (disk_valid_data.valid_count == 0) {
-            auto dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY);
-            if (dim.has_value()) {
-                SetDim(dim.value());
-            }
+    knowhere::DataSetPtr build_dataset;
+    build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
+
+    if (disk_valid_data.found && disk_valid_data.valid_count == 0) {
+        auto dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY);
+        AssertInfo(dim.has_value() && dim.value() > 0,
+                   "dim is missing when build empty nullable disk index");
+        index_.GetIdMap().SetValidBitmap(
+            disk_valid_data.bitmap.data(),
+            static_cast<int64_t>(disk_valid_data.total_count));
+        FinalizeIdMapForEmptyIndex(
+            index_, ErrorCode::IndexBuildError, "empty disk index");
+        SetDim(dim.value());
+        empty_vector_index_ = true;
+        if (local_chunk_manager->Exist(valid_data_path)) {
             file_manager_->AddFile(valid_data_path);
-            local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
-                local_chunk_manager, segment_id, field_id));
-            LOG_INFO("build all-null nullable disk index done, build_id: {}",
-                     config.value("build_id", "unknown"));
-            return;
         }
+        local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
+            local_chunk_manager, segment_id, field_id));
+        LOG_INFO("build all-null nullable disk index done, build_id: {}",
+                 config.value("build_id", "unknown"));
+        return;
     }
 
     // For VECTOR_ARRAY, verify offsets file exists and pass its path to build_config
@@ -471,6 +481,13 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
                                          empty_offsets_path,
                                          GetDim(),
                                          offsets.value());
+            if (disk_valid_data.found) {
+                index_.GetIdMap().SetValidBitmap(
+                    disk_valid_data.bitmap.data(),
+                    static_cast<int64_t>(disk_valid_data.total_count));
+                FinalizeIdMapForEmptyIndex(
+                    index_, ErrorCode::IndexBuildError, "empty disk index");
+            }
             file_manager_->AddFile(empty_offsets_path);
             if (local_chunk_manager->Exist(valid_data_path)) {
                 file_manager_->AddFile(valid_data_path);
@@ -478,6 +495,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
             local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
                 local_chunk_manager, segment_id, field_id));
             empty_emb_list_offsets_ = std::move(offsets.value());
+            empty_vector_index_ = true;
             LOG_INFO("build all-empty emb_list disk index done, build_id: {}",
                      config.value("build_id", "unknown"));
             return;
@@ -485,7 +503,14 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         build_config[EMB_LIST_OFFSETS_PATH] = offsets_path;
     }
 
-    build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
+    if (disk_valid_data.found) {
+        build_dataset = std::make_shared<knowhere::DataSet>();
+        build_dataset->SetRows(
+            static_cast<int64_t>(disk_valid_data.valid_count));
+        index_.GetIdMap().SetValidBitmap(
+            disk_valid_data.bitmap.data(),
+            static_cast<int64_t>(disk_valid_data.total_count));
+    }
 
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
         auto num_threads = GetValueFromConfig<std::string>(
@@ -511,16 +536,16 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
     build_config.erase(INSERT_FILES_KEY);
     build_config.erase(VEC_OPT_FIELDS);
-    auto stat = index_.Build({}, build_config);
+    auto stat = index_.Build(build_dataset, build_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build disk index, {}",
                   KnowhereStatusString(stat));
 
-    // Add valid_data file to index if it was created (nullable vector field)
     if (local_chunk_manager->Exist(valid_data_path)) {
         file_manager_->AddFile(valid_data_path);
     }
+    empty_vector_index_ = false;
 
     local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
         local_chunk_manager, segment_id, field_id));
@@ -552,19 +577,19 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    const auto& offset_mapping = GetOffsetMapping();
-    if (HasValidData() && GetValidCount() == 0 &&
-        offset_mapping.GetTotalCount() > 0) {
-        auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-        WriteDiskValidData(
-            local_chunk_manager, valid_data_path, offset_mapping);
-        file_manager_->AddFile(valid_data_path);
-        auto dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY);
-        if (dim.has_value()) {
-            SetDim(dim.value());
+    auto add_valid_data_file = [&]() {
+        const auto id_map_snapshot = index_.GetIdMap().GetSnapshot();
+        const auto& valid_bitmap = id_map_snapshot.GetValidBitmap();
+        if (valid_bitmap.size() == 0) {
+            return;
         }
-        return;
-    }
+        auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
+        WriteDiskValidData(local_chunk_manager,
+                           valid_data_path,
+                           valid_bitmap.size(),
+                           valid_bitmap.data());
+        file_manager_->AddFile(valid_data_path);
+    };
 
     if (is_embedding_list && milvus::GetDatasetRows(dataset) == 0) {
         auto offsets =
@@ -583,8 +608,24 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
                                      dataset->GetDim(),
                                      empty_offsets);
         file_manager_->AddFile(empty_offsets_path);
+        add_valid_data_file();
+        FinalizeIdMapForEmptyIndex(
+            index_, ErrorCode::IndexBuildError, "empty disk index");
         SetDim(dataset->GetDim());
         empty_emb_list_offsets_ = std::move(empty_offsets);
+        empty_vector_index_ = true;
+        local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
+            local_chunk_manager, segment_id, field_id));
+        return;
+    }
+
+    if (milvus::GetDatasetRows(dataset) == 0 &&
+        index_.GetIdMap().GetSnapshot().GetCount() != 0) {
+        add_valid_data_file();
+        FinalizeIdMapForEmptyIndex(
+            index_, ErrorCode::IndexBuildError, "empty disk index");
+        SetDim(dataset->GetDim());
+        empty_vector_index_ = true;
         local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
             local_chunk_manager, segment_id, field_id));
         return;
@@ -653,18 +694,14 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         build_config[EMB_LIST_OFFSETS_PATH] = offsets_path;
     }
 
-    auto stat = index_.Build({}, build_config);
+    auto stat = index_.Build(dataset, build_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build index, {}",
                   KnowhereStatusString(stat));
 
-    if (HasValidData()) {
-        auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-        WriteDiskValidData(
-            local_chunk_manager, valid_data_path, offset_mapping);
-        file_manager_->AddFile(valid_data_path);
-    }
+    add_valid_data_file();
+    empty_vector_index_ = false;
 
     local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
         local_chunk_manager, segment_id, field_id));
@@ -687,8 +724,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 
     knowhere::Json search_config = PrepareSearchParams(search_info);
 
-    const auto& offset_mapping = GetOffsetMapping();
-    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
+    if (IsEmptyVectorIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -798,8 +834,7 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
         return iterators;
     };
 
-    const auto& offset_mapping = GetOffsetMapping();
-    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
+    if (IsEmptyVectorIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -824,8 +859,7 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
 template <typename T>
 const bool
 VectorDiskAnnIndex<T>::HasRawData() const {
-    const auto& offset_mapping = GetOffsetMapping();
-    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
+    if (IsEmptyVectorIndex()) {
         return true;
     }
     return index_.HasRawData(GetMetricType());
@@ -834,66 +868,24 @@ VectorDiskAnnIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorDiskAnnIndex<T>::IsIndexRefineEnabled() const {
-    const auto& offset_mapping = GetOffsetMapping();
-    if (IsAllNullNullable(offset_mapping) || IsEmptyEmbListIndex()) {
+    if (IsEmptyVectorIndex()) {
         return false;
     }
     return index_.IsIndexRefineEnabled();
 }
 
 template <typename T>
-std::vector<uint8_t>
+VectorRetrieveResult
 VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
-    auto index_type = GetIndexType();
-    if (IndexIsSparse(index_type)) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to get vector, index is sparse");
-    }
-
-    // if dataset is empty, return empty vector
-    if (dataset->GetRows() == 0) {
-        return {};
-    }
-
-    auto res = index_.GetVectorByIds(dataset);
-    if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  fmt::format("failed to get vector: {}: {}",
-                              KnowhereStatusString(res.error()),
-                              res.what()));
-    }
-    return this->template DecodeVectorByIdsResult<T>(res.value());
+    return this->template GetVectorByIdsFromIndex<T>(dataset, index_);
 }
 
 template <typename T>
-std::pair<std::vector<uint8_t>, std::vector<size_t>>
+EmbListRetrieveResult
 VectorDiskAnnIndex<T>::GetEmbListByIds(const DatasetPtr dataset,
                                        const std::string& metric_type) const {
-    if (dataset->GetRows() == 0) {
-        return {{}, {0}};
-    }
-    if (IsEmptyEmbListIndex()) {
-        auto ids = dataset->GetIds();
-        auto rows = dataset->GetRows();
-        auto emb_list_count =
-            static_cast<int64_t>(empty_emb_list_offsets_.size()) - 1;
-        for (int64_t i = 0; i < rows; ++i) {
-            AssertInfo(ids[i] >= 0 && ids[i] < emb_list_count,
-                       "emb list id {} out of range {}",
-                       ids[i],
-                       emb_list_count);
-        }
-        return {{}, std::vector<size_t>(rows + 1, 0)};
-    }
-
-    auto res = index_.GetEmbListByIds(dataset, metric_type);
-    if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  fmt::format("failed to get emb list: {}: {}",
-                              KnowhereStatusString(res.error()),
-                              res.what()));
-    }
-    return this->template DecodeEmbListByIdsResult<T>(res.value());
+    return this->template GetEmbListByIdsFromIndex<T>(
+        dataset, metric_type, index_, empty_emb_list_offsets_);
 }
 
 template <typename T>

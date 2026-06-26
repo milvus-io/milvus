@@ -86,12 +86,20 @@ CachedSearchIterator::InitializeChunkedIterators(
     int64_t offset = 0;
     chunked_heaps_.resize(nq_);
     for (int64_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
-        auto [chunk_data, chunk_size] = get_chunk_data(chunk_id);
-        auto sub_data = query::dataset::RawDataset{
-            offset, query_ds.dim, chunk_size, chunk_data};
+        auto raw_chunk = get_chunk_data(chunk_id);
+        auto& sub_data = raw_chunk.raw_dataset;
+        if (raw_chunk.raw_id_map.empty()) {
+            sub_data.begin_id = offset;
+        }
 
-        auto expected_iterators = GetBruteForceSearchIterators(
-            query_ds, sub_data, search_info, index_info, bitset, data_type);
+        auto expected_iterators =
+            GetBruteForceSearchIterators(query_ds,
+                                         sub_data,
+                                         raw_chunk.raw_id_map,
+                                         search_info,
+                                         index_info,
+                                         bitset,
+                                         data_type);
         if (expected_iterators.has_value()) {
             auto& chunk_iterators = expected_iterators.value();
             iterators_.insert(iterators_.end(),
@@ -101,7 +109,7 @@ CachedSearchIterator::InitializeChunkedIterators(
             ThrowInfo(ErrorCode::UnexpectedError,
                       "Failed to create iterators from index");
         }
-        offset += chunk_size;
+        offset += sub_data.num_raw_data;
     }
 }
 
@@ -136,6 +144,9 @@ CachedSearchIterator::CachedSearchIterator(
     // multi emb-list iterator is rejected upstream, so we don't branch on
     // it here).
     const bool is_element_level = search_info.array_offsets_ != nullptr;
+    offset_mapping_snapshot_ = vec_data->get_offset_mapping().GetSnapshot();
+    const bool has_offset_mapping =
+        offset_mapping_snapshot_.IsEnabled() && !is_element_level;
     if (is_element_level) {
         chunk_buffers_.reserve(num_chunks_);
     }
@@ -147,14 +158,37 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, &vec_data, vec_size_per_chunk, row_count, is_element_level](
-            int64_t chunk_id) {
+        [this,
+         &vec_data,
+         vec_size_per_chunk,
+         row_count,
+         is_element_level,
+         has_offset_mapping,
+         dim = query_ds.dim](int64_t chunk_id) {
             const void* chunk_data = vec_data->get_chunk_data(chunk_id);
             // no need to store a PinWrapper for growing, because vec_data is guaranteed to not be evicted.
-            int64_t chunk_size = std::min(
-                vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
+            const int64_t row_begin = chunk_id * vec_size_per_chunk;
+            int64_t chunk_size =
+                std::min(vec_size_per_chunk, row_count - row_begin);
             if (!is_element_level) {
-                return std::make_pair(chunk_data, chunk_size);
+                if (!has_offset_mapping) {
+                    return RawChunkData{
+                        query::dataset::RawDataset{
+                            row_begin, dim, chunk_size, chunk_data, nullptr},
+                        query::dataset::RawIdMapView{}};
+                }
+                const auto* ids = offset_mapping_snapshot_.GetLogicalOffsets(
+                    row_begin, static_cast<size_t>(chunk_size));
+                AssertInfo(ids != nullptr,
+                           "invalid growing offset mapping snapshot for chunk "
+                           "begin {}, size {}",
+                           row_begin,
+                           chunk_size);
+                return RawChunkData{
+                    query::dataset::RawDataset{
+                        0, dim, chunk_size, chunk_data, nullptr},
+                    query::dataset::RawIdMapView{
+                        ids, static_cast<size_t>(chunk_size)}};
             }
 
             auto va_ptr = reinterpret_cast<const VectorArray*>(chunk_data);
@@ -173,7 +207,9 @@ CachedSearchIterator::CachedSearchIterator(
             }
             const void* flat_data = buf.get();
             chunk_buffers_.emplace_back(std::move(buf));
-            return std::make_pair(flat_data, total_elements);
+            return RawChunkData{
+                query::dataset::RawDataset{0, dim, total_elements, flat_data},
+                query::dataset::RawIdMapView{}};
         });
 }
 
@@ -203,16 +239,15 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, column, &search_info](int64_t chunk_id) {
+        [this, column, &search_info, dim = query_ds.dim](int64_t chunk_id) {
             auto pw = column->DataOfChunk(nullptr, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
                           });
-            int64_t chunk_size = column->chunk_row_nums(chunk_id);
-            const auto& offset_mapping = column->GetOffsetMapping();
-            if (offset_mapping.IsEnabled()) {
-                chunk_size = column->GetValidCountInChunk(chunk_id);
-            }
+            const auto chunk_begin = column->GetNumRowsUntilChunk(chunk_id);
+            auto id_map = column->GetRawDataIdMapInChunk(
+                chunk_id, search_info.array_offsets_ == nullptr);
+            int64_t chunk_size = id_map.chunk_size;
             // For element-level search on vector array field, chunk_size
             // must be the element count in this chunk, not the row count.
             if (search_info.array_offsets_ != nullptr) {
@@ -223,7 +258,15 @@ CachedSearchIterator::CachedSearchIterator(
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();
             pin_wrappers_.emplace_back(std::move(pw));
-            return std::make_pair(chunk_data, chunk_size);
+            return RawChunkData{query::dataset::RawDataset{
+                                    id_map.has_id_map() ? 0 : chunk_begin,
+                                    dim,
+                                    chunk_size,
+                                    chunk_data,
+                                    nullptr},
+                                query::dataset::RawIdMapView{
+                                    id_map.internal_to_external_ids,
+                                    id_map.internal_to_external_ids_count}};
         });
 }
 

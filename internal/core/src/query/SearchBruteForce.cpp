@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -41,6 +40,63 @@
 #include "query/helper.h"
 
 namespace milvus::query {
+namespace {
+
+class RawOutIdIterator : public knowhere::IndexNode::iterator {
+ public:
+    RawOutIdIterator(knowhere::IndexNode::IteratorPtr iterator,
+                     const int32_t* internal_to_external_ids)
+        : iterator_(std::move(iterator)),
+          internal_to_external_ids_(internal_to_external_ids) {
+    }
+
+    std::pair<int64_t, float>
+    Next() override {
+        auto ret = iterator_->Next();
+        if (ret.first >= 0) {
+            ret.first = internal_to_external_ids_[ret.first];
+        }
+        return ret;
+    }
+
+    bool
+    HasNext() override {
+        return iterator_->HasNext();
+    }
+
+ private:
+    knowhere::IndexNode::IteratorPtr iterator_;
+    const int32_t* internal_to_external_ids_ = nullptr;
+};
+
+void
+MapRawResultIdsToExternal(SubSearchResult& result,
+                          const dataset::RawIdMapView& raw_id_map) {
+    if (raw_id_map.empty()) {
+        return;
+    }
+    auto& offsets = result.mutable_offsets();
+    for (auto& offset : offsets) {
+        if (offset >= 0) {
+            offset = raw_id_map.internal_to_external_ids[offset];
+        }
+    }
+}
+
+void
+MapRawIteratorsToExternal(
+    std::vector<knowhere::IndexNode::IteratorPtr>& iterators,
+    const dataset::RawIdMapView& raw_id_map) {
+    if (raw_id_map.empty()) {
+        return;
+    }
+    for (auto& iterator : iterators) {
+        iterator = std::make_shared<RawOutIdIterator>(
+            std::move(iterator), raw_id_map.internal_to_external_ids);
+    }
+}
+
+}  // namespace
 
 void
 CheckBruteForceSearchParam(const FieldMeta& field,
@@ -152,9 +208,10 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
 SubSearchResult
 BruteForceSearch(const dataset::SearchDataset& query_ds,
                  const dataset::RawDataset& raw_ds,
+                 const dataset::RawIdMapView& raw_id_map,
                  const SearchInfo& search_info,
                  const std::map<std::string, std::string>& index_info,
-                 const BitsetView& bitset,
+                 BitsetView bitset,
                  DataType data_type,
                  DataType element_type,
                  milvus::OpContext* op_context) {
@@ -166,6 +223,10 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     auto nq = query_ds.num_queries;
     auto [query_dataset, base_dataset] =
         PrepareBFDataSet(query_ds, raw_ds, data_type);
+    if (!raw_id_map.empty()) {
+        bitset.set_out_ids(raw_id_map.internal_to_external_ids,
+                           raw_id_map.internal_to_external_ids_count);
+    }
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);
     // `range_search_k` is only used as one of the conditions for iterator early termination.
     // not gurantee to return exactly `range_search_k` results, which may be more or less.
@@ -299,6 +360,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                       KnowhereStatusString(stat));
         }
     }
+    MapRawResultIdsToExternal(sub_result, raw_id_map);
     sub_result.round_values();
     return sub_result;
 }
@@ -343,28 +405,43 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 GetBruteForceSearchIterators(
     const dataset::SearchDataset& query_ds,
     const dataset::RawDataset& raw_ds,
+    const dataset::RawIdMapView& raw_id_map,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
-    const BitsetView& bitset,
+    BitsetView bitset,
     DataType data_type) {
     auto [query_dataset, base_dataset] =
         PrepareBFDataSet(query_ds, raw_ds, data_type);
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);
-    return DispatchBruteForceIteratorByDataType(
+    if (!raw_id_map.empty()) {
+        bitset.set_out_ids(raw_id_map.internal_to_external_ids,
+                           raw_id_map.internal_to_external_ids_count);
+    }
+    auto iterators = DispatchBruteForceIteratorByDataType(
         base_dataset, query_dataset, search_cfg, bitset, data_type);
+    if (iterators.has_value()) {
+        MapRawIteratorsToExternal(iterators.value(), raw_id_map);
+    }
+    return iterators;
 }
 
 SubSearchResult
 PackBruteForceSearchIteratorsIntoSubResult(
     const dataset::SearchDataset& query_ds,
     const dataset::RawDataset& raw_ds,
+    const dataset::RawIdMapView& raw_id_map,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
     DataType data_type) {
     auto nq = query_ds.num_queries;
-    auto iterators_val = GetBruteForceSearchIterators(
-        query_ds, raw_ds, search_info, index_info, bitset, data_type);
+    auto iterators_val = GetBruteForceSearchIterators(query_ds,
+                                                      raw_ds,
+                                                      raw_id_map,
+                                                      search_info,
+                                                      index_info,
+                                                      bitset,
+                                                      data_type);
     if (iterators_val.has_value()) {
         auto& iterators = iterators_val.value();
         AssertInfo(
