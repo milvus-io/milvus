@@ -1202,6 +1202,33 @@ func TestConfigureUseTakeForOutput(t *testing.T) {
 	})
 }
 
+func (suite *SegmentLoaderDetailSuite) TestReopenLoadedSealedSegmentsForSchemaUpdate() {
+	suite.Run("only_reopen_loaded_segments_for_target_collection", func() {
+		target := NewMockSegment(suite.T())
+		otherCollection := NewMockSegment(suite.T())
+		noInfo := NewMockSegment(suite.T())
+		reopened := NewMockSegment(suite.T())
+
+		targetInfo := &querypb.SegmentLoadInfo{SegmentID: suite.segmentID, CollectionID: suite.collectionID}
+
+		suite.segmentManager.EXPECT().GetBy(mock.Anything, mock.Anything).Return([]Segment{target, otherCollection, noInfo}).Once()
+		target.EXPECT().Collection().Return(suite.collectionID).Once()
+		target.EXPECT().LoadInfo().Return(targetInfo).Once()
+		otherCollection.EXPECT().Collection().Return(suite.collectionID + 1).Once()
+		noInfo.EXPECT().Collection().Return(suite.collectionID).Once()
+		noInfo.EXPECT().LoadInfo().Return(nil).Once()
+
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, commonpb.SegmentState_SegmentStateNone).Return(nil).Once()
+		suite.segmentManager.EXPECT().GetSealed(suite.segmentID).Return(reopened).Once()
+		reopened.EXPECT().Reopen(mock.Anything, mock.MatchedBy(func(info *querypb.SegmentLoadInfo) bool {
+			return info.GetSegmentID() == suite.segmentID && info.GetCollectionID() == suite.collectionID
+		})).Return(nil).Once()
+
+		err := suite.loader.ReopenLoadedSealedSegmentsForSchemaUpdate(context.Background(), suite.collectionID)
+		suite.NoError(err)
+	})
+}
+
 func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 	suite.Run("out_of_memory_zero_info", func() {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key, "0")

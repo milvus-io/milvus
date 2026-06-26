@@ -588,9 +588,20 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	// Pass the barrier timestamp through; collectionManager derives the logical
 	// schema version from the schema payload when it is present.
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
+	changed, err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
 	if err != nil {
 		log.Warn(ctx, "failed to update schema", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	if !changed {
+		return merr.Success(), nil
+	}
+
+	// Only reopen segments already loaded on this QueryNode. Load-time refreshes stay
+	// on the delegator publish path so the service gate remains in one place.
+	err = node.loader.ReopenLoadedSealedSegmentsForSchemaUpdate(ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn(ctx, "failed to reopen loaded segments after schema update", mlog.Err(err))
 	}
 
 	return merr.Status(err), nil

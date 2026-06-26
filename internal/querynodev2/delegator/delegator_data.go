@@ -478,6 +478,39 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 	return sd.loadBM25StatsForReopen(ctx, infosWithBM25Stats, req)
 }
 
+func (sd *shardDelegator) maybeReopenLoadedSegmentsBeforePublish(ctx context.Context, worker cluster.Worker, req *querypb.LoadSegmentsRequest) (uint64, error) {
+	sd.schemaChangeMutex.RLock()
+	currentSchema, _, currentBarrierTs := sd.collection.SchemaSnapshot()
+	sd.schemaChangeMutex.RUnlock()
+
+	loadMeta := req.GetLoadMeta()
+	if loadMeta == nil || loadMeta.GetSchemaBarrierTs() == 0 {
+		return currentBarrierTs, nil
+	}
+
+	loadedBarrierTs := loadMeta.GetSchemaBarrierTs()
+	if loadedBarrierTs >= currentBarrierTs {
+		return loadedBarrierTs, nil
+	}
+
+	reopenReq := typeutil.Clone(req)
+	reopenReq.LoadScope = querypb.LoadScope_Reopen
+	reopenReq.NeedTransfer = false
+	reopenReq.Schema = currentSchema
+	reopenReq.LoadMeta = &querypb.LoadMetaInfo{
+		CollectionID:    req.GetCollectionID(),
+		SchemaBarrierTs: currentBarrierTs,
+	}
+
+	if err := worker.LoadSegments(ctx, reopenReq); err != nil {
+		return 0, err
+	}
+	if err := sd.handleReopenPostLoad(ctx, reopenReq); err != nil {
+		return 0, err
+	}
+	return currentBarrierTs, nil
+}
+
 func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
@@ -628,6 +661,12 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return sd.handleReopenPostLoad(ctx, req)
 	}
 
+	effectiveSchemaBarrierTs, err := sd.maybeReopenLoadedSegmentsBeforePublish(ctx, worker, req)
+	if err != nil {
+		log.Warn(ctx, "failed to reopen loaded segments before publish", mlog.Err(err))
+		return err
+	}
+
 	return sd.withPostLoadLimit(ctx, func() error {
 		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
 			return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
@@ -671,7 +710,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Debug(ctx, "load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, req.GetLoadMeta().GetSchemaBarrierTs())
+			entries, effectiveSchemaBarrierTs)
 		if err != nil {
 			log.Warn(ctx, "load stream delete failed", mlog.Err(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
