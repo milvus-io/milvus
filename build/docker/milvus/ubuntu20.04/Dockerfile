@@ -19,6 +19,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
+    apt-get upgrade -y openssl libssl1.1 && \
     apt-get install -y --no-install-recommends gpgv curl libaio-dev libgomp1 && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
