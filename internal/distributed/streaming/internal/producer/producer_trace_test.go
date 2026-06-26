@@ -207,6 +207,54 @@ func TestProduceBroadcast_DoesNotOpenAutocommitOrTxnSpan(t *testing.T) {
 	}
 }
 
+func TestProduceInternalRemoteOpensDistAppendSpan(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	mockMsgID := mock_message.NewMockMessageID(t)
+	msg := buildTestInsertMessage(t)
+
+	mockProd := mock_producer.NewMockProducer(t)
+	mockProd.EXPECT().Append(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+			sc := trace.SpanContextFromContext(ctx)
+			assert.True(t, sc.IsValid(), "remote append ctx should carry wal.dist_append span")
+			return &types.AppendResult{
+				MessageID: mockMsgID,
+				TimeTick:  100,
+			}, nil
+		})
+	mockProd.EXPECT().Available().Return(make(chan struct{}))
+	mockProd.EXPECT().IsAvailable().Return(true)
+	mockProd.EXPECT().Close().Return()
+
+	rp := NewResumableProducer(func(ctx context.Context, opts *handler.ProducerOptions) (producer.Producer, error) {
+		return mockProd, nil
+	}, &ProducerOptions{
+		PChannel: "test-trace",
+	})
+	t.Cleanup(rp.Close)
+
+	_, err := rp.produceInternal(context.Background(), msg)
+	assert.NoError(t, err)
+
+	spans := exporter.GetSpans()
+	var distAppend tracetest.SpanStub
+	for _, s := range spans {
+		if s.Name == message.SpanNameWALDistAppend {
+			distAppend = s
+			break
+		}
+	}
+	assert.Equal(t, message.SpanNameWALDistAppend, distAppend.Name, "wal.dist_append span should be emitted for remote append")
+}
+
 // newTestResumableProducer builds a ResumableProducer with a mocked inner handler
 // so that produceInternal exits on the first iteration.
 func newTestResumableProducer(t *testing.T) *ResumableProducer {
