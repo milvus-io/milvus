@@ -11,12 +11,31 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+typedef struct CCacheShardDiskUsageStats {
+    char* data_type;
+    char* shard;
+    double disk_bytes;
+} CCacheShardDiskUsageStats;
+
+typedef struct CCacheShardDiskUsageStatsArray {
+    CCacheShardDiskUsageStats* stats;
+    int64_t len;
+} CCacheShardDiskUsageStatsArray;
+
 char*
 GetCoreMetrics();
+
+CCacheShardDiskUsageStatsArray
+GetCacheShardDiskUsageStats();
+
+void
+DeleteCacheShardDiskUsageStats(CCacheShardDiskUsageStatsArray stats);
 
 #ifdef __cplusplus
 };
