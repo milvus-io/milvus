@@ -138,18 +138,15 @@ func newProducerWithMetrics(channel string, p handler.Producer) handler.Producer
 	if p == nil {
 		return nil
 	}
-	isLocal := registry.IsLocal(p)
 	return producerWithMetrics{
 		Producer: p,
-		metrics:  newProducerMetrics(channel, isLocal),
-		isLocal:  isLocal,
+		metrics:  newProducerMetrics(channel, registry.IsLocal(p)),
 	}
 }
 
 type producerWithMetrics struct {
 	handler.Producer
 	metrics *producerMetrics
-	isLocal bool
 }
 
 func (pm producerWithMetrics) Append(ctx context.Context, msg message.MutableMessage) (result *types.AppendResult, err error) {
@@ -159,10 +156,6 @@ func (pm producerWithMetrics) Append(ctx context.Context, msg message.MutableMes
 	}()
 
 	return pm.Producer.Append(ctx, msg)
-}
-
-func (pm producerWithMetrics) IsLocal() bool {
-	return pm.isLocal
 }
 
 func (pm producerWithMetrics) Close() {
