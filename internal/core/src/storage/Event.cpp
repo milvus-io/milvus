@@ -254,18 +254,24 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
                              bool is_field_data) {
     auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
     if (!ast.ok()) {
-        throw ast;
+        throw SegcoreError(
+            ast.get_error_code(),
+            fmt::format("read start timestamp failed: {}", ast.what()));
     }
     ast = reader->ReadSingleValue<Timestamp>(end_timestamp);
     if (!ast.ok()) {
-        throw ast;
+        throw SegcoreError(
+            ast.get_error_code(),
+            fmt::format("read end timestamp failed: {}", ast.what()));
     }
 
     int payload_length =
         event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = reader->Read(payload_length);
     if (!res.first.ok()) {
-        throw res.first;
+        throw SegcoreError(
+            res.first.get_error_code(),
+            fmt::format("read payload failed: {}", res.first.what()));
     }
     payload_reader = std::make_shared<PayloadReader>(
         res.second.get(), payload_length, data_type, nullable, is_field_data);
@@ -539,16 +545,20 @@ LocalInsertEvent::Serialize() {
 LocalIndexEvent::LocalIndexEvent(BinlogReaderPtr reader) {
     auto ret = reader->Read(sizeof(index_size), &index_size);
     if (!ret.ok()) {
-        throw ret;
+        throw SegcoreError(ret.get_error_code(),
+                           fmt::format("read binlog failed: {}", ret.what()));
     }
     ret = reader->Read(sizeof(degree), &degree);
     if (!ret.ok()) {
-        throw ret;
+        throw SegcoreError(ret.get_error_code(),
+                           fmt::format("read binlog failed: {}", ret.what()));
     }
 
     auto res = reader->Read(index_size);
     if (!res.first.ok()) {
-        throw res.first;
+        throw SegcoreError(
+            res.first.get_error_code(),
+            fmt::format("read payload failed: {}", res.first.what()));
     }
     auto payload_reader = std::make_shared<PayloadReader>(
         res.second.get(), index_size, DataType::INT8, false);

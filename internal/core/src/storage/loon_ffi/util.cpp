@@ -42,37 +42,6 @@
 
 using json = nlohmann::json;
 
-namespace {
-// Map a milvus-storage FFI (loon) error code to a segcore ErrorCode so the
-// failure category survives to Go instead of collapsing to an untyped
-// std::runtime_error (-> UnexpectedError 2001 at the cgo boundary).
-milvus::ErrorCode
-LoonResultToErrorCode(int err_code) {
-    switch (err_code) {
-        case LOON_INVALID_ARGS:
-        case LOON_INVALID_PROPERTIES:
-        case LOON_NOT_SUPPORT:
-            return milvus::ErrorCode::InvalidParameter;  // input, non-retriable
-        case LOON_MEMORY_ERROR:
-            return milvus::ErrorCode::MemAllocateFailed;  // retriable
-        case LOON_IO_ERROR:
-            // Transient object-storage IO failure; another replica / a retry may
-            // succeed.
-            return milvus::ErrorCode::FileReadFailed;  // retriable
-        case LOON_DATA_ERROR:
-            // Malformed/corrupt data on disk; permanent.
-            return milvus::ErrorCode::DataFormatBroken;
-        case LOON_FILE_NOT_FOUND:
-            // Object missing in shared storage; rerouting will not help.
-            return milvus::ErrorCode::ObjectNotExist;
-        default:
-            // ARROW / LOGICAL / GOT_EXCEPTION / UNREACHABLE / TXN_* collapse to a
-            // non-retriable system error by design.
-            return milvus::ErrorCode::UnexpectedError;
-    }
-}
-}  // namespace
-
 std::shared_ptr<LoonProperties>
 MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     // Prepare key-value pairs from CStorageConfig
@@ -174,13 +143,10 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
 
     if (!loon_ffi_is_success(&result)) {
         auto message = loon_ffi_get_errmsg(&result);
-        // Copy the error message and code before freeing the LoonFFIResult.
+        // Copy the error message before freeing the LoonFFIResult
         std::string error_msg = message ? message : "Unknown error";
-        int err_code = result.err_code;
         loon_ffi_free_result(&result);
-        ThrowInfo(LoonResultToErrorCode(err_code),
-                  "failed to create storage properties: {}",
-                  error_msg);
+        throw std::runtime_error(error_msg);
     }
 
     loon_ffi_free_result(&result);
