@@ -1902,6 +1902,13 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     }
 
     SegmentExpr::DetermineExecPath();
+    // MATCH_*/element_filter child ($ predicate) is element-level: it can only
+    // use a nested index. Fall back to brute force on a non-nested (legacy)
+    // array index.
+    if (expr_->column_.element_level_ &&
+        exec_path_ == ExprExecPath::ScalarIndex && !CanUseNestedIndex()) {
+        exec_path_ = ExprExecPath::RawData;
+    }
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
     }

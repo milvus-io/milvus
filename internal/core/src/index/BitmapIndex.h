@@ -188,8 +188,13 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        if (schema_.data_type() == proto::schema::DataType::Array &&
-            !is_nested_index_) {
+        // Array bitmap indexes -- nested or not -- cannot reconstruct the
+        // per-row array structure (row boundaries, null/empty rows) that
+        // IArrayOffsets / MATCH_* / element_filter / array_length need, so they
+        // must not let the segment loader skip the raw array data. (Previously a
+        // nested array bitmap reported true, allowing an index-only load that
+        // left MATCH_* with no offsets and aborted at query time.)
+        if (schema_.data_type() == proto::schema::DataType::Array) {
             return false;
         }
         return true;

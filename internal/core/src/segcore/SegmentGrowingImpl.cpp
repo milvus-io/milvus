@@ -209,22 +209,17 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            // For regular array types (INT32, FLOAT, etc.). Nullable array
-            // FieldData is stored compactly -- NULL rows occupy no slot in the
-            // underlying buffer -- so a valid row must be read by its physical
-            // index, not its logical row index (mirroring the VECTOR_ARRAY
-            // branch above). Indexing the compact buffer by the logical i would
-            // read the wrong element, and run past the buffer, once any NULL row
-            // precedes a valid one.
+            // For regular (scalar) array types (INT32, FLOAT, etc.), nullable
+            // FieldData is stored DENSELY: a NULL row occupies a length-0 Array
+            // slot at its logical position (FieldDataArrayImpl does not pack
+            // valid rows). This differs from the VECTOR_ARRAY branch above,
+            // where FieldDataVectorArrayImpl packs only valid rows and so must
+            // be read by physical index. Read each scalar-array row by its
+            // logical index i; a NULL row's empty Array already reports
+            // length 0.
             auto* raw_data = static_cast<const ArrayView*>(data->Data());
-            int64_t physical_row = 0;
             for (int64_t i = 0; i < num_rows; ++i) {
-                if (data->IsNullable() && !data->is_valid(i)) {
-                    array_lengths[offset + i] = 0;
-                    continue;
-                }
-                auto source_index = data->IsNullable() ? physical_row++ : i;
-                array_lengths[offset + i] = raw_data[source_index].length();
+                array_lengths[offset + i] = raw_data[i].length();
             }
         }
         offset += num_rows;
