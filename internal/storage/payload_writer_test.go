@@ -388,6 +388,108 @@ func TestPayloadWriter_ArrayOfVector(t *testing.T) {
 		err = w.AddDataToPayloadForUT(wrongData, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "incorrect data type")
+
+		invalidLengthCases := []struct {
+			name        string
+			elementType schemapb.DataType
+			dim         int
+			data        *VectorArrayFieldData
+		}{
+			{
+				name:        "FloatVector",
+				elementType: schemapb.DataType_FloatVector,
+				dim:         4,
+				data: &VectorArrayFieldData{
+					Data: []*schemapb.VectorField{
+						{
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5}},
+							},
+						},
+					},
+					ElementType: schemapb.DataType_FloatVector,
+					Dim:         4,
+				},
+			},
+			{
+				name:        "BinaryVector",
+				elementType: schemapb.DataType_BinaryVector,
+				dim:         16,
+				data: &VectorArrayFieldData{
+					Data: []*schemapb.VectorField{
+						{
+							Data: &schemapb.VectorField_BinaryVector{
+								BinaryVector: []byte{1, 2, 3},
+							},
+						},
+					},
+					ElementType: schemapb.DataType_BinaryVector,
+					Dim:         16,
+				},
+			},
+			{
+				name:        "Float16Vector",
+				elementType: schemapb.DataType_Float16Vector,
+				dim:         4,
+				data: &VectorArrayFieldData{
+					Data: []*schemapb.VectorField{
+						{
+							Data: &schemapb.VectorField_Float16Vector{
+								Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
+							},
+						},
+					},
+					ElementType: schemapb.DataType_Float16Vector,
+					Dim:         4,
+				},
+			},
+			{
+				name:        "BFloat16Vector",
+				elementType: schemapb.DataType_BFloat16Vector,
+				dim:         4,
+				data: &VectorArrayFieldData{
+					Data: []*schemapb.VectorField{
+						{
+							Data: &schemapb.VectorField_Bfloat16Vector{
+								Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
+							},
+						},
+					},
+					ElementType: schemapb.DataType_BFloat16Vector,
+					Dim:         4,
+				},
+			},
+			{
+				name:        "Int8Vector",
+				elementType: schemapb.DataType_Int8Vector,
+				dim:         4,
+				data: &VectorArrayFieldData{
+					Data: []*schemapb.VectorField{
+						{
+							Data: &schemapb.VectorField_Int8Vector{
+								Int8Vector: []byte{1, 2, 3, 4, 5},
+							},
+						},
+					},
+					ElementType: schemapb.DataType_Int8Vector,
+					Dim:         4,
+				},
+			},
+		}
+		for _, tt := range invalidLengthCases {
+			t.Run("invalid length "+tt.name, func(t *testing.T) {
+				w, err := NewPayloadWriter(
+					schemapb.DataType_ArrayOfVector,
+					WithDim(tt.dim),
+					WithElementType(tt.elementType),
+				)
+				require.NoError(t, err)
+
+				err = w.AddVectorArrayFieldDataToPayload(tt.data)
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "not divisible")
+			})
+		}
 	})
 
 	t.Run("Test ArrayOfFloatVector - Multiple Batches", func(t *testing.T) {

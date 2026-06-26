@@ -1217,6 +1217,166 @@ func TestStructFieldReader_ArrayOfVectorFloat64(t *testing.T) {
 	require.Equal(t, []float32{9, 10, 11, 12}, vectors[1].GetFloatVector().GetData())
 }
 
+func TestStructFieldReader_ArrayOfVectorByteElementTypes(t *testing.T) {
+	buildChunked := func(rows [][][]byte) (*arrow.Chunked, arrow.Array) {
+		mem := memory.NewGoAllocator()
+		structType := arrow.StructOf(arrow.Field{
+			Name:     "vector_array",
+			Type:     arrow.ListOf(arrow.PrimitiveTypes.Uint8),
+			Nullable: true,
+		})
+		listBuilder := array.NewListBuilder(mem, structType)
+		structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
+		vectorBuilder := structBuilder.FieldBuilder(0).(*array.ListBuilder)
+		uint8Builder := vectorBuilder.ValueBuilder().(*array.Uint8Builder)
+
+		for _, row := range rows {
+			listBuilder.Append(true)
+			for _, vector := range row {
+				vectorBuilder.Append(true)
+				uint8Builder.AppendValues(vector, nil)
+				structBuilder.Append(true)
+			}
+		}
+
+		arr := listBuilder.NewArray()
+		listBuilder.Release()
+		chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+		return chunked, arr
+	}
+
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         int
+		rows        [][][]byte
+		want        [][]byte
+	}{
+		{
+			name:        "BinaryVector",
+			elementType: schemapb.DataType_BinaryVector,
+			dim:         16,
+			rows: [][][]byte{
+				{{1, 2}, {3, 4}},
+				{{5, 6}},
+			},
+			want: [][]byte{{1, 2, 3, 4}, {5, 6}},
+		},
+		{
+			name:        "Float16Vector",
+			elementType: schemapb.DataType_Float16Vector,
+			dim:         2,
+			rows: [][][]byte{
+				{{1, 2, 3, 4}, {5, 6, 7, 8}},
+				{{9, 10, 11, 12}},
+			},
+			want: [][]byte{{1, 2, 3, 4, 5, 6, 7, 8}, {9, 10, 11, 12}},
+		},
+		{
+			name:        "BFloat16Vector",
+			elementType: schemapb.DataType_BFloat16Vector,
+			dim:         2,
+			rows: [][][]byte{
+				{{11, 12, 13, 14}, {15, 16, 17, 18}},
+				{{19, 20, 21, 22}},
+			},
+			want: [][]byte{{11, 12, 13, 14, 15, 16, 17, 18}, {19, 20, 21, 22}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunked, arr := buildChunked(tt.rows)
+			defer chunked.Release()
+			defer arr.Release()
+
+			reader := &StructFieldReader{
+				field: &schemapb.FieldSchema{
+					Name:        "struct_array[vector_array]",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: tt.elementType,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxCapacityKey, Value: "20"},
+					},
+				},
+				fieldIndex: 0,
+				dim:        tt.dim,
+			}
+
+			data, validData, err := reader.readArrayOfVectorField(chunked)
+			require.NoError(t, err)
+			require.Nil(t, validData)
+			require.Len(t, data, len(tt.want))
+
+			vectors := data.([]*schemapb.VectorField)
+			for i, vector := range vectors {
+				require.Equal(t, int64(tt.dim), vector.GetDim())
+				switch tt.elementType {
+				case schemapb.DataType_BinaryVector:
+					require.Equal(t, tt.want[i], vector.GetBinaryVector())
+				case schemapb.DataType_Float16Vector:
+					require.Equal(t, tt.want[i], vector.GetFloat16Vector())
+				case schemapb.DataType_BFloat16Vector:
+					require.Equal(t, tt.want[i], vector.GetBfloat16Vector())
+				}
+			}
+		})
+	}
+}
+
+func TestStructFieldReader_ArrayOfVectorInt8(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	structType := arrow.StructOf(arrow.Field{
+		Name:     "vector_array",
+		Type:     arrow.ListOf(arrow.PrimitiveTypes.Int8),
+		Nullable: true,
+	})
+	listBuilder := array.NewListBuilder(mem, structType)
+	structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
+	vectorBuilder := structBuilder.FieldBuilder(0).(*array.ListBuilder)
+	int8Builder := vectorBuilder.ValueBuilder().(*array.Int8Builder)
+
+	appendVector := func(values ...int8) {
+		vectorBuilder.Append(true)
+		int8Builder.AppendValues(values, nil)
+		structBuilder.Append(true)
+	}
+	listBuilder.Append(true)
+	appendVector(1, -2, 3, -4)
+	appendVector(5, -6, 7, -8)
+	listBuilder.Append(true)
+	appendVector(9, -10, 11, -12)
+
+	arr := listBuilder.NewArray()
+	listBuilder.Release()
+	defer arr.Release()
+
+	chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+	defer chunked.Release()
+
+	reader := &StructFieldReader{
+		field: &schemapb.FieldSchema{
+			Name:        "struct_array[vector_array]",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_Int8Vector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "20"},
+			},
+		},
+		fieldIndex: 0,
+		dim:        4,
+	}
+
+	data, validData, err := reader.readArrayOfVectorField(chunked)
+	require.NoError(t, err)
+	require.Nil(t, validData)
+	require.Len(t, data, 2)
+
+	vectors := data.([]*schemapb.VectorField)
+	require.Equal(t, []byte{1, 254, 3, 252, 5, 250, 7, 248}, vectors[0].GetInt8Vector())
+	require.Equal(t, []byte{9, 246, 11, 244}, vectors[1].GetInt8Vector())
+}
+
 func TestStructFieldReader_ArrayMaxCapacity(t *testing.T) {
 	mem := memory.NewGoAllocator()
 	structType := arrow.StructOf(arrow.Field{

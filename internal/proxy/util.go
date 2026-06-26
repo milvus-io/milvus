@@ -432,7 +432,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 	}
 
 	// for dense vector field, dim will be limited by max_dimension
-	if typeutil.IsBinaryVectorType(field.DataType) {
+	if isBinaryVectorDimension(field) {
 		if dim%8 != 0 {
 			return merr.WrapErrParameterInvalidMsg("invalid dimension: %d of field %s. binary vector dimension should be multiple of 8. ", dim, field.GetName())
 		}
@@ -445,6 +445,11 @@ func validateDimension(field *schemapb.FieldSchema) error {
 		}
 	}
 	return nil
+}
+
+func isBinaryVectorDimension(field *schemapb.FieldSchema) bool {
+	return typeutil.IsBinaryVectorType(field.GetDataType()) ||
+		(typeutil.IsArrayOfVectorType(field.GetDataType()) && typeutil.IsBinaryVectorType(field.GetElementType()))
 }
 
 func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema) error {
@@ -677,14 +682,10 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 			return err
 		}
 	} else {
-		// TODO(SpadeA): only support float vector now
-		if field.GetElementType() != schemapb.DataType_FloatVector {
-			return merr.WrapErrParameterInvalidMsg("unsupported element type of array field %s, now only float vector is supported", field.Name)
+		if !typeutil.IsFixDimVectorType(field.GetElementType()) {
+			return merr.WrapErrParameterInvalidMsg("unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
 		}
 
-		// if !typeutil.IsVectorType(field.GetElementType()) {
-		// 	return fmt.Errorf("Inconsistent schema: element type of array field %s is not a vector type", field.Name)
-		// }
 		err = validateDimension(field)
 		if err != nil {
 			return err
