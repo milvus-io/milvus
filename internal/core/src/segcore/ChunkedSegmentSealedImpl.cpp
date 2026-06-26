@@ -1186,12 +1186,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             milvus::storage::LocalChunkManagerSingleton::GetInstance()
                 .GetChunkManager()
                 ->GetRootPath();
-        auto field_data_info =
-            FieldDataInfo(field_id.get(),
-                          num_rows,
-                          mmap_dir_path,
-                          schema_->ShouldLoadField(field_id),
-                          load_info.shard);
+        auto field_data_info = FieldDataInfo(field_id.get(),
+                                             num_rows,
+                                             mmap_dir_path,
+                                             schema_->ShouldLoadField(field_id),
+                                             load_info.shard);
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -5079,12 +5078,12 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
             ->GetRootPath();
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto field_data_info = FieldDataInfo(field_id.get(),
-                                         size,
-                                         mmap_dir_path,
-                                         false,
-                                         std::atomic_load(&segment_load_info_)
-                                             ->GetInsertChannel());
+    auto field_data_info = FieldDataInfo(
+        field_id.get(),
+        size,
+        mmap_dir_path,
+        false,
+        std::atomic_load(&segment_load_info_)->GetInsertChannel());
 
     auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
         field_id, IsVectorDataType(data_type), /*is_index=*/false);
