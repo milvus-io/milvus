@@ -1,9 +1,9 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 
 #include <filesystem>
-#include <limits>
 #include <utility>
 
+#include "cachinglayer/LoadingOverheadTracker.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "common/resource_c.h"
@@ -17,6 +17,7 @@
 #include "nlohmann/json.hpp"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/memory_planner.h"
 #include "storage/EntryStreamUtils.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -82,13 +83,18 @@ SealedIndexTranslator::SealedIndexTranslator(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
-        auto upper_bound = milvus::cachinglayer::ResourceUsage{
-            static_cast<int64_t>(
-                milvus::storage::TransientMemoryBudget::GetEntryStreamBudget()
-                    .CapacityBytes()),
-            std::numeric_limits<int64_t>::max()};
+        auto budget_capacity = static_cast<int64_t>(
+            milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
+                .CapacityBytes());
+        auto memory_upper_bound =
+            budget_capacity == 0
+                ? milvus::cachinglayer::LoadingOverheadTracker::kUnlimited
+                      .memory_bytes
+                : budget_capacity;
+        auto upper_bound =
+            milvus::cachinglayer::ResourceUsage{memory_upper_bound, int64_t{0}};
         meta_.loading_overhead = milvus::cachinglayer::LoadingOverheadConfig{
-            upper_bound, "ScalarIndexV3TransientMemoryBudget"};
+            upper_bound, milvus::segcore::kLoadTransientOverheadGroup};
     }
 }
 
@@ -181,7 +187,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         config_[milvus::index::COLLECTION_ID] =
             file_manager_context_.fieldDataMeta.collection_id;
         LOG_INFO("load V3 scalar index with configs: {}", config_.dump());
-        index->LoadUnified(config_);
+        index->LoadUnified(config_, ctx);
     } else {
         LOG_INFO("load index with configs: {}", config_.dump());
         index->Load(ctx_, config_);

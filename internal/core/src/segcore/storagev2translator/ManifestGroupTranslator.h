@@ -184,6 +184,9 @@ class ManifestGroupTranslator
     load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
                      milvus::cachinglayer::cid_t cid);
 
+    int64_t
+    loading_overhead_bytes(int64_t cell_size) const;
+
     int64_t segment_id_;
     GroupChunkType group_chunk_type_;
     int64_t column_group_index_;
@@ -194,6 +197,7 @@ class ManifestGroupTranslator
     GroupCTMeta meta_;
     bool use_mmap_;
     bool mmap_populate_;
+    bool has_array_field_{false};
     std::string mmap_dir_path_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};

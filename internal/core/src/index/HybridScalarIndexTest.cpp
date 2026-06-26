@@ -13,12 +13,15 @@
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <stdlib.h>
+#include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -31,6 +34,7 @@
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "cachinglayer/LoadingOverheadTracker.h"
 #include "gtest/gtest.h"
 #include "index/HybridScalarIndex.h"
 #include "index/Index.h"
@@ -43,6 +47,8 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/memory_planner.h"
+#include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
@@ -708,11 +714,17 @@ TYPED_TEST_SUITE_P(HybridIndexTestInverted);
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ResourceEstimateUsesInternalInvertedIndexType) {
-    auto stream_budget =
-        storage::TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes();
-    auto stream_overhead =
-        static_cast<uint64_t>(stream_budget + storage::kTailMergeGrace);
-    auto index_size = stream_overhead + 1024;
+    auto stream_budget = storage::EntryStreamMaxTransientBytes();
+    auto index_size = static_cast<uint64_t>(stream_budget);
+    if (stream_budget == std::numeric_limits<size_t>::max() ||
+        index_size > std::numeric_limits<uint64_t>::max() -
+                         storage::kTailMergeGrace - 1024) {
+        index_size = storage::kTailMergeGrace + 1024;
+    } else {
+        index_size += 1024;
+    }
+    auto stream_overhead = static_cast<uint64_t>(
+        std::min<size_t>(index_size, storage::EntryStreamMaxTransientBytes()));
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
@@ -736,6 +748,61 @@ TYPED_TEST_P(HybridIndexTestInverted,
     EXPECT_EQ(request.max_memory_cost, stream_overhead);
     EXPECT_EQ(request.max_disk_cost, index_size);
     EXPECT_FALSE(request.has_raw_data);
+}
+
+TYPED_TEST_P(HybridIndexTestInverted,
+             ScalarIndexLoadingOverheadDoesNotCapFileDimension) {
+    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto old_capacity = budget.CapacityBytes();
+    auto cleanup = folly::makeGuard(
+        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+    budget.SetCapacityBytes(0);
+
+    std::map<std::string, std::string> index_params{
+        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.collection_id = 1;
+    load_info.partition_id = 2;
+    load_info.segment_id = 3;
+    load_info.field_id = 101;
+    load_info.field_type = this->type_;
+    load_info.element_type = DataType::NONE;
+    load_info.enable_mmap = false;
+    load_info.index_id = this->index_build_id_;
+    load_info.index_build_id = this->index_build_id_;
+    load_info.index_version = this->index_version_;
+    load_info.index_params = index_params;
+    load_info.index_files = this->index_files_;
+    load_info.index_engine_version = this->index_version_;
+    load_info.index_size = 1024;
+    load_info.num_rows = this->nb_;
+    load_info.dim = 0;
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    index_info.field_type = this->type_;
+    index_info.index_engine_version = this->index_version_;
+
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+
+    Config config = index_params;
+    milvus::segcore::storagev1translator::SealedIndexTranslator translator(
+        index_info,
+        &load_info,
+        milvus::tracer::TraceContext{},
+        ctx,
+        std::move(config));
+
+    ASSERT_TRUE(translator.meta()->loading_overhead.has_value());
+    EXPECT_EQ(translator.meta()->loading_overhead->group,
+              milvus::segcore::kLoadTransientOverheadGroup);
+    EXPECT_EQ(
+        translator.meta()->loading_overhead->upper_bound.memory_bytes,
+        milvus::cachinglayer::LoadingOverheadTracker::kUnlimited.memory_bytes);
+    EXPECT_EQ(translator.meta()->loading_overhead->upper_bound.file_bytes, 0);
 }
 
 template <typename T>
@@ -933,7 +1000,8 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV4,
                             TestRangeCompareFuncTest);
 
 REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestInverted,
-                            ResourceEstimateUsesInternalInvertedIndexType);
+                            ResourceEstimateUsesInternalInvertedIndexType,
+                            ScalarIndexLoadingOverheadDoesNotCapFileDimension);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,

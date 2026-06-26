@@ -79,9 +79,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.IndexSliceSize.GetAsInt64(), int64(DefaultIndexSliceSize))
 		t.Logf("knowhere index slice size = %d", Params.IndexSliceSize.GetAsInt64())
 
-		assert.InDelta(t, DefaultStreamBudgetRatio, Params.StreamBudgetRatio.GetAsFloat(), 0.0001)
-		params.Save(Params.StreamBudgetRatio.Key, "2.5")
-		assert.InDelta(t, 2.5, Params.StreamBudgetRatio.GetAsFloat(), 0.0001)
+		defer params.Reset(Params.LoadTransientBudgetBytes.Key)
+		assert.Equal(t, int64(DefaultLoadTransientBudgetBytes), Params.LoadTransientBudgetBytes.GetAsInt64())
+		params.Save(Params.LoadTransientBudgetBytes.Key, "-1")
+		assert.Equal(t, int64(DefaultLoadTransientBudgetBytes), Params.LoadTransientBudgetBytes.GetAsInt64())
+		params.Save(Params.LoadTransientBudgetBytes.Key, "67108864")
+		assert.Equal(t, int64(67108864), Params.LoadTransientBudgetBytes.GetAsInt64())
 
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
@@ -491,7 +494,6 @@ func TestComponentParam(t *testing.T) {
 		// test query side config
 		chunkRows := Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(128), chunkRows)
-
 		nlist := Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
 

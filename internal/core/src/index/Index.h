@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/File.h"
 #include "common/JsonCastType.h"
+#include "common/OpContext.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_factory.h"
@@ -65,7 +66,8 @@ class IndexBase {
     Upload(const Config& config = {}) = 0;
 
     virtual void
-    LoadUnified(const Config& config) {
+    LoadUnified(const Config& config, milvus::OpContext* op_ctx = nullptr) {
+        (void)op_ctx;
         ThrowInfo(Unsupported,
                   "LoadUnified is not supported for this index type");
     }

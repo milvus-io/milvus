@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -24,10 +25,12 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "common/Common.h"
 #include "common/EasyAssert.h"
+#include "folly/CancellationToken.h"
 
 namespace milvus::storage {
 
@@ -45,10 +48,12 @@ DefaultStreamSliceSize() {
     return DEFAULT_INDEX_FILE_SLICE_SIZE;
 }
 
-inline double
-StreamBudgetRatio() {
-    auto ratio = milvus::ENTRY_STREAM_BUDGET_RATIO.load();
-    return ratio > 0 ? ratio : 1.0;
+inline void
+ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
+                 const std::string& operation) {
+    if (cancellation_token.isCancellationRequested()) {
+        ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
+    }
 }
 
 /// A slice read from a V3 entry. `error` carries an exception captured in
@@ -60,19 +65,26 @@ struct StreamSliceResult {
 };
 
 /// Byte budget for transient data that has been submitted for async work but
-/// has not been consumed yet.
+/// has not been consumed yet. Capacity 0 means unlimited.
 ///
 /// Usage:
 ///   - Call Acquire(bytes) to block until budget is available.
+///   - Call AcquireUntil(bytes, stop_waiting) to block until budget is
+///     available or the caller's lifecycle ends.
 ///   - Call TryAcquire(bytes) for non-blocking replenish in refill loops.
 ///   - Call Release(bytes) after the transient data has been consumed.
 ///   - Oversized requests are allowed to run exclusively to guarantee progress.
 class TransientMemoryBudget {
  public:
     static TransientMemoryBudget&
-    GetEntryStreamBudget() {
+    GetLoadTransientBudget() {
         static TransientMemoryBudget instance;
         return instance;
+    }
+
+    static void
+    SetLoadTransientBudgetBytes(size_t bytes) {
+        GetLoadTransientBudget().SetCapacityBytes(bytes);
     }
 
     /// Block until enough budget is available. Safe to call when the calling
@@ -82,6 +94,25 @@ class TransientMemoryBudget {
         std::unique_lock<std::mutex> lock(mu_);
         cv_.wait(lock, [this, bytes] { return CanAcquireLocked(bytes); });
         inflight_bytes_ += bytes;
+    }
+
+    /// Block until enough budget is available, or stop_waiting returns true.
+    /// The callback must be cheap and non-blocking. Returning false means no
+    /// budget was acquired and the caller should stop its work.
+    template <typename StopWaiting>
+    bool
+    AcquireUntil(size_t bytes, StopWaiting stop_waiting) {
+        std::unique_lock<std::mutex> lock(mu_);
+        while (true) {
+            if (stop_waiting()) {
+                return false;
+            }
+            if (CanAcquireLocked(bytes)) {
+                inflight_bytes_ += bytes;
+                return true;
+            }
+            cv_.wait_for(lock, std::chrono::milliseconds(10));
+        }
     }
 
     /// Try to claim budget. Returns true if under budget.
@@ -112,7 +143,17 @@ class TransientMemoryBudget {
 
     size_t
     CapacityBytes() const {
-        return EntryStreamBudgetBytes();
+        std::lock_guard<std::mutex> lock(mu_);
+        return CapacityBytesLocked();
+    }
+
+    void
+    SetCapacityBytes(size_t bytes) {
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            capacity_bytes_ = bytes;
+        }
+        cv_.notify_all();
     }
 
     void
@@ -123,17 +164,21 @@ class TransientMemoryBudget {
  private:
     TransientMemoryBudget() = default;
 
-    static size_t
-    EntryStreamBudgetBytes() {
-        auto core_num = std::max(1, milvus::CPU_NUM);
-        auto capacity = static_cast<size_t>(core_num * StreamBudgetRatio()) *
-                        DefaultStreamSliceSize();
-        return std::max<size_t>(capacity, DefaultStreamSliceSize());
+    explicit TransientMemoryBudget(size_t capacity_bytes)
+        : capacity_bytes_(capacity_bytes) {
+    }
+
+    size_t
+    CapacityBytesLocked() const {
+        return capacity_bytes_;
     }
 
     bool
     CanAcquireLocked(size_t bytes) const {
-        auto capacity_bytes = CapacityBytes();
+        auto capacity_bytes = CapacityBytesLocked();
+        if (capacity_bytes == 0) {
+            return true;
+        }
         if (bytes > capacity_bytes) {
             return inflight_bytes_ == 0;
         }
@@ -141,15 +186,19 @@ class TransientMemoryBudget {
                bytes <= capacity_bytes - inflight_bytes_;
     }
 
-    std::mutex mu_;
+    mutable std::mutex mu_;
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
+    size_t capacity_bytes_{0};
 };
 
 inline size_t
 EntryStreamMaxTransientBytes() {
     auto capacity =
-        TransientMemoryBudget::GetEntryStreamBudget().CapacityBytes();
+        TransientMemoryBudget::GetLoadTransientBudget().CapacityBytes();
+    if (capacity == 0) {
+        return std::numeric_limits<size_t>::max();
+    }
     if (capacity > std::numeric_limits<size_t>::max() - kTailMergeGrace) {
         return std::numeric_limits<size_t>::max();
     }
