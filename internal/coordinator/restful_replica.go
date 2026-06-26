@@ -72,10 +72,12 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	// Get cluster-level configuration
 	clusterReplicaNum := Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt()
 	clusterResourceGroups := Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	forceOverrideUserReplicaMode := Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool()
 
 	logger.Info("checking replica load config compliance",
 		zap.Int("clusterReplicaNum", clusterReplicaNum),
-		zap.Strings("clusterResourceGroups", clusterResourceGroups))
+		zap.Strings("clusterResourceGroups", clusterResourceGroups),
+		zap.Bool("forceOverrideUserReplicaMode", forceOverrideUserReplicaMode))
 
 	// Use ShowLoadCollections to get all loaded collections
 	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
@@ -89,6 +91,11 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 
 	// Check each collection
 	for _, collectionID := range showResp.GetCollectionIDs() {
+		if !forceOverrideUserReplicaMode && s.queryCoordServer.IsCollectionUserSpecifiedReplicaMode(ctx, collectionID) {
+			logger.Info("collection is user specified replica mode, skip compliance check", zap.Int64("collectionID", collectionID))
+			continue
+		}
+
 		// Get internal replicas from QueryCoord meta which contains StreamingResourceGroup field
 		internalReplicas := s.queryCoordServer.GetInternalReplicasByCollection(ctx, collectionID)
 
