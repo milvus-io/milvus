@@ -189,6 +189,9 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 			)
 		}
 	}
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
+	}
 
 	return writerOpts
 }
@@ -722,7 +725,6 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 	}
 	if !hasLobFiles {
 		mlog.Info(context.TODO(), "no LOB files found in source segments")
-		return nil
 	}
 
 	// create LOB compaction context and compute strategies

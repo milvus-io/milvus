@@ -387,7 +387,8 @@ var _ BinlogRecordWriter = (*PackedManifestRecordWriter)(nil)
 type PackedManifestRecordWriter struct {
 	packedBinlogRecordWriterBase
 	// writer and stats generated at runtime
-	writer *packedRecordBatchWriter
+	writer           *packedRecordBatchWriter
+	textRefsAsBinary bool
 }
 
 func (pw *PackedManifestRecordWriter) Write(r Record) error {
@@ -437,7 +438,7 @@ func (pw *PackedManifestRecordWriter) initWriters(r Record) error {
 		var err error
 		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
 		pw.basePath = path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-		pw.writer, err = NewPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, writerFormat, schemaBasedFormats)
+		pw.writer, err = newPackedRecordBatchWriter(pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext, true, pw.textRefsAsBinary, writerFormat, schemaBasedFormats)
 		if err != nil {
 			return merr.WrapErrStorage(err, "can not new packed record writer")
 		}
@@ -557,6 +558,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
+	textRefsAsBinary bool,
 ) (*PackedManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -583,6 +585,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 			ttlFieldID:           getTTLFieldID(schema),
 			ttlFieldValues:       make([]int64, 0),
 		},
+		textRefsAsBinary: textRefsAsBinary,
 	}
 
 	// Create stats collectors
