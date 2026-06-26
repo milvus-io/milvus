@@ -1697,6 +1697,17 @@ func (c *Client) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 	})
 }
 
+func (c *Client) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+		return client.GetQueryViewSegmentLoadInfo(ctx, req)
+	})
+}
+
 // LoadBalance migrate the sealed segments on the source node to the dst nodes.
 func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)

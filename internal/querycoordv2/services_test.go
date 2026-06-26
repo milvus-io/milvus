@@ -58,6 +58,7 @@ import (
 	sbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	componenttypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1338,6 +1339,45 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 	resp, err := server.GetLoadSegmentInfo(ctx, req)
 	suite.NoError(err)
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
+}
+
+func (suite *ServiceSuite) TestGetQueryViewSegmentLoadInfo() {
+	ctx := context.Background()
+	server := suite.server
+	respFromDataCoord := &querypb.GetQueryViewSegmentLoadInfoResponse{
+		Status: merr.Success(),
+		Infos:  []*querypb.SegmentLoadInfo{{SegmentID: 1000}},
+	}
+	fakeMixCoord := &fakeQueryViewSegmentLoadInfoMixCoord{resp: respFromDataCoord}
+	server.SetMixCoord(fakeMixCoord)
+
+	req := &querypb.GetQueryViewSegmentLoadInfoRequest{
+		CollectionID: suite.collections[0],
+		SegmentIDs:   []int64{1000},
+	}
+	resp, err := server.GetQueryViewSegmentLoadInfo(ctx, req)
+	suite.NoError(err)
+	suite.Same(respFromDataCoord, resp)
+	suite.Equal(req, fakeMixCoord.req)
+
+	server.UpdateStateCode(commonpb.StateCode_Initializing)
+	resp, err = server.GetQueryViewSegmentLoadInfo(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	suite.Equal(1, fakeMixCoord.calls)
+}
+
+type fakeQueryViewSegmentLoadInfoMixCoord struct {
+	componenttypes.MixCoord
+	req   *querypb.GetQueryViewSegmentLoadInfoRequest
+	resp  *querypb.GetQueryViewSegmentLoadInfoResponse
+	calls int
+}
+
+func (m *fakeQueryViewSegmentLoadInfoMixCoord) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	m.calls++
+	m.req = req
+	return m.resp, nil
 }
 
 func (suite *ServiceSuite) TestLoadBalance() {

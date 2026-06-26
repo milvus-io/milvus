@@ -633,6 +633,10 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 	return s.mixCoord.GetLoadSegmentInfo(ctx, req)
 }
 
+func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return s.mixCoord.GetQueryViewSegmentLoadInfo(ctx, req)
+}
+
 // LoadBalance migrate the sealed segments on the source node to the dst nodes
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return s.mixCoord.LoadBalance(ctx, req)

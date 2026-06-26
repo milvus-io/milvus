@@ -24,16 +24,22 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 type MockRootCoord struct {
@@ -312,6 +318,67 @@ func Test_NewServer(t *testing.T) {
 
 	err = server.Stop()
 	assert.NoError(t, err)
+}
+
+func TestRegisterQueryViewSyncServer(t *testing.T) {
+	server := grpc.NewServer()
+	registerQueryViewSyncServer(server, noopQNSegmentManager{})
+
+	_, ok := server.GetServiceInfo()["milvus.proto.view.ViewSyncService"]
+	assert.True(t, ok)
+}
+
+type noopQNSegmentManager struct{}
+
+func (noopQNSegmentManager) Acquire(qnview.AcquireSegments) {}
+
+func (noopQNSegmentManager) Release(qnview.ReleaseSegments) {}
+
+func TestQueryViewTransformLogAccesserNilWhenWALNotReady(t *testing.T) {
+	streaming.SetWALForTest(nil)
+	defer streaming.SetupNoopWALForTest()
+
+	assert.Nil(t, queryViewTransformLogAccesser())
+}
+
+type fakeQueryViewMetadataMixCoordClient struct {
+	types.MixCoordClient
+
+	getQVLoadInfoReq  *querypb.GetQueryViewSegmentLoadInfoRequest
+	getQVLoadInfoResp *querypb.GetQueryViewSegmentLoadInfoResponse
+	getQVLoadInfoErr  error
+}
+
+func (c *fakeQueryViewMetadataMixCoordClient) GetQueryViewSegmentLoadInfo(_ context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	c.getQVLoadInfoReq = req
+	return c.getQVLoadInfoResp, c.getQVLoadInfoErr
+}
+
+func newTestQueryViewLoadMetadataProvider(client types.MixCoordClient) *lazyQueryViewLoadMetadataProvider {
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	future.Set(client)
+	return &lazyQueryViewLoadMetadataProvider{mixCoord: future}
+}
+
+func TestLazyQueryViewLoadMetadataProvider_GetQueryViewSegmentLoadInfo(t *testing.T) {
+	indexes := []*indexpb.IndexInfo{{CollectionID: 100, FieldID: 101, IndexName: "vec_idx"}}
+	client := &fakeQueryViewMetadataMixCoordClient{
+		getQVLoadInfoResp: &querypb.GetQueryViewSegmentLoadInfoResponse{
+			Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Infos:         []*querypb.SegmentLoadInfo{{SegmentID: 1000, PartitionID: 10}},
+			IndexInfoList: indexes,
+		},
+	}
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	infos, indexInfos, err := provider.GetQueryViewSegmentLoadInfo(context.Background(), 100, 1000)
+
+	require.NoError(t, err)
+	assert.Equal(t, []*querypb.SegmentLoadInfo{{SegmentID: 1000, PartitionID: 10}}, infos)
+	assert.Equal(t, indexes, indexInfos)
+	require.NotNil(t, client.getQVLoadInfoReq)
+	assert.Equal(t, int64(100), client.getQVLoadInfoReq.GetCollectionID())
+	assert.Equal(t, []int64{1000}, client.getQVLoadInfoReq.GetSegmentIDs())
 }
 
 func Test_Run(t *testing.T) {

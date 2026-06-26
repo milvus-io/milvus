@@ -438,6 +438,23 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 	}, nil
 }
 
+func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	ctx = mlog.WithFields(ctx, mlog.Int64("collectionID", req.GetCollectionID()), mlog.Int64s("segments", req.GetSegmentIDs()))
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		msg := "failed to get query view segment load info"
+		mlog.Warn(ctx, msg, mlog.Err(err))
+		return &querypb.GetQueryViewSegmentLoadInfoResponse{
+			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
+		}, nil
+	}
+	if s.mixCoord == nil {
+		return &querypb.GetQueryViewSegmentLoadInfoResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("mixcoord is not initialized")),
+		}, nil
+	}
+	return s.mixCoord.GetQueryViewSegmentLoadInfo(ctx, req)
+}
+
 func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "received sync new created partition request")
 
