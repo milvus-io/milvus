@@ -1248,7 +1248,10 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.RoutingMode = collInfo.RoutingMode
 	shardInfos := make([]*schemapb.CollectionShardInfo, len(collInfo.VirtualChannelNames))
 	for i, vchannel := range collInfo.VirtualChannelNames {
-		info := &schemapb.CollectionShardInfo{}
+		// default a legacy/normal shard to a self-describing Normal entry so a
+		// consumer can always key by vchannel_name (a legacy collection carries no
+		// ShardInfos in meta).
+		info := &schemapb.CollectionShardInfo{VchannelName: vchannel}
 		if shard, ok := collInfo.ShardInfos[vchannel]; ok {
 			info = shard.ToPB()
 		}

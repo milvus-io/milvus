@@ -463,16 +463,23 @@ func (m *shardSplitManager) commitRouting(task *datapb.SplitShardTask, collectio
 			shardInfos[i] = rangeShardInfoPB(targetState, 0, []*schemapb.RoutingKeyRange{
 				{Lower: target.GetRoutingKeyLower(), Upper: target.GetRoutingKeyUpper()},
 			})
+			// record the source this target is carved from so a querynode/querycoord
+			// can group a source with exactly its own targets.
+			shardInfos[i].SourceVchannel = task.GetSourceVchannel()
 		default:
 			// a pre-existing shard that is neither the source nor a target:
 			// carry its current ranges and state through unchanged so a split of
 			// a multi-shard collection keeps the other shards' routing intact.
 			if info, ok := collection.ShardInfos[vchannel]; ok {
 				shardInfos[i] = rangeShardInfoPB(info.GetState(), info.GetLastTruncateTimeTick(), info.GetRangeRouting().GetRanges())
+				shardInfos[i].SourceVchannel = info.GetSourceVchannel()
 			} else {
 				shardInfos[i] = &schemapb.CollectionShardInfo{State: schemapb.ShardState_ShardNormal}
 			}
 		}
+		// every shard carries its own vchannel so consumers need not rely on
+		// positional alignment with the parallel virtual_channel_names array.
+		shardInfos[i].VchannelName = vchannel
 	}
 
 	return m.router.CommitShardSplitRouting(m.ctx, &rootcoordpb.CommitShardSplitRoutingRequest{
