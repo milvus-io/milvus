@@ -54,8 +54,15 @@ func NewPipeLine(
 	pipelineQueueLength := paramtable.Get().QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
 
 	p := &pipeline{
-		collectionID:   collectionID,
-		StreamPipeline: base.NewPipelineWithStream(dispatcher, nodeCtxTtInterval, enableTtChecker, channel, delegator),
+		collectionID: collectionID,
+		StreamPipeline: base.NewPipelineWithStream(
+			dispatcher,
+			nodeCtxTtInterval,
+			enableTtChecker,
+			channel,
+			delegator,
+			base.WithMsgPackBatcher(base.NewDMLMsgPackBatcher(paramtable.Get().QueryNodeCfg.DMLMicroBatchMaxMsgNum.GetAsInt)),
+		),
 	}
 
 	filterNode := newFilterNode(collectionID, channel, manager, delegator, pipelineQueueLength)

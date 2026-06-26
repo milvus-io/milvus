@@ -139,6 +139,11 @@ type DeleteData struct {
 	RowCount    int64
 }
 
+type DeleteBatch struct {
+	Ts   uint64
+	Data []*DeleteData
+}
+
 // Append appends another delete data into this one.
 func (d *DeleteData) Append(ad DeleteData) {
 	d.PrimaryKeys = append(d.PrimaryKeys, ad.PrimaryKeys...)
@@ -249,9 +254,16 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 // delegator puts deleteData into buffer first,
 // then dispatch data to segments according to the result of bloom filter check.
 func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
+	sd.ProcessDeleteBatches([]DeleteBatch{{Ts: ts, Data: deleteData}})
+}
+
+func (sd *shardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
 	// Early return if delegator is stopped - ProcessDelete becomes a no-op
 	// This prevents unnecessary processing and side effects during shutdown
 	if sd.Stopped() {
+		return
+	}
+	if len(batches) == 0 {
 		return
 	}
 
@@ -263,26 +275,35 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 
 	log := sd.getLogger(context.Background())
 
-	log.Debug(context.TODO(), "start to process delete", mlog.Uint64("ts", ts))
-	// add deleteData into buffer.
-	cacheItems := make([]deletebuffer.BufferItem, 0, len(deleteData))
-	for _, entry := range deleteData {
-		cacheItems = append(cacheItems, deletebuffer.BufferItem{
-			PartitionID: entry.PartitionID,
-			DeleteData: storage.DeleteData{
-				Pks:      entry.PrimaryKeys,
-				Tss:      entry.Timestamps,
-				RowCount: entry.RowCount,
-			},
+	log.Debug(context.TODO(), "start to process delete batches", mlog.Int("batchNum", len(batches)))
+	allDeleteData := make([]*DeleteData, 0, len(batches))
+	for _, batch := range batches {
+		if len(batch.Data) == 0 {
+			continue
+		}
+
+		cacheItems := make([]deletebuffer.BufferItem, 0, len(batch.Data))
+		for _, entry := range batch.Data {
+			cacheItems = append(cacheItems, deletebuffer.BufferItem{
+				PartitionID: entry.PartitionID,
+				DeleteData: storage.DeleteData{
+					Pks:      entry.PrimaryKeys,
+					Tss:      entry.Timestamps,
+					RowCount: entry.RowCount,
+				},
+			})
+		}
+
+		sd.deleteBuffer.Put(&deletebuffer.Item{
+			Ts:   batch.Ts,
+			Data: cacheItems,
 		})
+		allDeleteData = append(allDeleteData, batch.Data...)
 	}
 
-	sd.deleteBuffer.Put(&deletebuffer.Item{
-		Ts:   ts,
-		Data: cacheItems,
-	})
-
-	sd.forwardStreamingDeletion(context.Background(), deleteData)
+	if len(allDeleteData) > 0 {
+		sd.forwardStreamingDeletion(context.Background(), allDeleteData)
+	}
 
 	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))

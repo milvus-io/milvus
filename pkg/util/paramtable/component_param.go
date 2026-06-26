@@ -3695,6 +3695,7 @@ type queryNodeConfig struct {
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
 	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
+	DMLMicroBatchMaxMsgNum  ParamItem `refreshable:"true"`
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"true"`
@@ -3795,6 +3796,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.FlowGraphMaxParallelism.Init(base.mgr)
+
+	p.DMLMicroBatchMaxMsgNum = ParamItem{
+		Key:          "queryNode.dataSync.dmlMicroBatch.maxMsgNum",
+		Version:      "3.0.0",
+		DefaultValue: "8",
+		Doc:          "Maximum number of DML messages in one micro-batch drained by query node data sync pipeline. The batcher only drains already buffered messages and does not wait for more messages.",
+		Export:       true,
+	}
+	p.DMLMicroBatchMaxMsgNum.Init(base.mgr)
 
 	p.StatsPublishInterval = ParamItem{
 		Key:          "queryNode.stats.publishInterval",
