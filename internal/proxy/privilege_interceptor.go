@@ -69,7 +69,26 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectType := privilegeExt.ObjectType.String()
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
-	dbName := GetCurDBNameFromContextOrDefault(ctx)
+	objectPrivilege := privilegeExt.ObjectPrivilege.String()
+	// Authorize against the db the request actually operates on, resolved by
+	// privilege level (mirrors the grant-side validation; see
+	// milvus-io/milvus#50678):
+	//   - Cluster-level privileges (CreateDatabase/ResourceGroup/...) are not
+	//     scoped to a database, so authorize them globally (AnyWord),
+	//     independent of the connection namespace.
+	//   - Database-/Collection-level privileges are scoped to the db the request
+	//     targets: the request-body DbName takes precedence, falling back to the
+	//     connection-context db.
+	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
+	if util.GetPrivilegeLevel(util.MetaStore2API(objectPrivilege)) == milvuspb.PrivilegeLevel_Cluster.String() {
+		dbName = util.AnyWord
+	}
+	// RenameCollection is a database-admin privilege: a same-db rename is
+	// authorized against the target db (database level, handled above), while a
+	// cross-db rename additionally requires a cluster-scoped (global) grant.
+	if r, ok := req.(*milvuspb.RenameCollectionRequest); ok && r.GetDbName() != r.GetNewDBName() {
+		dbName = util.AnyWord
+	}
 
 	// Resolve alias to actual collection name for RBAC checks
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
@@ -112,8 +131,6 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		}
 		objectNames = resolvedNames
 	}
-
-	objectPrivilege := privilegeExt.ObjectPrivilege.String()
 
 	log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
 		mlog.String("object_type", objectType), mlog.String("object_privilege", objectPrivilege),

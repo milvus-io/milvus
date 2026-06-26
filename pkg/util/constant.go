@@ -240,7 +240,6 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeFlush.String(),
 		commonpb.ObjectPrivilege_PrivilegeCompaction.String(),
 		commonpb.ObjectPrivilege_PrivilegeLoadBalance.String(),
-		commonpb.ObjectPrivilege_PrivilegeRenameCollection.String(),
 		commonpb.ObjectPrivilege_PrivilegeCreateAlias.String(),
 		commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
 		commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String(),
@@ -383,6 +382,11 @@ var (
 		ConvertPrivileges([]string{
 			commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropCollection.String(),
+			// RenameCollection is a database-admin privilege: a same-db rename is
+			// authorized at database level; a cross-db rename additionally requires
+			// a cluster-scoped (db="*") grant (see PrivilegeInterceptor). It is
+			// intentionally NOT part of the collection-level ReadWrite group.
+			commonpb.ObjectPrivilege_PrivilegeRenameCollection.String(),
 		})...,
 	)
 
@@ -422,7 +426,6 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeUpdateUser.String(),
-			commonpb.ObjectPrivilege_PrivilegeRenameCollection.String(),
 			commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String(),
