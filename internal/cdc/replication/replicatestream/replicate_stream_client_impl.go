@@ -240,15 +240,6 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
 	immutableMessage := msg.IntoImmutableMessageProto()
 
-	ctx := message.ExtractTraceContext(context.Background(), message.MilvusMessageToImmutableMessage(immutableMessage))
-	_, span := message.StartSpan(ctx, message.SpanNameReplicatePrimary)
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-		}
-		span.End()
-	}()
-
 	defer func() {
 		logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("revision", r.channel.ModRevision))
 		if err != nil {

@@ -17,7 +17,8 @@ const (
 	SpanNameWALBroadcast       = "wal.broadcast"
 	SpanNameWALAppend          = "wal.append"
 	SpanNameWALAppendImpl      = "wal.appendimpl"
-	SpanNameReplicatePrimary   = "replicate.primary"
+	SpanNameWALConsume         = "wal.consume"
+	SpanNameWALDistConsume     = "wal.dist_consume"
 	SpanNameReplicateSecondary = "replicate.secondary"
 	SpanNameWALBCCallback      = "wal.bc_callback"
 )
@@ -26,20 +27,45 @@ func StartSpan(ctx context.Context, spanName string) (context.Context, trace.Spa
 	return otel.Tracer(tracerName).Start(ctx, spanName)
 }
 
+type traceContextInjector interface {
+	injectTraceContext(context.Context)
+}
+
+type traceContextOverwriter interface {
+	overwriteTraceContext(context.Context)
+}
+
 // InjectTraceContext writes the current span context into msg under the
 // reserved key _tc as a base64-encoded marshaled TraceContextHeader.
 // No-op when _tc already exists or no active / valid span is present on ctx.
-func InjectTraceContext(ctx context.Context, msg TraceContextInjector) {
+func InjectTraceContext(ctx context.Context, msg BasicMessage) {
 	if msg == nil {
 		return
 	}
-	msg.WithTraceContext(ctx)
+	if writer, ok := msg.(traceContextInjector); ok {
+		writer.injectTraceContext(ctx)
+	}
+}
+
+// OverwriteTraceContext writes the current span context into msg under the
+// reserved key _tc even when a trace context already exists.
+func OverwriteTraceContext(ctx context.Context, msg BasicMessage) {
+	if msg == nil {
+		return
+	}
+	if writer, ok := msg.(traceContextOverwriter); ok {
+		writer.overwriteTraceContext(ctx)
+	}
 }
 
 func injectTraceContext(ctx context.Context, p Properties) {
 	if p.Exist(messageTraceContext) {
 		return
 	}
+	overwriteTraceContext(ctx, p)
+}
+
+func overwriteTraceContext(ctx context.Context, p Properties) {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
 		return

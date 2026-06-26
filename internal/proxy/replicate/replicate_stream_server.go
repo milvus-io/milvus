@@ -119,23 +119,20 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	if err != nil {
 		return err
 	}
+	ctx := message.ExtractTraceContext(p.streamServer.Context(), msg)
+	ctx, span := message.StartSpan(ctx, message.SpanNameReplicateSecondary)
+	message.OverwriteTraceContext(ctx, msg)
+	defer span.End()
+
 	sourceTs := msg.ReplicateHeader().TimeTick
-	ctx := p.streamServer.Context()
 	mlog.Debug(ctx, "recv replicate message from client",
 		mlog.String("messageID", reqMsg.GetId().GetId()),
 		mlog.Uint64("sourceTimeTick", sourceTs),
 		mlog.FieldMessage(msg),
 	)
 
-	// Extract trace context carried by the replicated immutable message, then
-	// keep it in the local mutable message if it already exists.
-	msgCtx := message.ExtractTraceContext(p.streamServer.Context(), msg)
-	msgCtx, span := message.StartSpan(msgCtx, message.SpanNameReplicateSecondary)
-	defer span.End()
-	message.InjectTraceContext(msgCtx, msg)
-
 	// Append message to wal.
-	_, err = streaming.WAL().Replicate().Append(msgCtx, msg)
+	_, err = streaming.WAL().Replicate().Append(ctx, msg)
 	if err == nil {
 		p.sendReplicateResult(sourceTs, msg)
 		return nil

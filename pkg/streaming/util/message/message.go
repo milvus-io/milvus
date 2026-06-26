@@ -1,8 +1,6 @@
 package message
 
 import (
-	"context"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -16,12 +14,6 @@ var (
 	_ ImmutableMessage    = (*immutableMessageImpl)(nil)
 	_ ImmutableTxnMessage = (*immutableTxnMessageImpl)(nil)
 )
-
-// TraceContextInjector injects the current ctx's W3C trace span context into
-// the message under the reserved _tc property when it is absent.
-type TraceContextInjector interface {
-	WithTraceContext(ctx context.Context)
-}
 
 // BasicMessage is the basic interface of message.
 type BasicMessage interface {
@@ -88,7 +80,6 @@ type BasicMessage interface {
 // Message can be modified before it is persistent by wal.
 type MutableMessage interface {
 	BasicMessage
-	TraceContextInjector
 
 	// VChannel returns the virtual channel of current message.
 	// Available only when the message's version greater than 0.
@@ -150,7 +141,6 @@ type ReplicateMutableMessage interface {
 // Indicated the message is broadcasted on various vchannels.
 type BroadcastMutableMessage interface {
 	BasicMessage
-	TraceContextInjector
 
 	// WithBroadcastID sets the broadcast id of the message.
 	WithBroadcastID(broadcastID uint64) BroadcastMutableMessage

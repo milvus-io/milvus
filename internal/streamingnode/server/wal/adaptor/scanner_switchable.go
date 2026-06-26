@@ -176,7 +176,10 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				// when we switch from tailing mode to catchup mode.
 				continue
 			}
-			if err := s.HandleMessage(ctx, msg); err != nil {
+			msgCtx, span := message.StartSpan(message.ExtractTraceContext(ctx, msg), message.SpanNameWALConsume)
+			message.OverwriteTraceContext(msgCtx, msg)
+			span.End()
+			if err := s.HandleMessage(msgCtx, msg); err != nil {
 				return nil, err
 			}
 			if msg.MessageType() != message.MessageTypeTimeTick || s.writeAheadBuffer == nil {

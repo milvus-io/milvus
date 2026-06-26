@@ -275,6 +275,7 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 	// An append operation should be retried until it succeeds or some unrecoverable error occurs.
 	for i := 0; ; i++ {
 		appendCtx, span := message.StartSpan(ctx, message.SpanNameWALAppendImpl)
+		message.OverwriteTraceContext(appendCtx, msg)
 		msgID, err := w.rwWALImpls.Append(appendCtx, msg)
 		if err != nil {
 			span.RecordError(err)

@@ -26,7 +26,7 @@ func buildTestCDCImmutableMessage(t *testing.T, primaryCtx context.Context) mess
 	mutableMsg := message.CreateTestEmptyInsertMesage(1, nil)
 	mutableMsg.WithTimeTick(100)
 	mutableMsg.WithLastConfirmed(msgID)
-	mutableMsg.WithTraceContext(primaryCtx)
+	message.InjectTraceContext(primaryCtx, mutableMsg)
 	return mutableMsg.IntoImmutableMessage(msgID)
 }
 
@@ -45,11 +45,9 @@ func setupTraceExporter(t *testing.T) *tracetest.InMemoryExporter {
 	return exporter
 }
 
-// TestSendMessage_OpensCdcSpanWithExtractedParent asserts that:
-//   - A replicate.primary span is exported under the source span carried by _tc.
-//   - The outgoing ReplicateRequest preserves the original immutable message
-//     properties; secondary-side WAL span injection happens on the replicate server.
-func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
+// TestSendMessage_PreservesTraceContextWithoutPrimarySpan asserts that CDC
+// forwarding does not create a replicate.primary span or rewrite message _tc.
+func TestSendMessage_PreservesTraceContextWithoutPrimarySpan(t *testing.T) {
 	exporter := setupTraceExporter(t)
 
 	// Simulate a primary WAL message with a persisted _tc pointing at
@@ -71,31 +69,20 @@ func TestSendMessage_OpensCdcSpanWithExtractedParent(t *testing.T) {
 	assert.NoError(t, err)
 	capturedReq := <-client.ch
 
-	// Outgoing _tc is still the primary span context. The replicate server owns
-	// the next WAL span, but keeps the existing message trace context.
-	outProps := capturedReq.GetReplicateMessage().GetMessage().GetProperties()
+	spans := exporter.GetSpans()
+	for _, s := range spans {
+		assert.NotEqual(t, "replicate.primary", s.Name, "CDC send should be represented by wal.consume")
+	}
+
 	outMsg := message.MilvusMessageToImmutableMessage(capturedReq.GetReplicateMessage().GetMessage())
 	outSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), outMsg))
 	assert.True(t, outSC.IsValid(), "outgoing _tc must be valid")
+	assert.Equal(t, primarySC.TraceID(), outSC.TraceID(),
+		"outgoing _tc should preserve the immutable message trace ID")
 	assert.Equal(t, primarySC.SpanID(), outSC.SpanID(),
-		"outgoing _tc should preserve the immutable message trace context")
-	assert.Equal(t, imsg.Properties().ToRawMap(), outProps,
+		"outgoing _tc should preserve the immutable message span ID")
+	assert.Equal(t, primarySC.SpanID(), trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), imsg)).SpanID(),
 		"sendMessage should not mutate immutable message properties")
-
-	// The replicate.primary span should use the extracted _tc as its parent.
-	spans := exporter.GetSpans()
-	var cdc tracetest.SpanStub
-	for _, s := range spans {
-		if s.Name == message.SpanNameReplicatePrimary {
-			cdc = s
-			break
-		}
-	}
-	assert.Equal(t, message.SpanNameReplicatePrimary, cdc.Name, "a replicate.primary span must be exported")
-	assert.Equal(t, primarySC.TraceID(), cdc.SpanContext.TraceID(),
-		"replicate.primary must share the source trace ID")
-	assert.Equal(t, primarySC.SpanID(), cdc.Parent.SpanID(),
-		"replicate.primary must be a child of the source span")
 }
 
 // TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan verifies that txn
@@ -135,20 +122,9 @@ func TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan(t *testing.T) {
 
 	spans := exporter.GetSpans()
 
-	var cdcReplicateSpans []tracetest.SpanStub
 	for _, s := range spans {
 		assert.NotEqual(t, "replicate.primary.txn", s.Name, "txn replication should not emit a txn-level span")
-		if s.Name == message.SpanNameReplicatePrimary {
-			cdcReplicateSpans = append(cdcReplicateSpans, s)
-		}
+		assert.NotEqual(t, "replicate.primary", s.Name, "txn replication should not emit per-message replicate.primary spans")
 	}
-
-	assert.Equal(t, 3, len(cdcReplicateSpans), "3 replicate.primary spans must be exported for begin+body+commit")
-	var beginSpan tracetest.SpanStub
-	for _, s := range cdcReplicateSpans {
-		if s.Parent.SpanID() == primarySC.SpanID() {
-			beginSpan = s
-		}
-	}
-	assert.Equal(t, message.SpanNameReplicatePrimary, beginSpan.Name, "begin message span should use the source span as parent")
+	_ = primarySC
 }
