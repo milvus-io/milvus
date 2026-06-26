@@ -6582,10 +6582,12 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionDropRatioWarn.Init(base.mgr)
 
 	p.ExternalCollectionPreAllocSegments = ParamItem{
-		Key:          "dataCoord.externalCollectionPreAllocSegments",
-		Version:      "2.6.8",
-		Doc:          "The number of IDs to pre-allocate for each external collection refresh task. Each segment consumes 2 IDs (1 for segment, 1 for fake binlog logID).",
-		DefaultValue: "10000",
+		Key:     "dataCoord.externalCollectionPreAllocSegments",
+		Version: "2.6.8",
+		Doc: "The number of IDs to pre-allocate for each external collection refresh task. " +
+			"Each segment consumes 2 IDs (1 for segment, 1 for fake binlog logID); " +
+			"milvus-table deltalogs without LogID consume additional fallback IDs.",
+		DefaultValue: "500000",
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)

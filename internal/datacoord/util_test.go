@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -165,6 +166,34 @@ func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {
 	enabled, err = getCollectionAutoCompactionEnabled(map[string]string{})
 	suite.NoError(err)
 	suite.Equal(Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), enabled)
+}
+
+func (suite *UtilSuite) TestCreateStorageConfig() {
+	suite.Run("local", func() {
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
+		paramtable.Get().Save(Params.LocalStorageCfg.Path.Key, "/tmp/milvus-local")
+		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
+		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
+
+		config := createStorageConfig()
+		suite.Equal("local", config.StorageType)
+		suite.Equal("/tmp/milvus-local", config.RootPath)
+	})
+
+	suite.Run("remote", func() {
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "minio")
+		paramtable.Get().Save(Params.MinioCfg.SslTLSMinVersion.Key, "1.2")
+		paramtable.Get().Save(Params.MinioCfg.UseCRC32C.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
+		defer paramtable.Get().Reset(Params.MinioCfg.SslTLSMinVersion.Key)
+		defer paramtable.Get().Reset(Params.MinioCfg.UseCRC32C.Key)
+
+		config := createStorageConfig()
+		suite.Equal("minio", config.StorageType)
+		suite.Equal(Params.MinioCfg.Address.GetValue(), config.Address)
+		suite.Equal("1.2", config.SslTlsMinVersion)
+		suite.True(config.UseCrc32CChecksum)
+	})
 }
 
 func (suite *UtilSuite) TestCalculateL0SegmentSize() {
