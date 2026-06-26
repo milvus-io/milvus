@@ -192,7 +192,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		for fi, builder := range rb.builders {
 			size, err := appendValueAt(builder, srcByField[fi][idx.ri], int(idx.i), defaults[fi])
 			if err != nil {
-				return 0, nil, err
+				return 0, nil, merr.Wrapf(err, "failed to append value at row %d for field %s", idx.i, rb.fields[fi].GetName())
 			}
 			rb.size += size
 		}
