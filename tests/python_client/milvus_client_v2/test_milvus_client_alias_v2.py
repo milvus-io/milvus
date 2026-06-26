@@ -1,4 +1,5 @@
 # ruff: noqa
+# fmt: off
 import pytest
 import random
 

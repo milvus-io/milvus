@@ -1,4 +1,5 @@
 # ruff: noqa
+# fmt: off
 import numpy as np
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
@@ -1247,4 +1248,3 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
                                          "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
- 
