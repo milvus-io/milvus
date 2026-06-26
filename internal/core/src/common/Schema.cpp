@@ -472,7 +472,11 @@ Schema::WarmupPolicy(const FieldId& field_id,
         return {true, it->second};
     }
 
-    // Fallback to appropriate collection-level config based on field type
+    return CollectionWarmupPolicy(is_vector, is_index);
+}
+
+std::pair<bool, std::string>
+Schema::CollectionWarmupPolicy(bool is_vector, bool is_index) const {
     if (is_vector) {
         if (is_index) {
             return {warmup_vector_index_.has_value(),
