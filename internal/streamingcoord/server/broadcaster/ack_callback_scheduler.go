@@ -276,7 +276,7 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	}
 	// call the ack callback until done, under the persisted trace context.
 	bt.ObserveAckCallbackBegin()
-	if err := runAckCallbackWithTrace(msg, func(spanCtx context.Context) error {
+	if err := runAckCallbackWithTrace(s.notifier.Context(), msg, func(spanCtx context.Context) error {
 		return s.callMessageAckCallbackUntilDone(spanCtx, msg, makeMap)
 	}); err != nil {
 		return err
@@ -323,8 +323,8 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 // broadcast task's message Properties and opens a wal.bc_callback
 // span under it, invoking fn with the new ctx. Span is always ended,
 // and errors are recorded on the span.
-func runAckCallbackWithTrace(msg message.BroadcastMutableMessage, fn func(ctx context.Context) error) error {
-	parentCtx := message.ExtractTraceContext(context.Background(), msg)
+func runAckCallbackWithTrace(baseCtx context.Context, msg message.BroadcastMutableMessage, fn func(ctx context.Context) error) error {
+	parentCtx := message.ExtractTraceContext(baseCtx, msg)
 	ctx, span := message.StartSpan(parentCtx, message.SpanNameWALBCCallback)
 	defer span.End()
 	err := fn(ctx)
