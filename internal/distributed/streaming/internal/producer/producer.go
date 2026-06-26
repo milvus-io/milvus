@@ -7,6 +7,8 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
@@ -124,7 +126,15 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 		if err != nil {
 			return nil, err
 		}
-		produceResult, err := producerHandler.Append(ctx, msg)
+		appendCtx, span := p.startDistAppendSpanIfRemote(ctx, producerHandler)
+		produceResult, err := producerHandler.Append(appendCtx, msg)
+		if span != nil {
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+			}
+			span.End()
+		}
 		if err == nil {
 			return produceResult, nil
 		}
@@ -150,6 +160,17 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			}
 		}
 	}
+}
+
+type localAwareProducer interface {
+	IsLocal() bool
+}
+
+func (p *ResumableProducer) startDistAppendSpanIfRemote(ctx context.Context, producerHandler handler.Producer) (context.Context, trace.Span) {
+	if producerHandler.(localAwareProducer).IsLocal() {
+		return ctx, nil
+	}
+	return message.StartSpan(ctx, message.SpanNameWALDistAppend)
 }
 
 // resumeLoop is used to resume producer from error.

@@ -17,6 +17,7 @@ const (
 	SpanNameWALBroadcast       = "wal.broadcast"
 	SpanNameWALAppend          = "wal.append"
 	SpanNameWALAppendImpl      = "wal.appendimpl"
+	SpanNameWALDistAppend      = "wal.dist_append"
 	SpanNameWALConsume         = "wal.consume"
 	SpanNameWALDistConsume     = "wal.dist_consume"
 	SpanNameReplicateSecondary = "replicate.secondary"
