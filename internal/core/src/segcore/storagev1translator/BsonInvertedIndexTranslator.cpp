@@ -28,6 +28,7 @@
 #include "index/json_stats/bson_inverted.h"
 #include "log/Log.h"
 #include "pb/common.pb.h"
+#include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -50,7 +51,7 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
                                                   /* is_index */ true),
             /* support_eviction */ true,
             std::nullopt,
-            load_info_.shard) {
+            milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
 }
 
 size_t

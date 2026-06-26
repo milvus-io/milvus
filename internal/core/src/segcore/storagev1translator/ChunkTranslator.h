@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -21,16 +20,9 @@
 #include "common/Chunk.h"
 #include "common/type_c.h"
 #include "mmap/Types.h"
+#include "segcore/CacheMetricAttribution.h"
 
 namespace milvus::segcore::storagev1translator {
-
-inline std::optional<milvus::cachinglayer::MetricAttribution>
-MetricAttributionFromShard(std::string shard) {
-    if (shard.empty()) {
-        return std::nullopt;
-    }
-    return milvus::cachinglayer::MetricAttribution{std::move(shard)};
-}
 
 struct CTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
@@ -53,7 +45,7 @@ struct CTMeta : public milvus::cachinglayer::Meta {
               cache_warmup_policy,
               support_eviction,
               std::nullopt,
-              MetricAttributionFromShard(std::move(shard))) {
+              milvus::segcore::MetricAttributionFromShard(std::move(shard))) {
     }
 };
 

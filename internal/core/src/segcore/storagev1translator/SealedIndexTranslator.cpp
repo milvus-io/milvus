@@ -16,6 +16,7 @@
 #include "index/Utils.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
+#include "segcore/CacheMetricAttribution.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
@@ -78,7 +79,7 @@ SealedIndexTranslator::SealedIndexTranslator(
             knowhere::IndexFactory::Instance().FeatureCheck(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
-          load_index_info->shard) {
+          milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
     load_resource_request_ = EstimateLoadResource();
 
     auto scalar_version =

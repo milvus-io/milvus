@@ -28,6 +28,7 @@
 #include "glog/logging.h"
 #include "index/TextMatchIndex.h"
 #include "log/Log.h"
+#include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -51,7 +52,7 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
                                                   /* is_index */ true),
             /* support_eviction */ true,
             std::nullopt,
-            load_info_.shard) {
+            milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
 }
 
 size_t
