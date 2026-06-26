@@ -3676,7 +3676,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.DMLMicroBatchMaxMsgNum = ParamItem{
 		Key:          "queryNode.dataSync.dmlMicroBatch.maxMsgNum",
-		Version:      "2.6.0",
+		Version:      "2.6.20",
 		DefaultValue: "8",
 		Doc:          "Maximum number of DML messages in one micro-batch drained by query node data sync pipeline. The batcher only drains already buffered messages and does not wait for more messages.",
 		Export:       true,
