@@ -108,6 +108,25 @@ func TestGetFilesSizeWithRetry_ExhaustsRetries(t *testing.T) {
 	assert.Equal(t, 3, callCount, "should exhaust all retry attempts")
 }
 
+// A 0 attempts value must not spin forever: the core clamps it to a bounded default.
+func TestGetFilesSizeWithRetry_ZeroAttemptsClamped(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+
+	callCount := 0
+	cm.EXPECT().Size(mock.Anything, "file1").
+		RunAndReturn(func(ctx context.Context, path string) (int64, error) {
+			callCount++
+			return 0, errors.New("net/http: timeout awaiting response headers")
+		}).Times(10)
+
+	_, err := getFilesSizeWithRetry(ctx, cm, []string{"file1"}, 0)
+
+	assert.Error(t, err)
+	assert.Equal(t, 10, callCount, "0 attempts must clamp to the bounded default, not retry forever")
+}
+
 // Codes the chunk manager's Size() already retries internally (IsRetryableErr:
 // ErrIoTooManyRequests / ErrIoUnexpectEOF) must NOT be retried again by this outer
 // layer, otherwise the two layers stack (up to retryAttempts^2 HEAD calls).

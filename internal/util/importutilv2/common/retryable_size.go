@@ -50,6 +50,12 @@ func GetFilesSizeWithRetry(ctx context.Context, cm storage.ChunkManager, paths [
 func getFilesSizeWithRetry(ctx context.Context, cm storage.ChunkManager,
 	paths []string, retryAttempts uint,
 ) (int64, error) {
+	// Defensive: retry.Attempts(0) means unbounded retry. The exported entrypoint reads
+	// the StorageReadRetryAttempts config, whose formatter already clamps <1 to the
+	// default, but guard direct callers too so a 0 can never spin forever here.
+	if retryAttempts < 1 {
+		retryAttempts = 10
+	}
 	var totalSize int64
 	for _, filePath := range paths {
 		var size int64
@@ -59,8 +65,12 @@ func getFilesSizeWithRetry(ctx context.Context, cm storage.ChunkManager,
 				size = s
 				return nil
 			}
-			// Context canceled or deadline exceeded - don't retry (and don't let it
-			// get mapped to a retryable-looking ErrIoFailed below).
+			// Defensive fast-fail on a bare context error returned directly by the
+			// ChunkManager (e.g. a mock, or a future non-Remote impl). On the
+			// RemoteChunkManager path a mid-flight cancellation is mapped to ErrIoFailed
+			// (mapObjectStorageError has no context case) and loses its context identity,
+			// so this branch does not fire there -- retry.Do's own ctx.Done handling
+			// terminates that case instead.
 			if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
 				return retry.Unrecoverable(e)
 			}
@@ -77,6 +87,13 @@ func getFilesSizeWithRetry(ctx context.Context, cm storage.ChunkManager,
 			// response headers" -- that is not a permanent/validation error. Retrying
 			// inner-retryable or permanent codes here would stack the two layers (up to
 			// retryAttempts^2 HEAD calls under a SlowDown storm), so bail out on both.
+			//
+			// Note ErrIoFailed is a catch-all: on the Remote import path known-permanent
+			// errors are classified to denylist codes (KeyNotFound / PermissionDenied /
+			// BucketNotFound / ...) and fail fast, so only genuinely-unknown errors are
+			// retried here. A non-classifying ChunkManager (e.g. LocalChunkManager, which
+			// is not used for remote imports) would retry a permanent OS error before
+			// failing -- the same trade-off the existing read/walk denylist retries make.
 			if merr.IsNonRetryableErr(e) || merr.IsRetryableErr(e) {
 				return retry.Unrecoverable(e)
 			}
