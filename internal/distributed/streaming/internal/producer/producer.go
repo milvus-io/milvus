@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -162,15 +163,18 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 	}
 }
 
-type localAwareProducer interface {
-	IsLocal() bool
-}
-
 func (p *ResumableProducer) startDistAppendSpanIfRemote(ctx context.Context, producerHandler handler.Producer) (context.Context, trace.Span) {
-	if producerHandler.(localAwareProducer).IsLocal() {
+	if isLocalProducer(producerHandler) {
 		return ctx, nil
 	}
 	return message.StartSpan(ctx, message.SpanNameWALDistAppend)
+}
+
+func isLocalProducer(producerHandler handler.Producer) bool {
+	if pm, ok := producerHandler.(producerWithMetrics); ok {
+		return registry.IsLocal(pm.Producer)
+	}
+	return registry.IsLocal(producerHandler)
 }
 
 // resumeLoop is used to resume producer from error.
