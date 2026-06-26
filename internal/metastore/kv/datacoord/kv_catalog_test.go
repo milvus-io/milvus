@@ -30,6 +30,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -473,6 +474,57 @@ func Test_AlterSegments(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(savedKvs))
+	})
+
+	// V3 segments persist paths via the LOON manifest. AlterSegments must
+	// emit ONLY the segment KV — no per-FieldBinlog binlog/deltalog/statslog
+	// KVs. The V2 "save successfully" subtest above writes 4 KVs (1 seg + 3
+	// binlog) for the same fixture; this V3 variant must write exactly 1.
+	t.Run("v3 segment skips per-FieldBinlog KVs", func(t *testing.T) {
+		var savedKvs map[string]string
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
+			savedKvs = m
+			return nil
+		})
+
+		v3Segment := proto.Clone(segment1).(*datapb.SegmentInfo)
+		v3Segment.ManifestPath = "test://manifest/path@1"
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{v3Segment}, metastore.BinlogsIncrement{
+			Segment: v3Segment,
+		})
+		assert.NoError(t, err)
+
+		// Exactly the segment KV — no per-FieldBinlog persistence for V3.
+		assert.Equal(t, 1, len(savedKvs))
+		segKey := buildSegmentPath(v3Segment.CollectionID, v3Segment.PartitionID, v3Segment.ID)
+		_, ok := savedKvs[segKey]
+		assert.True(t, ok, "segment KV must still be written")
+
+		for k := range savedKvs {
+			assert.NotContains(t, k, SegmentBinlogPathPrefix, "no insert binlog KV for V3")
+			assert.NotContains(t, k, SegmentDeltalogPathPrefix, "no delta binlog KV for V3")
+			assert.NotContains(t, k, SegmentStatslogPathPrefix, "no stats binlog KV for V3")
+		}
+
+		// Verify by re-parsing the persisted segment KV:
+		// 1. NumOfRows is unchanged: V3 skips ReCalcRowCount
+		//    (binlogs[0].Binlogs has 5 entries but the segment reports
+		//    100; the V2 path would correct down to 5).
+		// 2. Binlogs/Statslogs/Deltalogs/Bm25Statslogs are empty on the
+		//    persisted proto — resetBinlogFields runs before serialization
+		//    for every segment, and the V3 path emits no per-FieldBinlog
+		//    KVs to compensate, so on reload these arrays will be nil.
+		//    SegmentInfo.Stats is the only source of aggregate metrics.
+		persisted := &datapb.SegmentInfo{}
+		require.NoError(t, proto.Unmarshal([]byte(savedKvs[segKey]), persisted))
+		assert.EqualValues(t, 100, persisted.GetNumOfRows(), "V3 must skip array-based row-count reconciliation")
+		assert.Empty(t, persisted.GetBinlogs(), "V3 persisted SegmentInfo must have empty Binlogs")
+		assert.Empty(t, persisted.GetStatslogs(), "V3 persisted SegmentInfo must have empty Statslogs")
+		assert.Empty(t, persisted.GetDeltalogs(), "V3 persisted SegmentInfo must have empty Deltalogs")
+		assert.Empty(t, persisted.GetBm25Statslogs(), "V3 persisted SegmentInfo must have empty Bm25Statslogs")
 	})
 
 	t.Run("save large ops successfully", func(t *testing.T) {

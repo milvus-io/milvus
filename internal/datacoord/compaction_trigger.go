@@ -641,16 +641,10 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 }
 
 func hasTooManyDeletions(segment *SegmentInfo) bool {
-	deltaLogCount := 0
-	totalDeletedRows := 0
-	totalDeleteLogSize := int64(0)
-	for _, deltaLogs := range segment.GetDeltalogs() {
-		for _, l := range deltaLogs.GetBinlogs() {
-			totalDeletedRows += int(l.GetEntriesNum())
-			totalDeleteLogSize += l.GetMemorySize()
-		}
-		deltaLogCount += len(deltaLogs.GetBinlogs())
-	}
+	stats := segment.EnsureStats()
+	deltaLogCount := int(stats.GetDeltaBinlogCount())
+	totalDeletedRows := int(stats.GetDeleteNumRows())
+	totalDeleteLogSize := stats.GetDeltaBinlogSize()
 
 	// Too many deltalog files, accumulates IO count.
 	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
@@ -745,36 +739,58 @@ func (t *compactionTrigger) ShouldCompactExpiryWithTTLField(compactTime *compact
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
-	// if expire time is enabled, put segment into compaction candidate
-	totalExpiredSize := int64(0)
-	totalExpiredRows := 0
-	var earliestFromTs uint64 = math.MaxUint64
-	for _, binlogs := range segment.GetBinlogs() {
-		for _, l := range binlogs.GetBinlogs() {
-			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
-			// For import segments, row timestamps predate the commit; use commit_timestamp
-			// as the effective "data age" to prevent premature TTL-triggered compaction.
-			if tsoutil.EffectiveTimestamp(l.TimestampTo, segment.GetCommitTimestamp()) < compactTime.expireTime {
-				mlog.RatedDebug(context.TODO(), rate.Limit(10), "mark binlog as expired",
-					mlog.FieldSegmentID(segment.ID),
-					mlog.Int64("binlogID", l.GetLogID()),
-					mlog.Uint64("binlogTimestampTo", l.TimestampTo),
-					mlog.Uint64("compactExpireTime", compactTime.expireTime))
-				totalExpiredRows += int(l.GetEntriesNum())
-				totalExpiredSize += l.GetMemorySize()
-			}
-			earliestFromTs = min(earliestFromTs, tsoutil.EffectiveTimestamp(l.TimestampFrom, segment.GetCommitTimestamp()))
-		}
-	}
+	stats := segment.EnsureStats()
+	commitTs := segment.GetCommitTimestamp()
+
+	// Strict-tolerance path: exact min via Stats.TimestampFrom. For import
+	// segments commit_timestamp overrides every row's effective timestamp.
+	earliestFromTs := tsoutil.EffectiveTimestamp(stats.GetTimestampFrom(), commitTs)
 	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {
 		return true
 	}
 
-	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
-		totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
-		mlog.Info(context.TODO(), "total expired entities is too much, trigger compaction", mlog.FieldSegmentID(segment.ID),
-			mlog.Int("expiredRows", totalExpiredRows), mlog.Int64("expiredLogSize", totalExpiredSize),
-			mlog.Bool("createdByCompaction", segment.CreatedByCompaction), mlog.Int64s("compactionFrom", segment.CompactionFrom))
+	// Ratio + size path: derive an expired-row fraction from the quantile
+	// distribution (20%-bucket granularity). Approximate; the strict-
+	// tolerance check above covers the precise edges.
+	//
+	// We deliberately UNDER-estimate. Q[i] < expireTime guarantees
+	// percentiles[i] of rows are expired; that fraction times
+	// InsertBinlogSize is the byte estimate under a uniform-per-row-size
+	// assumption that does NOT hold when expired binlogs are smaller than
+	// the segment-wide average. To prevent over-triggering on segments
+	// whose precise expired-byte sum sits exactly at threshold, we shift
+	// the fraction down one 20% bucket.
+	ratio := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()
+	expiredFraction := 0.0
+	if commitTs > 0 {
+		if commitTs < compactTime.expireTime {
+			expiredFraction = 1.0
+		}
+	} else {
+		// Quantile i covers fraction (i+1)/len(quantiles) of rows. Count the
+		// prefix of quantiles older than the expiration horizon, then shift
+		// down one bucket (the deliberate under-estimate described above).
+		quantiles := stats.GetTimestampQuantiles()
+		qualifying := 0
+		for _, q := range quantiles {
+			if q <= 0 || uint64(q) >= compactTime.expireTime {
+				break
+			}
+			qualifying++
+		}
+		if qualifying >= 2 {
+			expiredFraction = float64(qualifying-1) / float64(len(quantiles))
+		}
+	}
+	expiredApproxSize := int64(expiredFraction * float64(stats.GetInsertBinlogSize()))
+	if expiredFraction >= ratio ||
+		expiredApproxSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
+		mlog.Info(context.TODO(), "expired entities exceed ratio/size threshold, trigger compaction",
+			mlog.Int64("segmentID", segment.ID),
+			mlog.Float64("expiredFraction", expiredFraction),
+			mlog.Int64("approxExpiredSize", expiredApproxSize),
+			mlog.Bool("createdByCompaction", segment.CreatedByCompaction),
+			mlog.Int64s("compactionFrom", segment.CompactionFrom))
 		return true
 	}
 

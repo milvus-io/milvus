@@ -24,7 +24,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -94,8 +93,8 @@ func (s *statsTaskSuite) SetupSuite() {
 						State:         commonpb.SegmentState_Flushed,
 						MaxRowNum:     65535,
 						Level:         datapb.SegmentLevel_L2,
+						Stats:         &datapb.Statistics{InsertBinlogSize: 512 * 1024 * 1024},
 					},
-					size: *atomic.NewInt64(512 * 1024 * 1024),
 				},
 			},
 			secondaryIndexes: segmentInfoIndexes{

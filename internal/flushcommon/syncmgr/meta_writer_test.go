@@ -68,7 +68,7 @@ func (s *MetaWriterSuite) TestNormalSave() {
 				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
 			},
 		},
-	}, bfs, nil)
+	}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
@@ -93,7 +93,7 @@ func (s *MetaWriterSuite) TestReturnError() {
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
 
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
@@ -129,7 +129,7 @@ func (s *MetaWriterSuite) TestGrowingSourceSyncMetaErrorsReturnError() {
 			seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 				ID:          1,
 				PartitionID: 2,
-			}, bfs, nil)
+			}, bfs, nil, nil)
 			s.metacache.EXPECT().GetSegmentByID(int64(1)).Return(seg, true).Once()
 			s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 			s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(tc.err).Once()

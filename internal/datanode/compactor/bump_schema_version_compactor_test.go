@@ -77,6 +77,7 @@ type fakeBinlogRecordWriter struct {
 	manifest         string
 	expirQuantiles   []int64
 	rowNum           int64
+	statsBlobSize    int64
 	schema           *schemapb.CollectionSchema
 	writtenTimestamp []int64
 }
@@ -97,6 +98,7 @@ func (w *fakeBinlogRecordWriter) GetLogs() (map[storage.FieldID]*datapb.FieldBin
 	return w.fieldBinlogs, w.statsLog, w.bm25StatsLog, w.manifest, w.expirQuantiles
 }
 func (w *fakeBinlogRecordWriter) GetRowNum() int64                   { return w.rowNum }
+func (w *fakeBinlogRecordWriter) GetStatsBlobSize() int64            { return w.statsBlobSize }
 func (w *fakeBinlogRecordWriter) FlushChunk() error                  { return nil }
 func (w *fakeBinlogRecordWriter) GetBufferUncompressed() uint64      { return 0 }
 func (w *fakeBinlogRecordWriter) Schema() *schemapb.CollectionSchema { return w.schema }
@@ -574,6 +576,41 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteAddsWriterStatsToM
 	s.Empty(segment.GetBm25Logs())
 	s.Contains(segment.GetManifest(), "with-writer-stats")
 	s.ElementsMatch([]string{"bloom_filter.100", "bm25.102"}, statKeys)
+}
+
+// V3 writers leave statsLog/bm25StatsLog nil because stats are embedded
+// in the manifest, not in FieldBinlog arrays. The result Statistics must
+// still report a non-zero StatsBinlogSize sourced from the writer's
+// tracked counter (GetStatsBlobSize), not from the absent arrays.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteCarriesV3StatsBlobSize() {
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+	newSegmentID := s.task.plan.GetPreAllocatedSegmentIDs().GetBegin()
+	manifestPath := packed.MarshalManifestPath(path.Join(s.task.compactionParams.StorageConfig.GetRootPath(), common.SegmentInsertLogPath, metautil.JoinIDPath(1, 1, newSegmentID)), 1)
+	// V3 simulation: no statsLog / bm25StatsLog FieldBinlogs, only the
+	// writer-tracked counter has the cumulative blob size.
+	writer := &fakeBinlogRecordWriter{
+		fieldBinlogs: map[storage.FieldID]*datapb.FieldBinlog{
+			100: {FieldID: 100, ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{{LogID: 1, EntriesNum: 3, MemorySize: 1024}}},
+		},
+		statsLog:      nil,
+		bm25StatsLog:  nil,
+		statsBlobSize: 4096,
+		manifest:      manifestPath,
+		schema:        s.task.plan.GetSchema(),
+	}
+
+	newWriterPatch := mockey.Mock(storage.NewBinlogRecordWriter).Return(writer, nil).Build()
+	defer newWriterPatch.UnPatch()
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	segment := result.GetSegments()[0]
+	s.Require().NotNil(segment.GetStats())
+	s.EqualValues(4096, segment.GetStats().GetStatsBinlogSize(),
+		"V3 stats blob size must come from writer.GetStatsBlobSize, not the nil statslog arrays")
+	s.EqualValues(1024, segment.GetStats().GetInsertBinlogSize())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRejectsWriterStatsWithoutManifest() {

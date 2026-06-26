@@ -385,6 +385,13 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			StorageVersion:      t.storageVersion,
 			Manifest:            manifest,
 			ExpirQuantiles:      expirQuantiles,
+			// Stats: insert aggregates from the freshly emitted insert
+			// logs, stats footprint from the writer's tracked counter.
+			// The counter covers both V2 (statslog FieldBinlog memory)
+			// and V3 (manifest-embedded blob bytes); the FieldBinlog
+			// arrays would silently report zero for V3 since stats
+			// live in the manifest.
+			Stats: buildCompactionOutputStats(insertLogs, nil, srw.GetStatsBlobSize()),
 		},
 	}
 	planResult := &datapb.CompactionPlanResult{
