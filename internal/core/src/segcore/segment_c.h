@@ -300,13 +300,22 @@ ExprResCacheEraseSegment(int64_t segment_id);
  * @brief Configuration for flushing growing segment data to storage.
  */
 typedef struct CFlushConfig {
-    const char* segment_path;   // base path for segment manifest and data
-    int64_t read_version;       // version to read (-1 = latest)
-    uint32_t retry_limit;       // retry limit for commit
-    const char* writer_format;  // writer.format
+    const char* segment_path;  // base path for segment manifest and data
+    const void* schema_blob;  // serialized CollectionSchema for this flush task
+    int64_t schema_length;    // length of schema_blob in bytes
+    int64_t read_version;     // version to read (-1 = latest)
+    uint32_t retry_limit;     // retry limit for commit
+    const char* writer_format;         // writer.format
+    const char* schema_based_pattern;  // writer.split.schema_based.patterns
+    const char* schema_based_formats;  // writer.split.schema_based.formats
+    int64_t* allowed_field_ids;        // projected field IDs to flush
+    size_t num_allowed_fields;         // number of projected fields
     // TEXT column configurations
-    int64_t* text_field_ids;       // array of TEXT field IDs
-    const char** text_lob_paths;   // array of LOB paths for each TEXT field
+    int64_t* text_field_ids;      // array of TEXT field IDs
+    const char** text_lob_paths;  // array of LOB paths for each TEXT field
+    int64_t text_inline_threshold;
+    int64_t text_max_lob_file_bytes;
+    int64_t text_flush_threshold_bytes;
     size_t num_text_columns;       // number of TEXT columns
     int64_t* bm25_field_ids;       // array of BM25 sparse output field IDs
     int64_t* bm25_stats_log_ids;   // array of BM25 stats log IDs

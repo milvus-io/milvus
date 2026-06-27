@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,15 +101,16 @@ type checkpointCandidates struct {
 }
 
 type growingSourceProgress struct {
-	segmentID        int64
-	targetOffset     int64
-	syncingOffset    int64
-	syncing          bool
-	pendingFlush     bool
-	pendingCommitted *growingSourcePendingCommittedFlush
-	batches          []growingSourceProgressBatch
-	failureCount     int64
-	lastFailure      string
+	segmentID           int64
+	targetOffset        int64
+	syncingOffset       int64
+	syncing             bool
+	pendingFlush        bool
+	pendingCommitted    *growingSourcePendingCommittedFlush
+	nonRetryableFailure bool
+	batches             []growingSourceProgressBatch
+	failureCount        int64
+	lastFailure         string
 }
 
 type growingSourcePendingCommittedFlush struct {
@@ -175,6 +177,19 @@ func (p *growingSourceProgress) failSync(err error) {
 	if err != nil {
 		p.lastFailure = err.Error()
 	}
+}
+
+func (p *growingSourceProgress) markNonRetryableFailure() {
+	p.nonRetryableFailure = true
+}
+
+func isGrowingSourceLayoutMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Column count mismatch") ||
+		strings.Contains(msg, "Column group size mismatch")
 }
 
 func cloneBM25StatsMap(stats map[int64]*storage.BM25Stats) map[int64]*storage.BM25Stats {
@@ -656,6 +671,9 @@ func (wb *writeBufferBase) warnGrowingSourceFallback(segmentID int64, targetOffs
 }
 
 func (wb *writeBufferBase) growingSourceProgressSyncable(segmentID int64, progress *growingSourceProgress, rollbackFlushing bool, markSealedFlushing bool) (bool, bool) {
+	if progress.nonRetryableFailure {
+		return false, false
+	}
 	if progress.syncing {
 		if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok &&
 			(segment.State() == commonpb.SegmentState_Sealed || segment.State() == commonpb.SegmentState_Flushing) {
@@ -927,7 +945,15 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 						progress.failSync(err)
 						wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
 						wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
-						wb.scheduleGrowingSourceRetryLocked()
+						if isGrowingSourceLayoutMismatch(err) {
+							progress.markNonRetryableFailure()
+							mlog.Error(ctx, "growing-source source sync failed with non-retryable layout mismatch",
+								mlog.Int64("segmentID", growingSourceTask.SegmentID()),
+								mlog.Int64("targetOffset", progress.targetOffset),
+								mlog.String("lastFailure", progress.lastFailure))
+						} else {
+							wb.scheduleGrowingSourceRetryLocked()
+						}
 					} else {
 						if growingSourceTask.IsFlush() {
 							progress.pendingFlush = false
@@ -1018,6 +1044,9 @@ func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...
 
 func (wb *writeBufferBase) growingSourceProgressSelectedByPolicy(ts typeutil.Timestamp, segmentID int64, progress *growingSourceProgress) bool {
 	if progress == nil {
+		return false
+	}
+	if progress.nonRetryableFailure {
 		return false
 	}
 	if progress.pendingFlush {
@@ -1442,6 +1471,7 @@ func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segment
 			WithMetaWriter(wb.metaWriter).
 			WithSchema(wb.metaCache.GetSchema(schemaTimestamp)).
 			WithAllocator(wb.allocator).
+			WithFailureCallback(wb.errHandler).
 			// Same as above: keep the critical write path retrying despite the
 			// retry.Do InputError short-circuit.
 			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),

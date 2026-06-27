@@ -180,6 +180,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithVersion(t.storageVersion),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.useLoonFFI),
+		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
 	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
 		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())

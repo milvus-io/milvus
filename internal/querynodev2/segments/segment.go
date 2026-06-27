@@ -1656,12 +1656,30 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	if startOffset == endOffset {
 		return nil, nil
 	}
+	if config == nil {
+		return nil, merr.WrapErrServiceInternalMsg("flush config is nil")
+	}
+	if config.Schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("flush schema is nil")
+	}
+
+	schemaBlob, err := proto.Marshal(config.Schema)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalMsg("marshal flush schema failed: %s", err.Error())
+	}
+	if len(schemaBlob) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("marshal flush schema returned empty blob")
+	}
 
 	// build C flush config
 	var cConfig C.CFlushConfig
 	cSegmentPath := C.CString(config.SegmentBasePath)
 	defer C.free(unsafe.Pointer(cSegmentPath))
 	cConfig.segment_path = cSegmentPath
+	cSchemaBlob := C.CBytes(schemaBlob)
+	defer C.free(cSchemaBlob)
+	cConfig.schema_blob = cSchemaBlob
+	cConfig.schema_length = C.int64_t(len(schemaBlob))
 
 	cConfig.read_version = C.int64_t(config.ReadVersion)
 	cConfig.retry_limit = C.uint32_t(3)
@@ -1670,6 +1688,29 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		cWriterFormat := C.CString(writerFormat)
 		defer C.free(unsafe.Pointer(cWriterFormat))
 		cConfig.writer_format = cWriterFormat
+	}
+	schemaBasedPattern := config.SchemaBasedPattern
+	if schemaBasedPattern != "" {
+		cSchemaBasedPattern := C.CString(schemaBasedPattern)
+		defer C.free(unsafe.Pointer(cSchemaBasedPattern))
+		cConfig.schema_based_pattern = cSchemaBasedPattern
+	}
+	schemaBasedFormats := config.SchemaBasedFormats
+	if schemaBasedFormats != "" {
+		cSchemaBasedFormats := C.CString(schemaBasedFormats)
+		defer C.free(unsafe.Pointer(cSchemaBasedFormats))
+		cConfig.schema_based_formats = cSchemaBasedFormats
+	}
+	numAllowedFields := len(config.AllowedFieldIDs)
+	if numAllowedFields > 0 {
+		cAllowedFieldIDs := (*C.int64_t)(C.malloc(C.size_t(numAllowedFields) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+		defer C.free(unsafe.Pointer(cAllowedFieldIDs))
+		allowedFieldIDSlice := unsafe.Slice(cAllowedFieldIDs, numAllowedFields)
+		for i, fieldID := range config.AllowedFieldIDs {
+			allowedFieldIDSlice[i] = C.int64_t(fieldID)
+		}
+		cConfig.allowed_field_ids = cAllowedFieldIDs
+		cConfig.num_allowed_fields = C.size_t(numAllowedFields)
 	}
 
 	// populate TEXT column configs
@@ -1693,6 +1734,9 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 
 		cConfig.text_field_ids = cFieldIDs
 		cConfig.text_lob_paths = cLobPathPtrs
+		cConfig.text_inline_threshold = C.int64_t(config.TextInlineThreshold)
+		cConfig.text_max_lob_file_bytes = C.int64_t(config.TextMaxLobFileBytes)
+		cConfig.text_flush_threshold_bytes = C.int64_t(config.TextFlushThresholdBytes)
 		cConfig.num_text_columns = C.size_t(numTextCols)
 	} else {
 		cConfig.text_field_ids = nil

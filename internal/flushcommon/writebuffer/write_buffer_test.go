@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -698,6 +699,15 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 		s.True(selected)
 	})
 
+	s.Run("non_retryable_failure", func() {
+		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1007, &growingSourceProgress{
+			segmentID:           1007,
+			pendingFlush:        true,
+			nonRetryableFailure: true,
+		})
+		s.False(selected)
+	})
+
 	s.Run("sealed_segment", func() {
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:    1002,
@@ -763,6 +773,39 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 		})
 		s.True(selected)
 	})
+}
+
+func (s *WriteBufferSuite) TestGrowingSourceLayoutMismatch() {
+	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column count mismatch at index 0: existing has 21 columns, but appended has 44 columns: segcore error[segcoreCode=2001]")))
+	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")))
+	s.False(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: mock transient error")))
+	s.False(isGrowingSourceLayoutMismatch(nil))
+}
+
+func (s *WriteBufferSuite) TestGrowingSourceProgressSyncableSkipsNonRetryableFailure() {
+	syncable, retry := s.wb.growingSourceProgressSyncable(1001, &growingSourceProgress{
+		segmentID:           1001,
+		nonRetryableFailure: true,
+		batches: []growingSourceProgressBatch{
+			{endPosition: &msgpb.MsgPosition{Timestamp: 100}, endOffset: 10},
+		},
+	}, false, true)
+	s.False(syncable)
+	s.False(retry)
+}
+
+func (s *WriteBufferSuite) TestGrowingSourceProgressRetrySkipsNonRetryableFailure() {
+	s.wb.growingSourceProgress[1001] = &growingSourceProgress{
+		segmentID:           1001,
+		nonRetryableFailure: true,
+		batches: []growingSourceProgressBatch{
+			{endPosition: &msgpb.MsgPosition{Timestamp: 100}, endOffset: 10},
+		},
+	}
+
+	segments, retry := s.wb.getGrowingSourceSegmentsToRetry()
+	s.Empty(segments)
+	s.False(retry)
 }
 
 func (s *WriteBufferSuite) TestDropPartitions() {

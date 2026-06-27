@@ -291,27 +291,65 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		return result
 	}
 
-	logs = make(map[int64]*datapb.FieldBinlog)
-	for _, columnGroup := range bw.columnGroups {
+	logs = buildV3ColumnGroupFieldBinlogs(
+		bw.columnGroups,
+		w.GetWrittenRowNum(),
+		tsFrom,
+		tsTo,
+		func(columnGroupID int64) int64 { return int64(w.GetColumnGroupWrittenCompressed(columnGroupID)) },
+		func(columnGroupID int64) int64 { return int64(w.GetColumnGroupWrittenUncompressed(columnGroupID)) },
+		nil,
+		w.GetWrittenPaths,
+		getFieldNullCounts,
+	)
+	return logs, files, nil
+}
+
+func buildV3ColumnGroupFieldBinlogs(
+	columnGroups []storagecommon.ColumnGroup,
+	entriesNum int64,
+	tsFrom uint64,
+	tsTo uint64,
+	compressedSize func(columnGroupID int64) int64,
+	memorySize func(columnGroupID int64) int64,
+	logID func(columnGroupID int64) int64,
+	logPath func(columnGroupID int64) string,
+	fieldNullCounts func(columnGroup storagecommon.ColumnGroup) map[int64]int64,
+) map[int64]*datapb.FieldBinlog {
+	logs := make(map[int64]*datapb.FieldBinlog, len(columnGroups))
+	for _, columnGroup := range columnGroups {
 		columnGroupID := columnGroup.GroupID
-		logs[columnGroupID] = &datapb.FieldBinlog{
+		fieldBinlog := &datapb.FieldBinlog{
 			FieldID:     columnGroupID,
 			ChildFields: columnGroup.Fields,
 			Format:      columnGroup.Format,
-			Binlogs: []*datapb.Binlog{
-				{
-					LogSize:         int64(w.GetColumnGroupWrittenCompressed(columnGroup.GroupID)),
-					MemorySize:      int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
-					LogPath:         w.GetWrittenPaths(columnGroupID),
-					EntriesNum:      w.GetWrittenRowNum(),
-					TimestampFrom:   tsFrom,
-					TimestampTo:     tsTo,
-					FieldNullCounts: getFieldNullCounts(columnGroup),
-				},
-			},
 		}
+		if entriesNum > 0 {
+			binlog := &datapb.Binlog{
+				EntriesNum:    entriesNum,
+				TimestampFrom: tsFrom,
+				TimestampTo:   tsTo,
+			}
+			if compressedSize != nil {
+				binlog.LogSize = compressedSize(columnGroupID)
+			}
+			if memorySize != nil {
+				binlog.MemorySize = memorySize(columnGroupID)
+			}
+			if logID != nil {
+				binlog.LogID = logID(columnGroupID)
+			}
+			if logPath != nil {
+				binlog.LogPath = logPath(columnGroupID)
+			}
+			if fieldNullCounts != nil {
+				binlog.FieldNullCounts = fieldNullCounts(columnGroup)
+			}
+			fieldBinlog.Binlogs = []*datapb.Binlog{binlog}
+		}
+		logs[columnGroupID] = fieldBinlog
 	}
-	return logs, files, nil
+	return logs
 }
 
 func (bw *BulkPackWriterV3) resolveInsertWriterFormats() (string, []string, error) {
