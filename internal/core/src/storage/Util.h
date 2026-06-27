@@ -63,6 +63,15 @@ namespace milvus::storage {
 // Go (pkg/util/merr/segcore.go) instead of every storage failure collapsing to
 // UnexpectedError(2001) via AssertInfo. Transient IO / OOM stay retriable;
 // malformed data is a permanent data error; anything else is an internal bug.
+//
+// CAVEAT: Invalid/TypeError/KeyError are treated here as permanent on-disk
+// corruption (DataFormatBroken). Only call this where those statuses genuinely
+// mean malformed *stored* data. Do NOT use it where arrow surfaces caller/config
+// validation as Invalid (a bad schema, bad URI, bad writer/reader config) -- that
+// should map to an input/parameter error, not data corruption. Current call sites
+// satisfy this: in-memory parquet parsing (PayloadReader) where Invalid == corrupt
+// bytes, and remote OpenOutputStream (IndexEntryEncryptedLocalWriter) where a
+// transient failure is IOError, not Invalid.
 inline ErrorCode
 ArrowStatusToErrorCode(const arrow::Status& status) {
     if (status.IsOutOfMemory()) {
