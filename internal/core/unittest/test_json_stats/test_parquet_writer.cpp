@@ -1,14 +1,91 @@
 #include <gtest/gtest.h>
-#include "index/json_stats/parquet_writer.h"
-#include <arrow/io/memory.h>
+#include <arrow/filesystem/localfs.h>
 #include <arrow/io/file.h>
+#include <arrow/io/interfaces.h>
+#include <arrow/io/memory.h>
+#include <arrow/result.h>
+#include <filesystem>
+#include <map>
 #include <parquet/arrow/writer.h>
 #include <memory>
+#include <set>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
-#include <map>
+
+#include "index/json_stats/parquet_writer.h"
+#include "index/json_stats/utils.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
 
 namespace milvus::index {
+namespace {
+
+class CloseFailingOutputStream : public arrow::io::OutputStream {
+ public:
+    explicit CloseFailingOutputStream(
+        std::shared_ptr<arrow::io::OutputStream> delegate)
+        : delegate_(std::move(delegate)) {
+        set_mode(arrow::io::FileMode::WRITE);
+    }
+
+    arrow::Status
+    Close() override {
+        closed_ = true;
+        auto status = delegate_->Close();
+        if (!status.ok()) {
+            return status;
+        }
+        return arrow::Status::IOError("injected final close failure");
+    }
+
+    bool
+    closed() const override {
+        return closed_ || delegate_->closed();
+    }
+
+    arrow::Result<int64_t>
+    Tell() const override {
+        return delegate_->Tell();
+    }
+
+    arrow::Status
+    Write(const void* data, int64_t nbytes) override {
+        return delegate_->Write(data, nbytes);
+    }
+
+    arrow::Status
+    Flush() override {
+        return delegate_->Flush();
+    }
+
+    using arrow::io::Writable::Write;
+
+ private:
+    std::shared_ptr<arrow::io::OutputStream> delegate_;
+    bool closed_{false};
+};
+
+class CloseFailingLocalFileSystem : public arrow::fs::LocalFileSystem {
+ public:
+    using arrow::fs::LocalFileSystem::LocalFileSystem;
+
+    arrow::Result<std::shared_ptr<arrow::io::OutputStream>>
+    OpenOutputStream(const std::string& path,
+                     const std::shared_ptr<const arrow::KeyValueMetadata>&
+                         metadata) override {
+        auto result =
+            arrow::fs::LocalFileSystem::OpenOutputStream(path, metadata);
+        if (!result.ok()) {
+            return result.status();
+        }
+        return std::make_shared<CloseFailingOutputStream>(result.ValueOrDie());
+    }
+};
+
+}  // namespace
+
 class ParquetWriterFactoryTest : public ::testing::Test {
  protected:
     void
@@ -29,6 +106,23 @@ class ParquetWriterFactoryTest : public ::testing::Test {
     std::map<JsonKey, JsonKeyLayoutType> column_map_;
     std::string path_prefix_;
 };
+
+namespace {
+
+milvus_storage::StorageConfig
+CreatePackedWriterStorageConfig() {
+    return milvus_storage::StorageConfig{};
+}
+
+milvus_storage::ArrowFileSystemPtr
+CreateLocalArrowFileSystem() {
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    return milvus::storage::InitArrowFileSystem(storage_config);
+}
+
+}  // namespace
 
 TEST_F(ParquetWriterFactoryTest, ColumnGroupingStrategyFactoryTest) {
     // Test creating default strategy
@@ -103,6 +197,67 @@ TEST_F(ParquetWriterFactoryTest, CreateContextWithColumnGroups) {
 
     // All columns should be assigned to a group
     EXPECT_EQ(group_ids.size(), column_map_.size());
+}
+
+TEST_F(ParquetWriterFactoryTest, CloseReturnsStatusAndIsIdempotent) {
+    auto fs = CreateLocalArrowFileSystem();
+    ASSERT_NE(fs, nullptr);
+    auto path_prefix = std::filesystem::path("json_stats_writer_close");
+    auto local_path = std::filesystem::path(TestLocalPath) / path_prefix;
+    std::filesystem::remove_all(local_path);
+    ASSERT_TRUE(std::filesystem::create_directories(local_path));
+
+    std::map<JsonKey, JsonKeyLayoutType> column_map = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/shared", JSONType::STRING), JsonKeyLayoutType::SHARED},
+    };
+
+    auto storage_config = CreatePackedWriterStorageConfig();
+    JsonStatsParquetWriter writer(fs, storage_config, 16 * 1024 * 1024, 1024);
+    auto context =
+        ParquetWriterFactory::CreateContext(column_map, path_prefix.string());
+    writer.Init(std::move(context));
+
+    writer.AppendValue(JsonKey("/int", JSONType::INT64).ToColumnName(), "42");
+    writer.AppendSharedRow(nullptr, 0);
+    writer.AddCurrentRow();
+
+    auto status = writer.Close();
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    EXPECT_TRUE(writer.Close().ok());
+    EXPECT_FALSE(writer.GetPathsToSize().empty());
+
+    std::filesystem::remove_all(local_path);
+}
+
+TEST_F(ParquetWriterFactoryTest, ClosePropagatesFinalCloseFailure) {
+    auto fs = std::make_shared<CloseFailingLocalFileSystem>();
+    auto path_prefix =
+        std::filesystem::path(TestLocalPath) / "json_stats_writer_close_fail";
+    std::filesystem::remove_all(path_prefix);
+    ASSERT_TRUE(std::filesystem::create_directories(path_prefix));
+
+    std::map<JsonKey, JsonKeyLayoutType> column_map = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/shared", JSONType::STRING), JsonKeyLayoutType::SHARED},
+    };
+
+    auto storage_config = CreatePackedWriterStorageConfig();
+    JsonStatsParquetWriter writer(fs, storage_config, 16 * 1024 * 1024, 1024);
+    auto context =
+        ParquetWriterFactory::CreateContext(column_map, path_prefix.string());
+    writer.Init(std::move(context));
+
+    writer.AppendValue(JsonKey("/int", JSONType::INT64).ToColumnName(), "42");
+    writer.AppendSharedRow(nullptr, 0);
+    writer.AddCurrentRow();
+
+    auto status = writer.Close();
+    EXPECT_FALSE(status.ok());
+    EXPECT_NE(status.ToString().find("injected final close failure"),
+              std::string::npos);
+
+    std::filesystem::remove_all(path_prefix);
 }
 
 }  // namespace milvus::index

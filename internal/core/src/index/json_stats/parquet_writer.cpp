@@ -19,9 +19,14 @@
 #include <arrow/array/array_primitive.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
+#include <exception>
 #include <arrow/io/file.h>
 #include <parquet/arrow/writer.h>
 #include <parquet/exception.h>
+#include <utility>
+
+#include "arrow/array/builder_base.h"
+#include "milvus-storage/packed/writer.h"
 
 namespace milvus::index {
 
@@ -41,22 +46,37 @@ JsonStatsParquetWriter::JsonStatsParquetWriter(
 }
 
 JsonStatsParquetWriter::~JsonStatsParquetWriter() {
-    Close();
-}
-
-void
-JsonStatsParquetWriter::Close() {
-    // check packed_writer_ initialized
-    if (packed_writer_) {
-        Flush();
-        // ignore close status here
-        auto _ = packed_writer_->Close();
+    try {
+        auto status = Close();
+        if (!status.ok()) {
+            LOG_WARN("failed to close json stats parquet writer: {}",
+                     status.ToString());
+        }
+    } catch (const std::exception& e) {
+        LOG_WARN("failed to close json stats parquet writer: {}", e.what());
     }
 }
 
-void
+arrow::Status
+JsonStatsParquetWriter::Close() {
+    if (!packed_writer_) {
+        return arrow::Status::OK();
+    }
+    auto flush_status = Flush();
+    if (!flush_status.ok()) {
+        return flush_status;
+    }
+    auto writer = std::move(packed_writer_);
+    return writer->Close();
+}
+
+arrow::Status
 JsonStatsParquetWriter::Flush() {
-    WriteCurrentBatch();
+    auto res = WriteCurrentBatch();
+    if (!res.ok()) {
+        return res.status();
+    }
+    return arrow::Status::OK();
 }
 
 void
@@ -74,7 +94,7 @@ JsonStatsParquetWriter::UpdatePathSizeMap(
     }
 }
 
-size_t
+arrow::Result<size_t>
 JsonStatsParquetWriter::WriteCurrentBatch() {
     if (unflushed_row_count_ == 0) {
         return 0;
@@ -85,8 +105,9 @@ JsonStatsParquetWriter::WriteCurrentBatch() {
     for (auto& builder : builders_) {
         std::shared_ptr<arrow::Array> array;
         auto status = builder->Finish(&array);
-        AssertInfo(
-            status.ok(), "failed to finish builder: {}", status.ToString());
+        if (!status.ok()) {
+            return status;
+        }
         arrays.push_back(std::move(array));
         builder->Reset();
     }
@@ -96,8 +117,10 @@ JsonStatsParquetWriter::WriteCurrentBatch() {
     auto batch = arrow::RecordBatch::Make(
         schema_, unflushed_row_count_, std::move(arrays));
     auto status = packed_writer_->Write(batch);
-    AssertInfo(
-        status.ok(), "failed to write batch, error: {}", status.ToString());
+    if (!status.ok()) {
+        unflushed_row_count_ = 0;
+        return status;
+    }
 
     auto res = unflushed_row_count_;
     unflushed_row_count_ = 0;
@@ -132,7 +155,10 @@ JsonStatsParquetWriter::AddCurrentRow() {
     unflushed_row_count_++;
     all_row_count_++;
     if (unflushed_row_count_ >= batch_size_) {
-        WriteCurrentBatch();
+        auto result = WriteCurrentBatch();
+        AssertInfo(result.ok(),
+                   "failed to write current json stats parquet batch: {}",
+                   result.status().ToString());
     }
     return all_row_count_;
 }

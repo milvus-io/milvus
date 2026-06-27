@@ -189,13 +189,13 @@ class JsonStatsParquetWriter {
     void
     AppendSharedRow(const uint8_t* data, size_t length);
 
-    void
+    arrow::Status
     Flush();
 
-    void
+    arrow::Status
     Close();
 
-    size_t
+    arrow::Result<size_t>
     WriteCurrentBatch();
 
     size_t
