@@ -18,13 +18,15 @@
 
 #include <arrow/filesystem/filesystem.h>
 #include <google/protobuf/repeated_ptr_field.h>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
-#include <string>
-#include <vector>
-#include <atomic>
 #include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "milvus-storage/common/lrucache.h"
 #include "milvus-storage/properties.h"
@@ -50,6 +52,22 @@ struct TextColumnCacheStats {
     size_t current_file_cache_size = 0;
 };
 
+using TextLobReaderFactory = std::function<
+    arrow::Result<std::unique_ptr<milvus_storage::lob_column::LobColumnReader>>(
+        std::shared_ptr<arrow::fs::FileSystem>,
+        const milvus_storage::lob_column::LobColumnConfig&)>;
+
+// LobColumnReader is not thread-safe; serialize calls per cached instance.
+struct CachedTextLobReader {
+    explicit CachedTextLobReader(
+        std::shared_ptr<milvus_storage::lob_column::LobColumnReader> reader)
+        : reader(std::move(reader)) {
+    }
+
+    std::shared_ptr<milvus_storage::lob_column::LobColumnReader> reader;
+    std::mutex mutex;
+};
+
 // TextColumnCache provides caching for TEXT column reading
 //
 // Caches open LobColumnReader instances (FileReaderCache):
@@ -62,6 +80,8 @@ class TextColumnCache {
  public:
     explicit TextColumnCache(
         const TextColumnCacheConfig& config = TextColumnCacheConfig());
+    TextColumnCache(const TextColumnCacheConfig& config,
+                    TextLobReaderFactory reader_factory);
     ~TextColumnCache();
 
     // Non-copyable, non-movable
@@ -79,8 +99,8 @@ class TextColumnCache {
     //   - fs: Arrow filesystem to use
     //   - properties: Properties for the reader
     //
-    // Returns: Shared pointer to LobColumnReader (may be shared across calls)
-    std::shared_ptr<milvus_storage::lob_column::LobColumnReader>
+    // Returns: Shared pointer to the cached reader holder.
+    std::shared_ptr<CachedTextLobReader>
     GetOrCreateReader(const std::string& lob_base_path,
                       std::shared_ptr<arrow::fs::FileSystem> fs,
                       const milvus_storage::api::Properties& properties);
@@ -130,13 +150,12 @@ class TextColumnCache {
 
  private:
     TextColumnCacheConfig config_;
+    TextLobReaderFactory reader_factory_;
 
     // Key: lob_base_path
-    // Value: LobColumnReader
+    // Value: LobColumnReader and its per-reader lock.
     mutable std::mutex reader_cache_mutex_;
-    milvus_storage::LRUCache<
-        std::string,
-        std::shared_ptr<milvus_storage::lob_column::LobColumnReader>>
+    milvus_storage::LRUCache<std::string, std::shared_ptr<CachedTextLobReader>>
         reader_cache_;
 
     mutable std::atomic<size_t> file_cache_hits_{0};
