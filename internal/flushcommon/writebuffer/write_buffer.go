@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -183,13 +182,8 @@ func (p *growingSourceProgress) markNonRetryableFailure() {
 	p.nonRetryableFailure = true
 }
 
-func isGrowingSourceLayoutMismatch(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "Column count mismatch") ||
-		strings.Contains(msg, "Column group size mismatch")
+func isGrowingSourceNonRetryableError(err error) bool {
+	return errors.Is(err, merr.ErrDataIntegrity)
 }
 
 func cloneBM25StatsMap(stats map[int64]*storage.BM25Stats) map[int64]*storage.BM25Stats {
@@ -945,9 +939,9 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 						progress.failSync(err)
 						wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
 						wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
-						if isGrowingSourceLayoutMismatch(err) {
+						if isGrowingSourceNonRetryableError(err) {
 							progress.markNonRetryableFailure()
-							mlog.Error(ctx, "growing-source source sync failed with non-retryable layout mismatch",
+							mlog.Error(ctx, "growing-source source sync failed with non-retryable error",
 								mlog.Int64("segmentID", growingSourceTask.SegmentID()),
 								mlog.Int64("targetOffset", progress.targetOffset),
 								mlog.String("lastFailure", progress.lastFailure))

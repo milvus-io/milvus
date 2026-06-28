@@ -226,6 +226,32 @@ func (s *SyncManagerSuite) TestTargetUpdateSameID() {
 	s.Error(err)
 }
 
+func (s *SyncManagerSuite) TestCallbackRunsBeforeHandleError() {
+	manager := NewSyncManager(s.chunkManager)
+
+	taskErr := errors.New("mock err")
+	callbackCalled := atomic.NewBool(false)
+
+	task := NewMockTask(s.T())
+	task.EXPECT().SegmentID().Return(1000)
+	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
+	task.EXPECT().Run(mock.Anything).Return(taskErr).Once()
+	task.EXPECT().HandleError(mock.MatchedBy(func(err error) bool {
+		return errors.Is(err, taskErr)
+	})).Run(func(error) {
+		s.True(callbackCalled.Load())
+	}).Once()
+
+	f, _ := manager.SyncData(context.Background(), task, func(err error) error {
+		s.ErrorIs(err, taskErr)
+		callbackCalled.Store(true)
+		return err
+	})
+	_, err := f.Await()
+	s.ErrorIs(err, taskErr)
+	s.True(callbackCalled.Load())
+}
+
 func (s *SyncManagerSuite) TestSyncManager_TaskStatsJSON() {
 	manager := NewSyncManager(s.chunkManager)
 	syncMgr, ok := manager.(*syncManager)

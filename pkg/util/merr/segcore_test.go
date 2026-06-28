@@ -73,6 +73,15 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		assert.ErrorIs(t, SegcoreError(2099, "x"), KnowhereError)
 	})
 
+	t.Run("data_format_broken_is_data_integrity", func(t *testing.T) {
+		err := SegcoreError(2024, "manifest layout mismatch")
+		assert.ErrorIs(t, err, ErrDataIntegrity)
+		assert.NotErrorIs(t, err, ErrSegcore)
+		assert.Equal(t, SystemError, GetErrorType(err))
+		assert.False(t, Status(err).GetRetriable())
+		assert.Contains(t, err.Error(), "2024")
+	})
+
 	t.Run("input_error_classification", func(t *testing.T) {
 		// Caller-input codes -> InputError, non-retriable by construction:
 		// FieldIDInvalid, DataIsEmpty, JsonKeyInvalid, MetricTypeInvalid,

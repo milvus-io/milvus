@@ -17,6 +17,7 @@
 #include <folly/Try.h>
 #include <folly/futures/Promise.h>
 #include <cstring>
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <limits>
@@ -86,6 +87,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/config.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/properties.h"
 
 // Arrow headers for FlushGrowingSegmentData
@@ -960,6 +962,40 @@ struct FieldInfo {
     milvus::segcore::TextLobSpillover* text_lob_spillover = nullptr;
 };
 
+milvus::ErrorCode
+ClassifyMilvusStorageCommitStatus(const arrow::Status& status) {
+    auto detail = milvus_storage::ExtendStatusDetail::UnwrapStatus(status);
+    if (detail) {
+        switch (detail->code()) {
+            case milvus_storage::ExtendStatusCode::TxnExhaustedRetry:
+            case milvus_storage::ExtendStatusCode::TxnResolutionFailed:
+                // TODO(storage-v3): add a dedicated retriable segcore code for
+                // storage transaction conflicts. FileWriteFailed is reused here
+                // only because it is already classified as retriable on the Go
+                // side; it mixes manifest transaction conflicts with generic
+                // file/object-store write failures.
+                return milvus::FileWriteFailed;
+            default:
+                break;
+        }
+    }
+
+    if (status.IsInvalid()) {
+        // This helper is used for manifest commit failures. On that path,
+        // milvus-storage reports permanent append/layout incompatibilities as
+        // Invalid, for example column count or column group mismatch. Retrying
+        // the same append will not make it compatible. Do not treat every
+        // Arrow Invalid from other storage APIs as DataFormatBroken without
+        // checking that call site's semantics.
+        return milvus::DataFormatBroken;
+    }
+
+    if (status.IsIOError()) {
+        return milvus::FileWriteFailed;
+    }
+    return milvus::UnexpectedError;
+}
+
 struct BM25StatsAccumulator {
     std::unordered_map<uint32_t, int32_t> rows_with_token;
     int64_t num_row = 0;
@@ -1162,6 +1198,55 @@ IsFixedWidthVectorDataType(milvus::DataType data_type) {
            data_type == milvus::DataType::VECTOR_INT8;
 }
 
+arrow::Result<int64_t>
+GetFixedWidthVectorValueAlignment(milvus::DataType data_type) {
+    switch (data_type) {
+        case milvus::DataType::VECTOR_FLOAT:
+            return alignof(float);
+        case milvus::DataType::VECTOR_BINARY:
+            return alignof(uint8_t);
+        case milvus::DataType::VECTOR_FLOAT16:
+            return alignof(milvus::float16);
+        case milvus::DataType::VECTOR_BFLOAT16:
+            return alignof(milvus::bfloat16);
+        case milvus::DataType::VECTOR_INT8:
+            return alignof(milvus::int8);
+        default:
+            return arrow::Status::Invalid(fmt::format(
+                "unsupported fixed-width vector data type {}", data_type));
+    }
+}
+
+bool
+IsBufferAligned(const void* data, int64_t alignment) {
+    if (data == nullptr || alignment <= 1) {
+        return true;
+    }
+    return reinterpret_cast<std::uintptr_t>(data) %
+               static_cast<std::uintptr_t>(alignment) ==
+           0;
+}
+
+arrow::Result<std::shared_ptr<arrow::Buffer>>
+WrapOrCopyArrowBuffer(const void* data, int64_t size, int64_t alignment) {
+    if (size < 0) {
+        return arrow::Status::Invalid("negative Arrow buffer size");
+    }
+    if (data == nullptr && size > 0) {
+        return arrow::Status::Invalid("null Arrow buffer data");
+    }
+    auto raw_data = static_cast<const uint8_t*>(data);
+    if (IsBufferAligned(data, alignment)) {
+        return arrow::Buffer::Wrap(raw_data, size);
+    }
+
+    ARROW_ASSIGN_OR_RAISE(auto copied_buffer, arrow::AllocateBuffer(size));
+    if (size > 0) {
+        std::memcpy(copied_buffer->mutable_data(), raw_data, size);
+    }
+    return std::shared_ptr<arrow::Buffer>(std::move(copied_buffer));
+}
+
 const uint8_t*
 GetPhysicalVectorValue(const milvus::segcore::VectorBase* vec_base,
                        int64_t physical_offset,
@@ -1182,7 +1267,8 @@ arrow::Result<std::shared_ptr<arrow::Array>>
 BuildNullableFixedWidthVectorArray(const FieldInfo& field_info,
                                    int64_t start_offset,
                                    int64_t num_rows,
-                                   int64_t byte_width) {
+                                   int64_t byte_width,
+                                   int64_t data_alignment) {
     if (!field_info.valid_data) {
         return arrow::Status::Invalid(
             "nullable vector field missing ValidData");
@@ -1220,8 +1306,10 @@ BuildNullableFixedWidthVectorArray(const FieldInfo& field_info,
             }
             std::shared_ptr<arrow::Buffer> offsets_buffer_shared(
                 std::move(offsets_buffer));
-            auto data_buffer =
-                arrow::Buffer::Wrap(value, num_rows * byte_width);
+            ARROW_ASSIGN_OR_RAISE(
+                auto data_buffer,
+                WrapOrCopyArrowBuffer(
+                    value, num_rows * byte_width, data_alignment));
             return std::make_shared<arrow::BinaryArray>(
                 num_rows, offsets_buffer_shared, data_buffer, nullptr, 0);
         }
@@ -1302,9 +1390,10 @@ WrapChunkAsArrowArray(const void* chunk_data,
                       int64_t element_size,
                       const milvus::segcore::ThreadSafeValidDataPtr& valid_data,
                       int64_t validity_offset) {
-    // wrap data buffer (zero-copy)
-    auto data_buffer = arrow::Buffer::Wrap(
-        static_cast<const uint8_t*>(chunk_data), num_rows * element_size);
+    ARROW_ASSIGN_OR_RAISE(
+        auto data_buffer,
+        WrapOrCopyArrowBuffer(
+            chunk_data, num_rows * element_size, element_size));
 
     // build validity bitmap if needed
     std::shared_ptr<arrow::Buffer> null_bitmap = nullptr;
@@ -1338,12 +1427,14 @@ WrapChunkAsFixedSizeBinaryArray(
     const void* chunk_data,
     int64_t num_rows,
     int64_t byte_width,
+    int64_t data_alignment,
     const std::shared_ptr<arrow::DataType>& data_type,
     const milvus::segcore::ThreadSafeValidDataPtr& valid_data,
     int64_t validity_offset) {
-    // wrap data buffer (zero-copy)
-    auto data_buffer = arrow::Buffer::Wrap(
-        static_cast<const uint8_t*>(chunk_data), num_rows * byte_width);
+    ARROW_ASSIGN_OR_RAISE(
+        auto data_buffer,
+        WrapOrCopyArrowBuffer(
+            chunk_data, num_rows * byte_width, data_alignment));
 
     // build validity bitmap if needed
     std::shared_ptr<arrow::Buffer> null_bitmap = nullptr;
@@ -1692,15 +1783,22 @@ BuildArrayForChunk(const FieldInfo& field_info,
         case milvus::DataType::VECTOR_FLOAT16:
         case milvus::DataType::VECTOR_BFLOAT16:
         case milvus::DataType::VECTOR_INT8: {
+            ARROW_ASSIGN_OR_RAISE(
+                auto data_alignment,
+                GetFixedWidthVectorValueAlignment(field_info.data_type));
             if (field_info.nullable) {
-                return BuildNullableFixedWidthVectorArray(
-                    field_info, global_offset, num_rows, element_size);
+                return BuildNullableFixedWidthVectorArray(field_info,
+                                                          global_offset,
+                                                          num_rows,
+                                                          element_size,
+                                                          data_alignment);
             }
             auto arrow_type =
                 milvus::GetArrowDataType(field_info.data_type, field_info.dim);
             return WrapChunkAsFixedSizeBinaryArray(get_data_ptr(),
                                                    num_rows,
                                                    element_size,
+                                                   data_alignment,
                                                    arrow_type,
                                                    field_info.valid_data,
                                                    global_offset);
@@ -2213,8 +2311,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // commit
         auto commit_result = transaction->Commit();
         if (!commit_result.ok()) {
-            return milvus::FailureCStatus(milvus::UnexpectedError,
-                                          commit_result.status().ToString());
+            auto status = commit_result.status();
+            return milvus::FailureCStatus(
+                ClassifyMilvusStorageCommitStatus(status), status.ToString());
         }
         auto committed_version = commit_result.ValueOrDie();
 

@@ -116,11 +116,6 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
 
 	logger := t.getLogger()
-	defer func() {
-		if err != nil {
-			t.HandleError(err)
-		}
-	}()
 
 	segmentInfo, has := t.metacache.GetSegmentByID(t.segmentID)
 	if !has {

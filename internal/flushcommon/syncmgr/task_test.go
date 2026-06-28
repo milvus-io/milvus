@@ -472,7 +472,7 @@ func (s *SyncTaskSuite) TestRunError() {
 		err := task.Run(ctx)
 
 		s.Error(err)
-		s.True(flag)
+		s.False(flag)
 	})
 }
 
