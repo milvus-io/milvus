@@ -357,7 +357,7 @@ func TestSecondaryReplicateManagerIgnoreStaleTxnBody(t *testing.T) {
 				},
 				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
 			},
-			TxnBuffer: utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+			TxnBuffer: utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
 		},
 	})
 	assert.NoError(t, err)
