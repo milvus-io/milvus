@@ -600,22 +600,31 @@ class TestMilvusClientThreeValuedLogicIssue46972(TestMilvusClientV2Base):
     def test_issue_46972_false_or_false_complex_json(self):
         """
         target: test that False OR False = False (not True) with complex JSON expressions
-        method: use the exact expressions from issue #46972
+        method: use the expressions from issue #46972
         expected: left expr is False, right expr is False, combined is False
 
         This is the critical bug fixed in PR #47333: complex expressions with
         JSON fields and nullable fields incorrectly evaluated (False OR False) as True.
+
+        Note: the original issue #46972 expressions contained bare `null is null`
+        / `null is not null` sub-terms, which only ever "worked" by accident — a
+        bare `null` used as a left-value was silently misparsed as a dynamic JSON
+        key. That misparse is now rejected at parse time (a bare `null` is not a
+        valid left-value), so those sub-terms are replaced with their exact
+        semantic equivalents `true` (`null is null`) and `false`
+        (`null is not null`). This keeps every sub-clause's boolean value — and
+        thus the False-OR-False regression coverage — identical.
         """
         client = self._client()
 
         # Block A: Left Expression (should be False for test data)
         expr_left = """
-(((meta_json["config"]["version"] == 9 or (meta_json["history"][0] > 49 or (meta_json["history"][0] > 47 and (meta_json["price"] > 294 and meta_json["price"] < 379)))) and (((meta_json["config"]["version"] == 7 or meta_json["history"][0] > 27) or (tags_array is not null or null is null)) or c17 == false)) or ((((c14 <= 863.28694295187 or (c10 != "kaKmPWPbAaEFnHzX" and c10 != "ZmBmv")) and ((c4 > 1113.2711377477458 or c13 >= -76839) or (meta_json["config"]["version"] == 3 or (meta_json["price"] > 150 and meta_json["price"] < 237)))) and c7 == false) and ((((c1 is not null and null is null) or (c12 == false and meta_json["config"]["version"] == 4)) or (((meta_json["active"] == true and meta_json["color"] == "Blue") and c12 == true) and (c6 is not null or c13 == 180192))) or (c4 < 105376.953125 or ((c15 <= 3484.876420871185 or c1 == false) or (meta_json["config"]["version"] == 9 and c10 != "OjcbvwxZ5LfV2PZNPgS7"))))))
+(((meta_json["config"]["version"] == 9 or (meta_json["history"][0] > 49 or (meta_json["history"][0] > 47 and (meta_json["price"] > 294 and meta_json["price"] < 379)))) and (((meta_json["config"]["version"] == 7 or meta_json["history"][0] > 27) or (tags_array is not null or true)) or c17 == false)) or ((((c14 <= 863.28694295187 or (c10 != "kaKmPWPbAaEFnHzX" and c10 != "ZmBmv")) and ((c4 > 1113.2711377477458 or c13 >= -76839) or (meta_json["config"]["version"] == 3 or (meta_json["price"] > 150 and meta_json["price"] < 237)))) and c7 == false) and ((((c1 is not null and true) or (c12 == false and meta_json["config"]["version"] == 4)) or (((meta_json["active"] == true and meta_json["color"] == "Blue") and c12 == true) and (c6 is not null or c13 == 180192))) or (c4 < 105376.953125 or ((c15 <= 3484.876420871185 or c1 == false) or (meta_json["config"]["version"] == 9 and c10 != "OjcbvwxZ5LfV2PZNPgS7"))))))
 """
 
         # Block B: Right Expression (should be False for test data)
         expr_right = """
-((((((c17 == false or exists(meta_json["non_exist"])) or c14 <= 5363.7872388701035) or meta_json["history"][0] > 72) or (((c4 is not null and c17 == true) and ((c2 < 60835 or c1 is null) or (c5 == false or meta_json["history"][0] > 64))) and ((c6 >= -56376 or c16 is not null) or ((c4 >= 812.9318963654309 and c16 >= 2907.7772038042867) and (meta_json["price"] > 449 and meta_json["price"] < 624))))) or (((((null is not null and c13 < 180192) or (c13 < -71746 or c17 == true)) and ((meta_json["price"] > 407 and meta_json["price"] < 521) and (c8 like "w%" or c14 > 3021.9496428003613))) and (((c12 == false or (meta_json["price"] > 412 and meta_json["price"] < 571)) or (c9 < 1264.220988053753 or c6 != 2063)) or c5 == false)) and (meta_json["active"] == true and meta_json["color"] == "Red"))) or ((((c13 != 54759 and (c7 is null and (c17 == true or c9 <= 1067.5165787120216))) and (((c11 != 36936 or meta_json["history"][0] > 59) or ((meta_json["price"] > 354 and meta_json["price"] < 528) and c9 >= 135.84002581554114)) and ((c0 > 105381.9375 or exists(meta_json["non_exist"])) or (c12 == true or meta_json is null)))) or ((((c14 >= 2547.2285277180335 and c1 == false) and (meta_json["history"][0] > 37 or json_contains(meta_json["k_11"], "o"))) and ((c9 < 2869.0647504243566 and c4 > 449.2640493406897) or (meta_json["config"]["version"] == 9 and c16 < 3626.0660282789318))) and (((c11 <= -57792 or (meta_json["price"] > 320 and meta_json["price"] < 488)) and (meta_json["active"] == false and c3 >= 105383.3671875)) or ((c13 >= -32496 and c5 == true) and (meta_json["active"] == true and meta_json["color"] == "Blue"))))) and c13 <= 180192))
+((((((c17 == false or exists(meta_json["non_exist"])) or c14 <= 5363.7872388701035) or meta_json["history"][0] > 72) or (((c4 is not null and c17 == true) and ((c2 < 60835 or c1 is null) or (c5 == false or meta_json["history"][0] > 64))) and ((c6 >= -56376 or c16 is not null) or ((c4 >= 812.9318963654309 and c16 >= 2907.7772038042867) and (meta_json["price"] > 449 and meta_json["price"] < 624))))) or (((((false and c13 < 180192) or (c13 < -71746 or c17 == true)) and ((meta_json["price"] > 407 and meta_json["price"] < 521) and (c8 like "w%" or c14 > 3021.9496428003613))) and (((c12 == false or (meta_json["price"] > 412 and meta_json["price"] < 571)) or (c9 < 1264.220988053753 or c6 != 2063)) or c5 == false)) and (meta_json["active"] == true and meta_json["color"] == "Red"))) or ((((c13 != 54759 and (c7 is null and (c17 == true or c9 <= 1067.5165787120216))) and (((c11 != 36936 or meta_json["history"][0] > 59) or ((meta_json["price"] > 354 and meta_json["price"] < 528) and c9 >= 135.84002581554114)) and ((c0 > 105381.9375 or exists(meta_json["non_exist"])) or (c12 == true or meta_json is null)))) or ((((c14 >= 2547.2285277180335 and c1 == false) and (meta_json["history"][0] > 37 or json_contains(meta_json["k_11"], "o"))) and ((c9 < 2869.0647504243566 and c4 > 449.2640493406897) or (meta_json["config"]["version"] == 9 and c16 < 3626.0660282789318))) and (((c11 <= -57792 or (meta_json["price"] > 320 and meta_json["price"] < 488)) and (meta_json["active"] == false and c3 >= 105383.3671875)) or ((c13 >= -32496 and c5 == true) and (meta_json["active"] == true and meta_json["color"] == "Blue"))))) and c13 <= 180192))
 """
 
         # Combined expression
