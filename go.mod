@@ -64,6 +64,7 @@ require (
 	github.com/bytedance/sonic v1.15.2
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cockroachdb/redact v1.1.3
+	github.com/colinmarc/hdfs/v2 v2.4.0
 	github.com/google/uuid v1.6.0
 	github.com/greatroar/blobloom v0.0.0-00010101000000-000000000000
 	github.com/hamba/avro/v2 v2.29.0
@@ -89,7 +90,6 @@ require (
 	github.com/bytedance/gopkg v0.1.4 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cloudfoundry/gosigar v1.3.6 // indirect
-	github.com/colinmarc/hdfs/v2 v2.4.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/gopherjs/gopherjs v1.12.80 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect

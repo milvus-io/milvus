@@ -61,7 +61,7 @@ func (f *ChunkManagerFactory) newChunkManager(ctx context.Context, engine string
 	case "remote", "minio", "opendal":
 		return NewRemoteChunkManager(ctx, f.config)
 	case "hdfs":
-		return NewHDFSChunkManager(f.config.HDFSAddress, f.config.HDFSUser, f.config.RootPath)
+		return NewHDFSChunkManager(ctx, f.config.HDFSAddress, f.config.HDFSUser, f.config.RootPath)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("no chunk manager implemented with engine: " + engine)
 	}
