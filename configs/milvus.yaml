@@ -53,6 +53,7 @@ etcd:
     # We recommend using version 1.2 and above.
     tlsMinVersion: 1.3
   requestTimeout: 10000 # Etcd operation timeout in milliseconds
+  dialTimeout: 5000 # Timeout in milliseconds for establishing the initial connection to etcd endpoints. Increase it for environments where transient network delays are expected during node scale-out.
   dialKeepAliveTime: 3000 # Interval in milliseconds for gRPC dial keepalive pings sent to etcd endpoints.
   dialKeepAliveTimeout: 2000 # Timeout in milliseconds waiting for keepalive responses before marking the connection as unhealthy.
   use:

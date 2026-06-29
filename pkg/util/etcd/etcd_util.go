@@ -77,6 +77,15 @@ func IsRetriableWatchErr(err error) bool {
 
 type ClientOption func(*clientv3.Config)
 
+// WithDialTimeout overrides the etcd client dial timeout. A non-positive value keeps the default.
+func WithDialTimeout(dialTimeout time.Duration) ClientOption {
+	return func(cfg *clientv3.Config) {
+		if dialTimeout > 0 {
+			cfg.DialTimeout = dialTimeout
+		}
+	}
+}
+
 // WithDialKeepAlive configures gRPC keepalive and autosync behaviors for the etcd client.
 func WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout time.Duration) ClientOption {
 	return func(cfg *clientv3.Config) {
