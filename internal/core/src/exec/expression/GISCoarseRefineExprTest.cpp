@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "ExprTestBase.h"
+#include "common/Common.h"
 #include "common/GeometryCache.h"
 #include "common/Schema.h"
 #include "common/Types.h"
@@ -76,6 +77,20 @@ struct GeometryCacheGuard {
     }
     ~GeometryCacheGuard() {
         SegcoreConfig::default_config().set_enable_geometry_cache(false);
+    }
+};
+
+// RAII guard for the expr batch size, restored on scope exit. Used to force
+// multiple Eval batches over a single segment so the split nodes' per-batch
+// coarse slicing + dual-cursor advance is exercised across batch boundaries.
+struct ExprBatchSizeGuard {
+    int64_t saved;
+    explicit ExprBatchSizeGuard(int64_t batch_size)
+        : saved(EXEC_EVAL_EXPR_BATCH_SIZE.load()) {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(batch_size);
+    }
+    ~ExprBatchSizeGuard() {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved);
     }
 };
 
@@ -222,6 +237,26 @@ TEST(GISCoarseRefineExprTest, EquivalenceFusionGrowingSegment) {
                                                 milvus::empty_index_meta,
                                                 SegcoreConfig::default_config(),
                                                 dataset);
+    ScopedSchemaHandle handle(*schema);
+
+    AssertFusionEquivalence(schema, handle, seg.get(), N);
+}
+
+// Equivalence with a small expr batch size, so a single N=1000 segment is
+// evaluated over MANY Eval batches. The default batch size (8192) makes the
+// other tests run in a single batch, which never exercises the split nodes'
+// per-batch slicing of the segment-level coarse_candidates bitmap, the
+// MoveCursor advance, or the dual-cursor sync between the Coarse and Refine
+// nodes across batch boundaries. Forcing several batches locks those paths
+// down. (The R-Tree-indexed coarse path is covered separately by
+// RTreeIndexTest.GIS_SplitFusion_Equivalence_Indexed.)
+TEST(GISCoarseRefineExprTest, EquivalenceFusionMultiBatch) {
+    ExprBatchSizeGuard batch_guard(128);  // 1000 rows -> 8 batches
+
+    auto schema = MakeGISSchema();
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedWithFieldDataLoaded(schema, dataset);
     ScopedSchemaHandle handle(*schema);
 
     AssertFusionEquivalence(schema, handle, seg.get(), N);
