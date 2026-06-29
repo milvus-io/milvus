@@ -19,9 +19,10 @@ package storage
 import (
 	"container/heap"
 	"io"
-	"sort"
+	"slices"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -37,16 +38,26 @@ type SortTimings struct {
 	NumRows    int
 }
 
+// Sort materializes the records from rr, stable-selects the rows for which
+// predicate returns true, sorts them by sortByFieldIDs, and writes them out
+// through rw in batches of roughly batchSize bytes.
+//
+// Performance notes (vs. the naive row-at-a-time approach):
+//   - The row selection is kept in a value slice ([]rowIndex) instead of a
+//     []*rowIndex, avoiding one heap allocation per row.
+//   - Sort keys are extracted into flat per-record slices once. A single int64
+//     key (the common PK case) is then sorted with an O(N) stable LSD radix
+//     sort; other keys use slices.SortFunc over the flat keys (plain slice
+//     indexing, no Column() map lookup per comparison).
+//   - When writing the output, each source column's array is resolved once per
+//     input record rather than once per row (RecordBuilder.Append would do the
+//     latter); rows are then emitted in order and flushed once the accumulated
+//     batch reaches batchSize bytes.
 func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool, sortByFieldIDs []int64,
 ) (int, *SortTimings, error) {
 	records := make([]Record, 0)
-
-	type index struct {
-		ri int
-		i  int
-	}
-	indices := make([]*index, 0)
+	indices := make([]rowIndex, 0)
 
 	// release cgo records
 	defer func() {
@@ -65,7 +76,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 				records = append(records, rec)
 				for i := 0; i < rec.Len(); i++ {
 					if predicate(rec, ri, i) {
-						indices = append(indices, &index{ri, i})
+						indices = append(indices, rowIndex{int32(ri), int32(i)})
 					}
 				}
 			} else if err == io.EOF {
@@ -83,60 +94,91 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 
 	phaseStart = time.Now()
 	if len(sortByFieldIDs) > 0 {
-		type keyCmp func(x, y *index) int
-		comparators := make([]keyCmp, 0, len(sortByFieldIDs))
-		for _, fid := range sortByFieldIDs {
+		// Pre-extract the sort key columns into flat per-record slices so the
+		// comparator avoids a Column() map lookup + type assert per comparison.
+		const (
+			keyInt64 = iota
+			keyString
+		)
+		kinds := make([]int, len(sortByFieldIDs))
+		int64Keys := make([][][]int64, len(sortByFieldIDs))
+		stringKeys := make([][][]string, len(sortByFieldIDs))
+		for fp, fid := range sortByFieldIDs {
 			switch records[0].Column(fid).(type) {
 			case *array.Int64:
-				f := func(x, y *index) int {
-					xVal := records[x.ri].Column(fid).(*array.Int64).Value(x.i)
-					yVal := records[y.ri].Column(fid).(*array.Int64).Value(y.i)
-					if xVal < yVal {
-						return -1
-					}
-					if xVal > yVal {
-						return 1
-					}
-					return 0
+				kinds[fp] = keyInt64
+				cols := make([][]int64, len(records))
+				for ri, rec := range records {
+					cols[ri] = rec.Column(fid).(*array.Int64).Int64Values()
 				}
-				comparators = append(comparators, f)
+				int64Keys[fp] = cols
 			case *array.String:
-				f := func(x, y *index) int {
-					xVal := records[x.ri].Column(fid).(*array.String).Value(x.i)
-					yVal := records[y.ri].Column(fid).(*array.String).Value(y.i)
-					if xVal < yVal {
-						return -1
+				kinds[fp] = keyString
+				cols := make([][]string, len(records))
+				for ri, rec := range records {
+					a := rec.Column(fid).(*array.String)
+					vals := make([]string, a.Len())
+					for i := range vals {
+						vals[i] = a.Value(i)
 					}
-					if xVal > yVal {
-						return 1
-					}
-					return 0
+					cols[ri] = vals
 				}
-				comparators = append(comparators, f)
+				stringKeys[fp] = cols
 			default:
 				return 0, nil, merr.WrapErrStorageMsg("unsupported type for sorting key")
 			}
 		}
 
-		sort.Slice(indices, func(i, j int) bool {
-			x := indices[i]
-			y := indices[j]
-			for _, cmp := range comparators {
-				c := cmp(x, y)
-				if c < 0 {
-					return true
+		// A single int64 sort key (the common PK case) is sorted with a stable
+		// LSD radix sort: O(N) instead of O(N log N) and no comparator calls.
+		// Multi-field or varchar keys fall back to comparison sort.
+		if len(sortByFieldIDs) == 1 && kinds[0] == keyInt64 {
+			radixSortByInt64(indices, int64Keys[0])
+		} else {
+			slices.SortFunc(indices, func(x, y rowIndex) int {
+				for fp := range sortByFieldIDs {
+					switch kinds[fp] {
+					case keyInt64:
+						xv, yv := int64Keys[fp][x.ri][x.i], int64Keys[fp][y.ri][y.i]
+						if xv != yv {
+							if xv < yv {
+								return -1
+							}
+							return 1
+						}
+					case keyString:
+						xv, yv := stringKeys[fp][x.ri][x.i], stringKeys[fp][y.ri][y.i]
+						if xv != yv {
+							if xv < yv {
+								return -1
+							}
+							return 1
+						}
+					}
 				}
-				if c > 0 {
-					return false
-				}
-			}
-			return false
-		})
+				return 0
+			})
+		}
 	}
 	sortCost := time.Since(phaseStart)
 
 	phaseStart = time.Now()
 	rb := NewRecordBuilder(schema)
+
+	// Resolve each output column's source array once per input record (instead
+	// of once per row, as RecordBuilder.Append would).
+	srcByField := make([][]arrow.Array, len(rb.builders))
+	defaults := make([]*schemapb.ValueField, len(rb.builders))
+	for fi := range rb.builders {
+		fid := rb.fields[fi].FieldID
+		cols := make([]arrow.Array, len(records))
+		for ri := range records {
+			cols[ri] = records[ri].Column(fid)
+		}
+		srcByField[fi] = cols
+		defaults[fi] = rb.fields[fi].GetDefaultValue()
+	}
+
 	writeRecord := func() error {
 		rec := rb.Build()
 		defer rec.Release()
@@ -147,11 +189,17 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	}
 
 	for _, idx := range indices {
-		if err := rb.Append(records[idx.ri], idx.i, idx.i+1); err != nil {
-			return 0, nil, err
+		for fi, builder := range rb.builders {
+			size, err := appendValueAt(builder, srcByField[fi][idx.ri], int(idx.i), defaults[fi])
+			if err != nil {
+				return 0, nil, merr.Wrapf(err, "failed to append value at row %d for field %s", idx.i, rb.fields[fi].GetName())
+			}
+			rb.size += size
 		}
+		rb.nRows++
 
-		// Write when accumulated data size reaches batchSize
+		// Flush once the accumulated batch reaches batchSize bytes (exact, like
+		// the original) so a single output record never exceeds the target.
 		if rb.GetSize() >= batchSize {
 			if err := writeRecord(); err != nil {
 				return 0, nil, err
@@ -159,7 +207,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		}
 	}
 
-	// write the last batch
+	// write the last partial batch
 	if err := writeRecord(); err != nil {
 		return 0, nil, err
 	}
@@ -173,6 +221,58 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		NumRows:    len(indices),
 	}
 	return len(indices), timings, nil
+}
+
+// rowIndex addresses a single row as (record index, row-in-record index). It is
+// stored by value to avoid a per-row heap allocation.
+type rowIndex struct {
+	ri int32
+	i  int32
+}
+
+// radixSortByInt64 sorts indices in place so that keys[indices[k].ri][indices[k].i]
+// is non-decreasing, using a stable LSD radix sort over the 8 bytes of the int64
+// key (O(N)). The sign bit is flipped so unsigned byte ordering matches signed
+// int64 ordering.
+func radixSortByInt64(indices []rowIndex, keys [][]int64) {
+	n := len(indices)
+	if n < 2 {
+		return
+	}
+	srcKey := make([]uint64, n)
+	for i, idx := range indices {
+		srcKey[i] = uint64(keys[idx.ri][idx.i]) ^ (uint64(1) << 63)
+	}
+	dstKey := make([]uint64, n)
+	srcIdx := indices
+	dstIdx := make([]rowIndex, n)
+	var counts [256]int
+	for shift := uint(0); shift < 64; shift += 8 {
+		counts = [256]int{}
+		for i := 0; i < n; i++ {
+			counts[(srcKey[i]>>shift)&0xff]++
+		}
+		sum := 0
+		for b := 0; b < 256; b++ {
+			c := counts[b]
+			counts[b] = sum
+			sum += c
+		}
+		for i := 0; i < n; i++ {
+			b := (srcKey[i] >> shift) & 0xff
+			p := counts[b]
+			counts[b]++
+			dstIdx[p] = srcIdx[i]
+			dstKey[p] = srcKey[i]
+		}
+		srcIdx, dstIdx = dstIdx, srcIdx
+		srcKey, dstKey = dstKey, srcKey
+	}
+	// 8 passes is even, so the sorted data ends up back in the original `indices`
+	// backing array; copy defensively in case the pass count ever becomes odd.
+	if &srcIdx[0] != &indices[0] {
+		copy(indices, srcIdx)
+	}
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.

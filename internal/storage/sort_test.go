@@ -18,6 +18,7 @@ package storage
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -26,6 +27,54 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
+
+func TestRadixSortByInt64(t *testing.T) {
+	t.Run("edge values across records", func(t *testing.T) {
+		// Keys laid out across 3 records, mixing negatives, zero, duplicates and
+		// the int64 bounds to exercise the sign-bit flip and every byte position.
+		keys := [][]int64{
+			{5, math.MaxInt64, -1},
+			{0, math.MinInt64, -1},
+			{42, 5},
+		}
+		var indices []rowIndex
+		for ri := range keys {
+			for i := range keys[ri] {
+				indices = append(indices, rowIndex{int32(ri), int32(i)})
+			}
+		}
+
+		radixSortByInt64(indices, keys)
+
+		got := make([]int64, len(indices))
+		for k, idx := range indices {
+			got[k] = keys[idx.ri][idx.i]
+		}
+		assert.Equal(t, []int64{math.MinInt64, -1, -1, 0, 5, 5, 42, math.MaxInt64}, got)
+	})
+
+	t.Run("stable for equal keys", func(t *testing.T) {
+		// Three rows share key 7 ({0,0},{1,0},{1,1} in input order); a stable sort
+		// must keep that relative order among the duplicates.
+		keys := [][]int64{
+			{7, 3},
+			{7, 7, 1},
+		}
+		indices := []rowIndex{{0, 0}, {0, 1}, {1, 0}, {1, 1}, {1, 2}}
+
+		radixSortByInt64(indices, keys)
+
+		assert.Equal(t, []rowIndex{{1, 2}, {0, 1}, {0, 0}, {1, 0}, {1, 1}}, indices)
+	})
+
+	t.Run("small inputs are no-ops", func(t *testing.T) {
+		single := []rowIndex{{0, 0}}
+		radixSortByInt64(single, [][]int64{{99}})
+		assert.Equal(t, []rowIndex{{0, 0}}, single)
+
+		assert.NotPanics(t, func() { radixSortByInt64(nil, nil) })
+	})
+}
 
 func TestSort(t *testing.T) {
 	const batchSize = 64 * 1024 * 1024
