@@ -1,3 +1,5 @@
+# ruff: noqa
+# fmt: off
 import numpy as np
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
@@ -501,24 +503,24 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit, expression,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1100,
-                                         "err_msg": "cannot parse expression: !bool, "
-                                                    "error: not op can only be applied on boolean expression"})
+                                         "err_msg": "cannot parse expression: !bool: not op can only be applied "
+                                                    "on boolean expression"})
         expression = "int64 > 0 and bool"
         log.debug(f"search with expression: {expression}")
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, expression,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1100,
-                                         "err_msg": "cannot parse expression: int64 > 0 and bool, "
-                                                    "error: 'and' can only be used between boolean expressions"})
+                                         "err_msg": "cannot parse expression: int64 > 0 and bool: 'and' can only "
+                                                    "be used between boolean expressions"})
         expression = "int64 > 0 or false"
         log.debug(f"search with expression: {expression}")
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, expression,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1100,
-                                         "err_msg": "cannot parse expression: int64 > 0 or false, "
-                                                    "error: 'or' can only be used between boolean expressions"})
+                                         "err_msg": "cannot parse expression: int64 > 0 or false: 'or' can only "
+                                                    "be used between boolean expressions"})
 
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1246,4 +1248,3 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
                                          "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
- 

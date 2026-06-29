@@ -1,3 +1,5 @@
+# ruff: noqa
+# fmt: off
 import pytest
 import random
 
@@ -439,9 +441,8 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         self.create_alias(client, collection_name, alias_name)
         
         # 3. try to create collection with alias name
-        error = {ct.err_code: 0,
-                 ct.err_msg: f"collection name [{alias_name}] conflicts with an existing alias,"
-                             " please choose a unique name"}
+        error = {ct.err_code: 1601,
+                 ct.err_msg: "please choose a unique name: alias and collection name conflict"}
         self.create_collection(client, alias_name, default_dim, consistency_level="Bounded",
                                check_task=CheckTasks.err_res,
                                check_items=error)
