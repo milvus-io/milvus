@@ -151,6 +151,12 @@ func TestExpr_NullLiteral(t *testing.T) {
 		`Int64Field not in [1, Null]`,
 		`Int64Field == NULL`,
 		`NULL in [1, 2]`,
+		// Identifier paths that bypass VisitIdentifier and call translateIdentifier
+		// directly (must be rejected too, even with a dynamic field present).
+		`array_length(NULL) > 0`,
+		`1 < NULL < 5`,
+		`NULL is null`,
+		`NULL > 5`,
 	}
 	for _, exprStr := range exprStrs {
 		assertInvalidExpr(t, helper, exprStr)

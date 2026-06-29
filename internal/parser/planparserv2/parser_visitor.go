@@ -62,6 +62,20 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 
 func (v *ParserVisitor) translateIdentifierWithText(identifier string, allowText bool) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
+	// `NULL` is lexed as a bare identifier (it is not a grammar token), so a
+	// literal NULL anywhere a column is expected — inside an `in [...]` list, as a
+	// comparison/range operand, a function argument (`array_length(NULL)`), an
+	// `is null` target, etc. — funnels through here. Without a dynamic field it
+	// fails an opaque "field NULL not exist" lookup; with a dynamic field it is
+	// silently mistaken for a JSON key named NULL. Treat bare `null`/`NULL` as a
+	// reserved word and reject it with an actionable message (issue #50882). A
+	// field or JSON key literally named "null" stays reachable via quoting, e.g.
+	// `field["null"]` / `$meta["null"]`, which routes through JSONIdentifier and
+	// never reaches this lookup with "null" as the base identifier.
+	if strings.EqualFold(identifier, "null") {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"NULL literal is not supported in expressions; use '<field> is null' or '<field> is not null' instead")
+	}
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
@@ -101,17 +115,6 @@ func (v *ParserVisitor) translateIdentifierWithText(identifier string, allowText
 // VisitIdentifier translates expr to column plan.
 func (v *ParserVisitor) VisitIdentifier(ctx *parser.IdentifierContext) interface{} {
 	identifier := ctx.GetText()
-	// `NULL` is lexed as a bare identifier (it is not a grammar token), so a
-	// literal NULL anywhere a value is expected — e.g. inside an `in [...]` list —
-	// reaches here. Without a dynamic field it fails an opaque "field NULL not
-	// exist" lookup; with a dynamic field it is silently mistaken for a JSON key.
-	// Treat bare `null`/`NULL` as a reserved word and reject it with an actionable
-	// message (issue #50882). A field or JSON key literally named "null" is still
-	// reachable via quoting, e.g. `field["null"]` / `$meta["null"]`.
-	if strings.EqualFold(identifier, "null") {
-		return merr.WrapErrParameterInvalidMsg(
-			"NULL literal is not supported in expressions; use '<field> is null' or '<field> is not null' instead")
-	}
 	expr, err := v.translateIdentifier(identifier)
 	if err != nil {
 		return err
