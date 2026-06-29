@@ -125,6 +125,9 @@ func (g *ProduceGuard) commit(ctx context.Context) (*types.AppendResult, error) 
 		panic("append task with no messages")
 	}
 	if g.msgs[0].BroadcastHeader() != nil {
+		if len(g.msgs) != 1 {
+			panic("broadcast guard must hold exactly one message")
+		}
 		return g.producer.produceInternal(ctx, g.msgs[0])
 	}
 	// auto commit if there's only one message.
