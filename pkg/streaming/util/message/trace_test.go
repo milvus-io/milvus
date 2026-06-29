@@ -5,8 +5,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
@@ -80,11 +86,183 @@ func TestOverwriteTraceContext_ExistingTraceContext_Replaces(t *testing.T) {
 	assert.Equal(t, nextSC.TraceFlags(), got.TraceFlags())
 }
 
+func TestTraceContext_TimeTickMessage_NoOp(t *testing.T) {
+	sc := makeSpanContext(t, "0102030405060708090a0b0c0d0e0f10", "1112131415161718", 0x01)
+	ctx := trace.ContextWithRemoteSpanContext(context.Background(), sc)
+
+	msg, err := NewTimeTickMessageBuilderV1().
+		WithHeader(&TimeTickMessageHeader{}).
+		WithBody(&msgpb.TimeTickMsg{}).
+		WithAllVChannel().
+		BuildMutable()
+	assert.NoError(t, err)
+	msg.WithTimeTick(100).WithLastConfirmedUseMessageID()
+	spanCtx, span := StartSpanForMessage(ctx, msg, SpanNameWALAppend)
+	assert.Equal(t, ctx, spanCtx)
+	assert.NotNil(t, span)
+	assert.False(t, span.IsRecording())
+	span.RecordError(assert.AnError)
+	span.SetStatus(0, "")
+	span.End()
+
+	InjectTraceContext(ctx, msg)
+	OverwriteTraceContext(ctx, msg)
+	_, ok := msg.Properties().Get(messageTraceContext)
+	assert.False(t, ok)
+}
+
+func TestStartSpanForMessage_AddsMessageAttributes(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	msg := CreateTestEmptyInsertMesage(1, nil)
+	_, span := StartSpanForMessage(context.Background(), msg, SpanNameWALAppend)
+	span.End()
+
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1)
+	assert.Equal(t, SpanNameWALAppend, spans[0].Name)
+	assertSpanAttribute(t, spans[0].Attributes, spanAttrMessageType, MessageTypeInsert.String())
+	assertSpanAttribute(t, spans[0].Attributes, spanAttrVChannel, "v1")
+	assertSpanBoolAttribute(t, spans[0].Attributes, spanAttrReplicate, false)
+
+	msgID := testMessageID("1")
+	msg.WithReplicateHeader(&ReplicateHeader{
+		ClusterID:              "cluster",
+		MessageID:              msgID,
+		LastConfirmedMessageID: msgID,
+		TimeTick:               100,
+		VChannel:               "v1",
+	})
+	_, span = StartSpanForMessage(context.Background(), msg, SpanNameWALAppend)
+	span.End()
+
+	spans = exporter.GetSpans()
+	require.Len(t, spans, 2)
+	assertSpanBoolAttribute(t, spans[1].Attributes, spanAttrReplicate, true)
+}
+
+func TestImmutableTxnMessageBuildCopiesCommitTraceContext(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), SpanNameWALConsume)
+	sourceSC := trace.SpanContextFromContext(sourceCtx)
+	sourceSpan.End()
+
+	txnCtx := TxnContext{TxnID: 1}
+	lastConfirmed := testMessageID("1")
+	beginID := testMessageID("2")
+	begin := NewBeginTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&BeginTxnMessageHeader{}).
+		WithBody(&BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnCtx).
+		WithTimeTick(100).
+		WithLastConfirmed(lastConfirmed).
+		IntoImmutableMessage(beginID)
+	builder := NewImmutableTxnMessageBuilder(MustAsImmutableBeginTxnMessageV2(begin))
+
+	bodyID := testMessageID("3")
+	body := CreateTestEmptyInsertMesage(1, nil).
+		WithTxnContext(txnCtx).
+		WithTimeTick(101).
+		WithLastConfirmed(lastConfirmed).
+		IntoImmutableMessage(bodyID)
+	builder.Add(body)
+
+	commitID := testMessageID("4")
+	commit := NewCommitTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&CommitTxnMessageHeader{}).
+		WithBody(&CommitTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnCtx).
+		WithTimeTick(102).
+		WithLastConfirmed(lastConfirmed)
+	InjectTraceContext(sourceCtx, commit)
+
+	txn, err := builder.Build(MustAsImmutableCommitTxnMessageV2(commit.IntoImmutableMessage(commitID)))
+	require.NoError(t, err)
+
+	txnSC := trace.SpanContextFromContext(ExtractTraceContext(context.Background(), txn))
+	assert.Equal(t, sourceSC.TraceID(), txnSC.TraceID())
+	assert.Equal(t, sourceSC.SpanID(), txnSC.SpanID())
+}
+
 func TestExtractTraceContext_MissingKey_ReturnsOriginalCtx(t *testing.T) {
 	msg := CreateTestEmptyInsertMesage(1, nil)
 	baseCtx := context.Background()
 	ctx := ExtractTraceContext(baseCtx, msg)
 	assert.Equal(t, baseCtx, ctx)
+}
+
+func assertSpanAttribute(t *testing.T, attrs []attribute.KeyValue, key string, value string) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			assert.Equal(t, value, attr.Value.AsString())
+			return
+		}
+	}
+	t.Fatalf("missing span attribute %q", key)
+}
+
+func assertSpanBoolAttribute(t *testing.T, attrs []attribute.KeyValue, key string, value bool) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			assert.Equal(t, value, attr.Value.AsBool())
+			return
+		}
+	}
+	t.Fatalf("missing span attribute %q", key)
+}
+
+type testMessageID string
+
+func (id testMessageID) WALName() WALName {
+	return WALNameTest
+}
+
+func (id testMessageID) LT(MessageID) bool {
+	return false
+}
+
+func (id testMessageID) LTE(MessageID) bool {
+	return true
+}
+
+func (id testMessageID) EQ(other MessageID) bool {
+	return id.String() == other.String()
+}
+
+func (id testMessageID) Marshal() string {
+	return string(id)
+}
+
+func (id testMessageID) IntoProto() *commonpb.MessageID {
+	return &commonpb.MessageID{
+		WALName: commonpb.WALName(id.WALName()),
+		Id:      id.Marshal(),
+	}
+}
+
+func (id testMessageID) String() string {
+	return string(id)
 }
 
 func TestExtractTraceContext_MalformedValue_ReturnsOriginalCtx(t *testing.T) {

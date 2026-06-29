@@ -172,9 +172,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 				resp.Consume.GetMessage().GetPayload(),
 				resp.Consume.GetMessage().GetProperties(),
 			)
-			msgCtx, span := message.StartSpan(message.ExtractTraceContext(c.ctx, newImmutableMsg), message.SpanNameWALDistConsume)
-			message.OverwriteTraceContext(msgCtx, newImmutableMsg)
-			span.End()
+			msgCtx := message.ExtractTraceContext(c.ctx, newImmutableMsg)
 			if newImmutableMsg.TxnContext() != nil {
 				if err := c.handleTxnMessage(msgCtx, newImmutableMsg); err != nil {
 					return err
@@ -183,6 +181,7 @@ func (c *consumerImpl) recvLoop() (err error) {
 				if c.txnBuilder != nil {
 					panic("unreachable code: txn builder should be nil if we receive a non-txn message")
 				}
+				msgCtx = startDistConsumeSpanForMessage(msgCtx, newImmutableMsg)
 				if result := c.msgHandler.Handle(message.HandleParam{
 					Ctx:     msgCtx,
 					Message: newImmutableMsg,
@@ -253,7 +252,7 @@ func (c *consumerImpl) handleTxnMessage(ctx context.Context, msg message.Immutab
 			c.logger.Warn(c.ctx, "failed to build txn message", mlog.Any("messageID", commitMsg.MessageID()), mlog.Err(err))
 			return nil
 		}
-		message.OverwriteTraceContext(ctx, msg)
+		ctx = startDistConsumeSpanForMessage(ctx, msg)
 		if result := c.msgHandler.Handle(message.HandleParam{
 			Ctx:     ctx,
 			Message: msg,
@@ -268,4 +267,11 @@ func (c *consumerImpl) handleTxnMessage(ctx context.Context, msg message.Immutab
 		c.txnBuilder.Add(msg)
 	}
 	return nil
+}
+
+func startDistConsumeSpanForMessage(ctx context.Context, msg message.ImmutableMessage) context.Context {
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALDistConsume)
+	message.OverwriteTraceContext(ctx, msg)
+	span.End()
+	return ctx
 }

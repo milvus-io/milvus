@@ -172,6 +172,128 @@ func TestRemoteConsumerOverwritesTraceContextWithDistConsumeSpan(t *testing.T) {
 	assert.Equal(t, distConsume.SpanContext.SpanID(), msgSC.SpanID())
 }
 
+func TestRemoteConsumerSkipsTraceForTimeTickMessage(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALConsume)
+	sourceSpan.End()
+
+	h := &captureTraceHandler{ch: make(chan message.HandleParam, 1)}
+	c := newMockedConsumerImpl(t, context.Background(), h)
+
+	msgID := walimplstest.NewTestMessageID(1)
+	mmsg := message.CreateTestTimeTickSyncMessage(t, 1, 100, msgID)
+	message.InjectTraceContext(sourceCtx, mmsg)
+	c.recvCh <- newConsumeResponse(msgID, mmsg)
+
+	var param message.HandleParam
+	select {
+	case param = <-h.ch:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for consumed message")
+	}
+
+	c.consumer.Close()
+	<-c.consumer.Done()
+	require.NoError(t, c.consumer.Error())
+
+	for _, s := range exporter.GetSpans() {
+		assert.NotEqual(t, message.SpanNameWALDistConsume, s.Name)
+	}
+
+	ctxSC := trace.SpanContextFromContext(param.Ctx)
+	assert.False(t, ctxSC.IsValid())
+
+	msgSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), param.Message))
+	assert.False(t, msgSC.IsValid())
+}
+
+func TestRemoteConsumerStartsDistConsumeSpanOnlyOnTxnCommit(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	sourceCtx, sourceSpan := otel.Tracer("test").Start(context.Background(), message.SpanNameWALConsume)
+	sourceSC := trace.SpanContextFromContext(sourceCtx)
+	sourceSpan.End()
+
+	h := &captureTraceHandler{ch: make(chan message.HandleParam, 1)}
+	c := newMockedConsumerImpl(t, context.Background(), h)
+
+	txnCtx := message.TxnContext{
+		TxnID:     1,
+		Keepalive: time.Second,
+	}
+	begin := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("test-1").
+		WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnCtx)
+	message.InjectTraceContext(sourceCtx, begin)
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(1), begin)
+
+	body := message.CreateTestEmptyInsertMesage(1, nil).WithTxnContext(txnCtx)
+	message.InjectTraceContext(sourceCtx, body)
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(2), body)
+
+	commit := message.NewCommitTxnMessageBuilderV2().
+		WithVChannel("test-1").
+		WithHeader(&message.CommitTxnMessageHeader{}).
+		WithBody(&message.CommitTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnCtx)
+	message.InjectTraceContext(sourceCtx, commit)
+	c.recvCh <- newConsumeResponse(walimplstest.NewTestMessageID(3), commit)
+
+	var param message.HandleParam
+	select {
+	case param = <-h.ch:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for consumed txn message")
+	}
+
+	c.consumer.Close()
+	<-c.consumer.Done()
+	require.NoError(t, c.consumer.Error())
+
+	distConsumes := findSpansByName(exporter.GetSpans(), message.SpanNameWALDistConsume)
+	require.Len(t, distConsumes, 1)
+	assert.Equal(t, sourceSC.TraceID(), distConsumes[0].SpanContext.TraceID())
+	assert.Equal(t, sourceSC.SpanID(), distConsumes[0].Parent.SpanID())
+	assert.Equal(t, message.MessageTypeTxn, param.Message.MessageType())
+
+	ctxSC := trace.SpanContextFromContext(param.Ctx)
+	assert.Equal(t, distConsumes[0].SpanContext.TraceID(), ctxSC.TraceID())
+	assert.Equal(t, distConsumes[0].SpanContext.SpanID(), ctxSC.SpanID())
+
+	msgSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), param.Message))
+	assert.Equal(t, distConsumes[0].SpanContext.TraceID(), msgSC.TraceID())
+	assert.Equal(t, distConsumes[0].SpanContext.SpanID(), msgSC.SpanID())
+}
+
+func findSpansByName(spans tracetest.SpanStubs, name string) []tracetest.SpanStub {
+	result := make([]tracetest.SpanStub, 0)
+	for _, s := range spans {
+		if s.Name == name {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 type mockedConsumer struct {
 	consumer Consumer
 	recvCh   chan *streamingpb.ConsumeResponse
