@@ -94,6 +94,17 @@ class PhyGISCoarseConjunctExpr : public SegmentExpr {
         return "PhyGISCoarseConjunctExpr";
     }
 
+    // The split nodes slice their output by the self-managed segment cursor
+    // (current_pos_ / NextBatchSize over active_count_), NOT by an external
+    // offset list. They therefore CANNOT serve the offset-input
+    // (iterative-filter / rescore) path; reporting false makes
+    // IterativeFilterNode fall back to its non-native execution instead of
+    // feeding offsets into Eval (which would mis-size the result bitmap).
+    bool
+    SupportOffsetInput() override {
+        return false;
+    }
+
     // Self-managed segment-level cursor (independent of exec_path_, like
     // PhyLikeConjunctExpr): keeps the conjunction's SkipFollowingExprs in sync.
     void
@@ -147,6 +158,14 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
     std::string
     ToString() const override {
         return "PhyGISRefineConjunctExpr";
+    }
+
+    // See PhyGISCoarseConjunctExpr::SupportOffsetInput: the Refine node also
+    // slices by its own segment cursor and asserts bitmap_input is sized by
+    // real_batch_size, so it cannot consume an external offset list.
+    bool
+    SupportOffsetInput() override {
+        return false;
     }
 
     // Self-managed segment-level cursor (independent of exec_path_).
