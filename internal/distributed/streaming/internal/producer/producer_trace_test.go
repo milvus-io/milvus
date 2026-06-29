@@ -207,6 +207,23 @@ func TestProduceBroadcast_DoesNotOpenAutocommitOrTxnSpan(t *testing.T) {
 	}
 }
 
+func TestProduceBroadcast_PanicsWhenGuardHasMultipleMessages(t *testing.T) {
+	msgs := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		WithBroadcast([]string{"test-vchannel-1", "test-vchannel-2"}).
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()
+
+	g := &ProduceGuard{
+		msgs: msgs,
+	}
+	assert.PanicsWithValue(t, "broadcast guard must hold exactly one message", func() {
+		_, _ = g.commit(context.Background())
+	})
+}
+
 func TestProduceInternalRemoteOpensDistAppendSpan(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(
