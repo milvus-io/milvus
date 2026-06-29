@@ -859,6 +859,7 @@ dataNode:
       enable: true # Support skip some timetick message to reduce CPU usage
       skipNum: 4 # Consume one for every n records skipped
       coldTime: 60 # Turn on skip mode after there are only timetick msg for x seconds
+    ioConcurrency: 0 # Concurrency of the datanode object-storage I/O pool (download/upload for compaction and stats tasks). 0 or negative means auto (CPU*2).
   segment:
     # The maximum size of each binlog file in a segment buffered in memory. Binlog files whose size exceeds this value are then flushed to MinIO or S3 service.
     # Unit: Byte

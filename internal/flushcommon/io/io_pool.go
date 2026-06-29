@@ -27,13 +27,31 @@ var (
 	bfApplyPoolInitOnce sync.Once
 )
 
-func initIOPool() {
+// ioDefaultPoolFloor preserves the historical default pool size (16) as a lower
+// bound for the auto-scaled capacity, so small nodes are not throttled below the
+// pre-existing default after switching to CPU-relative sizing.
+const ioDefaultPoolFloor = 16
+
+// ioPoolCapacity resolves the size of the datanode object-storage IO pool.
+// When dataNode.dataSync.ioConcurrency is unset (<=0), it scales with the node
+// as max(16, CPU*2): the pool is object-storage IO bound and its goroutines mostly
+// block on network, so the concurrency can safely exceed the CPU count, while the
+// floor keeps small nodes at the old default. An explicit configuration is honored
+// as-is (no more hard-coded 32 cap).
+func ioPoolCapacity() int {
 	capacity := paramtable.Get().DataNodeCfg.IOConcurrency.GetAsInt()
-	if capacity > 32 {
-		capacity = 32
+	if capacity <= 0 {
+		capacity = hardware.GetCPUNum() * 2
+		if capacity < ioDefaultPoolFloor {
+			capacity = ioDefaultPoolFloor
+		}
 	}
+	return capacity
+}
+
+func initIOPool() {
 	// error only happens with negative expiry duration or with negative pre-alloc size.
-	ioPool = conc.NewPool[any](capacity)
+	ioPool = conc.NewPool[any](ioPoolCapacity())
 }
 
 func GetOrCreateIOPool() *conc.Pool[any] {
