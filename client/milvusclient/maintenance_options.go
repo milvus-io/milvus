@@ -168,24 +168,20 @@ type PrewarmOption interface {
 var _ PrewarmOption = (*prewarmOption)(nil)
 
 type prewarmOption struct {
-	collectionName       string
-	namespace            string
-	replicaNum           int
-	resourceGroups       []string
-	loadFields           []string
-	skipLoadDynamicField bool
-	loadParams           map[string]string
+	collectionName string
+	namespace      string
+	replicaNum     int
+	resourceGroups []string
+	loadParams     map[string]string
 }
 
 func (opt *prewarmOption) Request() *milvuspb.PrewarmRequest {
 	return &milvuspb.PrewarmRequest{
-		CollectionName:       opt.collectionName,
-		Namespace:            &opt.namespace,
-		ReplicaNumber:        int32(opt.replicaNum),
-		ResourceGroups:       opt.resourceGroups,
-		LoadFields:           opt.loadFields,
-		SkipLoadDynamicField: opt.skipLoadDynamicField,
-		LoadParams:           opt.loadParams,
+		CollectionName: opt.collectionName,
+		Namespace:      &opt.namespace,
+		ReplicaNumber:  int32(opt.replicaNum),
+		ResourceGroups: opt.resourceGroups,
+		LoadParams:     opt.loadParams,
 	}
 }
 
@@ -196,16 +192,6 @@ func (opt *prewarmOption) WithReplica(num int) *prewarmOption {
 
 func (opt *prewarmOption) WithResourceGroup(resourceGroups ...string) *prewarmOption {
 	opt.resourceGroups = resourceGroups
-	return opt
-}
-
-func (opt *prewarmOption) WithLoadFields(loadFields ...string) *prewarmOption {
-	opt.loadFields = loadFields
-	return opt
-}
-
-func (opt *prewarmOption) WithSkipLoadDynamicField(skipFlag bool) *prewarmOption {
-	opt.skipLoadDynamicField = skipFlag
 	return opt
 }
 

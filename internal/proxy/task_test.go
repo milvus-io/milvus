@@ -4185,7 +4185,6 @@ func TestPrewarmTask_Execute(t *testing.T) {
 	collectionID := UniqueID(100)
 	partitionID := UniqueID(200)
 	vectorFieldID := int64(101)
-	indexID := int64(300)
 
 	schema := &schemapb.CollectionSchema{
 		Name:            collectionName,
@@ -4214,25 +4213,12 @@ func TestPrewarmTask_Execute(t *testing.T) {
 	})
 
 	mixCoord := mocks.NewMockMixCoordClient(t)
-	mixCoord.EXPECT().DescribeIndex(mock.Anything, mock.MatchedBy(func(req *indexpb.DescribeIndexRequest) bool {
-		return req.GetCollectionID() == collectionID
-	})).Return(&indexpb.DescribeIndexResponse{
-		Status: merr.Success(),
-		IndexInfos: []*indexpb.IndexInfo{
-			{
-				CollectionID: collectionID,
-				FieldID:      vectorFieldID,
-				IndexID:      indexID,
-			},
-		},
-	}, nil).Once()
 	mixCoord.EXPECT().Prewarm(mock.Anything, mock.MatchedBy(func(req *querypb.PrewarmRequest) bool {
 		return req.GetCollectionID() == collectionID &&
 			proto.Equal(req.GetSchema(), schema) &&
 			req.GetNamespace() == namespace &&
 			assert.ObjectsAreEqual([]int64{partitionID}, req.GetPartitionIDs()) &&
-			assert.ObjectsAreEqual([]int64{vectorFieldID}, req.GetLoadFields()) &&
-			req.GetFieldIndexID()[vectorFieldID] == indexID &&
+			req.GetReplicaNumber() == 2 &&
 			req.GetPriority() == commonpb.LoadPriority_LOW
 	})).Return(merr.Success(), nil).Once()
 
