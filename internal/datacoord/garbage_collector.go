@@ -1407,6 +1407,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 				futures := make([]*conc.Future[struct{}], 0)
 
 				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+					fileNum++
 					file := files.FilePath
 
 					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
@@ -1477,6 +1478,7 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 				futures := make([]*conc.Future[struct{}], 0)
 
 				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+					fileNum++
 					file := files.FilePath
 
 					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
@@ -1514,6 +1516,7 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 				futures := make([]*conc.Future[struct{}], 0)
 
 				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+					fileNum++
 					file := files.FilePath
 
 					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
@@ -1584,6 +1587,7 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 				futures := make([]*conc.Future[struct{}], 0)
 
 				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+					fileNum++
 					file := files.FilePath
 
 					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
