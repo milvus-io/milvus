@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -40,6 +41,7 @@ type ScoreBasedBalancer struct {
 	BalanceReplicaHelper
 	scheduler    task.Scheduler
 	dist         *meta.DistributionManager
+	meta         *meta.Meta
 	targetMgr    meta.TargetManagerInterface
 	assignPolicy assign.ScoreAwareAssignPolicy
 }
@@ -50,12 +52,18 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
+	metaMgr ...*meta.Meta,
 ) *ScoreBasedBalancer {
 	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeScoreBased).(assign.ScoreAwareAssignPolicy)
+	var mgr *meta.Meta
+	if len(metaMgr) > 0 {
+		mgr = metaMgr[0]
+	}
 	return &ScoreBasedBalancer{
 		BalanceReplicaHelper: BalanceReplicaHelper{nodeManager: nodeManager},
 		scheduler:            scheduler,
 		dist:                 dist,
+		meta:                 mgr,
 		targetMgr:            targetMgr,
 		assignPolicy:         policy,
 	}
@@ -91,6 +99,10 @@ func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 		return nil, nil
 	}
 
+	if b.shouldBalanceNamespacePartitionShard(ctx, replica) {
+		return b.balanceNamespacePartitionShardDisk(ctx, br, replica)
+	}
+
 	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
 		channelPlans = b.balanceChannels(ctx, br, replica)
 	}
@@ -98,6 +110,17 @@ func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 		segmentPlans = b.balanceSegments(ctx, br, replica)
 	}
 	return segmentPlans, channelPlans
+}
+
+func (b *ScoreBasedBalancer) shouldBalanceNamespacePartitionShard(ctx context.Context, replica *meta.Replica) bool {
+	if b.meta == nil {
+		return false
+	}
+	collection := b.meta.GetCollection(ctx, replica.GetCollectionID())
+	if collection == nil || collection.Schema == nil {
+		return false
+	}
+	return common.IsNamespaceModePartition(collection.Schema.GetProperties()...)
 }
 
 // balanceChannels generates channel balance plans for a replica.

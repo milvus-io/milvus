@@ -40,6 +40,7 @@ type BalancerFactory struct {
 	scheduler   task.Scheduler
 	nodeManager *session.NodeManager
 	dist        *meta.DistributionManager
+	meta        *meta.Meta
 	targetMgr   meta.TargetManagerInterface
 }
 
@@ -56,9 +57,10 @@ func InitGlobalBalancerFactory(
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
+	metaMgr ...*meta.Meta,
 ) {
 	factoryOnce.Do(func() {
-		globalFactory = NewBalancerFactory(scheduler, nodeManager, dist, targetMgr)
+		globalFactory = NewBalancerFactory(scheduler, nodeManager, dist, targetMgr, metaMgr...)
 		mlog.Info(context.TODO(), "Global balancer factory initialized")
 	})
 }
@@ -82,13 +84,19 @@ func NewBalancerFactory(
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
+	metaMgr ...*meta.Meta,
 ) *BalancerFactory {
+	var mgr *meta.Meta
+	if len(metaMgr) > 0 {
+		mgr = metaMgr[0]
+	}
 	return &BalancerFactory{
 		balancerMap:         make(map[string]Balance),
 		stoppingBalancerMap: make(map[string]*StoppingBalancer),
 		scheduler:           scheduler,
 		nodeManager:         nodeManager,
 		dist:                dist,
+		meta:                mgr,
 		targetMgr:           targetMgr,
 	}
 }
@@ -114,16 +122,16 @@ func (f *BalancerFactory) GetBalancer() Balance {
 	case meta.RowCountBasedBalancerName:
 		balancer = NewRowCountBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	case meta.ScoreBasedBalancerName:
-		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
+		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr, f.meta)
 	case meta.MultiTargetBalancerName:
-		balancer = NewMultiTargetBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
+		balancer = NewMultiTargetBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr, f.meta)
 	case meta.ChannelLevelScoreBalancerName:
-		balancer = NewChannelLevelScoreBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
+		balancer = NewChannelLevelScoreBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr, f.meta)
 	default:
 		mlog.Info(context.TODO(), "Unknown balancer type, using default",
 			mlog.String("requested", balanceKey),
 			mlog.String("default", meta.ScoreBasedBalancerName))
-		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
+		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr, f.meta)
 	}
 
 	f.balancerMap[balanceKey] = balancer
