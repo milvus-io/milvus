@@ -122,6 +122,15 @@ func (c *Client) LoadPartitions(ctx context.Context, option LoadPartitionsOption
 	return task, err
 }
 
+func (c *Client) Prewarm(ctx context.Context, option PrewarmOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.Prewarm(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
 func (c *Client) GetLoadState(ctx context.Context, option GetLoadStateOption, callOptions ...grpc.CallOption) (entity.LoadState, error) {
 	req := option.Request()
 

@@ -2510,6 +2510,56 @@ func (suite *ServiceSuite) TestPrewarmIsSerializedByJobScheduler() {
 	}
 }
 
+func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionCarriesLoadOptions() {
+	mockey.PatchConvey("TestPrewarmLoadMissingPartitionCarriesLoadOptions", suite.T(), func() {
+		ctx := context.Background()
+		collectionID := int64(9013)
+		partitionID := int64(9014)
+		namespace := "tenant-a"
+		fieldID := int64(101)
+		indexID := int64(201)
+		schema := &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+		}
+		resourceGroups := []string{"rg1", "rg2"}
+
+		var captured *querypb.LoadPartitionsRequest
+		mockey.Mock((*Server).broadcastAlterLoadConfigCollectionV2ForLoadPartitions).
+			To(func(s *Server, ctx context.Context, req *querypb.LoadPartitionsRequest) error {
+				captured = req
+				return nil
+			}).
+			Build()
+		mockey.Mock((*Server).waitPrewarmPartitionLoaded).Return(nil).Build()
+
+		err := suite.server.ensurePrewarmPartitionLoaded(ctx, &querypb.PrewarmRequest{
+			Schema:         schema,
+			Namespace:      &namespace,
+			CollectionID:   collectionID,
+			PartitionIDs:   []int64{partitionID},
+			FieldIndexID:   map[int64]int64{fieldID: indexID},
+			LoadFields:     []int64{fieldID},
+			Priority:       commonpb.LoadPriority_LOW,
+			ReplicaNumber:  3,
+			ResourceGroups: resourceGroups,
+		})
+
+		suite.NoError(err)
+		suite.Require().NotNil(captured)
+		suite.Equal(collectionID, captured.GetCollectionID())
+		suite.Equal([]int64{partitionID}, captured.GetPartitionIDs())
+		suite.Equal(map[int64]int64{fieldID: indexID}, captured.GetFieldIndexID())
+		suite.Equal([]int64{fieldID}, captured.GetLoadFields())
+		suite.Equal(commonpb.LoadPriority_LOW, captured.GetPriority())
+		suite.EqualValues(3, captured.GetReplicaNumber())
+		suite.Equal(resourceGroups, captured.GetResourceGroups())
+		suite.True(captured.GetForceSyncWarmup())
+	})
+}
+
 func (suite *ServiceSuite) TearDownTest() {
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()
