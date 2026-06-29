@@ -983,6 +983,18 @@ func WithCollectionID2TaskFilter(collectionID int64) TaskFilter {
 	}
 }
 
+func WithReplicaID2TaskFilter(replicaID int64) TaskFilter {
+	return func(task Task) bool {
+		return task.ReplicaID() == replicaID
+	}
+}
+
+func WithShard2TaskFilter(shard string) TaskFilter {
+	return func(task Task) bool {
+		return task.Shard() == shard
+	}
+}
+
 func WithTaskTypeFilter(taskType Type) TaskFilter {
 	return func(task Task) bool {
 		return GetTaskType(task) == taskType
@@ -1033,6 +1045,33 @@ func (scheduler *taskScheduler) GetSegmentTaskNum(filters ...TaskFilter) int {
 		return true
 	})
 	return counter
+}
+
+func (scheduler *taskScheduler) GetTasks(filters ...TaskFilter) []Task {
+	tasks := make([]Task, 0, scheduler.channelTasks.Len()+scheduler.segmentTasks.Len())
+	taskIDs := make(map[UniqueID]struct{})
+	addTask := func(task Task) {
+		if _, ok := taskIDs[task.ID()]; ok {
+			return
+		}
+		for _, filter := range filters {
+			if !filter(task) {
+				return
+			}
+		}
+		taskIDs[task.ID()] = struct{}{}
+		tasks = append(tasks, task)
+	}
+
+	scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool {
+		addTask(task)
+		return true
+	})
+	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
+		addTask(task)
+		return true
+	})
+	return tasks
 }
 
 // GetTasksJSON returns the JSON string of all tasks.

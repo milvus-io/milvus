@@ -86,7 +86,7 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 	assign.InitGlobalAssignPolicyFactory(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
 
 	suite.meta = testMeta
-	suite.balancer = NewScoreBasedBalancer(suite.mockScheduler, nodeManager, distManager, testTarget)
+	suite.balancer = NewScoreBasedBalancer(suite.mockScheduler, nodeManager, distManager, testTarget, testMeta)
 
 	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -1398,4 +1398,215 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnChannelExclusive()
 	suite.Len(channelPlans, 2)
 	_, channelPlans = suite.getCollectionBalancePlans(balancer, 3)
 	suite.Len(channelPlans, 2)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) setupNamespacePartitionShardBalance(
+	ctx context.Context,
+	collectionID int64,
+	replicaNodes []int64,
+	nodeShardBytes map[int64]map[string]float64,
+	channelNodes map[string]int64,
+	segmentNodes map[string]map[int64]int64,
+) *meta.Replica {
+	collection := utils.CreateTestCollection(collectionID, 1)
+	collection.LoadPercentage = 100
+	collection.Status = querypb.LoadStatus_Loaded
+	collection.Schema = utils.CreateTestSchema()
+	collection.Schema.Properties = []*commonpb.KeyValuePair{
+		{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+	}
+	suite.Require().NoError(suite.meta.PutCollection(ctx, collection))
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
+
+	for _, nodeID := range replicaNodes {
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  fmt.Sprintf("127.0.0.1:%d", nodeID),
+			Hostname: "localhost",
+			Version:  common.Version,
+		})
+		nodeInfo.SetState(session.NodeStateNormal)
+		stats := make([]*querypb.CacheShardDiskUsageStats, 0, len(nodeShardBytes[nodeID]))
+		for shard, diskBytes := range nodeShardBytes[nodeID] {
+			stats = append(stats, &querypb.CacheShardDiskUsageStats{
+				DataType:  "sealed",
+				Shard:     shard,
+				DiskBytes: diskBytes,
+			})
+		}
+		nodeInfo.UpdateStats(session.WithCacheShardDiskUsageStats(stats))
+		suite.balancer.nodeManager.Add(nodeInfo)
+		suite.meta.HandleNodeUp(ctx, nodeID)
+	}
+
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:            collectionID,
+		CollectionID:  collectionID,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         replicaNodes,
+	})
+	suite.Require().NoError(suite.meta.Put(ctx, replica))
+
+	channelsByNode := make(map[int64][]*meta.DmChannel)
+	for shard, nodeID := range channelNodes {
+		channelsByNode[nodeID] = append(channelsByNode[nodeID], &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: collectionID,
+				ChannelName:  shard,
+			},
+			View: &meta.LeaderView{
+				ID:           nodeID,
+				CollectionID: collectionID,
+				Channel:      shard,
+				Status:       &querypb.LeaderViewStatus{Serviceable: true},
+			},
+		})
+	}
+	for nodeID, channels := range channelsByNode {
+		suite.balancer.dist.ChannelDistManager.Update(nodeID, channels...)
+	}
+
+	segmentsByNode := make(map[int64][]*meta.Segment)
+	targetSegments := make([]*datapb.SegmentInfo, 0)
+	for shard, segmentNodes := range segmentNodes {
+		for segmentID, nodeID := range segmentNodes {
+			segmentInfo := &datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  collectionID,
+				PartitionID:   collectionID,
+				InsertChannel: shard,
+				NumOfRows:     100,
+			}
+			segmentsByNode[nodeID] = append(segmentsByNode[nodeID], &meta.Segment{
+				SegmentInfo: segmentInfo,
+				Node:        nodeID,
+			})
+			targetSegments = append(targetSegments, segmentInfo)
+		}
+	}
+	for nodeID, segments := range segmentsByNode {
+		suite.balancer.dist.SegmentDistManager.Update(nodeID, segments...)
+	}
+	recoveryChannels := make([]*datapb.VchannelInfo, 0, len(channelNodes))
+	for shard := range channelNodes {
+		recoveryChannels = append(recoveryChannels, &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  shard,
+		})
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(recoveryChannels, targetSegments, nil)
+	suite.Require().NoError(suite.balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
+	suite.True(suite.balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID))
+
+	return replica
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestNamespacePartitionShardDiskBalanceDoesNotFallback() {
+	ctx := context.Background()
+	collectionID := int64(10001)
+	replica := suite.setupNamespacePartitionShardBalance(
+		ctx,
+		collectionID,
+		[]int64{1, 2},
+		nil,
+		map[string]int64{"shard-1": 1},
+		map[string]map[int64]int64{"shard-1": {101: 1, 102: 1}},
+	)
+
+	segmentPlans, channelPlans := suite.balancer.BalanceReplica(ctx, replica)
+
+	suite.Empty(channelPlans)
+	suite.Empty(segmentPlans)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestNamespacePartitionShardDiskBalanceMovesChannelFirst() {
+	ctx := context.Background()
+	collectionID := int64(10002)
+	replica := suite.setupNamespacePartitionShardBalance(
+		ctx,
+		collectionID,
+		[]int64{1, 2},
+		map[int64]map[string]float64{
+			1: {"shard-1": 400, "shard-2": 300},
+			2: {"shard-3": 10},
+		},
+		map[string]int64{"shard-1": 1, "shard-2": 1, "shard-3": 2},
+		map[string]map[int64]int64{"shard-1": {101: 1, 102: 1}},
+	)
+
+	segmentPlans, channelPlans := suite.balancer.BalanceReplica(ctx, replica)
+
+	suite.Empty(segmentPlans)
+	suite.Len(channelPlans, 1)
+	suite.Equal("shard-1", channelPlans[0].Channel.GetChannelName())
+	suite.Equal(int64(1), channelPlans[0].From)
+	suite.Equal(int64(2), channelPlans[0].To)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestNamespacePartitionShardDiskBalanceMovesAllShardSegmentsToSameNode() {
+	ctx := context.Background()
+	collectionID := int64(10003)
+	replica := suite.setupNamespacePartitionShardBalance(
+		ctx,
+		collectionID,
+		[]int64{1, 2},
+		map[int64]map[string]float64{
+			1: {"shard-1": 400, "shard-2": 300},
+			2: {"shard-3": 10},
+		},
+		map[string]int64{"shard-1": 2, "shard-2": 1, "shard-3": 2},
+		map[string]map[int64]int64{"shard-1": {101: 1, 102: 1}},
+	)
+
+	segmentPlans, channelPlans := suite.balancer.BalanceReplica(ctx, replica)
+
+	suite.Empty(channelPlans)
+	suite.Len(segmentPlans, 2)
+	for _, plan := range segmentPlans {
+		suite.Equal("shard-1", plan.Segment.GetInsertChannel())
+		suite.Equal(int64(1), plan.From)
+		suite.Equal(int64(2), plan.To)
+	}
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestNamespacePartitionShardDiskBalanceProjectsInflightShardMoves() {
+	ctx := context.Background()
+	collectionID := int64(10004)
+	replica := suite.setupNamespacePartitionShardBalance(
+		ctx,
+		collectionID,
+		[]int64{1, 2, 3},
+		map[int64]map[string]float64{
+			1: {"shard-1": 600, "shard-4": 200},
+			2: {"shard-2": 500},
+			3: {"shard-3": 10},
+		},
+		map[string]int64{"shard-1": 1, "shard-2": 2, "shard-3": 3, "shard-4": 1},
+		map[string]map[int64]int64{
+			"shard-1": {101: 1},
+			"shard-2": {201: 2},
+		},
+	)
+
+	realScheduler := task.NewScheduler(ctx, suite.meta, suite.balancer.dist, suite.balancer.targetMgr, nil, nil, suite.balancer.nodeManager)
+	suite.balancer.scheduler = realScheduler
+	moveShard2, err := task.NewChannelTask(
+		ctx,
+		10*time.Second,
+		task.WrapIDSource(0),
+		collectionID,
+		replica,
+		task.NewChannelAction(3, task.ActionTypeGrow, "shard-2"),
+		task.NewChannelAction(2, task.ActionTypeReduce, "shard-2"),
+	)
+	suite.Require().NoError(err)
+	suite.Require().NoError(realScheduler.Add(moveShard2))
+
+	segmentPlans, channelPlans := suite.balancer.BalanceReplica(ctx, replica)
+
+	suite.Empty(segmentPlans)
+	suite.Len(channelPlans, 1)
+	suite.Equal("shard-1", channelPlans[0].Channel.GetChannelName())
+	suite.Equal(int64(1), channelPlans[0].From)
+	suite.Equal(int64(2), channelPlans[0].To)
 }
