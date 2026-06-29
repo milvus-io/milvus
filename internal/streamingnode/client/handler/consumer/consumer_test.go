@@ -282,6 +282,15 @@ func TestRemoteConsumerStartsDistConsumeSpanOnlyOnTxnCommit(t *testing.T) {
 	msgSC := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), param.Message))
 	assert.Equal(t, distConsumes[0].SpanContext.TraceID(), msgSC.TraceID())
 	assert.Equal(t, distConsumes[0].SpanContext.SpanID(), msgSC.SpanID())
+
+	txnMsg := message.AsImmutableTxnMessage(param.Message)
+	require.NotNil(t, txnMsg)
+	assertMessageTraceContext(t, txnMsg.Begin(), distConsumes[0].SpanContext)
+	assert.NoError(t, txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
+		assertMessageTraceContext(t, msg, distConsumes[0].SpanContext)
+		return nil
+	}))
+	assertMessageTraceContext(t, txnMsg.Commit(), distConsumes[0].SpanContext)
 }
 
 func findSpansByName(spans tracetest.SpanStubs, name string) []tracetest.SpanStub {
@@ -292,6 +301,14 @@ func findSpansByName(spans tracetest.SpanStubs, name string) []tracetest.SpanStu
 		}
 	}
 	return result
+}
+
+func assertMessageTraceContext(t *testing.T, msg message.ImmutableMessage, expected trace.SpanContext) {
+	t.Helper()
+
+	sc := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), msg))
+	assert.Equal(t, expected.TraceID(), sc.TraceID())
+	assert.Equal(t, expected.SpanID(), sc.SpanID())
 }
 
 type mockedConsumer struct {

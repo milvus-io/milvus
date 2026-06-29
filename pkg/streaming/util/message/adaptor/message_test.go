@@ -82,6 +82,62 @@ func TestNewMsgPackFromMessageRestoresTraceContext(t *testing.T) {
 	assert.Equal(t, traceID, trace.SpanContextFromContext(pack.Msgs[0].TraceCtx()).TraceID())
 }
 
+func TestNewMsgPackFromTxnMessageUsesTxnTraceContext(t *testing.T) {
+	txnTraceID, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	require.NoError(t, err)
+	txnSpanID, err := trace.SpanIDFromHex("0102030405060708")
+	require.NoError(t, err)
+	txnCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: txnTraceID,
+		SpanID:  txnSpanID,
+	}))
+
+	bodyTraceID, err := trace.TraceIDFromHex("1112131415161718191a1b1c1d1e1f20")
+	require.NoError(t, err)
+	bodySpanID, err := trace.SpanIDFromHex("1112131415161718")
+	require.NoError(t, err)
+	bodyCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: bodyTraceID,
+		SpanID:  bodySpanID,
+	}))
+
+	id := rmq.NewRmqID(1)
+	txnContext := message.TxnContext{TxnID: 1}
+	begin := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnContext).
+		WithTimeTick(1).
+		WithLastConfirmed(id).
+		IntoImmutableMessage(id)
+	builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin))
+
+	body := message.CreateTestInsertMessage(t, 3, 1, 2, id).WithTxnContext(txnContext)
+	message.InjectTraceContext(bodyCtx, body)
+	builder.Add(body.IntoImmutableMessage(id))
+
+	commit := message.NewCommitTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.CommitTxnMessageHeader{}).
+		WithBody(&message.CommitTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnContext).
+		WithTimeTick(3).
+		WithLastConfirmed(id)
+	message.InjectTraceContext(txnCtx, commit)
+	txnMsg, err := builder.Build(message.MustAsImmutableCommitTxnMessageV2(commit.IntoImmutableMessage(id)))
+	require.NoError(t, err)
+
+	pack, err := NewMsgPackFromMessage(txnMsg)
+	require.NoError(t, err)
+	require.NotNil(t, pack)
+	require.Len(t, pack.Msgs, 1)
+	assert.Equal(t, txnTraceID, trace.SpanContextFromContext(pack.Msgs[0].TraceCtx()).TraceID())
+	assert.Equal(t, txnSpanID, trace.SpanContextFromContext(pack.Msgs[0].TraceCtx()).SpanID())
+}
+
 func TestNewMsgPackFromCreateCollectionMessage(t *testing.T) {
 	id := rmq.NewRmqID(1)
 
