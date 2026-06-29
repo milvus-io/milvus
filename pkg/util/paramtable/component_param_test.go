@@ -463,8 +463,9 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int32(1024), Params.MaxUnsolvedQueueSize.GetAsInt32())
 		assert.Equal(t, "1024", Params.MaxUnsolvedQueueSize.DefaultValue)
-		assert.Equal(t, int64(16), Params.MaxGroupNQ.GetAsInt64())
-		assert.Equal(t, 3.0, Params.NQMergeRatio.GetAsFloat())
+		assert.Equal(t, int64(64), Params.MaxGroupNQ.GetAsInt64())
+		assert.Equal(t, 16.0, Params.NQMergeRatio.GetAsFloat())
+		assert.Equal(t, 20.0, Params.TopKMergeRatio.GetAsFloat())
 		assert.Equal(t, 50*time.Millisecond, Params.MaxDeadlineMergeGap.GetAsDurationByParse())
 		defer params.Reset(Params.MaxDeadlineMergeGap.Key)
 		assert.NoError(t, params.Save(Params.MaxDeadlineMergeGap.Key, "100ms"))
