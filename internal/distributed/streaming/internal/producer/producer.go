@@ -127,7 +127,7 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 		if err != nil {
 			return nil, err
 		}
-		appendCtx, span := p.startDistAppendSpanIfRemote(ctx, producerHandler)
+		appendCtx, span := p.startDistAppendSpanIfRemote(ctx, producerHandler, msg)
 		produceResult, err := producerHandler.Append(appendCtx, msg)
 		if span != nil {
 			if err != nil {
@@ -163,11 +163,11 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 	}
 }
 
-func (p *ResumableProducer) startDistAppendSpanIfRemote(ctx context.Context, producerHandler handler.Producer) (context.Context, trace.Span) {
+func (p *ResumableProducer) startDistAppendSpanIfRemote(ctx context.Context, producerHandler handler.Producer, msg message.MutableMessage) (context.Context, trace.Span) {
 	if isLocalProducer(producerHandler) {
 		return ctx, nil
 	}
-	return message.StartSpan(ctx, message.SpanNameWALDistAppend)
+	return message.StartSpanForMessage(ctx, msg, message.SpanNameWALDistAppend)
 }
 
 func isLocalProducer(producerHandler handler.Producer) bool {

@@ -4,13 +4,21 @@ import (
 	"context"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
+var noopSpan trace.Span = noop.Span{}
+
 const (
 	tracerName = "milvus.streaming.wal"
+
+	spanAttrMessageType = "message.type"
+	spanAttrVChannel    = "message.vchannel"
+	spanAttrReplicate   = "message.replicate"
 
 	SpanNameWALAutocommit      = "wal.autocommit"
 	SpanNameWALTxn             = "wal.txn"
@@ -28,6 +36,36 @@ func StartSpan(ctx context.Context, spanName string) (context.Context, trace.Spa
 	return otel.Tracer(tracerName).Start(ctx, spanName)
 }
 
+func StartSpanForMessage(ctx context.Context, msg BasicMessage, spanName string) (context.Context, trace.Span) {
+	if !shouldTraceMessage(msg) {
+		return ctx, noopSpan
+	}
+	return otel.Tracer(tracerName).Start(ctx, spanName, trace.WithAttributes(
+		attribute.String(spanAttrMessageType, msg.MessageType().String()),
+		attribute.String(spanAttrVChannel, getVChannel(msg)),
+		attribute.Bool(spanAttrReplicate, isReplicateMessage(msg)),
+	))
+}
+
+func shouldTraceMessage(msg BasicMessage) bool {
+	return msg != nil && msg.MessageType() != MessageTypeTimeTick
+}
+
+type messageWithVChannel interface {
+	VChannel() string
+}
+
+func getVChannel(msg BasicMessage) string {
+	if msgWithVChannel, ok := msg.(messageWithVChannel); ok {
+		return msgWithVChannel.VChannel()
+	}
+	return ""
+}
+
+func isReplicateMessage(msg BasicMessage) bool {
+	return msg.Properties().Exist(messageReplicateMesssageHeader)
+}
+
 type traceContextInjector interface {
 	injectTraceContext(context.Context)
 }
@@ -40,7 +78,7 @@ type traceContextOverwriter interface {
 // reserved key _tc as a base64-encoded marshaled TraceContextHeader.
 // No-op when _tc already exists or no active / valid span is present on ctx.
 func InjectTraceContext(ctx context.Context, msg BasicMessage) {
-	if msg == nil {
+	if !shouldTraceMessage(msg) {
 		return
 	}
 	if writer, ok := msg.(traceContextInjector); ok {
@@ -51,7 +89,7 @@ func InjectTraceContext(ctx context.Context, msg BasicMessage) {
 // OverwriteTraceContext writes the current span context into msg under the
 // reserved key _tc even when a trace context already exists.
 func OverwriteTraceContext(ctx context.Context, msg BasicMessage) {
-	if msg == nil {
+	if !shouldTraceMessage(msg) {
 		return
 	}
 	if writer, ok := msg.(traceContextOverwriter); ok {

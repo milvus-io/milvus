@@ -157,7 +157,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	}
 	defer w.lifetime.Done()
 
-	ctx, span := message.StartSpan(ctx, message.SpanNameWALAppend)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAppend)
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
@@ -274,7 +274,7 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 
 	// An append operation should be retried until it succeeds or some unrecoverable error occurs.
 	for i := 0; ; i++ {
-		appendCtx, span := message.StartSpan(ctx, message.SpanNameWALAppendImpl)
+		appendCtx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAppendImpl)
 		message.OverwriteTraceContext(appendCtx, msg)
 		msgID, err := w.rwWALImpls.Append(appendCtx, msg)
 		if err != nil {

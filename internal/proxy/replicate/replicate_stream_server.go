@@ -120,7 +120,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 		return err
 	}
 	ctx := message.ExtractTraceContext(p.streamServer.Context(), msg)
-	ctx, span := message.StartSpan(ctx, message.SpanNameReplicateSecondary)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameReplicateSecondary)
 	message.OverwriteTraceContext(ctx, msg)
 	defer span.End()
 

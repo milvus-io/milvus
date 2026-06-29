@@ -139,7 +139,7 @@ func (g *ProduceGuard) commit(ctx context.Context) (*types.AppendResult, error) 
 }
 
 func (g *ProduceGuard) produceAutocommit(ctx context.Context, msg message.MutableMessage) (_ *types.AppendResult, err error) {
-	ctx, span := message.StartSpan(ctx, message.SpanNameWALAutocommit)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAutocommit)
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
