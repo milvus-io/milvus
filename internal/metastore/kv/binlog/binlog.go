@@ -33,6 +33,10 @@ func CompressSaveBinlogPaths(req *datapb.SaveBinlogPathsRequest) error {
 	if err != nil {
 		return err
 	}
+	err = CompressFieldBinlogs(req.GetPredicateDeltalogs())
+	if err != nil {
+		return err
+	}
 	err = CompressFieldBinlogs(req.GetField2BinlogPaths())
 	if err != nil {
 		return err
@@ -137,6 +141,10 @@ func DecompressBinLogs(s *datapb.SegmentInfo) error {
 	// reconstruction which would generate wrong paths.
 	if s.GetManifestPath() == "" {
 		err = DecompressBinLog(storage.DeleteBinlog, collectionID, partitionID, segmentID, s.GetDeltalogs())
+		if err != nil {
+			return err
+		}
+		err = DecompressBinLog(storage.DeleteBinlog, collectionID, partitionID, segmentID, s.GetPredicateDeltalogs())
 		if err != nil {
 			return err
 		}

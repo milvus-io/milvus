@@ -132,6 +132,19 @@ func (s *SegmentActionSuite) TestActions() {
 	s.Equal(1, len(info.Bm25logs()))
 }
 
+func (s *SegmentActionSuite) TestPredicateDeltalogSegmentAction() {
+	info := &SegmentInfo{}
+	predicateDeltalogs := []*datapb.FieldBinlog{
+		{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "predicate"}},
+		},
+	}
+
+	UpdatePredicateDeltalogs(predicateDeltalogs)(info)
+	s.Equal(predicateDeltalogs, info.PredicateDeltalogs())
+}
+
 func (s *SegmentActionSuite) TestMergeActions() {
 	info := &SegmentInfo{}
 

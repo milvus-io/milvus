@@ -478,6 +478,55 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	s.EqualValues(datapb.SegmentLevel_L0, segment.GetLevel())
 }
 
+func (s *ServerSuite) TestSaveBinlogPathsPredicateDeltalogs() {
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+
+	ctx := context.Background()
+	resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    1,
+		PartitionID:  1,
+		CollectionID: 0,
+		SegLevel:     datapb.SegmentLevel_L0,
+		Channel:      "ch1",
+		PredicateDeltalogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/predicate-delta/0/1/1/1/1",
+						EntriesNum: 1,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 1,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					Timestamp:   0,
+				},
+			},
+		},
+		Flushed: true,
+	})
+	s.NoError(err)
+	s.EqualValues(commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
+	s.Require().NotNil(segment)
+	s.Empty(segment.GetDeltalogs())
+	s.Require().Len(segment.GetPredicateDeltalogs(), 1)
+	s.EqualValues(1, segment.GetPredicateDeltalogs()[0].GetFieldID())
+	s.Require().Len(segment.GetPredicateDeltalogs()[0].GetBinlogs(), 1)
+	s.EqualValues(1, segment.GetPredicateDeltalogs()[0].GetBinlogs()[0].GetLogID())
+	s.Empty(segment.GetPredicateDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 

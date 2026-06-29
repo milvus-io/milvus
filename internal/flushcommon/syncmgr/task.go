@@ -70,10 +70,11 @@ type SyncTask struct {
 
 	pack *SyncPack
 
-	insertBinlogs map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
-	statsBinlogs  map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
-	bm25Binlogs   map[int64]*datapb.FieldBinlog
-	deltaBinlog   *datapb.FieldBinlog
+	insertBinlogs        map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
+	statsBinlogs         map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
+	bm25Binlogs          map[int64]*datapb.FieldBinlog
+	deltaBinlog          *datapb.FieldBinlog
+	predicateDeltaBinlog *datapb.FieldBinlog
 
 	manifestPath string
 
@@ -139,17 +140,23 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
+		// predicateDeltaBinlog stays nil for StorageV2/V3: predicate-delete deltalogs
+		// are persisted only on StorageV1 L0 segments (NewPredicateDeltalogWriter is
+		// StorageV1-only and L0 segments are always StorageV1).
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
 	case storage.StorageV3:
 		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
+		// predicateDeltaBinlog stays nil for StorageV2/V3: predicate-delete deltalogs
+		// are persisted only on StorageV1 L0 segments (NewPredicateDeltalogWriter is
+		// StorageV1-only and L0 segments are always StorageV1).
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
 	default:
 		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		if writerErr != nil {
 			return writerErr
 		}
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.predicateDeltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
 	}
 
 	if err != nil {
@@ -324,7 +331,7 @@ func (t *SyncTask) Binlogs() (map[int64]*datapb.FieldBinlog, map[int64]*datapb.F
 func (t *SyncTask) MarshalJSON() ([]byte, error) {
 	deltaRowCount := int64(0)
 	if t.pack != nil && t.pack.deltaData != nil {
-		deltaRowCount = t.pack.deltaData.RowCount
+		deltaRowCount = t.pack.deltaData.PrimaryKeyDeleteCount()
 	}
 	return json.Marshal(&metricsinfo.SyncTask{
 		SegmentID:     t.segmentID,

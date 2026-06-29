@@ -47,15 +47,79 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syn
 	}, nil
 }
 
-func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
+func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	for _, msg := range deleteMsgs {
-		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
-		pks := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
-		pkTss := msg.GetTimestamps()
-		if len(pks) > 0 {
-			wb.bufferDelete(l0SegmentID, pks, pkTss, startPos, endPos)
+		pks, pkTss, serializedExprPlan, isPredicateDelete, err := validateDeletePayload(msg)
+		if err != nil {
+			return err
 		}
+		if len(pks) == 0 && !isPredicateDelete {
+			continue
+		}
+
+		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
+		if isPredicateDelete {
+			wb.bufferPredicateDelete(l0SegmentID, serializedExprPlan, pkTss[0], startPos, endPos)
+			continue
+		}
+		wb.bufferDelete(l0SegmentID, pks, pkTss, startPos, endPos)
 	}
+	return nil
+}
+
+// validateDeletePayload is the local WAL-shape guard before L0 buffering.
+// storage.ParseIDs2PrimaryKeys only parses PK IDs and cannot express predicate
+// deletes, so predicate payloads stay as serialized expr bytes instead of being
+// wrapped in a fake PrimaryKey implementation.
+func validateDeletePayload(msg *msgstream.DeleteMsg) ([]storage.PrimaryKey, []uint64, []byte, bool, error) {
+	if msg == nil || msg.DeleteRequest == nil {
+		return nil, nil, nil, false, merr.WrapErrServiceInternalMsg("delete message is nil")
+	}
+
+	serializedExprPlan := msg.GetSerializedExprPlan()
+	pks := parseDeletePrimaryKeys(msg)
+	tss := msg.GetTimestamps()
+	if len(serializedExprPlan) > 0 {
+		if len(pks) > 0 {
+			return nil, nil, nil, false, merr.WrapErrServiceInternalMsg("predicate delete message must not contain primary keys")
+		}
+		if len(tss) != 1 {
+			return nil, nil, nil, false, merr.WrapErrServiceInternalMsg("predicate delete message must contain exactly one timestamp, got %d", len(tss))
+		}
+		if msg.GetNumRows() != 0 {
+			return nil, nil, nil, false, merr.WrapErrServiceInternalMsg("predicate delete message must have num_rows 0, got %d", msg.GetNumRows())
+		}
+		return nil, tss, serializedExprPlan, true, nil
+	}
+
+	if len(pks) == 0 {
+		if len(tss) == 0 && msg.GetNumRows() == 0 {
+			return nil, nil, nil, false, nil
+		}
+		return nil, nil, nil, false, merr.WrapErrServiceInternalMsg("primary-key delete message must contain primary keys")
+	}
+	if len(pks) != len(tss) {
+		return nil, nil, nil, false, merr.WrapErrServiceInternalMsg("primary-key delete message primary key count %d does not match timestamp count %d", len(pks), len(tss))
+	}
+	if msg.GetNumRows() != 0 && msg.GetNumRows() != int64(len(pks)) {
+		return nil, nil, nil, false, merr.WrapErrServiceInternalMsg("primary-key delete message num_rows %d does not match primary key count %d", msg.GetNumRows(), len(pks))
+	}
+	return pks, tss, nil, false, nil
+}
+
+func parseDeletePrimaryKeys(msg *msgstream.DeleteMsg) []storage.PrimaryKey {
+	if ids := msg.GetPrimaryKeys(); ids != nil && ids.GetIdField() != nil {
+		return storage.ParseIDs2PrimaryKeys(ids)
+	}
+	int64Pks := msg.GetInt64PrimaryKeys()
+	if len(int64Pks) == 0 {
+		return nil
+	}
+	pks := make([]storage.PrimaryKey, 0, len(int64Pks))
+	for _, pk := range int64Pks {
+		pks = append(pks, storage.NewInt64PrimaryKey(pk))
+	}
+	return pks
 }
 
 func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
@@ -81,7 +145,9 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	// In streaming service mode, flushed segments no longer maintain a bloom filter.
 	// So, here we skip generating BF (growing segment's BF will be regenerated during the sync phase)
 	// and also skip filtering delete entries by bf.
-	wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
+	if err := wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos); err != nil {
+		return err
+	}
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
 	wb.updateProcessedTsLocked(endPos.GetTimestamp())

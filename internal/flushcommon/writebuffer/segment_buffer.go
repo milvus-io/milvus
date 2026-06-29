@@ -29,21 +29,25 @@ func newSegmentBuffer(segmentID int64, collSchema *schemapb.CollectionSchema) (*
 }
 
 func (buf *segmentBuffer) IsFull() bool {
-	return buf.insertBuffer.IsFull() || buf.deltaBuffer.IsFull()
+	return (buf.insertBuffer != nil && buf.insertBuffer.IsFull()) ||
+		(buf.deltaBuffer != nil && buf.deltaBuffer.IsFull())
 }
 
 func (buf *segmentBuffer) Yield() (insert []*storage.InsertData, bm25stats map[int64]*storage.BM25Stats, delete *storage.DeleteData, schema *schemapb.CollectionSchema) {
-	insert = buf.insertBuffer.Yield()
-	bm25stats = buf.insertBuffer.YieldStats()
-	delete = buf.deltaBuffer.Yield()
-	schema = buf.insertBuffer.collSchema
+	if buf.insertBuffer != nil {
+		insert = buf.insertBuffer.Yield()
+		bm25stats = buf.insertBuffer.YieldStats()
+		schema = buf.insertBuffer.collSchema
+	}
+	if buf.deltaBuffer != nil {
+		delete = buf.deltaBuffer.Yield()
+	}
 	return
 }
 
 func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
 	insertTs := buf.insertBuffer.MinTimestamp()
 	deltaTs := buf.deltaBuffer.MinTimestamp()
-
 	if insertTs < deltaTs {
 		return insertTs
 	}
@@ -51,7 +55,14 @@ func (buf *segmentBuffer) MinTimestamp() typeutil.Timestamp {
 }
 
 func (buf *segmentBuffer) EarliestPosition() *msgpb.MsgPosition {
-	return getEarliestCheckpoint(buf.insertBuffer.startPos, buf.deltaBuffer.startPos)
+	var insertStartPos, deltaStartPos *msgpb.MsgPosition
+	if buf.insertBuffer != nil {
+		insertStartPos = buf.insertBuffer.startPos
+	}
+	if buf.deltaBuffer != nil {
+		deltaStartPos = buf.deltaBuffer.startPos
+	}
+	return getEarliestCheckpoint(insertStartPos, deltaStartPos)
 }
 
 func (buf *segmentBuffer) GetTimeRange() *TimeRange {
@@ -69,9 +80,16 @@ func (buf *segmentBuffer) GetTimeRange() *TimeRange {
 	return result
 }
 
-// MemorySize returns total memory size of insert buffer & delta buffer.
+// MemorySize returns total memory size of insert buffer and delete buffers.
 func (buf *segmentBuffer) MemorySize() int64 {
-	return buf.insertBuffer.size + buf.deltaBuffer.size
+	var size int64
+	if buf.insertBuffer != nil {
+		size += buf.insertBuffer.size
+	}
+	if buf.deltaBuffer != nil {
+		size += buf.deltaBuffer.size
+	}
+	return size
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

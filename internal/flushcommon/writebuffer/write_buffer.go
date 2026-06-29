@@ -1330,6 +1330,12 @@ func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKe
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
 }
 
+func (wb *writeBufferBase) bufferPredicateDelete(segmentID int64, serializedExprPlan []byte, ts typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) {
+	segBuf := wb.getOrCreateBuffer(segmentID, ts)
+	bufSize := segBuf.deltaBuffer.BufferPredicate(serializedExprPlan, ts, startPos, endPos)
+	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
+}
+
 func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (syncmgr.Task, error) {
 	segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID) // wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
 	if !ok {

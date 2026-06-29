@@ -95,10 +95,10 @@ func hasSpecialStatslog(segment *datapb.SegmentInfo) bool {
 }
 
 func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
-	binlogs, deltalogs, statslogs, bm25logs []*datapb.FieldBinlog,
+	binlogs, deltalogs, predicateDeltalogs, statslogs, bm25logs []*datapb.FieldBinlog,
 ) (map[string]string, error) {
 	// all the FieldBinlog will only have logid
-	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, statslogs, bm25logs)
+	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, predicateDeltalogs, statslogs, bm25logs)
 	if err != nil {
 		return nil, err
 	}
@@ -107,12 +107,12 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 }
 
 func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, error) {
-	noBinlogsSegment, binlogs, deltalogs, statslogs, bm25logs := CloneSegmentWithExcludeBinlogs(segment)
+	noBinlogsSegment, binlogs, deltalogs, predicateDeltalogs, statslogs, bm25logs := CloneSegmentWithExcludeBinlogs(segment)
 	// `segment` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `segment`.
 	segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
 
 	// save binlogs separately
-	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, bm25logs)
+	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, predicateDeltalogs, statslogs, bm25logs)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +130,7 @@ func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, 
 func resetBinlogFields(segment *datapb.SegmentInfo) {
 	segment.Binlogs = nil
 	segment.Deltalogs = nil
+	segment.PredicateDeltalogs = nil
 	segment.Statslogs = nil
 	segment.Bm25Statslogs = nil
 }
@@ -142,7 +143,7 @@ func cloneLogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	return res
 }
 
-func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binlogs, deltalogs, statslogs, bm25logs []*datapb.FieldBinlog) (map[string]string, error) {
+func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binlogs, deltalogs, predicateDeltalogs, statslogs, bm25logs []*datapb.FieldBinlog) (map[string]string, error) {
 	kv := make(map[string]string)
 
 	checkLogID := func(fieldBinlog *datapb.FieldBinlog) error {
@@ -183,6 +184,22 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		kv[key] = string(binlogBytes)
 	}
 
+	// predicate deltalog
+	for _, deltalog := range predicateDeltalogs {
+		if err := checkLogID(deltalog); err != nil {
+			return nil, err
+		}
+	}
+	if len(predicateDeltalogs) > 0 {
+		mergedDeltalog := mergePredicateDeltalogs(predicateDeltalogs)
+		binlogBytes, err := proto.Marshal(mergedDeltalog)
+		if err != nil {
+			return nil, merr.WrapErrSerializationFailed(err, "marshal predicate deltalogs failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, mergedDeltalog.FieldID)
+		}
+		key := buildPredicateDeltalogPath(collectionID, partitionID, segmentID)
+		kv[key] = string(binlogBytes)
+	}
+
 	// statslog
 	for _, statslog := range statslogs {
 		if err := checkLogID(statslog); err != nil {
@@ -212,18 +229,31 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 	return kv, nil
 }
 
-func CloneSegmentWithExcludeBinlogs(segment *datapb.SegmentInfo) (*datapb.SegmentInfo, []*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog) {
+// mergePredicateDeltalogs collapses predicate deltalogs into one segment-scoped value.
+// The datacoord mergeFieldBinlogs helper keeps field-scoped groups and is private to another package,
+// while predicate deltalogs use one fixed metadata key and must not be split by FieldID.
+func mergePredicateDeltalogs(predicateDeltalogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
+	merged := proto.Clone(predicateDeltalogs[0]).(*datapb.FieldBinlog)
+	for _, deltalog := range predicateDeltalogs[1:] {
+		merged.Binlogs = append(merged.Binlogs, deltalog.GetBinlogs()...)
+	}
+	return merged
+}
+
+func CloneSegmentWithExcludeBinlogs(segment *datapb.SegmentInfo) (*datapb.SegmentInfo, []*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog) {
 	clonedSegment := proto.Clone(segment).(*datapb.SegmentInfo)
 	binlogs := clonedSegment.Binlogs
 	deltalogs := clonedSegment.Deltalogs
+	predicateDeltalogs := clonedSegment.PredicateDeltalogs
 	statlogs := clonedSegment.Statslogs
 	bm25logs := clonedSegment.Bm25Statslogs
 
 	clonedSegment.Binlogs = nil
 	clonedSegment.Deltalogs = nil
+	clonedSegment.PredicateDeltalogs = nil
 	clonedSegment.Statslogs = nil
 	clonedSegment.Bm25Statslogs = nil
-	return clonedSegment, binlogs, deltalogs, statlogs, bm25logs
+	return clonedSegment, binlogs, deltalogs, predicateDeltalogs, statlogs, bm25logs
 }
 
 func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
@@ -293,6 +323,10 @@ func buildFieldDeltalogPath(collectionID typeutil.UniqueID, partitionID typeutil
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentDeltalogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
+func buildPredicateDeltalogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d/%s", SegmentPredicateDeltalogPathPrefix, collectionID, partitionID, segmentID, PredicateDeltalogPathPostfix)
+}
+
 // TODO: There's no need to include fieldID in the stats log path key.
 func buildFieldStatslogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID, fieldID)
@@ -308,6 +342,10 @@ func buildFieldBinlogPathPrefix(collectionID typeutil.UniqueID, partitionID type
 
 func buildFieldDeltalogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d/", SegmentDeltalogPathPrefix, collectionID, partitionID, segmentID)
+}
+
+func buildFieldPredicateDeltalogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d/", SegmentPredicateDeltalogPathPrefix, collectionID, partitionID, segmentID)
 }
 
 func buildFieldStatslogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {

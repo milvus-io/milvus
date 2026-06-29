@@ -1147,7 +1147,7 @@ func RevertSegmentPartitionStatsVersionOperator(segmentID int64) UpdateOperator 
 }
 
 // Add binlogs in segmentInfo
-func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
+func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog, predicateDeltalogs ...[]*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -1156,9 +1156,11 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 			return false
 		}
 
+		predicateLogs := firstPredicateDeltalogs(predicateDeltalogs)
 		segment.Binlogs = mergeFieldBinlogs(segment.GetBinlogs(), binlogs)
 		segment.Statslogs = mergeFieldBinlogs(segment.GetStatslogs(), statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+		segment.PredicateDeltalogs = mergeFieldBinlogs(segment.GetPredicateDeltalogs(), predicateLogs)
 		if len(deltalogs) > 0 {
 			segment.deltaRowcount.Store(-1)
 		}
@@ -1167,14 +1169,26 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 			UpdateMask: metastore.BinlogsUpdateMask{
-				WithoutBinlogs:       len(binlogs) == 0,
-				WithoutDeltalogs:     len(deltalogs) == 0,
-				WithoutStatslogs:     len(statslogs) == 0,
-				WithoutBm25Statslogs: len(bm25logs) == 0,
+				WithoutBinlogs:            len(binlogs) == 0,
+				WithoutDeltalogs:          len(deltalogs) == 0,
+				WithoutPredicateDeltalogs: len(predicateLogs) == 0,
+				WithoutStatslogs:          len(statslogs) == 0,
+				WithoutBm25Statslogs:      len(bm25logs) == 0,
 			},
 		}
 		return true
 	}
+}
+
+func hasPredicateDeltalogsArg(predicateDeltalogs [][]*datapb.FieldBinlog) bool {
+	return len(predicateDeltalogs) > 0
+}
+
+func firstPredicateDeltalogs(predicateDeltalogs [][]*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	if !hasPredicateDeltalogsArg(predicateDeltalogs) {
+		return nil
+	}
+	return predicateDeltalogs[0]
 }
 
 func addDeltalogsToSegment(modPack *updateSegmentPack, segmentID int64, segment *SegmentInfo, deltalogs []*datapb.FieldBinlog) bool {
@@ -1187,10 +1201,11 @@ func addDeltalogsToSegment(modPack *updateSegmentPack, segmentID int64, segment 
 	modPack.increments[segmentID] = metastore.BinlogsIncrement{
 		Segment: segment.SegmentInfo,
 		UpdateMask: metastore.BinlogsUpdateMask{
-			WithoutBinlogs:       true,
-			WithoutDeltalogs:     false,
-			WithoutStatslogs:     true,
-			WithoutBm25Statslogs: true,
+			WithoutBinlogs:            true,
+			WithoutDeltalogs:          false,
+			WithoutPredicateDeltalogs: true,
+			WithoutStatslogs:          true,
+			WithoutBm25Statslogs:      true,
 		},
 	}
 	return true
@@ -1376,7 +1391,7 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 	}
 }
 
-func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog, predicateDeltalogs ...[]*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -1389,14 +1404,21 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 		segment.Statslogs = statslogs
 		segment.Deltalogs = deltalogs
 		segment.Bm25Statslogs = bm25logs
+		updateMask := metastore.BinlogsUpdateMask{}
+		if hasPredicateDeltalogsArg(predicateDeltalogs) {
+			segment.PredicateDeltalogs = firstPredicateDeltalogs(predicateDeltalogs)
+		} else {
+			updateMask.WithoutPredicateDeltalogs = true
+		}
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
-			Segment: segment.SegmentInfo,
+			Segment:    segment.SegmentInfo,
+			UpdateMask: updateMask,
 		}
 		return true
 	}
 }
 
-func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog, predicateDeltalogs ...[]*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		modPack.fromSaveBinlogPathSegmentID = segmentID
 		segment := modPack.Get(segmentID)
@@ -1409,12 +1431,19 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 		segment.Binlogs = mergeFieldBinlogs(nil, binlogs)
 		segment.Statslogs = mergeFieldBinlogs(nil, statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(nil, deltalogs)
+		segment.Bm25Statslogs = mergeFieldBinlogs(nil, bm25logs)
+		updateMask := metastore.BinlogsUpdateMask{}
+		if hasPredicateDeltalogsArg(predicateDeltalogs) {
+			segment.PredicateDeltalogs = mergeFieldBinlogs(nil, firstPredicateDeltalogs(predicateDeltalogs))
+		} else {
+			updateMask.WithoutPredicateDeltalogs = true
+		}
 		if len(deltalogs) > 0 {
 			segment.deltaRowcount.Store(-1)
 		}
-		segment.Bm25Statslogs = mergeFieldBinlogs(nil, bm25logs)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
-			Segment: segment.SegmentInfo,
+			Segment:    segment.SegmentInfo,
+			UpdateMask: updateMask,
 		}
 		return true
 	}
@@ -1476,14 +1505,16 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 		segment.DataVersion++
 
 		// Backfill column-group commit only mutates segment.Binlogs; skipping
-		// Deltalogs / Statslogs / Bm25Statslogs avoids rewriting their KVs on
-		// every call and the write amplification that comes with it.
+		// Deltalogs / PredicateDeltalogs / Statslogs / Bm25Statslogs avoids
+		// rewriting their KVs on every call and the write amplification that
+		// comes with it.
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 			UpdateMask: metastore.BinlogsUpdateMask{
-				WithoutDeltalogs:     true,
-				WithoutStatslogs:     true,
-				WithoutBm25Statslogs: true,
+				WithoutDeltalogs:          true,
+				WithoutPredicateDeltalogs: true,
+				WithoutStatslogs:          true,
+				WithoutBm25Statslogs:      true,
 			},
 			DroppedBinlogFieldIDs: droppedFieldIDs,
 		}

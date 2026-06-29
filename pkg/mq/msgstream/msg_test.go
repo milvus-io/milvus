@@ -212,6 +212,30 @@ func TestInsertMsg_CheckAligned(t *testing.T) {
 	assert.NoError(t, msg1.CheckAligned())
 }
 
+func TestDeleteMsg_CheckAlignedPredicateDelete(t *testing.T) {
+	msg := &DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{
+		Timestamps:         []uint64{100},
+		NumRows:            0,
+		SerializedExprPlan: []byte{1, 2, 3},
+	}}
+	assert.NoError(t, msg.CheckAligned())
+
+	msg.NumRows = 1
+	assert.Error(t, msg.CheckAligned())
+	msg.NumRows = 0
+
+	msg.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}
+	assert.Error(t, msg.CheckAligned())
+	msg.PrimaryKeys = nil
+
+	msg.Int64PrimaryKeys = []int64{1}
+	assert.Error(t, msg.CheckAligned())
+	msg.Int64PrimaryKeys = nil
+
+	msg.Timestamps = []uint64{100, 200}
+	assert.Error(t, msg.CheckAligned())
+}
+
 func TestInsertMsg_CheckAlignedRejectsNullableVectorNonCompactData(t *testing.T) {
 	validData := []bool{true, false, true}
 	testCases := []struct {

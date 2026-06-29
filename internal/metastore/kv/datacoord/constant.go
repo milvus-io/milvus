@@ -17,10 +17,13 @@
 package datacoord
 
 const (
-	MetaPrefix                          = "datacoord-meta"
-	SegmentPrefix                       = MetaPrefix + "/s"
-	SegmentBinlogPathPrefix             = MetaPrefix + "/binlog"
-	SegmentDeltalogPathPrefix           = MetaPrefix + "/deltalog"
+	MetaPrefix                         = "datacoord-meta"
+	SegmentPrefix                      = MetaPrefix + "/s"
+	SegmentBinlogPathPrefix            = MetaPrefix + "/binlog"
+	SegmentDeltalogPathPrefix          = MetaPrefix + "/deltalog"
+	SegmentPredicateDeltalogPathPrefix = MetaPrefix + "/predicate-deltalog"
+	// PredicateDeltalogPathPostfix is the fixed segment-scoped postfix for predicate deltalog metadata keys.
+	PredicateDeltalogPathPostfix        = "predicate"
 	SegmentStatslogPathPrefix           = MetaPrefix + "/statslog"
 	SegmentBM25logPathPrefix            = MetaPrefix + "/bm25log"
 	ChannelRemovePrefix                 = MetaPrefix + "/channel-removal"

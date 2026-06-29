@@ -284,6 +284,17 @@ func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstre
 	return delMsg
 }
 
+func (s *L0WriteBufferSuite) composePredicateDeleteMsg(partitionID int64) *msgstream.DeleteMsg {
+	return &msgstream.DeleteMsg{
+		DeleteRequest: &msgpb.DeleteRequest{
+			PartitionID:        partitionID,
+			SerializedExprPlan: []byte("expr"),
+			Timestamps:         []uint64{100},
+			NumRows:            0,
+		},
+	}
+}
+
 func (s *L0WriteBufferSuite) SetupTest() {
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
@@ -343,6 +354,87 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		err = wb.BufferData([]*InsertData{}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
 		s.MetricsEqual(value, 5856)
+	})
+
+	s.Run("predicate_delete", func() {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+
+		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+			idAllocator: s.allocator,
+		})
+		s.NoError(err)
+
+		s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.collSchema).Once()
+		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(info *datapb.SegmentInfo, _ metacache.PkStatsFactory, _ metacache.BM25StatsFactory, _ ...metacache.SegmentAction) {
+			s.EqualValues(10, info.GetPartitionID())
+			s.Equal(datapb.SegmentLevel_L0, info.GetLevel())
+		}).Return()
+
+		err = wb.BufferData(nil, []*msgstream.DeleteMsg{s.composePredicateDeleteMsg(10)}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+		s.NoError(err)
+
+		l0wb := wb.(*l0WriteBuffer)
+		s.Len(l0wb.buffers, 1)
+		for _, buf := range l0wb.buffers {
+			result := buf.deltaBuffer.Yield()
+			s.NotNil(result)
+			s.Empty(result.Pks)
+			s.Empty(result.Tss)
+			s.Equal([][]byte{[]byte("expr")}, result.SerializedExprPlans)
+			s.Equal([]uint64{100}, result.PredicateTss)
+		}
+	})
+}
+
+func (s *L0WriteBufferSuite) TestDeleteRequestShapeValidation() {
+	pks, err := storage.GenInt64PrimaryKeys(1, 2)
+	s.Require().NoError(err)
+
+	s.Run("pk delete", func() {
+		parsedPks, tss, expr, isPredicate, err := validateDeletePayload(s.composeDeleteMsg(pks))
+		s.NoError(err)
+		s.False(isPredicate)
+		s.Nil(expr)
+		s.Len(parsedPks, 2)
+		s.Len(tss, 2)
+	})
+
+	s.Run("predicate delete", func() {
+		parsedPks, tss, expr, isPredicate, err := validateDeletePayload(s.composePredicateDeleteMsg(10))
+		s.NoError(err)
+		s.True(isPredicate)
+		s.Empty(parsedPks)
+		s.Equal([]byte("expr"), expr)
+		s.Equal([]uint64{100}, tss)
+	})
+
+	s.Run("mixed pk and predicate", func() {
+		msg := s.composePredicateDeleteMsg(10)
+		msg.PrimaryKeys = storage.ParsePrimaryKeys2IDs(pks)
+		_, _, _, _, err := validateDeletePayload(msg)
+		s.Error(err)
+	})
+
+	s.Run("predicate timestamp count", func() {
+		msg := s.composePredicateDeleteMsg(10)
+		msg.Timestamps = []uint64{100, 101}
+		_, _, _, _, err := validateDeletePayload(msg)
+		s.Error(err)
+	})
+
+	s.Run("predicate num rows", func() {
+		msg := s.composePredicateDeleteMsg(10)
+		msg.NumRows = 1
+		_, _, _, _, err := validateDeletePayload(msg)
+		s.Error(err)
+	})
+
+	s.Run("pk timestamp count", func() {
+		msg := s.composeDeleteMsg(pks)
+		msg.Timestamps = []uint64{100}
+		_, _, _, _, err := validateDeletePayload(msg)
+		s.Error(err)
 	})
 }
 

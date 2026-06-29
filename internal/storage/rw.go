@@ -518,6 +518,27 @@ func NewDeltalogWriter(
 	}
 }
 
+func NewPredicateDeltalogWriter(
+	ctx context.Context,
+	collectionID, partitionID, segmentID, logID UniqueID,
+	path string,
+	option ...RwOption,
+) (RecordWriter, error) {
+	rwOptions := DefaultWriterOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+	switch rwOptions.version {
+	case StorageV1:
+		return NewLegacyPredicateDeltalogWriter(collectionID, partitionID, segmentID, logID, rwOptions.uploader, path)
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
+	}
+}
+
 func NewDeltalogReader(
 	pkType schemapb.DataType,
 	paths []string,
