@@ -92,6 +92,11 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      compaction:
+        storageVersion:
+          enabled: true
+        storageFormat:
+          enabled: true
       targetVecIndexVersion: 10
       gc:
         interval: 1800
