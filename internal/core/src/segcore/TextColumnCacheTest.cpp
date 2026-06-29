@@ -24,10 +24,9 @@
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
-#include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -44,25 +43,44 @@ using milvus_storage::lob_column::LOB_REFERENCE_SIZE;
 using milvus_storage::lob_column::LobColumnConfig;
 using milvus_storage::lob_column::LobColumnReader;
 
-struct ConcurrentCallTracker {
+class BlockingCallTracker {
+ public:
     void
     ObserveCall() {
-        auto active_now = active.fetch_add(1, std::memory_order_acq_rel) + 1;
-        calls.fetch_add(1, std::memory_order_relaxed);
-
-        auto observed = max_active.load(std::memory_order_relaxed);
-        while (observed < active_now &&
-               !max_active.compare_exchange_weak(
-                   observed, active_now, std::memory_order_relaxed)) {
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        active.fetch_sub(1, std::memory_order_acq_rel);
+        std::unique_lock<std::mutex> lock(mutex_);
+        ++calls_;
+        entered_ = true;
+        cv_.notify_all();
+        cv_.wait(lock, [&] { return released_; });
     }
 
-    std::atomic<int> active{0};
-    std::atomic<int> max_active{0};
-    std::atomic<int> calls{0};
+    bool
+    WaitForEntered(std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return cv_.wait_for(lock, timeout, [&] { return entered_; });
+    }
+
+    void
+    Release() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            released_ = true;
+        }
+        cv_.notify_all();
+    }
+
+    int
+    CallCount() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return calls_;
+    }
+
+ private:
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+    bool entered_{false};
+    bool released_{false};
+    int calls_{0};
 };
 
 std::vector<uint8_t>
@@ -73,7 +91,7 @@ Bytes(const std::string& value) {
 class InstrumentedLobColumnReader : public LobColumnReader {
  public:
     explicit InstrumentedLobColumnReader(
-        std::shared_ptr<ConcurrentCallTracker> tracker)
+        std::shared_ptr<BlockingCallTracker> tracker)
         : tracker_(std::move(tracker)) {
     }
 
@@ -116,14 +134,15 @@ class InstrumentedLobColumnReader : public LobColumnReader {
     }
 
  private:
-    std::shared_ptr<ConcurrentCallTracker> tracker_;
+    std::shared_ptr<BlockingCallTracker> tracker_;
     bool closed_{false};
 };
 
 TextLobReaderFactory
-MakeReaderFactory(std::shared_ptr<ConcurrentCallTracker> tracker,
-                  std::atomic<int>* factory_calls) {
-    return [tracker = std::move(tracker), factory_calls](
+MakeReaderFactory(std::shared_ptr<BlockingCallTracker> tracker,
+                  std::shared_ptr<std::atomic<int>> factory_calls) {
+    return [tracker = std::move(tracker),
+            factory_calls = std::move(factory_calls)](
                std::shared_ptr<arrow::fs::FileSystem>, const LobColumnConfig&)
                -> arrow::Result<std::unique_ptr<LobColumnReader>> {
         factory_calls->fetch_add(1, std::memory_order_relaxed);
@@ -140,144 +159,151 @@ MakeLobReference() {
     return ref;
 }
 
-std::vector<std::string>
-RunConcurrently(size_t thread_count, const std::function<void(size_t)>& task) {
-    std::mutex mutex;
-    std::condition_variable cv;
-    size_t ready = 0;
-    bool start = false;
-    std::vector<std::string> errors;
-    std::vector<std::thread> threads;
-    threads.reserve(thread_count);
+template <typename Task>
+void
+ExpectTaskUsesCachedReaderLock(
+    const std::shared_ptr<CachedTextLobReader>& cached_reader,
+    const std::shared_ptr<BlockingCallTracker>& tracker,
+    Task task) {
+    constexpr auto kBlockedCheck = std::chrono::seconds(1);
+    constexpr auto kTimeout = std::chrono::seconds(5);
 
-    for (size_t i = 0; i < thread_count; ++i) {
-        threads.emplace_back([&, i] {
-            {
-                std::unique_lock<std::mutex> lock(mutex);
-                ++ready;
-                if (ready == thread_count) {
-                    cv.notify_one();
-                }
-                cv.wait(lock, [&] { return start; });
-            }
+    std::unique_lock<std::mutex> reader_lock(cached_reader->mutex);
+    auto started = std::make_shared<std::promise<void>>();
+    auto done = std::make_shared<std::promise<void>>();
+    auto started_future = started->get_future();
+    auto done_future = done->get_future();
 
-            try {
-                task(i);
-            } catch (const std::exception& ex) {
-                std::lock_guard<std::mutex> lock(mutex);
-                errors.emplace_back(ex.what());
-            } catch (...) {
-                std::lock_guard<std::mutex> lock(mutex);
-                errors.emplace_back("unknown exception");
-            }
-        });
+    std::thread worker([started, done, task = std::move(task)]() mutable {
+        try {
+            started->set_value();
+            task();
+            done->set_value();
+        } catch (...) {
+            done->set_exception(std::current_exception());
+        }
+    });
+
+    if (started_future.wait_for(kTimeout) != std::future_status::ready) {
+        tracker->Release();
+        worker.detach();
+        FAIL() << "read worker did not start";
     }
 
-    {
-        std::unique_lock<std::mutex> lock(mutex);
-        cv.wait(lock, [&] { return ready == thread_count; });
-        start = true;
-    }
-    cv.notify_all();
-
-    for (auto& thread : threads) {
-        thread.join();
+    if (tracker->WaitForEntered(kBlockedCheck)) {
+        tracker->Release();
+        reader_lock.unlock();
+        worker.join();
+        FAIL() << "read reached LobColumnReader while cached reader mutex "
+                  "was held";
     }
 
-    return errors;
+    reader_lock.unlock();
+
+    if (!tracker->WaitForEntered(kTimeout)) {
+        tracker->Release();
+        worker.detach();
+        FAIL() << "read did not reach LobColumnReader after cached reader "
+                  "mutex was released";
+    }
+
+    tracker->Release();
+
+    if (done_future.wait_for(kTimeout) != std::future_status::ready) {
+        worker.detach();
+        FAIL() << "read did not complete after LobColumnReader was released";
+    }
+
+    worker.join();
+    try {
+        done_future.get();
+    } catch (const std::exception& ex) {
+        FAIL() << ex.what();
+    } catch (...) {
+        FAIL() << "unknown exception";
+    }
 }
 
 TEST(TextColumnCache, ReadTextSerializesCallsOnCachedReader) {
-    auto tracker = std::make_shared<ConcurrentCallTracker>();
-    std::atomic<int> factory_calls{0};
-    TextColumnCache cache(TextColumnCacheConfig{},
-                          MakeReaderFactory(tracker, &factory_calls));
-    milvus_storage::api::Properties properties;
+    auto tracker = std::make_shared<BlockingCallTracker>();
+    auto factory_calls = std::make_shared<std::atomic<int>>(0);
+    auto cache = std::make_shared<TextColumnCache>(
+        TextColumnCacheConfig{}, MakeReaderFactory(tracker, factory_calls));
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
     const std::string lob_base_path = "/tmp/text-column-cache";
-    auto ref = MakeLobReference();
+    auto ref = std::make_shared<std::vector<uint8_t>>(MakeLobReference());
+    auto text = std::make_shared<std::string>();
 
-    ASSERT_NE(cache.GetOrCreateReader(lob_base_path, nullptr, properties),
-              nullptr);
+    auto cached_reader =
+        cache->GetOrCreateReader(lob_base_path, nullptr, *properties);
+    ASSERT_NE(cached_reader, nullptr);
 
-    constexpr size_t kThreadCount = 8;
-    auto errors = RunConcurrently(kThreadCount, [&](size_t) {
-        auto text = cache.ReadText(
-            lob_base_path, nullptr, properties, ref.data(), ref.size());
-        if (text != "mock-text") {
-            throw std::runtime_error("unexpected text: " + text);
-        }
+    ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
+        *text = cache->ReadText(
+            lob_base_path, nullptr, *properties, ref->data(), ref->size());
     });
 
-    if (!errors.empty()) {
-        FAIL() << errors.front();
-    }
-    EXPECT_EQ(factory_calls.load(std::memory_order_relaxed), 1);
-    EXPECT_EQ(tracker->calls.load(std::memory_order_relaxed), kThreadCount);
-    EXPECT_EQ(tracker->max_active.load(std::memory_order_relaxed), 1);
+    EXPECT_EQ(*text, "mock-text");
+    EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
+    EXPECT_EQ(tracker->CallCount(), 1);
 }
 
 TEST(TextColumnCache, ReadBatchSerializesCallsOnCachedReader) {
-    auto tracker = std::make_shared<ConcurrentCallTracker>();
-    std::atomic<int> factory_calls{0};
-    TextColumnCache cache(TextColumnCacheConfig{},
-                          MakeReaderFactory(tracker, &factory_calls));
-    milvus_storage::api::Properties properties;
+    auto tracker = std::make_shared<BlockingCallTracker>();
+    auto factory_calls = std::make_shared<std::atomic<int>>(0);
+    auto cache = std::make_shared<TextColumnCache>(
+        TextColumnCacheConfig{}, MakeReaderFactory(tracker, factory_calls));
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
     const std::string lob_base_path = "/tmp/text-column-cache";
-    auto ref = MakeLobReference();
-    std::vector<EncodedRef> refs = {{ref.data(), ref.size()},
-                                    {ref.data(), ref.size()}};
+    auto ref = std::make_shared<std::vector<uint8_t>>(MakeLobReference());
+    auto refs =
+        std::make_shared<std::vector<EncodedRef>>(std::vector<EncodedRef>{
+            {ref->data(), ref->size()}, {ref->data(), ref->size()}});
+    auto texts = std::make_shared<std::vector<std::string>>();
 
-    ASSERT_NE(cache.GetOrCreateReader(lob_base_path, nullptr, properties),
-              nullptr);
+    auto cached_reader =
+        cache->GetOrCreateReader(lob_base_path, nullptr, *properties);
+    ASSERT_NE(cached_reader, nullptr);
 
-    constexpr size_t kThreadCount = 8;
-    auto errors = RunConcurrently(kThreadCount, [&](size_t) {
-        auto texts = cache.ReadBatch(lob_base_path, nullptr, properties, refs);
-        if (texts != std::vector<std::string>{"mock-text", "mock-text"}) {
-            throw std::runtime_error("unexpected batch text");
-        }
+    ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
+        *texts = cache->ReadBatch(lob_base_path, nullptr, *properties, *refs);
     });
 
-    if (!errors.empty()) {
-        FAIL() << errors.front();
-    }
-    EXPECT_EQ(factory_calls.load(std::memory_order_relaxed), 1);
-    EXPECT_EQ(tracker->calls.load(std::memory_order_relaxed), kThreadCount);
-    EXPECT_EQ(tracker->max_active.load(std::memory_order_relaxed), 1);
+    EXPECT_EQ(*texts, (std::vector<std::string>{"mock-text", "mock-text"}));
+    EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
+    EXPECT_EQ(tracker->CallCount(), 1);
 }
 
 TEST(TextColumnCache, ReadBatchIntoSerializesCallsOnCachedReader) {
-    auto tracker = std::make_shared<ConcurrentCallTracker>();
-    std::atomic<int> factory_calls{0};
-    TextColumnCache cache(TextColumnCacheConfig{},
-                          MakeReaderFactory(tracker, &factory_calls));
-    milvus_storage::api::Properties properties;
+    auto tracker = std::make_shared<BlockingCallTracker>();
+    auto factory_calls = std::make_shared<std::atomic<int>>(0);
+    auto cache = std::make_shared<TextColumnCache>(
+        TextColumnCacheConfig{}, MakeReaderFactory(tracker, factory_calls));
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
     const std::string lob_base_path = "/tmp/text-column-cache";
-    auto ref = MakeLobReference();
-    std::vector<EncodedRef> refs = {{ref.data(), ref.size()},
-                                    {ref.data(), ref.size()}};
+    auto ref = std::make_shared<std::vector<uint8_t>>(MakeLobReference());
+    auto refs =
+        std::make_shared<std::vector<EncodedRef>>(std::vector<EncodedRef>{
+            {ref->data(), ref->size()}, {ref->data(), ref->size()}});
+    auto dst =
+        std::make_shared<google::protobuf::RepeatedPtrField<std::string>>();
+    dst->Add();
+    dst->Add();
 
-    ASSERT_NE(cache.GetOrCreateReader(lob_base_path, nullptr, properties),
-              nullptr);
+    auto cached_reader =
+        cache->GetOrCreateReader(lob_base_path, nullptr, *properties);
+    ASSERT_NE(cached_reader, nullptr);
 
-    constexpr size_t kThreadCount = 8;
-    auto errors = RunConcurrently(kThreadCount, [&](size_t) {
-        google::protobuf::RepeatedPtrField<std::string> dst;
-        dst.Add();
-        dst.Add();
-        cache.ReadBatchInto(lob_base_path, nullptr, properties, refs, &dst);
-        if (dst.size() != 2 || dst.Get(0) != "mock-text" ||
-            dst.Get(1) != "mock-text") {
-            throw std::runtime_error("unexpected batch-into text");
-        }
+    ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
+        cache->ReadBatchInto(
+            lob_base_path, nullptr, *properties, *refs, dst.get());
     });
 
-    if (!errors.empty()) {
-        FAIL() << errors.front();
-    }
-    EXPECT_EQ(factory_calls.load(std::memory_order_relaxed), 1);
-    EXPECT_EQ(tracker->calls.load(std::memory_order_relaxed), kThreadCount);
-    EXPECT_EQ(tracker->max_active.load(std::memory_order_relaxed), 1);
+    ASSERT_EQ(dst->size(), 2);
+    EXPECT_EQ(dst->Get(0), "mock-text");
+    EXPECT_EQ(dst->Get(1), "mock-text");
+    EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
+    EXPECT_EQ(tracker->CallCount(), 1);
 }
 
 }  // namespace
