@@ -2100,32 +2100,36 @@ func TestHandleSessionEvent(t *testing.T) {
 	})
 }
 
-type rootCoordSegFlushComplete struct {
-	mockMixCoord
-	flag bool
-}
-
-// SegmentFlushCompleted, override default behavior
-func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, req *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
-	if rc.flag {
-		return merr.Success(), nil
+func newPostFlushTestServer(collection *collectionInfo, segments ...*datapb.SegmentInfo) *Server {
+	mt := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+	if collection != nil {
+		mt.AddCollection(collection)
+	}
+	for _, segment := range segments {
+		mt.segments.SetSegment(segment.GetID(), NewSegmentInfo(segment))
+	}
+	return &Server{meta: mt}
 }
 
 func TestPostFlush(t *testing.T) {
 	t.Run("segment not found", func(t *testing.T) {
-		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
+		svr := newPostFlushTestServer(nil)
 
 		err := svr.postFlush(context.Background(), 1)
 		assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
 	})
 
 	t.Run("success post flush", func(t *testing.T) {
-		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
-		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
+		svr := newPostFlushTestServer(nil, &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+			IsSorted:     true,
+		})
 		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 		drainBuildIndexChForTest()
@@ -2133,25 +2137,18 @@ func TestPostFlush(t *testing.T) {
 		drainStatsTaskChForTest()
 		defer drainStatsTaskChForTest()
 
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-			ID:           1,
-			CollectionID: 1,
-			PartitionID:  1,
-			State:        commonpb.SegmentState_Flushing,
-			IsSorted:     true,
-		}))
-
-		assert.NoError(t, err)
-
-		err = svr.postFlush(context.Background(), 1)
+		err := svr.postFlush(context.Background(), 1)
 		assert.NoError(t, err)
 		assertBuildIndexEvents(t, 1)
 	})
 
 	t.Run("sort compaction post flush only triggers stats task", func(t *testing.T) {
-		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
-		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
+		svr := newPostFlushTestServer(nil, &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+		})
 		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
 		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
@@ -2161,15 +2158,7 @@ func TestPostFlush(t *testing.T) {
 		drainStatsTaskChForTest()
 		defer drainStatsTaskChForTest()
 
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-			ID:           1,
-			CollectionID: 1,
-			PartitionID:  1,
-			State:        commonpb.SegmentState_Flushing,
-		}))
-		assert.NoError(t, err)
-
-		err = svr.postFlush(context.Background(), 1)
+		err := svr.postFlush(context.Background(), 1)
 		assert.NoError(t, err)
 		assertNoBuildIndexEvent(t)
 		select {
@@ -2181,9 +2170,20 @@ func TestPostFlush(t *testing.T) {
 	})
 
 	t.Run("external collection post flush triggers build index directly", func(t *testing.T) {
-		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
-		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
+		svr := newPostFlushTestServer(&collectionInfo{
+			ID: 1,
+			Schema: &schemapb.CollectionSchema{
+				ExternalSource: "s3://external",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				},
+			},
+		}, &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+		})
 		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
 		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
@@ -2193,24 +2193,7 @@ func TestPostFlush(t *testing.T) {
 		drainStatsTaskChForTest()
 		defer drainStatsTaskChForTest()
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID: 1,
-			Schema: &schemapb.CollectionSchema{
-				ExternalSource: "s3://external",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
-				},
-			},
-		})
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-			ID:           1,
-			CollectionID: 1,
-			PartitionID:  1,
-			State:        commonpb.SegmentState_Flushing,
-		}))
-		assert.NoError(t, err)
-
-		err = svr.postFlush(context.Background(), 1)
+		err := svr.postFlush(context.Background(), 1)
 		assert.NoError(t, err)
 		assertBuildIndexEvents(t, 1)
 		assertNoStatsTaskEvent(t)
