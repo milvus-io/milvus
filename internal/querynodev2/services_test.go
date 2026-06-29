@@ -1029,7 +1029,7 @@ func TestPrewarmSegments(t *testing.T) {
 	node.manager = &segments.Manager{Segment: segmentManager}
 
 	segment := segments.NewMockSegment(t)
-	segment.EXPECT().Prewarm(mock.Anything, []int64{101, 102}).Return(nil).Once()
+	segment.EXPECT().Prewarm(mock.Anything, []int64(nil)).Return(nil).Once()
 
 	segmentManager.EXPECT().
 		GetAndPin([]int64{11, 12}, mock.Anything, mock.Anything, mock.Anything).
@@ -1047,7 +1047,6 @@ func TestPrewarmSegments(t *testing.T) {
 			222,
 		},
 		SegmentIDs: []int64{11, 12},
-		FieldIDs:   []int64{101, 102},
 	})
 
 	assert.NoError(t, err)
