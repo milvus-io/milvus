@@ -287,13 +287,13 @@ message LoadPartitionsRequest {
 }
 
 message PrewarmRequest {
+    reserved 7;
     common.MsgBase base = 1;
     int64 dbID = 2;
     int64 collectionID = 3;
     repeated int64 partitionIDs = 4;
     schema.CollectionSchema schema = 5;
     optional string namespace = 6;
-    repeated int64 fieldIDs = 7;
     repeated int64 segmentIDs = 8;
     common.LoadPriority priority = 9;
     map<int64, int64> field_indexID = 10;

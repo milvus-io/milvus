@@ -311,7 +311,6 @@ func (s *Server) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*com
 		mlog.Int64("collectionID", req.GetCollectionID()),
 		mlog.Int64s("partitions", req.GetPartitionIDs()),
 		mlog.String("namespace", req.GetNamespace()),
-		mlog.Int64s("fields", req.GetFieldIDs()),
 	)
 
 	logger.Info(ctx, "received prewarm request")
@@ -325,21 +324,18 @@ func (s *Server) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*com
 		return merr.Status(err), nil
 	}
 
-	if err := s.ensurePrewarmPartitionLoaded(ctx, req); err != nil {
-		logger.Warn(ctx, "failed to load partition before prewarm", mlog.Err(err))
+	if s.jobScheduler == nil {
+		err := merr.WrapErrServiceInternalMsg("querycoord job scheduler is not initialized")
+		logger.Warn(ctx, "failed to prewarm", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
-	if err := s.prewarmLoadedSegments(ctx, req); err != nil {
-		logger.Warn(ctx, "failed to prewarm loaded segments", mlog.Err(err))
+	job := newPrewarmJob(ctx, s, req)
+	s.jobScheduler.Add(job)
+	if err := job.Wait(); err != nil {
+		logger.Warn(ctx, "failed to prewarm", mlog.Err(err))
 		return merr.Status(err), nil
 	}
-
-	if err := s.clearPrewarmForceSyncWarmup(ctx, req.GetCollectionID(), req.GetPartitionIDs()[0]); err != nil {
-		logger.Warn(ctx, "failed to clear prewarm force sync warmup", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
 	logger.Info(ctx, "prewarm done")
 	return merr.Success(), nil
 }
@@ -472,7 +468,6 @@ func (s *Server) prewarmLoadedSegments(ctx context.Context, req *querypb.Prewarm
 				PartitionIDs:    req.GetPartitionIDs(),
 				Schema:          req.GetSchema(),
 				Namespace:       req.Namespace,
-				FieldIDs:        req.GetFieldIDs(),
 				SegmentIDs:      segmentIDs,
 				Priority:        req.GetPriority(),
 				ForceSyncWarmup: true,
