@@ -408,7 +408,7 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	lockDur := time.Since(lockStart)
 	if lockDur > 100*time.Millisecond {
 		segmentIDs := lo.Map(entries, func(e SegmentEntry, _ int) int64 { return e.SegmentID })
-		log.Warn("AddDistributions lock slow", zap.Duration("lockDur", lockDur), zap.Int64s("segmentIDs", segmentIDs))
+		mlog.Warn(context.TODO(), "AddDistributions lock slow", mlog.Duration("lockDur", lockDur), mlog.Int64s("segmentIDs", segmentIDs))
 	}
 	for _, entry := range entries {
 		oldEntry, ok := d.sealedSegments[entry.SegmentID]
@@ -440,7 +440,7 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	t1 := time.Now()
 	if t1.Sub(lockStart) > 100*time.Millisecond {
 		segmentIDs := lo.Map(entries, func(e SegmentEntry, _ int) int64 { return e.SegmentID })
-		log.Warn("AddDistributions notifySnapshotUpdate slow", zap.Duration("lockDur", t1.Sub(lockStart)), zap.Int64s("segmentIDs", segmentIDs))
+		mlog.Warn(context.TODO(), "AddDistributions notifySnapshotUpdate slow", mlog.Duration("lockDur", t1.Sub(lockStart)), mlog.Int64s("segmentIDs", segmentIDs))
 	}
 
 	d.notifySnapshotUpdate()
@@ -502,7 +502,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
-	// oldValue := d.queryView.version
+	oldValue := d.queryView.version
 	d.queryView = &channelQueryView{
 		growingSegments:       typeutil.NewUniqueSet(action.GetGrowingInTarget()...),
 		sealedSegmentRowCount: action.GetSealedSegmentRowCount(),

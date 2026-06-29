@@ -1569,7 +1569,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 			unflushed = append(unflushed, sid)
 		}
 		if len(unflushed) != 0 {
-			mlog.RatedInfo(ctx, rate.Limit(10), "DataCoord receive GetFlushState request, Flushed is false", mlog.Int64s("unflushed", unflushed), mlog.Int("len", len(unflushed)))
+			log.RatedInfo(ctx, rate.Limit(10), "DataCoord receive GetFlushState request, Flushed is false", mlog.Int64s("unflushed", unflushed), mlog.Int("len", len(unflushed)))
 			resp.Flushed = false
 
 			return resp, nil
@@ -1585,7 +1585,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	if len(channels) == 0 { // For compatibility with old client
 		resp.Flushed = true
 
-		mlog.Info(context.TODO(), "GetFlushState all flushed without checking flush ts")
+		log.Info(ctx, "GetFlushState all flushed without checking flush ts")
 		return resp, nil
 	}
 
@@ -1598,7 +1598,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		if cp == nil || cpTs < req.GetFlushTs() {
 			resp.Flushed = false
 
-			mlog.RatedInfo(ctx, rate.Limit(10), "GetFlushState failed, channel unflushed", mlog.String("channel", channel.GetName()),
+			log.RatedInfo(ctx, rate.Limit(10), "GetFlushState failed, channel unflushed", mlog.String("channel", channel.GetName()),
 				mlog.Time("CP", tsoutil.PhysicalTime(cpTs)),
 				mlog.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cpTs))))
 			return resp, nil
@@ -1606,7 +1606,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	}
 
 	resp.Flushed = true
-	mlog.Info(context.TODO(), "GetFlushState all flushed")
+	log.Info(ctx, "GetFlushState all flushed")
 
 	return resp, nil
 }

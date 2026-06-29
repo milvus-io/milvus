@@ -324,8 +324,7 @@ GetFileSize(const char* path, int64_t* size) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
+        auto trueFs = milvus::segcore::GetDefaultArrowFileSystem();
         if (!trueFs) {
             return milvus::FailureCStatus(
                 milvus::ErrorCode::FileReadFailed,

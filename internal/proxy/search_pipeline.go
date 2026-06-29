@@ -1436,11 +1436,11 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	t1 := time.Now()
 	defer func() {
 		cost := time.Since(t1)
-		log.Ctx(ctx).Info("[sss] requery",
-			zap.Int64("requestID", op.requestID),
-			zap.Stringer("traceID", trace.SpanFromContext(ctx).SpanContext().TraceID()),
-			zap.Int64s("partitionIDs", op.partitionIDs),
-			zap.Duration("duration", cost))
+		mlog.Info(ctx, "[sss] requery",
+			mlog.Int64("requestID", op.requestID),
+			mlog.Stringer("traceID", trace.SpanFromContext(ctx).SpanContext().TraceID()),
+			mlog.Int64s("partitionIDs", op.partitionIDs),
+			mlog.Duration("duration", cost))
 	}()
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{

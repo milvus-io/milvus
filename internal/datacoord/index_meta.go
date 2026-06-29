@@ -209,10 +209,10 @@ func (m *indexMeta) reloadFromKV(scanTargets []partitionScanTarget) error {
 		var completedScanTargets atomic.Int64
 		var totalSegmentIndexes atomic.Int64
 		scanStart := time.Now()
-		log.Ctx(m.ctx).Info("indexMeta segment index scan targets prepared",
-			zap.Int("numScanTargets", len(scanTargets)),
-			zap.Int("numPartitionTargets", numPartitionTargets),
-			zap.Int("readConcurrency", paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt()))
+		mlog.Info(m.ctx, "indexMeta segment index scan targets prepared",
+			mlog.Int("numScanTargets", len(scanTargets)),
+			mlog.Int("numPartitionTargets", numPartitionTargets),
+			mlog.Int("readConcurrency", paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt()))
 		for i, target := range scanTargets {
 			i := i
 			target := target
@@ -227,22 +227,22 @@ func (m *indexMeta) reloadFromKV(scanTargets []partitionScanTarget) error {
 					segIdxes, err = m.catalog.ListSegmentIndexes(m.ctx, target.collectionID)
 				}
 				if err != nil {
-					log.Ctx(m.ctx).Warn("indexMeta segment index scan failed",
-						zap.Int64("collectionID", target.collectionID),
-						zap.Int64("partitionID", target.partitionID),
-						zap.Bool("partitionScoped", target.partitionScoped),
-						zap.Error(err))
+					mlog.Warn(m.ctx, "indexMeta segment index scan failed",
+						mlog.Int64("collectionID", target.collectionID),
+						mlog.Int64("partitionID", target.partitionID),
+						mlog.Bool("partitionScoped", target.partitionScoped),
+						mlog.Err(err))
 					return nil, err
 				}
 				scanTargetSegIdxes[i] = segIdxes
 				totalSegmentIndexes.Add(int64(len(segIdxes)))
 				completed := completedScanTargets.Add(1)
 				if completed == totalScanTargets || completed%segmentIndexScanProgressLogInterval == 0 {
-					log.Ctx(m.ctx).Info("indexMeta segment index scan progress",
-						zap.Int64("completedScanTargets", completed),
-						zap.Int64("totalScanTargets", totalScanTargets),
-						zap.Int64("numSegmentIndexes", totalSegmentIndexes.Load()),
-						zap.Duration("duration", time.Since(scanStart)))
+					mlog.Info(m.ctx, "indexMeta segment index scan progress",
+						mlog.Int64("completedScanTargets", completed),
+						mlog.Int64("totalScanTargets", totalScanTargets),
+						mlog.Int64("numSegmentIndexes", totalSegmentIndexes.Load()),
+						mlog.Duration("duration", time.Since(scanStart)))
 				}
 				return nil, nil
 			}))

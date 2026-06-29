@@ -483,6 +483,65 @@ func compressL0CompactionBinlogs(outputSegs []*datapb.CompactionSegment) error {
 	return nil
 }
 
+func (t *l0CompactionTask) commitV3ManifestDeltas(ctx context.Context, outputSegs []*datapb.CompactionSegment) error {
+	type manifestDeltaGroup struct {
+		manifestPath string
+		entries      []packed.DeltaLogEntry
+		outputSegs   []*datapb.CompactionSegment
+	}
+
+	groups := make(map[int64]*manifestDeltaGroup)
+	for _, seg := range outputSegs {
+		if seg.GetManifest() != "" || len(seg.GetDeltalogs()) == 0 {
+			continue
+		}
+
+		segmentID := seg.GetSegmentID()
+		if committed := t.committedV3Manifests[segmentID]; committed != "" {
+			seg.Manifest = committed
+			continue
+		}
+
+		target := t.meta.GetHealthySegment(ctx, segmentID)
+		if target == nil || target.GetManifestPath() == "" {
+			continue
+		}
+
+		entries, err := buildL0V3DeltaLogEntries(segmentID, seg.GetDeltalogs())
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			continue
+		}
+
+		group := groups[segmentID]
+		if group == nil {
+			group = &manifestDeltaGroup{manifestPath: target.GetManifestPath()}
+			groups[segmentID] = group
+		}
+		group.entries = append(group.entries, entries...)
+		group.outputSegs = append(group.outputSegs, seg)
+	}
+
+	if len(groups) == 0 {
+		return nil
+	}
+
+	storageConfig := compaction.CreateStorageConfig()
+	for segmentID, group := range groups {
+		manifestPath, err := packed.AddDeltaLogsToManifestOverwrite(group.manifestPath, storageConfig, group.entries)
+		if err != nil {
+			return err
+		}
+		t.committedV3Manifests[segmentID] = manifestPath
+		for _, seg := range group.outputSegs {
+			seg.Manifest = manifestPath
+		}
+	}
+	return nil
+}
+
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	if err := t.commitV3ManifestDeltas(context.TODO(), outputSegs); err != nil {
 		return err

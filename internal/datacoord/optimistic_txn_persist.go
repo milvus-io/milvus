@@ -13,6 +13,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	tikverr "github.com/tikv/client-go/v2/error"
+	tikvkv "github.com/tikv/client-go/v2/kv"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -389,13 +391,16 @@ func (p *tikvPersist[K, V]) captureCommitTS(txn interface{ SetCommitCallback(fun
 }
 
 func (p *tikvPersist[K, V]) tikvKeyExists(ctx context.Context, txn interface {
-	Get(ctx context.Context, k []byte) ([]byte, error)
+	Get(context.Context, []byte, ...tikvkv.GetOption) (tikvkv.ValueEntry, error)
 }, key []byte) ([]byte, bool, error) {
-	val, err := txn.Get(ctx, key)
+	entry, err := txn.Get(ctx, key)
 	if err != nil {
-		return nil, false, nil
+		if tikverr.IsErrNotFound(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
-	return val, true, nil
+	return entry.Value, true, nil
 }
 
 func (p *tikvPersist[K, V]) Scan(ctx context.Context, prefix K) ([]K, []V, []int64, error) {

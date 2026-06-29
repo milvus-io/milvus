@@ -387,11 +387,11 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			metrics.SearchLabel,
 		)
 		d := time.Since(t1)
-		log.Info("[sss] segment filter search",
-			zap.Int64("requestID", req.GetReq().GetBase().GetMsgID()),
-			zap.Stringer("traceID", trace.SpanFromContext(ctx).SpanContext().TraceID()),
-			zap.Any("partition", req.GetReq().PartitionIDs),
-			zap.Any("duration", d))
+		log.Info(ctx, "[sss] segment filter search",
+			mlog.Int64("requestID", req.GetReq().GetBase().GetMsgID()),
+			mlog.Stringer("traceID", trace.SpanFromContext(ctx).SpanContext().TraceID()),
+			mlog.Any("partition", req.GetReq().PartitionIDs),
+			mlog.Duration("duration", d))
 	}
 
 	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())

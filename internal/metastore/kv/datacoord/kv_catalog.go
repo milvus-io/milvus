@@ -371,14 +371,14 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 			return err
 		}
 	}
-	log.Ctx(ctx).Info("[AlterSegments] done",
-		zap.Duration("total", time.Since(start)),
-		zap.Duration("buildSegmentKvs", buildSegmentKvsDur),
-		zap.Duration("buildBinlogKvs", buildBinlogKvsDur),
-		zap.Duration("saveByBatch", saveByBatchDur),
-		zap.Int("kvCount", len(kvs)),
-		zap.Int("segmentCount", len(segments)),
-		zap.Int("binlogIncrementCount", len(binlogs)),
+	mlog.Info(ctx, "[AlterSegments] done",
+		mlog.Duration("total", time.Since(start)),
+		mlog.Duration("buildSegmentKvs", buildSegmentKvsDur),
+		mlog.Duration("buildBinlogKvs", buildBinlogKvsDur),
+		mlog.Duration("saveByBatch", saveByBatchDur),
+		mlog.Int("kvCount", len(kvs)),
+		mlog.Int("segmentCount", len(segments)),
+		mlog.Int("binlogIncrementCount", len(binlogs)),
 	)
 	return nil
 }
