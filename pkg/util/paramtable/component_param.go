@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
