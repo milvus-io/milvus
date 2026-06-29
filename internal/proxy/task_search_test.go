@@ -6757,6 +6757,35 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding-list) fields in hybrid search")
 	})
 
+	t.Run("hybrid with search iterator v2 should fail", func(t *testing.T) {
+		qt := buildElementHybridTask("regular_vec", "", true, "")
+		qt.request.SubReqs[0].SearchParams = append(qt.request.SubReqs[0].SearchParams,
+			&commonpb.KeyValuePair{Key: SearchIterV2Key, Value: "True"},
+			&commonpb.KeyValuePair{Key: SearchIterBatchSizeKey, Value: "5"})
+
+		err := qt.initAdvancedSearchRequest(ctx)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "search iterator v2 is not supported for hybrid search")
+	})
+
+	t.Run("hybrid with search iterator v2 on second sub-request should fail", func(t *testing.T) {
+		qt := buildElementHybridTask("regular_vec", "", false, "")
+		secondSubReq := proto.Clone(qt.request.SubReqs[0]).(*milvuspb.SubSearchRequest)
+		secondSubReq.SearchParams = append(secondSubReq.SearchParams,
+			&commonpb.KeyValuePair{Key: IteratorField, Value: "True"},
+			&commonpb.KeyValuePair{Key: SearchIterV2Key, Value: "True"},
+			&commonpb.KeyValuePair{Key: SearchIterBatchSizeKey, Value: "5"})
+		qt.request.SubReqs = append(qt.request.SubReqs, secondSubReq)
+
+		err := qt.initAdvancedSearchRequest(ctx)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "search iterator v2 is not supported for hybrid search")
+	})
+
 	t.Run("hybrid with ArrayOfVector group by should fail", func(t *testing.T) {
 		qt := buildHybridTask("emb_vec", "", false, "scalar_field")
 		err := qt.initAdvancedSearchRequest(ctx)
