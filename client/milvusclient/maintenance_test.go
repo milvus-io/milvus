@@ -193,7 +193,6 @@ func (s *MaintenanceSuite) TestPrewarm() {
 	s.Run("success", func() {
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		namespace := fmt.Sprintf("ns_%s", s.randString(6))
-		fieldNames := []string{"id", "vector"}
 		replicaNum := rand.Intn(3) + 1
 		rgs := []string{"rg1", "rg2"}
 		loadParams := map[string]string{"load_priority": "low"}
@@ -201,8 +200,8 @@ func (s *MaintenanceSuite) TestPrewarm() {
 		s.mock.EXPECT().Prewarm(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.PrewarmRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, req.GetCollectionName())
 			s.Equal(namespace, req.GetNamespace())
-			s.ElementsMatch(fieldNames, req.GetLoadFields())
-			s.True(req.GetSkipLoadDynamicField())
+			s.Empty(req.GetLoadFields())
+			s.False(req.GetSkipLoadDynamicField())
 			s.EqualValues(replicaNum, req.GetReplicaNumber())
 			s.ElementsMatch(rgs, req.GetResourceGroups())
 			s.Equal(loadParams, req.GetLoadParams())
@@ -212,8 +211,6 @@ func (s *MaintenanceSuite) TestPrewarm() {
 		err := s.client.Prewarm(ctx, NewPrewarmOption(collectionName, namespace).
 			WithReplica(replicaNum).
 			WithResourceGroup(rgs...).
-			WithLoadFields(fieldNames...).
-			WithSkipLoadDynamicField(true).
 			WithLoadParam("load_priority", "low"))
 		s.NoError(err)
 	})

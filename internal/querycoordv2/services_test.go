@@ -2374,6 +2374,10 @@ func newBlockingQueryCoordJob(ctx context.Context, collectionID int64) *blocking
 }
 
 func (j *blockingQueryCoordJob) PreExecute() error {
+	return nil
+}
+
+func (j *blockingQueryCoordJob) Execute() error {
 	close(j.started)
 	select {
 	case <-j.release:
@@ -2383,84 +2387,88 @@ func (j *blockingQueryCoordJob) PreExecute() error {
 	}
 }
 
-func (j *blockingQueryCoordJob) Execute() error {
-	return nil
-}
-
 func (suite *ServiceSuite) TestPrewarmIsSerializedByJobScheduler() {
-	ctx := context.Background()
-	collectionID := int64(9003)
-	partitionID := int64(9004)
-	nodeID := int64(1)
-	segmentID := int64(9005)
-	namespace := "tenant-a"
-	schema := &schemapb.CollectionSchema{
-		EnableNamespace: true,
-		Properties: []*commonpb.KeyValuePair{
-			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
-		},
-	}
+	mockey.PatchConvey("TestPrewarmIsSerializedByJobScheduler", suite.T(), func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
-	collection := utils.CreateTestCollection(collectionID, 1)
-	collection.Schema = schema
-	partition := utils.CreateTestPartition(collectionID, partitionID)
-	partition.LoadPercentage = 100
-	suite.Require().NoError(suite.meta.PutCollection(ctx, collection, partition))
-	suite.dist.SegmentDistManager.Update(nodeID, utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 1, "test-channel"))
+		collectionID := int64(9003)
+		partitionID := int64(9004)
+		nodeID := int64(1)
+		segmentID := int64(9005)
+		namespace := "tenant-a"
+		schema := &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+		}
 
-	blockingJob := newBlockingQueryCoordJob(ctx, collectionID)
-	suite.jobScheduler.Add(blockingJob)
-	<-blockingJob.started
+		mockey.Mock((*Server).waitPrewarmPartitionLoaded).Return(nil).Build()
 
-	suite.cluster.EXPECT().
-		Prewarm(mock.Anything, nodeID, mock.MatchedBy(func(req *querypb.PrewarmRequest) bool {
-			return req.GetCollectionID() == collectionID &&
-				len(req.GetPartitionIDs()) == 1 && req.GetPartitionIDs()[0] == partitionID &&
-				len(req.GetSegmentIDs()) == 1 && req.GetSegmentIDs()[0] == segmentID
-		})).
-		Return(merr.Success(), nil).
-		Once()
+		suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+		collection := utils.CreateTestCollection(collectionID, 1)
+		collection.Schema = schema
+		partition := utils.CreateTestPartition(collectionID, partitionID)
+		partition.LoadPercentage = 100
+		suite.Require().NoError(suite.meta.PutCollection(ctx, collection, partition))
+		suite.dist.SegmentDistManager.Update(nodeID, utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 1, "test-channel"))
 
-	type prewarmResult struct {
-		status *commonpb.Status
-		err    error
-	}
-	done := make(chan prewarmResult, 1)
-	go func() {
-		status, err := suite.server.Prewarm(ctx, &querypb.PrewarmRequest{
-			Schema:       schema,
-			Namespace:    &namespace,
-			CollectionID: collectionID,
-			PartitionIDs: []int64{partitionID},
-		})
-		done <- prewarmResult{status: status, err: err}
-	}()
+		blockingJob := newBlockingQueryCoordJob(ctx, collectionID)
+		suite.jobScheduler.Add(blockingJob)
+		select {
+		case <-blockingJob.started:
+		case <-ctx.Done():
+			suite.FailNow("blocking job did not start")
+		}
 
-	select {
-	case result := <-done:
-		suite.Failf("prewarm completed before prior collection job", "status=%v err=%v", result.status, result.err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(blockingJob.release)
+		suite.cluster.EXPECT().
+			Prewarm(mock.Anything, nodeID, mock.MatchedBy(func(req *querypb.PrewarmRequest) bool {
+				return req.GetCollectionID() == collectionID &&
+					len(req.GetPartitionIDs()) == 1 && req.GetPartitionIDs()[0] == partitionID &&
+					len(req.GetSegmentIDs()) == 1 && req.GetSegmentIDs()[0] == segmentID
+			})).
+			Return(merr.Success(), nil).
+			Once()
 
-	select {
-	case result := <-done:
-		suite.NoError(result.err)
-		suite.True(merr.Ok(result.status))
-	case <-time.After(3 * time.Second):
-		suite.Fail("prewarm did not complete after prior collection job released")
-	}
+		type prewarmResult struct {
+			status *commonpb.Status
+			err    error
+		}
+		done := make(chan prewarmResult, 1)
+		go func() {
+			status, err := suite.server.Prewarm(ctx, &querypb.PrewarmRequest{
+				Schema:       schema,
+				Namespace:    &namespace,
+				CollectionID: collectionID,
+				PartitionIDs: []int64{partitionID},
+			})
+			done <- prewarmResult{status: status, err: err}
+		}()
+
+		select {
+		case result := <-done:
+			suite.Failf("prewarm completed before prior collection job", "status=%v err=%v", result.status, result.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(blockingJob.release)
+
+		select {
+		case result := <-done:
+			suite.NoError(result.err)
+			suite.True(merr.Ok(result.status))
+		case <-ctx.Done():
+			suite.Fail("prewarm did not complete after prior collection job released")
+		}
+	})
 }
 
-func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionCarriesLoadOptions() {
-	mockey.PatchConvey("TestPrewarmLoadMissingPartitionCarriesLoadOptions", suite.T(), func() {
+func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionUsesDefaultLoadFields() {
+	mockey.PatchConvey("TestPrewarmLoadMissingPartitionUsesDefaultLoadFields", suite.T(), func() {
 		ctx := context.Background()
 		collectionID := int64(9013)
 		partitionID := int64(9014)
 		namespace := "tenant-a"
-		fieldID := int64(101)
-		indexID := int64(201)
 		schema := &schemapb.CollectionSchema{
 			EnableNamespace: true,
 			Properties: []*commonpb.KeyValuePair{
@@ -2483,8 +2491,6 @@ func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionCarriesLoadOptions() {
 			Namespace:      &namespace,
 			CollectionID:   collectionID,
 			PartitionIDs:   []int64{partitionID},
-			FieldIndexID:   map[int64]int64{fieldID: indexID},
-			LoadFields:     []int64{fieldID},
 			Priority:       commonpb.LoadPriority_LOW,
 			ReplicaNumber:  3,
 			ResourceGroups: resourceGroups,
@@ -2494,8 +2500,8 @@ func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionCarriesLoadOptions() {
 		suite.Require().NotNil(captured)
 		suite.Equal(collectionID, captured.GetCollectionID())
 		suite.Equal([]int64{partitionID}, captured.GetPartitionIDs())
-		suite.Equal(map[int64]int64{fieldID: indexID}, captured.GetFieldIndexID())
-		suite.Equal([]int64{fieldID}, captured.GetLoadFields())
+		suite.Empty(captured.GetFieldIndexID())
+		suite.Empty(captured.GetLoadFields())
 		suite.Equal(commonpb.LoadPriority_LOW, captured.GetPriority())
 		suite.EqualValues(3, captured.GetReplicaNumber())
 		suite.Equal(resourceGroups, captured.GetResourceGroups())
@@ -2510,10 +2516,11 @@ func (suite *ServiceSuite) TearDownTest() {
 	assign.ResetGlobalAssignPolicyFactoryForTest()
 }
 
-func TestPrewarmRequestDoesNotExposeFieldIDs(t *testing.T) {
+func TestPrewarmRequestDoesNotExposeFieldMetadata(t *testing.T) {
 	prewarm := querypb.File_query_coord_proto.Messages().ByName(protoreflect.Name("PrewarmRequest"))
 	require.NotNil(t, prewarm)
-	assert.Nil(t, prewarm.Fields().ByName(protoreflect.Name("fieldIDs")))
+	assert.Nil(t, prewarm.Fields().ByName(protoreflect.Name("field_indexID")))
+	assert.Nil(t, prewarm.Fields().ByName(protoreflect.Name("load_fields")))
 }
 
 func TestValidatePrewarmRequest(t *testing.T) {

@@ -400,8 +400,6 @@ func (s *Server) ensurePrewarmPartitionLoaded(ctx context.Context, req *querypb.
 			CollectionID:    req.GetCollectionID(),
 			PartitionIDs:    req.GetPartitionIDs(),
 			Schema:          req.GetSchema(),
-			FieldIndexID:    req.GetFieldIndexID(),
-			LoadFields:      req.GetLoadFields(),
 			Priority:        req.GetPriority(),
 			ForceSyncWarmup: true,
 			ReplicaNumber:   req.GetReplicaNumber(),
