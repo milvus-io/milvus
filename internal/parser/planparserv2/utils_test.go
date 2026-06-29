@@ -1183,6 +1183,48 @@ func Test_checkValidModArith(t *testing.T) {
 	})
 }
 
+// Test_checkValidBitwiseArith tests bitwise operation validation.
+// Bitwise operators, like modulo, can only be applied to integer types.
+func Test_checkValidBitwiseArith(t *testing.T) {
+	bitwiseOps := []planpb.ArithOpType{
+		planpb.ArithOpType_BitAnd,
+		planpb.ArithOpType_BitOr,
+		planpb.ArithOpType_BitXor,
+	}
+	for _, op := range bitwiseOps {
+		op := op
+		t.Run(op.String()+" with integers is valid", func(t *testing.T) {
+			err := checkValidModArith(op,
+				schemapb.DataType_Int64, schemapb.DataType_None,
+				schemapb.DataType_Int64, schemapb.DataType_None)
+			assert.NoError(t, err)
+		})
+
+		t.Run(op.String()+" with integer array element is valid", func(t *testing.T) {
+			err := checkValidModArith(op,
+				schemapb.DataType_Array, schemapb.DataType_Int32,
+				schemapb.DataType_Int64, schemapb.DataType_None)
+			assert.NoError(t, err)
+		})
+
+		t.Run(op.String()+" with float left is invalid", func(t *testing.T) {
+			err := checkValidModArith(op,
+				schemapb.DataType_Float, schemapb.DataType_None,
+				schemapb.DataType_Int64, schemapb.DataType_None)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
+		})
+
+		t.Run(op.String()+" with double right is invalid", func(t *testing.T) {
+			err := checkValidModArith(op,
+				schemapb.DataType_Int64, schemapb.DataType_None,
+				schemapb.DataType_Double, schemapb.DataType_None)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "bitwise operations can only apply on integer types")
+		})
+	}
+}
+
 // Test_castRangeValue tests value casting for range operations
 // This ensures proper type validation and conversion for range expressions
 func Test_castRangeValue(t *testing.T) {

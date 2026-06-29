@@ -395,6 +395,21 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 			{`array_length(ArrayField) > {length}`, map[string]*schemapb.TemplateValue{
 				"length": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
 			}},
+			// bitwise operators with placeholder operand / value
+			{`(Int64Field & {mask}) == {target}`, map[string]*schemapb.TemplateValue{
+				"mask":   generateTemplateValue(schemapb.DataType_Int64, int64(12)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(4)),
+			}},
+			{`(Int64Field | {mask}) != 0`, map[string]*schemapb.TemplateValue{
+				"mask": generateTemplateValue(schemapb.DataType_Int64, int64(2)),
+			}},
+			{`(Int64Field ^ {mask}) < {target}`, map[string]*schemapb.TemplateValue{
+				"mask":   generateTemplateValue(schemapb.DataType_Int64, int64(7)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(1000)),
+			}},
+			{`(Int64Field & 4) == {target}`, map[string]*schemapb.TemplateValue{
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(4)),
+			}},
 		}
 
 		schemaH := newTestSchemaHelper(s.T())
@@ -441,6 +456,21 @@ func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 			}},
 			{`array_length(ArrayField) == {length}`, map[string]*schemapb.TemplateValue{
 				"length": generateTemplateValue(schemapb.DataType_String, "abc"),
+			}},
+			// bitwise operators reject non-integer placeholder operand / value
+			{`(Int64Field & {mask}) == {target}`, map[string]*schemapb.TemplateValue{
+				"mask":   generateTemplateValue(schemapb.DataType_String, "abc"),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(4)),
+			}},
+			{`(Int64Field & {mask}) == {target}`, map[string]*schemapb.TemplateValue{
+				"mask":   generateTemplateValue(schemapb.DataType_Int64, int64(4)),
+				"target": generateTemplateValue(schemapb.DataType_String, "abc"),
+			}},
+			// a float field must NOT become bitwise-able by hiding the operand
+			// behind a placeholder (the integer-only check still applies).
+			{`(FloatField & {mask}) == {target}`, map[string]*schemapb.TemplateValue{
+				"mask":   generateTemplateValue(schemapb.DataType_Int64, int64(4)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
 			}},
 		}
 
