@@ -251,7 +251,7 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
 		NumOfRows:     100,
 		InsertChannel: "ch1",
 	})
-	s.meta.segments.SetSegment(seg2.GetID(), seg2)
+	s.meta.segments.SetSegment(seg2.GetID(), seg2, 0)
 
 	// Create a job
 	job := &copySegmentJob{

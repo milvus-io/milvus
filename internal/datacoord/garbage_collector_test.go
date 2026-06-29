@@ -637,7 +637,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		catalog.EXPECT().DropSegmentIndex(mock.Anything, collID, partID, segID, buildID).Return(nil)
 
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -698,7 +698,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -751,7 +751,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().DropSegmentIndex(mock.Anything, collID, partID, segID, buildID).Return(nil)
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -4102,10 +4102,8 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_TextAndJSONStats(t *testing.T
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{1003: segment},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newCachedSegmentsInfoForTest(map[int64]*SegmentInfo{1003: segment}),
+		channelCPs:   newChannelCps(),
 	}
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
@@ -4159,10 +4157,8 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_TextAndJSONStats_SegmentNil(t
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{},
-		},
-		channelCPs: newChannelCps(),
+		segments:     NewCachedSegmentsInfo(),
+		channelCPs:   newChannelCps(),
 	}
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))

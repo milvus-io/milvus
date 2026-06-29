@@ -2506,7 +2506,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer pt.Reset(pt.DataCoordCfg.SegmentMaxSize.Key)
 
 		const mb = 1024 * 1024
-		s.meta.segments.segments[1].Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		s.meta.segments.GetSegment(1).Binlogs[0].Binlogs[0].MemorySize = 250 * mb
 
 		tr := s.tr
 		handler := NewNMockHandler(s.T())

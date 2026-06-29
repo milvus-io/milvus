@@ -24,6 +24,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
+func newCachedSegmentsInfoForTest(segments map[UniqueID]*SegmentInfo) *CachedSegmentsInfo {
+	cache := NewCachedSegmentsInfo()
+	for id, segment := range segments {
+		cache.SetSegment(id, segment, 0)
+	}
+	return cache
+}
+
 func TestCachedSegmentsInfo_TombstoneBlocksStaleWrite(t *testing.T) {
 	cache := NewCachedSegmentsInfo()
 	seg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1}}
