@@ -326,7 +326,7 @@ func (s *Server) initDataCoord() error {
 	if err = s.initShardSplitManager(); err != nil {
 		return err
 	}
-	log.Info("init shard split manager done")
+	mlog.Info(s.ctx, "init shard split manager done")
 
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")

@@ -401,7 +401,7 @@ func (r *recoveryStorageImpl) handleSplitShard(msg message.ImmutableSplitShardMe
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
 		vchannelInfo.ObserveSplitShard(msg)
 	}
-	r.Logger().Info("split shard", log.FieldMessage(msg))
+	r.Logger().Info(context.TODO(), "split shard", mlog.FieldMessage(msg))
 }
 
 // handleAlterWAL handles the alter WAL message.
@@ -544,7 +544,7 @@ func (r *recoveryStorageImpl) handleCreateVChannel(msg message.ImmutableCreateVC
 		return
 	}
 	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateVChannelMessage(msg)
-	r.Logger().Info("create vchannel", log.FieldMessage(msg))
+	r.Logger().Info(context.TODO(), "create vchannel", mlog.FieldMessage(msg))
 }
 
 // handleDropCollection handles the drop collection message.

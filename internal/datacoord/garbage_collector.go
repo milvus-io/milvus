@@ -844,7 +844,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		log := mlog.With(mlog.Int64("segmentID", segmentID))
 		segInsertChannel := segment.GetInsertChannel()
 		if gc.option.isChannelSplitting != nil && gc.option.isChannelSplitting(segInsertChannel) {
-			log.Info("skip GC segment since its channel is splitting", zap.String("channel", segInsertChannel))
+			log.Info(ctx, "skip GC segment since its channel is splitting", mlog.String("channel", segInsertChannel))
 			continue
 		}
 		if loadedSegments.Contain(segmentID) {

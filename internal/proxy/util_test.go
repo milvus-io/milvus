@@ -63,12 +63,14 @@ func TestAssignChannelsByPK_FlagEquivalence(t *testing.T) {
 	key := paramtable.Get().ProxyCfg.EnableRoutingTable.Key
 	paramtable.Get().Save(key, "false")
 	msgOff := &msgstream.InsertMsg{}
-	legacy := assignChannelsByPK(pks, ch, msgOff)
+	legacy, err := assignChannelsByPK(pks, ch, msgOff)
+	assert.NoError(t, err)
 	legacyHash := msgOff.HashValues
 
 	paramtable.Get().Save(key, "true")
 	msgOn := &msgstream.InsertMsg{}
-	routed := assignChannelsByPK(pks, ch, msgOn)
+	routed, err := assignChannelsByPK(pks, ch, msgOn)
+	assert.NoError(t, err)
 	routedHash := msgOn.HashValues
 
 	assert.Equal(t, legacy, routed)
@@ -82,13 +84,17 @@ func TestRouteDeleteHashValues_FlagEquivalence(t *testing.T) {
 
 	key := paramtable.Get().ProxyCfg.EnableRoutingTable.Key
 	paramtable.Get().Save(key, "false")
-	legacy := routeDeleteHashValues(pks, vChannels)
+	legacy, err := routeDeleteHashValues(pks, vChannels)
+	assert.NoError(t, err)
 	paramtable.Get().Save(key, "true")
-	routed := routeDeleteHashValues(pks, vChannels)
+	routed, err := routeDeleteHashValues(pks, vChannels)
+	assert.NoError(t, err)
 	paramtable.Get().Reset(key)
 
 	// flag-off must equal the legacy hash, and flag-on must equal flag-off.
-	assert.Equal(t, typeutil.HashPK2Channels(pks, vChannels), legacy)
+	expected, err := typeutil.HashPK2Channels(pks, vChannels)
+	assert.NoError(t, err)
+	assert.Equal(t, expected, legacy)
 	assert.Equal(t, legacy, routed)
 }
 

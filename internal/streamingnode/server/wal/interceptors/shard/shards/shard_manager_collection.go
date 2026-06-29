@@ -90,14 +90,14 @@ func (m *shardManagerImpl) checkIfVChannelCanBeWritten(collectionID int64) error
 // right before the SplitShard message; here only the fence state flips.
 func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) {
 	collectionID := msg.Header().CollectionId
-	logger := m.Logger().With(log.FieldMessage(msg))
+	logger := m.Logger().With(mlog.FieldMessage(msg))
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	collectionInfo, ok := m.collections[collectionID]
 	if !ok {
-		logger.Warn("collection not exists when splitting shard", zap.Int64("collectionID", collectionID))
+		logger.Warn(context.TODO(), "collection not exists when splitting shard", mlog.Int64("collectionID", collectionID))
 		return
 	}
 	if collectionInfo.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
@@ -108,22 +108,16 @@ func (m *shardManagerImpl) SplitShard(msg message.ImmutableSplitShardMessageV2) 
 	// record T_switch so an already-fenced re-fence can return it; the split
 	// coordinator recovers T_switch from here after a crash that lost it.
 	collectionInfo.SplitTimeTick = msg.TimeTick()
-	logger.Info("vchannel is fenced by shard split",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("splitTaskID", msg.Header().GetSplitTaskId()),
-		zap.Uint64("timetick", msg.TimeTick()))
+	logger.Info(context.TODO(), "vchannel is fenced by shard split",
+		mlog.Int64("collectionID", collectionID),
+		mlog.Int64("splitTaskID", msg.Header().GetSplitTaskId()),
+		mlog.Uint64("timetick", msg.TimeTick()))
 }
 
 // CreateCollection creates a new partition manager when create collection message is written into wal.
 // After CreateCollection is called, the ddl and dml on the collection can be applied.
 func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
-	collectionID := msg.Header().CollectionId
-	partitionIDs := msg.Header().PartitionIds
-	vchannel := msg.VChannel()
-	timetick := msg.TimeTick()
-	schema := msg.MustBody().GetCollectionSchema()
 	logger := m.Logger().With(mlog.FieldMessage(msg))
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.createCollectionLocked(msg.Header().CollectionId, msg.Header().PartitionIds, msg.VChannel(),
@@ -135,7 +129,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 // body shape, so it registers the collection for DML and segment assignment
 // on this pchannel exactly as CreateCollection does.
 func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableCreateVChannelMessageV2) {
-	logger := m.Logger().With(log.FieldMessage(msg))
+	logger := m.Logger().With(mlog.FieldMessage(msg))
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.createCollectionLocked(msg.Header().CollectionId, msg.Header().PartitionIds, msg.VChannel(),
@@ -144,7 +138,7 @@ func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableCreateVChannelMes
 
 // createCollectionLocked registers the collection and its partition managers on
 // this pchannel for DML and segment assignment. The caller must hold m.mu.
-func (m *shardManagerImpl) createCollectionLocked(collectionID int64, partitionIDs []int64, vchannel string, timetick uint64, schema *schemapb.CollectionSchema, logger *log.MLogger) {
+func (m *shardManagerImpl) createCollectionLocked(collectionID int64, partitionIDs []int64, vchannel string, timetick uint64, schema *schemapb.CollectionSchema, logger *mlog.Logger) {
 	if err := m.checkIfCollectionCanBeCreated(collectionID); err != nil {
 		logger.Warn(context.TODO(), "collection already exists")
 		return

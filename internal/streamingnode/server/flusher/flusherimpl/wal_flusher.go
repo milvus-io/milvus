@@ -292,7 +292,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	case message.MessageTypeCreateVChannel:
 		createVChannelMsg, err := message.AsImmutableCreateVChannelMessageV2(msg)
 		if err != nil {
-			impl.logger.DPanic("the message type is not CreateVChannelMessage", zap.Error(err))
+			impl.logger.DPanic(context.TODO(), "the message type is not CreateVChannelMessage", mlog.Err(err))
 			return nil
 		}
 		impl.flusherComponents.WhenCreateVChannel(createVChannelMsg)

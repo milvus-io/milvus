@@ -21,14 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -206,13 +204,13 @@ func (m *shardSplitManager) Start() {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		logger := log.Ctx(m.ctx).With(log.FieldComponent("shard-split-manager"))
-		logger.Info("shard split manager started")
+		logger := mlog.With(mlog.FieldComponent("shard-split-manager"))
+		logger.Info(m.ctx, "shard split manager started")
 		for {
 			interval := paramtable.Get().DataCoordCfg.ShardSplitCheckInterval.GetAsDuration(time.Second)
 			select {
 			case <-m.ctx.Done():
-				logger.Info("shard split manager stopped")
+				logger.Info(m.ctx, "shard split manager stopped")
 				return
 			case <-time.After(interval):
 				m.detectOnce()
@@ -233,7 +231,7 @@ func (m *shardSplitManager) Stop() {
 // collection and creates a split task for the shards over the thresholds.
 func (m *shardSplitManager) detectOnce() {
 	params := &paramtable.Get().DataCoordCfg
-	logger := log.Ctx(m.ctx).With(log.FieldComponent("shard-split-manager"))
+	logger := mlog.With(mlog.FieldComponent("shard-split-manager"))
 	if !params.ShardSplitEnable.GetAsBool() {
 		return
 	}
@@ -242,7 +240,7 @@ func (m *shardSplitManager) detectOnce() {
 		// yet part of the replication stream, so a replica would miss the topology
 		// change. Suppress the trigger while the cluster is replicating; the
 		// streamingnode fence is the backstop if a split somehow starts anyway.
-		logger.RatedWarn(60, "shard split trigger suppressed while replication/CDC is enabled")
+		logger.RatedWarn(m.ctx, 60, "shard split trigger suppressed while replication/CDC is enabled")
 		return
 	}
 	maxConcurrent := params.ShardSplitMaxConcurrentTasks.GetAsInt()
@@ -273,25 +271,25 @@ func (m *shardSplitManager) detectOnce() {
 				// but cannot be split further: the split point must fall on
 				// a namespace boundary, and its growth is bounded by the
 				// namespace hard limit instead.
-				logger.RatedWarn(60, "the shard over the split thresholds holds a single namespace, skip it",
-					zap.String("vchannel", stats.vchannel),
-					zap.Int64("size", stats.size),
-					zap.Int64("rows", stats.rows))
+				logger.RatedWarn(m.ctx, 60, "the shard over the split thresholds holds a single namespace, skip it",
+					mlog.String("vchannel", stats.vchannel),
+					mlog.Int64("size", stats.size),
+					mlog.Int64("rows", stats.rows))
 				continue
 			}
 			task, err := m.createTask(collection.ID, stats)
 			if err != nil {
-				logger.Warn("create shard split task failed",
-					zap.String("vchannel", stats.vchannel), zap.Error(err))
+				logger.Warn(m.ctx, "create shard split task failed",
+					mlog.String("vchannel", stats.vchannel), mlog.Err(err))
 				continue
 			}
-			logger.Info("shard split task created",
-				zap.Int64("taskID", task.GetTaskId()),
-				zap.Int64("collectionID", collection.ID),
-				zap.String("vchannel", stats.vchannel),
-				zap.Int64("size", stats.size),
-				zap.Int64("rows", stats.rows),
-				zap.Int("namespaceCount", stats.namespaceCount))
+			logger.Info(m.ctx, "shard split task created",
+				mlog.Int64("taskID", task.GetTaskId()),
+				mlog.Int64("collectionID", collection.ID),
+				mlog.String("vchannel", stats.vchannel),
+				mlog.Int64("size", stats.size),
+				mlog.Int64("rows", stats.rows),
+				mlog.Int("namespaceCount", stats.namespaceCount))
 			active++
 		}
 	}

@@ -1454,27 +1454,27 @@ func (c *Core) CommitShardSplitRouting(ctx context.Context, in *rootcoordpb.Comm
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("CommitShardSplitRouting")
 
-	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
-		zap.String("dbName", in.GetDbName()),
-		zap.String("collectionName", in.GetCollectionName()),
-		zap.Int64("collectionID", in.GetCollectionId()),
+	logger := mlog.With(mlog.String("role", typeutil.RootCoordRole),
+		mlog.String("dbName", in.GetDbName()),
+		mlog.String("collectionName", in.GetCollectionName()),
+		mlog.Int64("collectionID", in.GetCollectionId()),
 	)
-	log.Info("received request to commit shard split routing")
+	logger.Info(ctx, "received request to commit shard split routing")
 
 	if err := c.broadcastCommitShardSplitRouting(ctx, in); err != nil {
 		if errors.Is(err, errIgnoredAlterCollection) {
-			log.Info("shard split routing already committed at this version, ignore it")
+			logger.Info(ctx, "shard split routing already committed at this version, ignore it")
 			metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.SuccessLabel).Inc()
 			return merr.Success(), nil
 		}
-		log.Warn("failed to commit shard split routing", zap.Error(err))
+		logger.Warn(ctx, "failed to commit shard split routing", mlog.Err(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CommitShardSplitRouting", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CommitShardSplitRouting").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	log.Info("done to commit shard split routing")
+	logger.Info(ctx, "done to commit shard split routing")
 	return merr.Success(), nil
 }
 

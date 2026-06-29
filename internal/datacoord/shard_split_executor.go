@@ -21,13 +21,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -60,11 +59,11 @@ func (m *shardSplitManager) reapTerminalTask(task *datapb.SplitShardTask, retent
 		return
 	}
 	if err := m.catalog.DropSplitShardTask(m.ctx, task); err != nil {
-		m.taskLogger(task).Warn("reap the terminal split task failed, will retry", zap.Error(err))
+		m.taskLogger(task).Warn(m.ctx, "reap the terminal split task failed, will retry", mlog.Err(err))
 		return
 	}
 	m.tasks.Remove(task.GetTaskId())
-	m.taskLogger(task).Info("reaped the terminal split task")
+	m.taskLogger(task).Info(m.ctx, "reaped the terminal split task")
 }
 
 func (m *shardSplitManager) advanceTask(task *datapb.SplitShardTask) {
@@ -95,7 +94,7 @@ func (m *shardSplitManager) advanceAdopting(task *datapb.SplitShardTask) {
 			task.State = datapb.SplitShardTaskState_SplitShardTaskDone
 			task.EndTime = uint64(time.Now().Unix())
 		}); err != nil {
-			logger.Warn("persist the done split task failed", zap.Error(err))
+			logger.Warn(m.ctx, "persist the done split task failed", mlog.Err(err))
 			return
 		}
 		m.recordTerminalMetrics(m.mustGetTask(task.GetTaskId()))
@@ -103,7 +102,7 @@ func (m *shardSplitManager) advanceAdopting(task *datapb.SplitShardTask) {
 	}
 
 	if err := m.commitRouting(task, collection, schemapb.ShardState_ShardDropped, schemapb.ShardState_ShardNormal); err != nil {
-		logger.Warn("commit the adoption routing failed", zap.Error(err))
+		logger.Warn(m.ctx, "commit the adoption routing failed", mlog.Err(err))
 		return
 	}
 
@@ -111,11 +110,11 @@ func (m *shardSplitManager) advanceAdopting(task *datapb.SplitShardTask) {
 		task.State = datapb.SplitShardTaskState_SplitShardTaskDone
 		task.EndTime = uint64(time.Now().Unix())
 	}); err != nil {
-		logger.Warn("persist the adopted split task failed", zap.Error(err))
+		logger.Warn(m.ctx, "persist the adopted split task failed", mlog.Err(err))
 		return
 	}
 	m.recordTerminalMetrics(m.mustGetTask(task.GetTaskId()))
-	logger.Info("split routing adopted, task done")
+	logger.Info(m.ctx, "split routing adopted, task done")
 }
 
 // advancePreparing allocates the target vchannels and plans the split point.
@@ -145,7 +144,7 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 	if err != nil {
 		// e.g. not enough pchannels: skip this split (abort) with an alert,
 		// the trigger will fire again when the headroom recovers.
-		logger.Warn("allocate target vchannels failed, abort the split task", zap.Error(err))
+		logger.Warn(m.ctx, "allocate target vchannels failed, abort the split task", mlog.Err(err))
 		m.abortTask(task, err.Error())
 		return
 	}
@@ -154,7 +153,7 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 	if err != nil {
 		// the planner may not be ready (e.g. statistics still loading);
 		// stay in Preparing and retry on the next tick.
-		logger.RatedWarn(60, "plan split targets failed, stay in preparing", zap.Error(err))
+		logger.RatedWarn(m.ctx, 60, "plan split targets failed, stay in preparing", mlog.Err(err))
 		return
 	}
 
@@ -162,10 +161,10 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 		task.Targets = targets
 		task.State = datapb.SplitShardTaskState_SplitShardTaskFencing
 	}); err != nil {
-		logger.Warn("persist the planned split task failed", zap.Error(err))
+		logger.Warn(m.ctx, "persist the planned split task failed", mlog.Err(err))
 		return
 	}
-	logger.Info("split targets planned, advance to fencing", zap.Int("targets", len(targets)))
+	logger.Info(m.ctx, "split targets planned, advance to fencing", mlog.Int("targets", len(targets)))
 }
 
 // advanceFencing executes the write switch: it fences the source vchannel with
@@ -205,7 +204,7 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 			Targets:        toMessageSplitTargets(task.GetTargets()),
 		})
 		if err != nil && !errors.Is(err, streaming.ErrSourceVChannelFenced) {
-			logger.Warn("fence the source vchannel failed", zap.Error(err))
+			logger.Warn(m.ctx, "fence the source vchannel failed", mlog.Err(err))
 			return
 		}
 		// Record T_switch (the SplitShard message's time tick) so the
@@ -225,11 +224,11 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 				task.SwitchTimeTick = switchTimeTick
 			}
 		}); err != nil {
-			logger.Warn("persist the fenced flag failed", zap.Error(err))
+			logger.Warn(m.ctx, "persist the fenced flag failed", mlog.Err(err))
 			return
 		}
 		task = m.mustGetTask(task.GetTaskId())
-		logger.Info("source vchannel fenced")
+		logger.Info(m.ctx, "source vchannel fenced")
 	}
 
 	// The new vchannels are created strictly after the fence: a freshly
@@ -237,7 +236,7 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 	// so every message of the new WALs lands after the fence.
 	barrier, err := m.allocator.AllocTimestamp(m.ctx)
 	if err != nil {
-		logger.Warn("allocate the barrier timestamp failed", zap.Error(err))
+		logger.Warn(m.ctx, "allocate the barrier timestamp failed", mlog.Err(err))
 		return
 	}
 	// The target vchannels are ordinary vchannels: their genesis checkpoint is
@@ -256,7 +255,7 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 		BarrierTimeTick: barrier,
 		Targets:         toMessageSplitTargets(task.GetTargets()),
 	}); err != nil {
-		logger.Warn("create the target vchannels failed", zap.Error(err))
+		logger.Warn(m.ctx, "create the target vchannels failed", mlog.Err(err))
 		return
 	}
 
@@ -266,17 +265,17 @@ func (m *shardSplitManager) advanceFencing(task *datapb.SplitShardTask) {
 	// to querycoord until adoption). Idempotent by shard state, so a retry — and a
 	// crash before the state advances below — is safe.
 	if err := m.commitRouting(task, collection, schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating); err != nil {
-		logger.Warn("commit the split routing failed", zap.Error(err))
+		logger.Warn(m.ctx, "commit the split routing failed", mlog.Err(err))
 		return
 	}
 
 	if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
 		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
 	}); err != nil {
-		logger.Warn("persist the fenced split task failed", zap.Error(err))
+		logger.Warn(m.ctx, "persist the fenced split task failed", mlog.Err(err))
 		return
 	}
-	logger.Info("target vchannels created and routing committed, advance to redistributing")
+	logger.Info(m.ctx, "target vchannels created and routing committed, advance to redistributing")
 }
 
 // advanceRedistributing relabels one batch of the source shard's segments to
@@ -303,10 +302,10 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 		if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
 			task.State = datapb.SplitShardTaskState_SplitShardTaskAdopting
 		}); err != nil {
-			logger.Warn("persist the redistributed split task failed", zap.Error(err))
+			logger.Warn(m.ctx, "persist the redistributed split task failed", mlog.Err(err))
 			return
 		}
-		logger.Info("every segment of the source shard redistributed, advance to adopting")
+		logger.Info(m.ctx, "every segment of the source shard redistributed, advance to adopting")
 		return
 	}
 
@@ -341,8 +340,8 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 			// retry it next round: the planner refreshes its partition-key
 			// cache on a miss, so a namespace added mid-redistribution becomes
 			// routable instead of pinning the task in Redistributing forever.
-			logger.Warn("assign a segment to the split targets failed, skipping it this round",
-				zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+			logger.Warn(m.ctx, "assign a segment to the split targets failed, skipping it this round",
+				mlog.Int64("segmentID", segment.GetID()), mlog.Err(err))
 			skipped++
 			continue
 		}
@@ -350,17 +349,17 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 		relabeled = append(relabeled, segment.GetID())
 	}
 	if skipped > 0 {
-		logger.Warn("skipped compacting/importing/unroutable segments during relabel, retry on the next round",
-			zap.Int("skipped", skipped))
+		logger.Warn(m.ctx, "skipped compacting/importing/unroutable segments during relabel, retry on the next round",
+			mlog.Int("skipped", skipped))
 	}
 	if len(operators) == 0 {
 		return
 	}
 	if err := m.meta.UpdateSegmentsInfo(m.ctx, operators...); err != nil {
-		logger.Warn("relabel a batch of segments failed", zap.Error(err))
+		logger.Warn(m.ctx, "relabel a batch of segments failed", mlog.Err(err))
 		return
 	}
-	logger.Info("relabeled a batch of segments", zap.Int64s("segmentIDs", relabeled))
+	logger.Info(m.ctx, "relabeled a batch of segments", mlog.Int64s("segmentIDs", relabeled))
 }
 
 // updateTask clones the task, applies the mutation, persists it and then
@@ -378,7 +377,7 @@ func (m *shardSplitManager) updateTask(task *datapb.SplitShardTask, mutate func(
 // abortTask aborts a split task. Abort is only legal before the write fence.
 func (m *shardSplitManager) abortTask(task *datapb.SplitShardTask, reason string) {
 	if task.GetFenced() {
-		m.taskLogger(task).Error("refuse to abort a split task past the write fence", zap.String("reason", reason))
+		m.taskLogger(task).Error(m.ctx, "refuse to abort a split task past the write fence", mlog.String("reason", reason))
 		return
 	}
 	if err := m.updateTask(task, func(task *datapb.SplitShardTask) {
@@ -386,11 +385,11 @@ func (m *shardSplitManager) abortTask(task *datapb.SplitShardTask, reason string
 		task.FailReason = reason
 		task.EndTime = uint64(time.Now().Unix())
 	}); err != nil {
-		m.taskLogger(task).Warn("persist the aborted split task failed", zap.Error(err))
+		m.taskLogger(task).Warn(m.ctx, "persist the aborted split task failed", mlog.Err(err))
 		return
 	}
 	m.recordTerminalMetrics(m.mustGetTask(task.GetTaskId()))
-	m.taskLogger(task).Info("split task aborted", zap.String("reason", reason))
+	m.taskLogger(task).Info(m.ctx, "split task aborted", mlog.String("reason", reason))
 }
 
 func (m *shardSplitManager) mustGetTask(taskID int64) *datapb.SplitShardTask {
@@ -401,13 +400,13 @@ func (m *shardSplitManager) mustGetTask(taskID int64) *datapb.SplitShardTask {
 	return task
 }
 
-func (m *shardSplitManager) taskLogger(task *datapb.SplitShardTask) *log.MLogger {
-	return log.Ctx(m.ctx).With(
-		log.FieldComponent("shard-split-manager"),
-		zap.Int64("taskID", task.GetTaskId()),
-		zap.Int64("collectionID", task.GetCollectionId()),
-		zap.String("sourceVChannel", task.GetSourceVchannel()),
-		zap.String("state", task.GetState().String()))
+func (m *shardSplitManager) taskLogger(task *datapb.SplitShardTask) *mlog.Logger {
+	return mlog.With(
+		mlog.FieldComponent("shard-split-manager"),
+		mlog.Int64("taskID", task.GetTaskId()),
+		mlog.Int64("collectionID", task.GetCollectionId()),
+		mlog.String("sourceVChannel", task.GetSourceVchannel()),
+		mlog.String("state", task.GetState().String()))
 }
 
 // commitRouting commits the split's routing change into the collection meta via

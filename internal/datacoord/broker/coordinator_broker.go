@@ -332,9 +332,9 @@ func (b *coordinatorBroker) DescribeDatabase(ctx context.Context, dbName string)
 func (b *coordinatorBroker) CommitShardSplitRouting(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest) error {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
-	log := log.Ctx(ctx).With(
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.Int64("collectionID", req.GetCollectionId()),
+	log := mlog.With(
+		mlog.String("collectionName", req.GetCollectionName()),
+		mlog.Int64("collectionID", req.GetCollectionId()),
 	)
 
 	if req.Base == nil {
@@ -343,10 +343,10 @@ func (b *coordinatorBroker) CommitShardSplitRouting(ctx context.Context, req *ro
 
 	resp, err := b.mixCoord.CommitShardSplitRouting(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("CommitShardSplitRouting failed", zap.Error(err))
+		log.Warn(ctx, "CommitShardSplitRouting failed", mlog.Err(err))
 		return err
 	}
 
-	log.Info("CommitShardSplitRouting succeeded")
+	log.Info(ctx, "CommitShardSplitRouting succeeded")
 	return nil
 }

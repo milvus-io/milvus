@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap/zapcore"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -77,5 +77,5 @@ func TestSplitShardMessageTypeProperties(t *testing.T) {
 	assert.False(t, typ.IsSelfControlled())
 	assert.False(t, typ.IsDMLMessageType())
 	assert.False(t, typ.CanEnableCipher())
-	assert.Equal(t, zapcore.InfoLevel, typ.LogLevel())
+	assert.Equal(t, mlog.InfoLevel, typ.LogLevel())
 }

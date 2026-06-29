@@ -293,17 +293,17 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			ddn.msgHandler.HandleSchemaChange(ddn.ctx, schemaMsg.SchemaChangeMessage)
 		case commonpb.MsgType_SplitShard:
 			splitMsg := msg.(*adaptor.SplitShardMessageBody)
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", splitMsg.SplitShardMessage.TimeTick()),
-				zap.Int64s("segmentIDs", splitMsg.SplitShardMessage.Header().FlushedSegmentIds),
+			logger := mlog.With(
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", splitMsg.SplitShardMessage.TimeTick()),
+				mlog.Int64s("segmentIDs", splitMsg.SplitShardMessage.Header().FlushedSegmentIds),
 			)
-			logger.Info("receive split shard message")
+			logger.Info(ddn.ctx, "receive split shard message")
 			if err := ddn.msgHandler.HandleSplitShard(splitMsg.SplitShardMessage); err != nil {
-				logger.Warn("handle split shard message failed", zap.Error(err))
+				logger.Warn(ddn.ctx, "handle split shard message failed", mlog.Err(err))
 			} else {
-				logger.Info("handle split shard message success")
+				logger.Info(ddn.ctx, "handle split shard message success")
 			}
 		case commonpb.MsgType_AlterCollection:
 			alterCollectionMsg := msg.(*adaptor.AlterCollectionMessageBody)

@@ -545,10 +545,10 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	// routing lookup then rejects the write instead of silently mis-routing.
 	rangeRoutingTable, err := buildRangeRoutingTable(collection.GetRoutingMode(), collection.GetVirtualChannelNames(), collection.GetShardInfos())
 	if err != nil {
-		log.Ctx(ctx).Warn("build range routing table failed, fall back to no range routing",
-			zap.String("collectionName", collectionName),
-			zap.Int64("collectionID", collection.GetCollectionID()),
-			zap.Error(err))
+		mlog.Warn(ctx, "build range routing table failed, fall back to no range routing",
+			mlog.String("collectionName", collectionName),
+			mlog.Int64("collectionID", collection.GetCollectionID()),
+			mlog.Err(err))
 		rangeRoutingTable = nil
 	}
 

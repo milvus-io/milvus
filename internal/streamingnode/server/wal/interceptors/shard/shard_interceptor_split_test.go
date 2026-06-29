@@ -7,16 +7,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -40,10 +37,8 @@ func newTestSplitShardMutableMessage() message.MutableMessage {
 }
 
 func newTestShardInterceptor(t *testing.T) (interceptors.Interceptor, *mock_shards.MockShardManager) {
-	core, _ := observer.New(zapcore.WarnLevel)
-	logger := &log.MLogger{Logger: zap.New(core)}
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().Logger().Return(logger).Maybe()
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})

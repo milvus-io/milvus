@@ -1040,9 +1040,9 @@ func UpdateInsertChannelOperator(segmentID int64, channel string) UpdateOperator
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
-			log.Ctx(context.TODO()).Warn("meta update: update insert channel failed - segment not found",
-				zap.Int64("segmentID", segmentID),
-				zap.String("channel", channel))
+			mlog.Warn(context.TODO(), "meta update: update insert channel failed - segment not found",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("channel", channel))
 			return false
 		}
 		if segment.GetInsertChannel() == channel {

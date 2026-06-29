@@ -96,7 +96,7 @@ func (impl *shardInterceptor) handleCreateVChannel(ctx context.Context, msg mess
 	createVChannelMsg := message.MustAsMutableCreateVChannelMessageV2(msg)
 	header := createVChannelMsg.Header()
 	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
-		impl.shardManager.Logger().Warn("collection already exists when creating vchannel", zap.Int64("collectionID", header.GetCollectionId()))
+		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating vchannel", mlog.FieldCollectionID(header.GetCollectionId()))
 		// The collection can not be created at current shard, ignored.
 	}
 
