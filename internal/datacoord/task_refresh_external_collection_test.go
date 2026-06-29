@@ -560,7 +560,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		segments.SetSegment(1, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             1,
@@ -572,7 +572,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 				ManifestPath:   "old-manifest",
 				StorageVersion: 3,
 			},
-		})
+		}, 0)
 
 		mt := &meta{
 			catalog:     catalog,

@@ -1043,13 +1043,13 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("sort compaction normalizes stale import fallback start position", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2,
 			NumOfRows: 2, CommitTimestamp: 5000,
 			StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1000},
-		}})
+		}}, 0)
 
 		result := &datapb.CompactionPlanResult{
 			Segments: []*datapb.CompactionSegment{{SegmentID: 2, NumOfRows: 2}},
@@ -1073,21 +1073,21 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("mix compaction preserves fallback start while normalizing fallback dml", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 			NumOfRows: 2, CommitTimestamp: 5000,
 			StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1000},
 			DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1500},
-		}})
+		}}, 0)
 		latestSegments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 2, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 			NumOfRows: 3, CommitTimestamp: 0,
 			StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2000},
 			DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 3000},
-		}})
+		}}, 0)
 
 		result := &datapb.CompactionPlanResult{
 			Segments: []*datapb.CompactionSegment{{SegmentID: 10, NumOfRows: 5}},
@@ -1454,7 +1454,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("mix_compaction_uses_output_timestamps_when_normal_segment_precedes_import_commit", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:              1,
@@ -1483,7 +1483,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 				DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2500},
 			}},
 		} {
-			latestSegments.SetSegment(segID, segment)
+			latestSegments.SetSegment(segID, segment, 0)
 		}
 
 		result := &datapb.CompactionPlanResult{
@@ -3843,6 +3843,49 @@ func TestSegmentMetricFormatLabel(t *testing.T) {
 	}
 }
 
+func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25Statslogs []*datapb.FieldBinlog) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			segment.Binlogs = append(segment.GetBinlogs(), binlogs...)
+			segment.Statslogs = append(segment.GetStatslogs(), statslogs...)
+			segment.Deltalogs = append(segment.GetDeltalogs(), deltalogs...)
+			segment.Bm25Statslogs = append(segment.GetBm25Statslogs(), bm25Statslogs...)
+			return BinlogIncrement{
+				Binlogs:       segment.GetBinlogs(),
+				Statslogs:     segment.GetStatslogs(),
+				Deltalogs:     segment.GetDeltalogs(),
+				Bm25Statslogs: segment.GetBm25Statslogs(),
+			}, true
+		}},
+	}
+}
+
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25Statslogs []*datapb.FieldBinlog) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			segment.Binlogs = binlogs
+			segment.Statslogs = statslogs
+			segment.Deltalogs = deltalogs
+			segment.Bm25Statslogs = bm25Statslogs
+			return BinlogIncrement{
+				Binlogs:       binlogs,
+				Statslogs:     statslogs,
+				Deltalogs:     deltalogs,
+				Bm25Statslogs: bm25Statslogs,
+			}, true
+		}},
+	}
+}
+
+func UpdateStatusOperator(segmentID int64, state commonpb.SegmentState) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			segment.State = state
+			return BinlogIncrement{}, true
+		}},
+	}
+}
+
 func TestUpdateSegmentsInfoUpdatesSegmentFormatMetric(t *testing.T) {
 	metrics.DataCoordNumSegments.Reset()
 	meta, err := newMemoryMeta(t)
@@ -3948,24 +3991,23 @@ func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricWithStateChange(t *testing.
 	flushedLanceLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "lance-table"}
 	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(growingUnknownLabels...)))
 
-	err = meta.UpdateSegmentsInfo(context.TODO(),
-		UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
-		AddBinlogsOperator(1,
-			[]*datapb.FieldBinlog{
-				{
-					FieldID:     100,
-					ChildFields: []int64{100},
-					Format:      "lance-table",
-					Binlogs: []*datapb.Binlog{
-						{LogID: 10, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
-					},
+	mutations := UpdateStatusOperator(1, commonpb.SegmentState_Flushed)
+	mergeSegmentMutations(mutations, AddBinlogsOperator(1,
+		[]*datapb.FieldBinlog{
+			{
+				FieldID:     100,
+				ChildFields: []int64{100},
+				Format:      "lance-table",
+				Binlogs: []*datapb.Binlog{
+					{LogID: 10, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
 				},
 			},
-			nil,
-			nil,
-			nil,
-		),
-	)
+		},
+		nil,
+		nil,
+		nil,
+	))
+	err = meta.UpdateSegmentsInfo(context.TODO(), mutations)
 	require.NoError(t, err)
 
 	assert.Equal(t, float64(0), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(growingUnknownLabels...)))
@@ -3993,24 +4035,23 @@ func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricWithBinlogsBeforeStateChang
 	flushedParquetLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "parquet"}
 	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(importingUnknownLabels...)))
 
-	err = meta.UpdateSegmentsInfo(context.TODO(),
-		UpdateBinlogsOperator(1,
-			[]*datapb.FieldBinlog{
-				{
-					FieldID:     100,
-					ChildFields: []int64{100},
-					Format:      "parquet",
-					Binlogs: []*datapb.Binlog{
-						{LogID: 10, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
-					},
+	mutations := UpdateBinlogsOperator(1,
+		[]*datapb.FieldBinlog{
+			{
+				FieldID:     100,
+				ChildFields: []int64{100},
+				Format:      "parquet",
+				Binlogs: []*datapb.Binlog{
+					{LogID: 10, EntriesNum: 100, LogSize: 1000, MemorySize: 1000},
 				},
 			},
-			nil,
-			nil,
-			nil,
-		),
-		UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
+		},
+		nil,
+		nil,
+		nil,
 	)
+	mergeSegmentMutations(mutations, UpdateStatusOperator(1, commonpb.SegmentState_Flushed))
+	err = meta.UpdateSegmentsInfo(context.TODO(), mutations)
 	require.NoError(t, err)
 
 	assert.Equal(t, float64(0), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(importingUnknownLabels...)))

@@ -79,20 +79,11 @@ func (s *StorageVersionUpgradePolicySuite) SetupTest() {
 }
 
 func (s *StorageVersionUpgradePolicySuite) setPolicyMeta(collID int64, coll *collectionInfo, segments map[UniqueID]*SegmentInfo) {
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
-	}
-
 	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 	collections.Insert(collID, coll)
 
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
+		segments:    newCachedSegmentsInfoForTest(segments),
 		collections: collections,
 	}
 }

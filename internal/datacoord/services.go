@@ -747,18 +747,18 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				return BinlogIncrement{}, true
 			}
 			if seg.State == commonpb.SegmentState_Flushed && !reqCopy.GetDropped() {
-				log.Info("segment is already flushed, ignoring save binlog paths",
-					zap.Int64("segmentID", seg.GetID()))
+				mlog.Info(ctx, "segment is already flushed, ignoring save binlog paths",
+					mlog.Int64("segmentID", seg.GetID()))
 				validationSkipped = true
 				return BinlogIncrement{}, false
 			}
 			for _, cp := range reqCopy.GetCheckPoints() {
 				if cp.SegmentID == seg.GetID() && seg.GetDmlPosition() != nil &&
 					cp.GetPosition().GetTimestamp() < seg.GetDmlPosition().GetTimestamp() {
-					log.Info("dml time tick is stale, ignoring save binlog paths",
-						zap.Int64("segmentID", seg.GetID()),
-						zap.Uint64("incoming", cp.GetPosition().GetTimestamp()),
-						zap.Uint64("existing", seg.GetDmlPosition().GetTimestamp()))
+					mlog.Info(ctx, "dml time tick is stale, ignoring save binlog paths",
+						mlog.Int64("segmentID", seg.GetID()),
+						mlog.Uint64("incoming", cp.GetPosition().GetTimestamp()),
+						mlog.Uint64("existing", seg.GetDmlPosition().GetTimestamp()))
 					validationSkipped = true
 					return BinlogIncrement{}, false
 				}
