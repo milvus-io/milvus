@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -52,6 +53,7 @@ const (
 	TriggerTypeForceMerge
 	TriggerTypeStorageVersionUpgrade
 	TriggerTypeBumpSchemaVersion
+	TriggerTypeTarget
 )
 
 type TickerType int8
@@ -62,13 +64,14 @@ const (
 	SingleTicker
 	BumpSchemaVersionTicker
 	StorageVersionTicker
+	TargetTicker
 )
 
 func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
 	switch t {
 	case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
 		return datapb.CompactionType_Level0DeleteCompaction
-	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge:
+	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge, TriggerTypeTarget:
 		return datapb.CompactionType_MixCompaction
 	case TriggerTypeClustering:
 		return datapb.CompactionType_ClusteringCompaction
@@ -105,6 +108,8 @@ func (t CompactionTriggerType) String() string {
 		return "StorageVersionUpgrade"
 	case TriggerTypeBumpSchemaVersion:
 		return "BumpSchemaVersion"
+	case TriggerTypeTarget:
+		return "Target"
 	default:
 		return ""
 	}
@@ -125,7 +130,7 @@ type TriggerManager interface {
 	Start()
 	Stop()
 	OnCollectionUpdate(collectionID int64)
-	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool, targetSize int64) (UniqueID, error)
+	ManualTrigger(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error)
 	InitForceMergeMemoryQuerier(nodeManager session.NodeManager, mixCoord types.MixCoord, session sessionutil.SessionInterface)
 }
 
@@ -148,6 +153,7 @@ type CompactionTriggerManager struct {
 	forceMergePolicy            *forceMergeCompactionPolicy
 	upgradeStorageVersionPolicy *storageVersionUpgradePolicy
 	bumpSchemaVersionPolicy     *bumpSchemaVersionPolicy
+	targetReconciler            *compactionTargetReconciler
 
 	cancel  context.CancelFunc
 	closeWg sync.WaitGroup
@@ -172,6 +178,9 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
 	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)
 	m.bumpSchemaVersionPolicy = newBumpSchemaVersionPolicy(meta, m.allocator, m.handler)
+	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
+		m.targetReconciler = newCompactionTargetReconciler(meta)
+	}
 
 	// Initialize policies map for ticker handling
 	m.policies[L0Ticker] = m.l0Policy
@@ -179,6 +188,9 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.policies[SingleTicker] = m.singlePolicy
 	m.policies[BumpSchemaVersionTicker] = m.bumpSchemaVersionPolicy
 	m.policies[StorageVersionTicker] = m.upgradeStorageVersionPolicy
+	if m.targetReconciler != nil {
+		m.policies[TargetTicker] = m.targetReconciler
+	}
 	return m
 }
 
@@ -227,7 +239,9 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer storageVersionTicker.Stop()
 	bumpSchemaVersionTicker := time.NewTicker(Params.DataCoordCfg.BumpSchemaVersionCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer bumpSchemaVersionTicker.Stop()
-	mlog.Info(ctx, "Compaction trigger manager start")
+	targetTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer targetTicker.Stop()
+	log.Info(ctx, "Compaction trigger manager start")
 	for {
 		select {
 		case <-ctx.Done():
@@ -243,6 +257,10 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, StorageVersionTicker)
 		case <-bumpSchemaVersionTicker.C:
 			m.handleTicker(ctx, BumpSchemaVersionTicker)
+		case <-targetTicker.C:
+			if _, exists := m.policies[TargetTicker]; exists {
+				m.handleTicker(ctx, TargetTicker)
+			}
 		case segID := <-getStatsTaskChSingleton():
 			log.Info(ctx, "receive new segment to trigger sort compaction", mlog.Int64("segmentID", segID))
 			view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
@@ -289,9 +307,13 @@ func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType 
 	}
 }
 
-func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, isClustering bool, isL0 bool, targetSize int64) (UniqueID, error) {
+func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error) {
+	collectionID := req.GetCollectionID()
+	isClustering := req.GetMajorCompaction()
+	isL0 := req.GetL0Compaction()
+	targetSize := req.GetTargetSize()
 	mlog.Info(ctx, "receive manual trigger",
-		mlog.Int64("collectionID", collectionID),
+		mlog.FieldCollectionID(collectionID),
 		mlog.Bool("is clustering", isClustering),
 		mlog.Bool("is l0", isL0),
 		mlog.Int64("targetSize", targetSize))
@@ -306,6 +328,9 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 	if collection.IsExternal() {
 		return 0, merr.WrapErrParameterInvalidMsg(
 			"compaction is not supported for external collection")
+	}
+	if isTargetBasedManualRewriteCompactionRequest(req) {
+		return m.saveManualRewriteCompactionTarget(ctx, req)
 	}
 
 	var triggerID UniqueID
@@ -331,6 +356,36 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 		}
 	}
 	return triggerID, nil
+}
+
+func isManualRewriteCompactionRequest(req *milvuspb.ManualCompactionRequest) bool {
+	return req != nil &&
+		!req.GetMajorCompaction() &&
+		!req.GetL0Compaction() &&
+		req.GetTargetSize() == 0
+}
+
+func isTargetBasedManualRewriteCompactionRequest(req *milvuspb.ManualCompactionRequest) bool {
+	return Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() &&
+		isManualRewriteCompactionRequest(req)
+}
+
+func (m *CompactionTriggerManager) saveManualRewriteCompactionTarget(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error) {
+	if m.meta == nil {
+		return 0, merr.WrapErrServiceInternal("data coord meta is not initialized")
+	}
+	targetMeta := m.meta.GetCompactionTargetMeta()
+	if targetMeta == nil {
+		return 0, merr.WrapErrServiceInternal("compaction target meta is not initialized")
+	}
+	record, err := newManualRewriteCompactionTarget(req.GetCollectionID(), req.GetSegmentIds()).Create(ctx, m.allocator)
+	if err != nil {
+		return 0, err
+	}
+	if err := targetMeta.SaveCompactionTarget(ctx, record); err != nil {
+		return 0, err
+	}
+	return record.GetTargetID(), nil
 }
 
 func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context, eventType CompactionTriggerType,
@@ -368,7 +423,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitL0ViewToScheduler(ctx, outView)
 				case TriggerTypeClustering:
 					m.SubmitClusteringViewToScheduler(ctx, outView)
-				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade:
+				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade, TriggerTypeTarget:
 					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
 				case TriggerTypeForceMerge:
 					m.SubmitForceMergeViewToScheduler(ctx, outView)

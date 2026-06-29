@@ -237,6 +237,10 @@ type DataCoordCatalog interface {
 	ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error)
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
+	ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error)
+	SaveCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
+	UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error
+	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
 
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error

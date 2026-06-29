@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -563,7 +564,14 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 		return err
 	}
 
-	t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
+	taskCreateTS, err := c.allocator.AllocTimestamp(context.TODO())
+	if err != nil {
+		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
+		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
+		return err
+	}
+	startTime := tsoutil.PhysicalTime(taskCreateTS).Unix()
+	t.SetTask(t.ShadowClone(setStartTime(startTime), setCreateTs(taskCreateTS)))
 	err = t.SaveTaskMeta()
 	if err != nil {
 		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
