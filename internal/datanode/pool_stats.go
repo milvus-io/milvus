@@ -24,6 +24,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 )
 
+// initPools eagerly constructs the DataNode's long-lived goroutine pools so that
+// the first Prometheus scrape (which calls collectPoolStats) is a pure read and
+// never triggers pool creation, config-watch registration, or worker warmup as a
+// side effect of metric collection. Each getter is idempotent (sync.Once), so this
+// is safe to call once at startup.
+func initPools() {
+	compactor.GetExecPool()
+	index.GetVecIndexBuildPool()
+	importv2.GetExecPool()
+	io.GetOrCreateIOPool()
+	io.GetOrCreateStatsPool()
+}
+
 // collectPoolStats returns current thread-count stats for the DataNode's
 // long-lived goroutine pools. It is registered with metrics.SetDataNodePoolCollectFn
 // and invoked at Prometheus scrape time (pull model), mirroring the QueryNode path.

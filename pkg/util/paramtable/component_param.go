@@ -49,7 +49,6 @@ const (
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
-	DefaultBM25LoadThreadCoreCoefficient       = 1
 	DefaultThreadPoolMaxThreadsSize            = 16
 
 	DefaultSessionTTL        = 15 // s
@@ -236,7 +235,6 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
-	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
 	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
 	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
@@ -705,16 +703,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
-
-	p.BM25LoadThreadCoreCoefficient = ParamItem{
-		Key:          "common.threadCoreCoefficient.bm25Load",
-		Version:      "2.6.8",
-		DefaultValue: strconv.Itoa(DefaultBM25LoadThreadCoreCoefficient),
-		Doc: "This parameter specify how many times the number of threads " +
-			"is the number of cores in BM25 load pool",
-		Export: true,
-	}
-	p.BM25LoadThreadCoreCoefficient.Init(base.mgr)
 
 	p.ThreadPoolMaxThreadsSize = ParamItem{
 		Key:          "common.threadCoreCoefficient.maxThreadsSize",
