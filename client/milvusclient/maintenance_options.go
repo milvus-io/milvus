@@ -161,6 +161,69 @@ func NewLoadPartitionsOption(collectionName string, partitionsNames ...string) *
 	}
 }
 
+type PrewarmOption interface {
+	Request() *milvuspb.PrewarmRequest
+}
+
+var _ PrewarmOption = (*prewarmOption)(nil)
+
+type prewarmOption struct {
+	collectionName       string
+	namespace            string
+	replicaNum           int
+	resourceGroups       []string
+	loadFields           []string
+	skipLoadDynamicField bool
+	loadParams           map[string]string
+}
+
+func (opt *prewarmOption) Request() *milvuspb.PrewarmRequest {
+	return &milvuspb.PrewarmRequest{
+		CollectionName:       opt.collectionName,
+		Namespace:            &opt.namespace,
+		ReplicaNumber:        int32(opt.replicaNum),
+		ResourceGroups:       opt.resourceGroups,
+		LoadFields:           opt.loadFields,
+		SkipLoadDynamicField: opt.skipLoadDynamicField,
+		LoadParams:           opt.loadParams,
+	}
+}
+
+func (opt *prewarmOption) WithReplica(num int) *prewarmOption {
+	opt.replicaNum = num
+	return opt
+}
+
+func (opt *prewarmOption) WithResourceGroup(resourceGroups ...string) *prewarmOption {
+	opt.resourceGroups = resourceGroups
+	return opt
+}
+
+func (opt *prewarmOption) WithLoadFields(loadFields ...string) *prewarmOption {
+	opt.loadFields = loadFields
+	return opt
+}
+
+func (opt *prewarmOption) WithSkipLoadDynamicField(skipFlag bool) *prewarmOption {
+	opt.skipLoadDynamicField = skipFlag
+	return opt
+}
+
+func (opt *prewarmOption) WithLoadParam(key, value string) *prewarmOption {
+	if opt.loadParams == nil {
+		opt.loadParams = make(map[string]string)
+	}
+	opt.loadParams[key] = value
+	return opt
+}
+
+func NewPrewarmOption(collectionName string, namespace string) *prewarmOption {
+	return &prewarmOption{
+		collectionName: collectionName,
+		namespace:      namespace,
+	}
+}
+
 type GetLoadStateOption interface {
 	Request() *milvuspb.GetLoadStateRequest
 	ProgressRequest() *milvuspb.GetLoadingProgressRequest
