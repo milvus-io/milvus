@@ -114,6 +114,15 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
         return fmt::format("{}", expr_->ToString());
     }
 
+    // The GIS filter slices by its own batch cursor (GetNextBatchSize) and never
+    // reads the offset-input list, so it cannot serve the offset-input
+    // (iterative-filter / rescore) path. Report false so IterativeFilterNode
+    // takes its non-native fallback instead of feeding offsets into Eval.
+    bool
+    SupportOffsetInput() override {
+        return false;
+    }
+
     void
     MoveCursor() {
         if (segment_->type() == SegmentType::Sealed) {
