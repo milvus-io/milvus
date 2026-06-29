@@ -56,7 +56,7 @@ func (suite *StreamPipelineSuite) SetupTest() {
 	suite.msgDispatcher.EXPECT().Register(mock.Anything, mock.Anything).Return(suite.inChannel, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 	getter := mock_pipeline.NewMockLastestMVCCTimeTickGetter(suite.T())
-	getter.EXPECT().GetLatestRequiredMVCCTimeTick().Return(0)
+	getter.EXPECT().GetLatestRequiredMVCCTimeTick().Return(0).Maybe()
 	suite.pipeline = NewPipelineWithStream(suite.msgDispatcher, 0, false, suite.channel, nil, getter)
 	suite.length = 4
 }
