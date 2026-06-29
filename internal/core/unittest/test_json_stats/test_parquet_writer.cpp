@@ -1,5 +1,6 @@
 #include <arrow/type.h>
 #include <gtest/gtest.h>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <set>
@@ -11,6 +12,8 @@
 #include "gtest/gtest.h"
 #include "index/json_stats/parquet_writer.h"
 #include "index/json_stats/utils.h"
+#include "segcore/default_fs.h"
+#include "test_utils/Constants.h"
 
 namespace milvus::index {
 class ParquetWriterFactoryTest : public ::testing::Test {
@@ -107,6 +110,36 @@ TEST_F(ParquetWriterFactoryTest, CreateContextWithColumnGroups) {
 
     // All columns should be assigned to a group
     EXPECT_EQ(group_ids.size(), column_map_.size());
+}
+
+TEST_F(ParquetWriterFactoryTest, CloseReturnsStatusAndIsIdempotent) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto path_prefix =
+        std::filesystem::path(TestLocalPath) / "json_stats_writer_close";
+    std::filesystem::remove_all(path_prefix);
+    ASSERT_TRUE(std::filesystem::create_directories(path_prefix));
+
+    std::map<JsonKey, JsonKeyLayoutType> column_map = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/shared", JSONType::STRING), JsonKeyLayoutType::SHARED},
+    };
+
+    milvus_storage::StorageConfig storage_config;
+    JsonStatsParquetWriter writer(fs, storage_config, 16 * 1024 * 1024, 1024);
+    auto context =
+        ParquetWriterFactory::CreateContext(column_map, path_prefix.string());
+    writer.Init(std::move(context));
+
+    writer.AppendValue(JsonKey("/int", JSONType::INT64).ToColumnName(), "42");
+    writer.AppendSharedRow(nullptr, 0);
+    writer.AddCurrentRow();
+
+    auto status = writer.Close();
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    EXPECT_TRUE(writer.Close().ok());
+    EXPECT_FALSE(writer.GetPathsToSize().empty());
+
+    std::filesystem::remove_all(path_prefix);
 }
 
 }  // namespace milvus::index
