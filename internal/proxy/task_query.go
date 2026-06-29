@@ -927,8 +927,6 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
-	var err error
-	useNamespaceChannel := false
 	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
 		if err != nil {
@@ -940,8 +938,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 			return err
 		}
 		if ok {
-			useNamespaceChannel = true
-			err = t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
 				Db:              t.request.GetDbName(),
 				CollectionName:  t.collectionName,
 				CollectionID:    t.CollectionID,
@@ -949,19 +946,23 @@ func (t *queryTask) Execute(ctx context.Context) error {
 				Nq:              1,
 				Exec:            t.queryShard,
 				PreferredNodeID: preferredNodeForChannel(t.preferredNodes, channelName),
-			})
+			}); err != nil {
+				log.Warn(ctx, "fail to execute query", mlog.Err(err))
+				return errors.Wrap(err, "failed to query")
+			}
+
+			log.Debug(ctx, "Query Execute done.")
+			return nil
 		}
 	}
-	if !useNamespaceChannel {
-		err = t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-			Db:             t.request.GetDbName(),
-			CollectionID:   t.CollectionID,
-			CollectionName: t.collectionName,
-			Nq:             1,
-			Exec:           t.queryShard,
-			PreferredNodes: t.preferredNodes,
-		})
-	}
+	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+		Db:             t.request.GetDbName(),
+		CollectionID:   t.CollectionID,
+		CollectionName: t.collectionName,
+		Nq:             1,
+		Exec:           t.queryShard,
+		PreferredNodes: t.preferredNodes,
+	})
 	if err != nil {
 		log.Warn(ctx, "fail to execute query", mlog.Err(err))
 		return errors.Wrap(err, "failed to query")

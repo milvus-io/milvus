@@ -1215,8 +1215,6 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
-	var err error
-	useNamespaceChannel := false
 	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		channelNames, err := t.chMgr.getVChannels(t.CollectionID)
 		if err != nil {
@@ -1228,8 +1226,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 			return err
 		}
 		if ok {
-			useNamespaceChannel = true
-			err = t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
+			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
 				Db:              t.request.GetDbName(),
 				CollectionName:  t.collectionName,
 				CollectionID:    t.CollectionID,
@@ -1237,18 +1234,24 @@ func (t *searchTask) Execute(ctx context.Context) error {
 				Nq:              t.Nq,
 				Exec:            t.searchShard,
 				PreferredNodeID: preferredNodeFromConcurrentMap(t.queryChannelsNode, channelName),
-			})
+			}); err != nil {
+				log.Warn(ctx, "search execute failed", mlog.Err(err))
+				return errors.Wrap(err, "failed to search")
+			}
+
+			log.Debug(ctx, "Search Execute done.",
+				mlog.Int64("collection", t.GetCollectionID()),
+				mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
+			return nil
 		}
 	}
-	if !useNamespaceChannel {
-		err = t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-			Db:             t.request.GetDbName(),
-			CollectionID:   t.CollectionID,
-			CollectionName: t.collectionName,
-			Nq:             t.Nq,
-			Exec:           t.searchShard,
-		})
-	}
+	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+		Db:             t.request.GetDbName(),
+		CollectionID:   t.CollectionID,
+		CollectionName: t.collectionName,
+		Nq:             t.Nq,
+		Exec:           t.searchShard,
+	})
 	if err != nil {
 		log.Warn(ctx, "search execute failed", mlog.Err(err))
 		return errors.Wrap(err, "failed to search")
