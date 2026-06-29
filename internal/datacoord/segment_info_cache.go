@@ -6,7 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -138,7 +138,7 @@ func (s *CachedSegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInf
 	for _, toID := range compactTos {
 		to := s.GetSegment(toID)
 		if to == nil {
-			log.Warn("compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", toID))
+			mlog.Warn(context.TODO(), "compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", toID))
 			return nil, exist
 		}
 		result = append(result, to)
