@@ -183,6 +183,45 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRange) {
         {R"(age64 + 500 <= 2500)",
          [](int64_t v) { return (v + 500) <= 2500; },
          DataType::INT64},
+        // Bitwise AND/OR/XOR test cases for BinaryArithOpEvalRangeExpr,
+        // covering all six comparison ops across integer field widths.
+        // Masks/thresholds are chosen so each clause yields a MIX of true and
+        // false rows for DataGen's value ranges (int8 wraps to [-128,127],
+        // int16/int32 in [0,2000), int64 pk is a large random) -- a clause that
+        // is constant-true/false cannot catch an operator or comparison bug.
+        // AND
+        {R"((age8 & 1) == 1)",
+         [](int8_t v) { return (v & 1) == 1; },
+         DataType::INT8},
+        {R"((age8 & 2) != 0)",
+         [](int8_t v) { return (v & 2) != 0; },
+         DataType::INT8},
+        {R"((age32 & 8) >= 8)",
+         [](int32_t v) { return (v & 8) >= 8; },
+         DataType::INT32},
+        {R"((age64 & 12) == 4)",
+         [](int64_t v) { return (v & 12) == 4; },
+         DataType::INT64},
+        {R"((age64 & 7) > 3)",
+         [](int64_t v) { return (v & 7) > 3; },
+         DataType::INT64},
+        {R"((age64 & 8) == 8)",
+         [](int64_t v) { return (v & 8) == 8; },
+         DataType::INT64},
+        // OR (mid-range threshold keeps the result mixed)
+        {R"((age16 | 8) < 1000)",
+         [](int16_t v) { return (v | 8) < 1000; },
+         DataType::INT16},
+        {R"((age32 | 4) <= 1000)",
+         [](int32_t v) { return (v | 4) <= 1000; },
+         DataType::INT32},
+        // XOR (mid-range threshold keeps the result mixed)
+        {R"((age16 ^ 7) > 100)",
+         [](int16_t v) { return (v ^ 7) > 100; },
+         DataType::INT16},
+        {R"((age32 ^ 1023) < 1000)",
+         [](int32_t v) { return (v ^ 1023) < 1000; },
+         DataType::INT32},
     };
 
     auto schema = std::make_shared<Schema>();
@@ -633,6 +672,41 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeNullable) {
                  return (v + 500) <= 2500;
              },
              DataType::INT64},
+            // Bitwise AND/OR/XOR on nullable fields: a null row must NOT match
+            // (filter returns false), and a valid row must match the bitwise
+            // reference. Thresholds keep each clause's result mixed.
+            {R"((age8 & 1) == 1)",
+             [](int8_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (v & 1) == 1;
+             },
+             DataType::INT8},
+            {R"((age16 | 8) < 1000)",
+             [](int16_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (v | 8) < 1000;
+             },
+             DataType::INT16},
+            {R"((age32 ^ 1023) < 1000)",
+             [](int32_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (v ^ 1023) < 1000;
+             },
+             DataType::INT32},
+            {R"((age64_nullable & 8) == 8)",
+             [](int64_t v, bool valid) {
+                 if (!valid) {
+                     return false;
+                 }
+                 return (v & 8) == 8;
+             },
+             DataType::INT64},
         };
 
     auto schema = std::make_shared<Schema>();
@@ -886,6 +960,46 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                      array_length = array.count_elements();
                  }
                  return array_length != 4;
+             }},
+            // Bitwise AND/OR/XOR test cases over a JSON integer field.
+            // json["int"] is a large random value, so OR/XOR clauses compare
+            // against a mid-range threshold (1e9) to stay mixed; AND clauses
+            // test low bits directly.
+            {R"((json["int"] & 1) == 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val & 1) == 0;
+             }},
+            {R"((json["int"] & 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val & 1) != 0;
+             }},
+            {R"((json["int"] | 4) > 1000000000)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val | 4) > 1000000000;
+             }},
+            {R"((json["int"] & 6) >= 2)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val & 6) >= 2;
+             }},
+            {R"((json["int"] ^ 1023) > 1000000000)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val ^ 1023) > 1000000000;
+             }},
+            {R"((json["int"] & 8) == 8)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"int"});
+                 auto val = json.template at<int64_t>(pointer).value();
+                 return (val & 8) == 8;
              }},
             // Test cases for BinaryArithOpEvalRangeExpr GT of various data types
             {R"(json["int"] + 1 > 2)",
@@ -2005,6 +2119,26 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
             {"age32 % 100 <= 0",
              [](int32_t v) { return (v % 100) <= 0; },
              DataType::INT32},
+            // Bitwise AND/OR/XOR tests on the scalar-sort index path.
+            // Thresholds chosen to keep each clause's result mixed.
+            {"(age8 & 1) == 1",
+             [](int8_t v) { return (v & 1) == 1; },
+             DataType::INT8},
+            {"(age16 | 8) < 1000",
+             [](int16_t v) { return (v | 8) < 1000; },
+             DataType::INT16},
+            {"(age32 ^ 1023) < 1000",
+             [](int32_t v) { return (v ^ 1023) < 1000; },
+             DataType::INT32},
+            {"(age32 & 8) >= 8",
+             [](int32_t v) { return (v & 8) >= 8; },
+             DataType::INT32},
+            {"(age64 & 12) == 4",
+             [](int64_t v) { return (v & 12) == 4; },
+             DataType::INT64},
+            {"(age64 & 8) == 8",
+             [](int64_t v) { return (v & 8) == 8; },
+             DataType::INT64},
         };
 
     auto schema = std::make_shared<Schema>();
