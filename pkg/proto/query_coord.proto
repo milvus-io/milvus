@@ -299,6 +299,8 @@ message PrewarmRequest {
     map<int64, int64> field_indexID = 10;
     repeated int64 load_fields = 11;
     bool force_sync_warmup = 12;
+    int32 replica_number = 13;
+    repeated string resource_groups = 14;
 }
 
 message ReleasePartitionsRequest {
