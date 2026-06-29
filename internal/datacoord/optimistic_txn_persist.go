@@ -7,20 +7,21 @@ import (
 	"strings"
 	"sync"
 
+	tikverr "github.com/tikv/client-go/v2/error"
+	"github.com/tikv/client-go/v2/kv"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 var (
 	ErrKeyAlreadyExists = fmt.Errorf("key already exists")
 	ErrKeyNotFound      = fmt.Errorf("key not found")
 	// ErrCASFailed is returned by Commit when an Update op's expectedVersion
-	// doesn't match the backend's current ModRevision for that key. Callers
-	// that want read-modify-write semantics retry: re-read the latest version,
+	// doesn't match the backend's current version for that key. Callers that
+	// want read-modify-write semantics retry: re-read the latest version,
 	// re-mutate, re-commit.
 	ErrCASFailed = fmt.Errorf("CAS precondition failed")
 )
@@ -38,7 +39,7 @@ type OptimisticTxnPersist interface {
 //
 // Strict ops fail the commit if their precondition is violated:
 //   - Insert: key must not exist.
-//   - Update: key's ModRevision must equal expectedVersion (ErrCASFailed otherwise).
+//   - Update: key's version must equal expectedVersion (ErrCASFailed otherwise).
 //   - Delete: key must exist.
 //
 // Unconditional ops always succeed:
@@ -306,17 +307,30 @@ func (p *tikvPersist) Scan(ctx context.Context, prefix string) ([]string, [][]by
 	}
 	defer iter.Close()
 
-	var ks []string
-	var vals [][]byte
-	var vers []int64
+	var keyBytes [][]byte
 	for iter.Valid() {
-		ks = append(ks, string(iter.Key()))
-		v := append([]byte(nil), iter.Value()...)
-		vals = append(vals, v)
-		vers = append(vers, int64(txn.StartTS()))
+		keyBytes = append(keyBytes, append([]byte(nil), iter.Key()...))
 		if err := iter.Next(); err != nil {
 			return nil, nil, nil, err
 		}
+	}
+
+	entries, err := txn.BatchGet(ctx, keyBytes, kv.WithReturnCommitTS())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	ks := make([]string, 0, len(keyBytes))
+	vals := make([][]byte, 0, len(keyBytes))
+	vers := make([]int64, 0, len(keyBytes))
+	for _, key := range keyBytes {
+		entry, ok := entries[string(key)]
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("%w: %s", ErrKeyNotFound, string(key))
+		}
+		ks = append(ks, string(key))
+		vals = append(vals, append([]byte(nil), entry.Value...))
+		vers = append(vers, int64(entry.CommitTS))
 	}
 	return ks, vals, vers, nil
 }
@@ -350,82 +364,85 @@ func (t *tikvTxn) Remove(key string) {
 func (t *tikvTxn) Commit() ([]TxnResult, error) {
 	results := make([]TxnResult, len(t.ops))
 
-	err := retry.Do(t.ctx, func() error {
-		txn, err := t.persist.cli.Begin()
-		if err != nil {
-			return err
-		}
-		defer txn.Rollback()
-
-		anyWrite := false
-		for i, op := range t.ops {
-			keyBytes := []byte(op.key)
-			switch op.kind {
-			case opInsert:
-				_, err := txn.Get(t.ctx, keyBytes)
-				if err == nil {
-					return retry.Unrecoverable(fmt.Errorf("%w: %s", ErrKeyAlreadyExists, op.key))
-				}
-				if err := txn.Set(keyBytes, op.value); err != nil {
-					return err
-				}
-				results[i].Value = op.value
-				anyWrite = true
-
-			case opUpdate:
-				// TiKV doesn't expose per-key ModRevision; the transaction
-				// itself provides serializable-snapshot isolation, so a
-				// concurrent writer that committed between our read and this
-				// Set will cause the Commit to fail. expectedVersion is
-				// accepted for API symmetry but not checked here.
-				_ = op.expectedVersion
-				if err := txn.Set(keyBytes, op.value); err != nil {
-					return err
-				}
-				results[i].Value = op.value
-				anyWrite = true
-
-			case opDelete:
-				if _, err := txn.Get(t.ctx, keyBytes); err != nil {
-					return retry.Unrecoverable(fmt.Errorf("%w: %s", ErrKeyNotFound, op.key))
-				}
-				if err := txn.Delete(keyBytes); err != nil {
-					return err
-				}
-				anyWrite = true
-
-			case opPut:
-				if err := txn.Set(keyBytes, op.value); err != nil {
-					return err
-				}
-				results[i].Value = op.value
-				anyWrite = true
-
-			case opRemove:
-				if err := txn.Delete(keyBytes); err != nil {
-					return err
-				}
-				anyWrite = true
-			}
-		}
-
-		if !anyWrite {
-			return nil
-		}
-
-		cts := t.persist.captureCommitTS(txn)
-		err = txn.Commit(t.ctx)
-		if err == nil {
-			for i := range t.ops {
-				results[i].Version = int64(*cts)
-			}
-		}
-		return err
-	}, retry.AttemptAlways())
+	txn, err := t.persist.cli.Begin()
 	if err != nil {
 		return nil, err
 	}
+	defer txn.Rollback()
+
+	if err := t.validateTiKVTxn(txn); err != nil {
+		return nil, err
+	}
+
+	anyWrite := false
+	for i, op := range t.ops {
+		keyBytes := []byte(op.key)
+		switch op.kind {
+		case opInsert, opUpdate, opPut:
+			if err := txn.Set(keyBytes, op.value); err != nil {
+				return nil, err
+			}
+			results[i].Value = op.value
+			anyWrite = true
+
+		case opDelete, opRemove:
+			if err := txn.Delete(keyBytes); err != nil {
+				return nil, err
+			}
+			anyWrite = true
+		}
+	}
+
+	if !anyWrite {
+		return results, nil
+	}
+
+	cts := t.persist.captureCommitTS(txn)
+	if err := txn.Commit(t.ctx); err != nil {
+		return nil, err
+	}
+	for i := range t.ops {
+		results[i].Version = int64(*cts)
+	}
 	return results, nil
+}
+
+func (t *tikvTxn) validateTiKVTxn(txn *transaction.KVTxn) error {
+	for _, op := range t.ops {
+		keyBytes := []byte(op.key)
+		switch op.kind {
+		case opInsert:
+			_, err := txn.Get(t.ctx, keyBytes, kv.WithReturnCommitTS())
+			if err == nil {
+				return fmt.Errorf("%w: %s", ErrKeyAlreadyExists, op.key)
+			}
+			if !tikverr.IsErrNotFound(err) {
+				return err
+			}
+
+		case opUpdate:
+			entry, err := txn.Get(t.ctx, keyBytes, kv.WithReturnCommitTS())
+			if tikverr.IsErrNotFound(err) {
+				return fmt.Errorf("%w: %s", ErrKeyNotFound, op.key)
+			}
+			if err != nil {
+				return err
+			}
+			if int64(entry.CommitTS) != op.expectedVersion {
+				return fmt.Errorf("%w: %s", ErrCASFailed, op.key)
+			}
+
+		case opDelete:
+			_, err := txn.Get(t.ctx, keyBytes, kv.WithReturnCommitTS())
+			if tikverr.IsErrNotFound(err) {
+				return fmt.Errorf("%w: %s", ErrKeyNotFound, op.key)
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ============================================================

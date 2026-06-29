@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -149,7 +149,7 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 func UpdateManifestVersion(segmentID int64, manifestVersion int64) SegmentOperator {
 	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.GetManifestPath() == "" {
-			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - no manifest path",
+			mlog.Warn(context.TODO(), "meta update: update manifest version failed - no manifest path",
 				zap.Int64("segmentID", segmentID))
 			return BinlogIncrement{}, false
 		}
@@ -162,7 +162,7 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) SegmentOperat
 		// ManifestPath between pre-check and this apply.
 		if currentVer >= manifestVersion {
 			if currentVer > manifestVersion {
-				log.Ctx(context.TODO()).Warn("meta update: update manifest version rejected - would regress",
+				mlog.Warn(context.TODO(), "meta update: update manifest version rejected - would regress",
 					zap.Int64("segmentID", segmentID),
 					zap.Int64("currentVer", currentVer),
 					zap.Int64("incomingVer", manifestVersion))
@@ -224,7 +224,7 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 
 			if segment.GetManifestPath() == "" {
 				if err := binlog.CompressFieldBinlogs(deltalogs); err != nil {
-					log.Ctx(context.TODO()).Warn("meta update: compress L0 deltalog failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+					mlog.Warn(context.TODO(), "meta update: compress L0 deltalog failed", zap.Int64("segmentID", segmentID), zap.Error(err))
 					return BinlogIncrement{}, false
 				}
 			} else {
@@ -235,7 +235,7 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 				if manifestPath == "" {
 					entries, err := buildL0V3DeltaLogEntries(segmentID, deltalogs)
 					if err != nil {
-						log.Ctx(context.TODO()).Warn("meta update: build L0 V3 delta entries failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+						mlog.Warn(context.TODO(), "meta update: build L0 V3 delta entries failed", zap.Int64("segmentID", segmentID), zap.Error(err))
 						return BinlogIncrement{}, false
 					}
 					if len(entries) == 0 {
@@ -243,7 +243,7 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 					}
 					manifestPath, err = packed.AddDeltaLogsToManifestOverwrite(segment.GetManifestPath(), storageConfig, entries)
 					if err != nil {
-						log.Ctx(context.TODO()).Warn("meta update: commit L0 V3 delta manifest failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+						mlog.Warn(context.TODO(), "meta update: commit L0 V3 delta manifest failed", zap.Int64("segmentID", segmentID), zap.Error(err))
 						return BinlogIncrement{}, false
 					}
 					if committedV3Manifests != nil {
@@ -251,7 +251,7 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 					}
 				}
 				if err := updateManifestPathIfNewer(segment, manifestPath); err != nil {
-					log.Ctx(context.TODO()).Warn("meta update: update L0 V3 manifest failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+					mlog.Warn(context.TODO(), "meta update: update L0 V3 manifest failed", zap.Int64("segmentID", segmentID), zap.Error(err))
 					return BinlogIncrement{}, false
 				}
 				clearBinlogPaths(deltalogs)
@@ -272,7 +272,7 @@ func ResetImportingSegmentRows(segmentIDs ...int64) map[int64][]SegmentOperator 
 		segID := segmentID
 		mutations[segID] = []SegmentOperator{func(segment *SegmentInfo) (BinlogIncrement, bool) {
 			if segment.GetState() != commonpb.SegmentState_Importing {
-				log.Ctx(context.TODO()).Warn("meta update: reset importing segment rows skipped - segment not in Importing state",
+				mlog.Warn(context.TODO(), "meta update: reset importing segment rows skipped - segment not in Importing state",
 					zap.Int64("segmentID", segID),
 					zap.String("state", segment.GetState().String()))
 				return BinlogIncrement{}, false
@@ -300,7 +300,7 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) map[int64][]SegmentOperat
 					}
 				}
 				if ts < maxTsTo {
-					log.Ctx(context.TODO()).Error("meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
+					mlog.Error(context.TODO(), "meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
 						zap.Int64("segmentID", segmentID),
 						zap.Uint64("commitTs", ts),
 						zap.Uint64("maxBinlogTimestampTo", maxTsTo))
