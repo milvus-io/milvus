@@ -80,13 +80,15 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 		panic("unreachable code, message must be a txn message")
 	}
 
+	txnTraceCtx := message.ExtractTraceContext(context.Background(), msg)
 	tsMsgs := make([]msgstream.TsMsg, 0, txnMsg.Size())
 	err := txnMsg.RangeOver(func(im message.ImmutableMessage) error {
 		var tsMsg msgstream.TsMsg
-		tsMsg, err := parseSingleMsg(im)
+		tsMsg, err := parseSingleMsgPayload(im)
 		if err != nil {
 			return err
 		}
+		tsMsg.SetTraceCtx(txnTraceCtx)
 		tsMsgs = append(tsMsgs, tsMsg)
 		return nil
 	})
@@ -98,6 +100,15 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 
 // parseSingleMsg converts message to ts message.
 func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	tsMsg, err := parseSingleMsgPayload(msg)
+	if err != nil {
+		return nil, err
+	}
+	tsMsg.SetTraceCtx(message.ExtractTraceContext(context.Background(), msg))
+	return tsMsg, nil
+}
+
+func parseSingleMsgPayload(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	var tsMsg msgstream.TsMsg
 	var err error
 	switch msg.Version() {
@@ -111,7 +122,6 @@ func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	if err != nil {
 		return nil, err
 	}
-	tsMsg.SetTraceCtx(message.ExtractTraceContext(context.Background(), msg))
 	return tsMsg, nil
 }
 

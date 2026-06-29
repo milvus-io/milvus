@@ -253,6 +253,7 @@ func (c *consumerImpl) handleTxnMessage(ctx context.Context, msg message.Immutab
 			return nil
 		}
 		ctx = startDistConsumeSpanForMessage(ctx, msg)
+		overwriteTxnMessagesTraceContext(ctx, message.AsImmutableTxnMessage(msg))
 		if result := c.msgHandler.Handle(message.HandleParam{
 			Ctx:     ctx,
 			Message: msg,
@@ -274,4 +275,13 @@ func startDistConsumeSpanForMessage(ctx context.Context, msg message.ImmutableMe
 	message.OverwriteTraceContext(ctx, msg)
 	span.End()
 	return ctx
+}
+
+func overwriteTxnMessagesTraceContext(ctx context.Context, txnMsg message.ImmutableTxnMessage) {
+	message.OverwriteTraceContext(ctx, txnMsg.Begin())
+	_ = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
+		message.OverwriteTraceContext(ctx, msg)
+		return nil
+	})
+	message.OverwriteTraceContext(ctx, txnMsg.Commit())
 }
