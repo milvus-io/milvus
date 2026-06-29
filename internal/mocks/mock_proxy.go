@@ -7643,6 +7643,65 @@ func (_c *MockProxy_PinSnapshotData_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// Prewarm provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) Prewarm(_a0 context.Context, _a1 *milvuspb.PrewarmRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Prewarm")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PrewarmRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PrewarmRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.PrewarmRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_Prewarm_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prewarm'
+type MockProxy_Prewarm_Call struct {
+	*mock.Call
+}
+
+// Prewarm is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.PrewarmRequest
+func (_e *MockProxy_Expecter) Prewarm(_a0 interface{}, _a1 interface{}) *MockProxy_Prewarm_Call {
+	return &MockProxy_Prewarm_Call{Call: _e.mock.On("Prewarm", _a0, _a1)}
+}
+
+func (_c *MockProxy_Prewarm_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.PrewarmRequest)) *MockProxy_Prewarm_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.PrewarmRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_Prewarm_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_Prewarm_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_Prewarm_Call) RunAndReturn(run func(context.Context, *milvuspb.PrewarmRequest) (*commonpb.Status, error)) *MockProxy_Prewarm_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PushClientCommand provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) PushClientCommand(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	ret := _m.Called(_a0, _a1)
