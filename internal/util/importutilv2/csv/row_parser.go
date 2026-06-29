@@ -709,55 +709,11 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 }
 
 func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.FieldSchema) (*schemapb.VectorField, error) {
-	elementType := field.GetElementType()
-	switch elementType {
-	case schemapb.DataType_FloatVector:
-		dim, err := typeutil.GetDim(field)
-		if err != nil {
-			return nil, err
-		}
-		values := make([]float32, 0, len(vectors)*int(dim))
-
-		for _, vectorAny := range vectors {
-			var vector []float32
-			v, ok := vectorAny.([]interface{})
-			if !ok {
-				return nil, r.wrapTypeError(vectorAny, field)
-			}
-			vector = make([]float32, len(v))
-			for i, elem := range v {
-				value, ok := elem.(json.Number)
-				if !ok {
-					return nil, r.wrapArrayValueTypeError(elem, elementType)
-				}
-				num, err := strconv.ParseFloat(value.String(), 32)
-				if err != nil {
-					return nil, merr.Wrap(err, "failed to parse float")
-				}
-				vector[i] = float32(num)
-			}
-
-			if len(vector) != int(dim) {
-				return nil, r.wrapDimError(len(vector), field)
-			}
-			values = append(values, vector...)
-		}
-
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_FloatVector{
-				FloatVector: &schemapb.FloatArray{
-					Data: values,
-				},
-			},
-		}, nil
-
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_BinaryVector,
-		schemapb.DataType_Int8Vector, schemapb.DataType_SparseFloatVector:
-		return nil, merr.WrapErrImportFailedMsg("not implemented element type for CSV: %s", elementType.String())
-	default:
-		return nil, merr.WrapErrImportFailedMsg("unsupported element type: %s", elementType.String())
+	dim, err := typeutil.GetDim(field)
+	if err != nil {
+		return nil, err
 	}
+	return common.ArrayOfVectorToFieldData(vectors, field, int(dim))
 }
 
 func (r *rowParser) wrapTypeError(v any, field *schemapb.FieldSchema) error {
