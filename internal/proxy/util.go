@@ -2666,7 +2666,7 @@ func assignChannelsByChannel(channelID uint32, channelNames []string, insertMsg 
 	channel2RowOffsets := map[string][]int{
 		channelName: make([]int, 0, insertMsg.NRows()),
 	}
-	for i := 0; i < insertMsg.NRows(); i++ {
+	for i := range insertMsg.HashValues {
 		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], i)
 	}
 	return channel2RowOffsets

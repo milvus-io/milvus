@@ -1080,7 +1080,6 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		SearchByPrimaryKeys:   false,
 		SubReqs:               nil,
 		FunctionScore:         req.FunctionScore,
-		Namespace:             req.Namespace,
 	}
 
 	for _, sub := range req.GetRequests() {

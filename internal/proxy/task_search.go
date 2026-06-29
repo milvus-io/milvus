@@ -1168,13 +1168,13 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 	if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		hashedPartitionNames, err := assignNamespacePartitionKey(t.ctx, t.request.GetDbName(), t.collectionName, t.request.Namespace)
 		if err != nil {
-			log.Ctx(t.ctx).Warn("failed to assign namespace partition key", zap.Error(err))
+			mlog.Warn(t.ctx, "failed to assign namespace partition key", mlog.Err(err))
 			return nil, err
 		}
 		if len(hashedPartitionNames) > 0 {
 			PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
 			if err2 != nil {
-				log.Ctx(t.ctx).Warn("failed to get namespace partition ids", zap.Error(err2))
+				mlog.Warn(t.ctx, "failed to get namespace partition ids", mlog.Err(err2))
 				return nil, err2
 			}
 			return PartitionIDs, nil
