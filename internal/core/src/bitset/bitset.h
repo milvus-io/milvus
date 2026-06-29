@@ -913,49 +913,103 @@ class BitsetBase {
             }
         } else if (a_op == ArithOpType::BitAnd) {
             if (cmp_op == CompareOpType::EQ) {
-                this->inplace_arith_compare<T, ArithOpType::BitAnd, CompareOpType::EQ>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitAnd,
+                                            CompareOpType::EQ>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::GE) {
-                this->inplace_arith_compare<T, ArithOpType::BitAnd, CompareOpType::GE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitAnd,
+                                            CompareOpType::GE>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::GT) {
-                this->inplace_arith_compare<T, ArithOpType::BitAnd, CompareOpType::GT>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitAnd,
+                                            CompareOpType::GT>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::LE) {
-                this->inplace_arith_compare<T, ArithOpType::BitAnd, CompareOpType::LE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitAnd,
+                                            CompareOpType::LE>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::LT) {
-                this->inplace_arith_compare<T, ArithOpType::BitAnd, CompareOpType::LT>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitAnd,
+                                            CompareOpType::LT>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::NE) {
-                this->inplace_arith_compare<T, ArithOpType::BitAnd, CompareOpType::NE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitAnd,
+                                            CompareOpType::NE>(
+                    src, right_operand, value, size);
             } else {
                 // unimplemented
             }
         } else if (a_op == ArithOpType::BitOr) {
             if (cmp_op == CompareOpType::EQ) {
-                this->inplace_arith_compare<T, ArithOpType::BitOr, CompareOpType::EQ>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitOr,
+                                            CompareOpType::EQ>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::GE) {
-                this->inplace_arith_compare<T, ArithOpType::BitOr, CompareOpType::GE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitOr,
+                                            CompareOpType::GE>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::GT) {
-                this->inplace_arith_compare<T, ArithOpType::BitOr, CompareOpType::GT>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitOr,
+                                            CompareOpType::GT>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::LE) {
-                this->inplace_arith_compare<T, ArithOpType::BitOr, CompareOpType::LE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitOr,
+                                            CompareOpType::LE>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::LT) {
-                this->inplace_arith_compare<T, ArithOpType::BitOr, CompareOpType::LT>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitOr,
+                                            CompareOpType::LT>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::NE) {
-                this->inplace_arith_compare<T, ArithOpType::BitOr, CompareOpType::NE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitOr,
+                                            CompareOpType::NE>(
+                    src, right_operand, value, size);
             } else {
                 // unimplemented
             }
         } else if (a_op == ArithOpType::BitXor) {
             if (cmp_op == CompareOpType::EQ) {
-                this->inplace_arith_compare<T, ArithOpType::BitXor, CompareOpType::EQ>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitXor,
+                                            CompareOpType::EQ>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::GE) {
-                this->inplace_arith_compare<T, ArithOpType::BitXor, CompareOpType::GE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitXor,
+                                            CompareOpType::GE>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::GT) {
-                this->inplace_arith_compare<T, ArithOpType::BitXor, CompareOpType::GT>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitXor,
+                                            CompareOpType::GT>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::LE) {
-                this->inplace_arith_compare<T, ArithOpType::BitXor, CompareOpType::LE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitXor,
+                                            CompareOpType::LE>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::LT) {
-                this->inplace_arith_compare<T, ArithOpType::BitXor, CompareOpType::LT>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitXor,
+                                            CompareOpType::LT>(
+                    src, right_operand, value, size);
             } else if (cmp_op == CompareOpType::NE) {
-                this->inplace_arith_compare<T, ArithOpType::BitXor, CompareOpType::NE>(src, right_operand, value, size);
+                this->inplace_arith_compare<T,
+                                            ArithOpType::BitXor,
+                                            CompareOpType::NE>(
+                    src, right_operand, value, size);
             } else {
                 // unimplemented
             }
