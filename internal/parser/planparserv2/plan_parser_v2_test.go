@@ -137,6 +137,30 @@ func TestExpr_Term(t *testing.T) {
 	}
 }
 
+func TestExpr_NullLiteral(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// NULL is not a value literal: it must be rejected wherever it appears as a
+	// bare identifier, including inside an `in` value list (issue #50882).
+	// Use `<field> is null` / `is not null` to compare against null instead.
+	exprStrs := []string{
+		`Int64Field in [6560, NULL, 6722]`,
+		`Int64Field in [null]`,
+		`Int64Field not in [1, Null]`,
+		`Int64Field == NULL`,
+		`NULL in [1, 2]`,
+	}
+	for _, exprStr := range exprStrs {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+
+	// `is null` / `is not null` keep working.
+	assertValidExpr(t, helper, `Int64Field is null`)
+	assertValidExpr(t, helper, `Int64Field is not null`)
+}
+
 func TestExpr_Call(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
