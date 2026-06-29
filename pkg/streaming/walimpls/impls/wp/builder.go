@@ -2,6 +2,7 @@ package wp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -42,6 +44,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if err != nil {
 		return nil, err
 	}
+	wpMetrics.RegisterClientMetricsWithRegisterer(metrics.GetRegisterer())
 	var storageClient wpStorageClient.ObjectStorage
 	if cfg.Woodpecker.Storage.IsStorageMinio() {
 		storageClient, err = wpStorageClient.NewObjectStorage(context.Background(), cfg)
@@ -50,17 +53,22 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		}
 		log.Ctx(context.Background()).Info("create minio handler finish while building wp opener")
 	}
-	etcdCli, err := b.getEtcdClient(context.TODO())
+	etcdCli, err := getEtcdClient(context.TODO())
 	if err != nil {
 		return nil, err
 	}
 	log.Ctx(context.Background()).Info("create etcd client finish while building wp opener")
-	wpClient, err := woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, storageClient, true)
+	var wpClient woodpecker.Client
+	if cfg.Woodpecker.Storage.IsStorageService() {
+		wpClient, err = woodpecker.NewClient(context.Background(), cfg, etcdCli, true)
+	} else {
+		wpMetrics.RegisterServerMetricsWithRegisterer(metrics.GetRegisterer())
+		wpClient, err = woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, storageClient, true)
+	}
 	if err != nil {
 		return nil, err
 	}
 	log.Ctx(context.Background()).Info("build wp opener finish", zap.String("wpClientInstance", fmt.Sprintf("%p", wpClient)))
-	wpMetrics.RegisterWoodpeckerWithRegisterer(metrics.GetRegisterer())
 	return &openerImpl{
 		c: wpClient,
 	}, nil
@@ -71,36 +79,41 @@ func (b *builderImpl) getWpConfig() (*config.Configuration, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = b.setCustomWpConfig(wpConfig, &paramtable.Get().WoodpeckerCfg)
+	err = setCustomWpConfig(wpConfig, &paramtable.Get().WoodpeckerCfg)
 	if err != nil {
 		return nil, err
 	}
 	return wpConfig, nil
 }
 
-func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) error {
+func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) error {
 	// set the rootPath as the prefix for wp object storage
-	wpConfig.Woodpecker.Meta.Prefix = fmt.Sprintf("%s/wp", paramtable.Get().EtcdCfg.RootPath.GetValue())
+	wpConfig.Woodpecker.Meta.Prefix = paramtable.Get().WoodpeckerCfg.MetaPrefix.GetValue()
+	wpConfig.Etcd.RootPath = paramtable.Get().EtcdCfg.RootPath.GetValue()
 	// logClient
-	wpConfig.Woodpecker.Client.Auditor.MaxInterval = int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds())
+	wpConfig.Woodpecker.Client.Auditor.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
 	wpConfig.Woodpecker.Client.SegmentAppend.QueueSize = cfg.AppendQueueSize.GetAsInt()
-	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = cfg.SegmentRollingMaxSize.GetAsSize()
-	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds())
+	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = config.NewByteSize(cfg.SegmentRollingMaxSize.GetAsSize())
+	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxBlocks = cfg.SegmentRollingMaxBlocks.GetAsInt64()
+
+	// quorum configuration
+	setQuorumConfig(wpConfig, cfg)
+
 	// logStore
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxInterval = int(cfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds())
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxIntervalForLocalStorage = int(cfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds())
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxInterval = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds()))
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxIntervalForLocalStorage = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds()))
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxEntries = cfg.SyncMaxEntries.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxBytes = cfg.SyncMaxBytes.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxBytes = config.NewByteSize(cfg.SyncMaxBytes.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushRetries = cfg.FlushMaxRetries.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushSize = cfg.FlushMaxSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushSize = config.NewByteSize(cfg.FlushMaxSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushThreads = cfg.FlushMaxThreads.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.RetryInterval = int(cfg.RetryInterval.GetAsDurationByParse().Milliseconds())
-	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = cfg.CompactionSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.RetryInterval = config.NewDurationMillisecondsFromInt(int(cfg.RetryInterval.GetAsDurationByParse().Milliseconds()))
+	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = config.NewByteSize(cfg.CompactionSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelUploads = cfg.CompactionMaxParallelUploads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelReads = cfg.CompactionMaxParallelReads.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = cfg.ReaderMaxBatchSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = config.NewByteSize(cfg.ReaderMaxBatchSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.RetentionPolicy.TTL = int(cfg.RetentionTTL.GetAsDurationByParse().Milliseconds() / 1000) // convert to seconds
 	wpConfig.Woodpecker.Logstore.FencePolicy.ConditionWrite = cfg.FencePolicyConditionWrite.GetValue()
@@ -140,7 +153,7 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Minio.CreateBucket = true
 	wpConfig.Minio.IamEndpoint = paramtable.Get().MinioCfg.IAMEndpoint.GetValue()
 	wpConfig.Minio.UseVirtualHost = paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool()
-	wpConfig.Minio.RequestTimeoutMs = paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt()
+	wpConfig.Minio.RequestTimeoutMs = config.NewDurationMillisecondsFromInt(paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt())
 	wpConfig.Minio.LogLevel = paramtable.Get().LogCfg.Level.GetValue()
 
 	// set log
@@ -155,7 +168,104 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	return nil
 }
 
-func (b *builderImpl) getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
+func setQuorumConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) {
+	q := &wpConfig.Woodpecker.Client.Quorum
+
+	// Bind milvus' dynamic config as the runtime source for woodpecker's quorum
+	// knobs. milvus is the authoritative config source, so the source always wins
+	// (ok=true) over woodpecker's static YAML value. These params are
+	// refreshable:"true", and woodpecker calls .Get() per segment when selecting a
+	// quorum (woodpecker/quorum/discovery.go), so etcd config changes take effect on
+	// the next segment with no restart.
+	q.SelectStrategy.AffinityMode.WithSource(func() (string, bool) {
+		return cfg.QuorumAffinityMode.GetValue(), true
+	})
+	q.SelectStrategy.Replicas.WithSource(func() (int, bool) {
+		return cfg.QuorumReplicas.GetAsInt(), true
+	})
+	q.SelectStrategy.Strategy.WithSource(func() (string, bool) {
+		return cfg.QuorumStrategy.GetValue(), true
+	})
+
+	// JSON-encoded knobs: parse on each read; on empty/parse failure return ok=false
+	// so woodpecker falls back to its static (YAML default) value. No logging here
+	// because .Get() is called per segment and would spam; format problems are
+	// surfaced by the startup validation and change callbacks below instead.
+	q.BufferPools.WithSource(func() ([]config.QuorumBufferPool, bool) {
+		raw := cfg.QuorumBufferPools.GetValue()
+		if raw == "" {
+			return nil, false
+		}
+		var pools []config.QuorumBufferPool
+		if err := json.Unmarshal([]byte(raw), &pools); err != nil {
+			return nil, false
+		}
+		return pools, true
+	})
+	q.SelectStrategy.CustomPlacement.WithSource(func() ([]config.CustomPlacement, bool) {
+		raw := cfg.QuorumCustomPlacement.GetValue()
+		if raw == "" {
+			return nil, false
+		}
+		var customPlacements []config.CustomPlacement
+		if err := json.Unmarshal([]byte(raw), &customPlacements); err != nil {
+			return nil, false
+		}
+		return customPlacements, true
+	})
+
+	// Validate the current JSON values once at startup (the change callbacks below
+	// only fire on subsequent updates, not on the initial value). Invalid JSON only
+	// warns; woodpecker falls back to its static default.
+	validateQuorumJSON("woodpecker quorum buffer pools", cfg.QuorumBufferPools.GetValue(), func(b []byte) error {
+		var v []config.QuorumBufferPool
+		return json.Unmarshal(b, &v)
+	})
+	validateQuorumJSON("woodpecker quorum custom placement", cfg.QuorumCustomPlacement.GetValue(), func(b []byte) error {
+		var v []config.CustomPlacement
+		return json.Unmarshal(b, &v)
+	})
+
+	// Validate JSON format on config change. A non-nil error is logged once per
+	// change by the param framework ("param change callback failed"); it does not
+	// veto the change, so on bad JSON woodpecker simply falls back to its static
+	// default on the next .Get().
+	cfg.QuorumBufferPools.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		if newValue == "" {
+			return nil
+		}
+		var v []config.QuorumBufferPool
+		if err := json.Unmarshal([]byte(newValue), &v); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid quorum buffer pools JSON %q: %v", newValue, err)
+		}
+		return nil
+	})
+	cfg.QuorumCustomPlacement.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		if newValue == "" {
+			return nil
+		}
+		var v []config.CustomPlacement
+		if err := json.Unmarshal([]byte(newValue), &v); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid quorum custom placement JSON %q: %v", newValue, err)
+		}
+		return nil
+	})
+}
+
+// validateQuorumJSON parses a non-empty raw JSON config once and warns on failure.
+func validateQuorumJSON(label, raw string, parse func([]byte) error) {
+	if raw == "" {
+		return
+	}
+	if err := parse([]byte(raw)); err != nil {
+		log.Ctx(context.Background()).Warn("invalid quorum JSON config at startup, will fall back to static default",
+			zap.String("config", label),
+			zap.String("json", raw),
+			zap.Error(err))
+	}
+}
+
+func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
 	log := log.Ctx(ctx)
