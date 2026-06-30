@@ -156,6 +156,12 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 
+	if err := s.validateExternalIndexFieldMaterialized(ctx, schema, req); err != nil {
+		mlog.Warn(ctx, "external index field is not materialized",
+			mlog.FieldFieldID(req.GetFieldID()), mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
 	isJSON := isJSONField(schema, req.GetFieldID())
 	if isJSON {
 		// check json_path and json_cast_type exist
@@ -325,6 +331,36 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		mlog.Int64("IndexID", index.IndexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
+}
+
+// validateExternalIndexFieldMaterialized rejects external index builds when the
+// requested field is absent from any flushed external segment.
+func (s *Server) validateExternalIndexFieldMaterialized(ctx context.Context, schema *schemapb.CollectionSchema, req *indexpb.CreateIndexRequest) error {
+	if !typeutil.IsExternalCollection(schema) {
+		return nil
+	}
+
+	field := typeutil.GetFieldByID(schema, req.GetFieldID())
+	if field.GetExternalField() == "" && !field.GetIsFunctionOutput() {
+		return nil
+	}
+
+	segments := s.meta.SelectSegments(ctx,
+		WithCollection(req.GetCollectionID()),
+		SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return info.GetLevel() != datapb.SegmentLevel_L0 && isFlush(info)
+		}),
+	)
+	for _, segment := range segments {
+		if _, ok := getSegmentBinlogFields(segment)[req.GetFieldID()]; ok {
+			continue
+		}
+		return merr.WrapErrParameterInvalidMsg(
+			"external field %s is not materialized in segment %d; run RefreshExternalCollection before creating index",
+			field.GetName(), segment.GetID(),
+		)
+	}
+	return nil
 }
 
 func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
