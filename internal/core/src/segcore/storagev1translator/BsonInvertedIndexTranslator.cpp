@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -27,6 +28,7 @@
 #include "index/json_stats/bson_inverted.h"
 #include "log/Log.h"
 #include "pb/common.pb.h"
+#include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
 
@@ -48,7 +50,9 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
             milvus::segcore::getCacheWarmupPolicy(load_info_.warmup_policy,
                                                   /* is_vector */ false,
                                                   /* is_index */ true),
-            /* support_eviction */ true) {
+            /* support_eviction */ true,
+            std::nullopt,
+            milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
 }
 
 size_t

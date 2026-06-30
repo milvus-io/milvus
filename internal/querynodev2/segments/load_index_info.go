@@ -19,6 +19,7 @@ package segments
 /*
 #cgo pkg-config: milvus_core
 
+#include <stdlib.h>
 #include "segcore/load_index_c.h"
 #include "common/binary_set_c.h"
 */
@@ -87,6 +88,15 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, info *cgopb.Lo
 	}).Await()
 
 	return HandleCStatus(ctx, &status, "FinishLoadIndexInfo failed")
+}
+
+func (li *LoadIndexInfo) setShard(shard string) {
+	if shard == "" {
+		return
+	}
+	cShard := C.CString(shard)
+	defer C.free(unsafe.Pointer(cShard))
+	C.SetLoadIndexInfoShard(li.cLoadIndexInfo, cShard)
 }
 
 func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {

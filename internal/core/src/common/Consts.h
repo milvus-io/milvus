@@ -136,6 +136,7 @@ const std::string SEGMENT_MANIFEST_KEY = "segment_manifest";
 const std::string EXTERNAL_SPEC_KEY = "external_spec";
 const std::string LOON_FFI_PROPERTIES_KEY = "loon_ffi_properties";
 const std::string STATS_BASE_PATH_KEY = "stats_base_path";
+const std::string JSON_STATS_CACHE_SHARD_KEY = "json_stats_cache_shard";
 
 // storage version
 const int64_t STORAGE_V1 = 1;

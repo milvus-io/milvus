@@ -32,6 +32,7 @@ struct BsonInvertedIndexLoadInfo {
     uint32_t load_priority;
     std::string
         warmup_policy;  // "disable", "sync", or "async"; empty means use global config
+    std::string shard;
 };
 
 // Translator for BsonInvertedIndex in json stats. It loads a single-cell

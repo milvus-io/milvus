@@ -391,3 +391,12 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
         return status;
     }
 }
+
+void
+SetLoadIndexInfoShard(CLoadIndexInfo c_load_index_info, const char* shard) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto load_index_info =
+        static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
+    load_index_info->shard = shard == nullptr ? "" : shard;
+}
