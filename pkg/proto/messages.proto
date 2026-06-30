@@ -809,6 +809,18 @@ message BatchUpdateManifestMessageHeader {
 // BatchUpdateManifestMessageBody is the body of batch update manifest message.
 message BatchUpdateManifestMessageBody {
     repeated BatchUpdateManifestItem items = 1;
+    // Optional. Present only when this batch is a field-backfill commit; it declares
+    // which fields the batch backfills. The ack callback (where the applied per-segment
+    // versions become known) uses it to register the bump_defence gate over the
+    // committed segments. Absent for a generic manifest update -- presence is the
+    // "is-backfill" signal and the gate step stays a no-op when it is nil.
+    FieldBackfill field_backfill = 2;
+}
+
+// FieldBackfill declares the field set a BatchUpdateManifest batch backfills, so the
+// batch's ack callback can register the bump_defence gate for those fields.
+message FieldBackfill {
+    repeated int64 field_ids = 1;
 }
 
 // BatchUpdateManifestItem is an item in batch update manifest message.

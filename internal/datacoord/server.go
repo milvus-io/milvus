@@ -167,11 +167,24 @@ type Server struct {
 
 	// file resource
 	fileResourceObserver FileResourceObserver
+
+	// bump_defence registry (mixCoord-owned; injected via SetBackfillAtomicGate)
+	backfillGate BackfillAtomicGateRegistrar
 }
 
 type FileResourceObserver interface {
 	InitDataCoord(manager session.NodeManager)
 	Notify()
+}
+
+// BackfillAtomicGateRegistrar is the primitive-only slice of the bump_defence registry (mixCoord)
+// that the datacoord registration sites need: the BatchUpdateManifest ack callback (Spark backfill,
+// segment-list round) and the external-collection refresh apply (watermark round). The coordinator
+// *BackfillAtomicGate satisfies it structurally; no BackfillRound type crosses the import boundary
+// (coordinator imports datacoord, not vice-versa).
+type BackfillAtomicGateRegistrar interface {
+	RegisterSegmentList(ctx context.Context, collectionID, roundID int64, source string, fieldIDs []int64, segmentVCommit map[int64]int64) error
+	RegisterWatermark(ctx context.Context, collectionID, roundID int64, fieldIDs []int64, watermark int32) error
 }
 
 type CollectionNameInfo struct {
@@ -230,6 +243,12 @@ func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) 
 
 func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
 	s.fileResourceObserver = observer
+}
+
+// SetBackfillAtomicGate injects the bump_defence registry (mixCoord-owned). Used by the
+// Spark-backfill registration site (CommitBackfillResult).
+func (s *Server) SetBackfillAtomicGate(reg BackfillAtomicGateRegistrar) {
+	s.backfillGate = reg
 }
 
 // QuitSignal returns signal when server quits
@@ -665,7 +684,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli, s.backfillGate)
 	}
 }
 

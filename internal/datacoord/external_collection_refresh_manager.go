@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -144,6 +145,11 @@ type externalCollectionRefreshManager struct {
 	// same physical location the FFI wrote to.
 	chunkManager storage.ChunkManager
 
+	// backfillGate registers a bump_defence watermark round when a finished
+	// refresh materializes new columns on existing segments (see
+	// applyFinishedJobSegments). Nil-safe: no gate, no registration.
+	backfillGate BackfillAtomicGateRegistrar
+
 	// Internal components (private, composed)
 	inspector *externalCollectionRefreshInspector
 	checker   *externalCollectionRefreshChecker
@@ -187,6 +193,7 @@ func NewExternalCollectionRefreshManager(
 	collectionGetter func(ctx context.Context, collectionID int64) (*collectionInfo, error),
 	schemaUpdater func(ctx context.Context, collectionID int64, externalSource, externalSpec string) error,
 	chunkManager storage.ChunkManager,
+	backfillGate BackfillAtomicGateRegistrar,
 ) ExternalCollectionRefreshManager {
 	closeChan := make(chan struct{})
 
@@ -200,6 +207,7 @@ func NewExternalCollectionRefreshManager(
 		collectionGetter: collectionGetter,
 		schemaUpdater:    schemaUpdater,
 		chunkManager:     chunkManager,
+		backfillGate:     backfillGate,
 		closeChan:        closeChan,
 		notifiedJobs:     make(map[int64]struct{}),
 		initJobsInFlight: make(map[int64]struct{}),
@@ -344,6 +352,18 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		}
 	}
 
+	// bump_defence: this apply is the round start -- the moment the refresh's segment
+	// patches become serving-visible (querynodes reopen to the new manifests one by one,
+	// so the read side goes MIXED from here until every segment reloads). Register the
+	// watermark gate BEFORE the apply: registration is idempotent (Source is derived
+	// from the watermark), and if the apply then fails the job is retried while the
+	// gate correctly holds (segments never advanced -- fail-closed, revoked by the
+	// retry or a later successful refresh). Registering after the apply would recompute
+	// an empty diff on retry and could leave the round ungated.
+	if err := m.registerBackfillGateForRefresh(ctx, job, updatedSegments); err != nil {
+		return err
+	}
+
 	// Intentionally allow the collection schema to advance while tasks are
 	// running. For the current additive-only scope, an older-schema refresh can
 	// be applied; it may miss newly added external columns, and the next refresh
@@ -358,6 +378,71 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		updatedSegments,
 		mlog.FieldJobID(job.GetJobId()),
 	)
+}
+
+// registerBackfillGateForRefresh registers a bump_defence watermark round when the
+// finished refresh materializes new columns on EXISTING segments. The field set is taken
+// from the first source -- the worker's fake binlogs declare the column set each new
+// manifest carries (ChildFields, see buildFakeBinlogs) -- so the newly materialized
+// columns are exactly the per-segment diff of incoming vs existing ChildFields. Brand-new
+// segments are born complete at the new schema version and never need gating. The
+// watermark is the highest worker-stamped SchemaVersion among the diffed segments
+// (conservative: a segment stamped lower keeps the round held until a later refresh
+// advances it -- fail-closed, self-healing).
+func (m *externalCollectionRefreshManager) registerBackfillGateForRefresh(
+	ctx context.Context,
+	job *datapb.ExternalCollectionRefreshJob,
+	updatedSegments []*datapb.SegmentInfo,
+) error {
+	if m.backfillGate == nil {
+		return nil
+	}
+	newFields := make(map[int64]struct{})
+	var watermark int32
+	for _, incoming := range updatedSegments {
+		existing := m.mt.segments.GetSegment(incoming.GetID())
+		if existing == nil || existing.GetState() == commonpb.SegmentState_Dropped {
+			continue
+		}
+		oldCols := make(map[int64]struct{})
+		for _, fb := range existing.GetBinlogs() {
+			for _, f := range fb.GetChildFields() {
+				oldCols[f] = struct{}{}
+			}
+		}
+		added := false
+		for _, fb := range incoming.GetBinlogs() {
+			for _, f := range fb.GetChildFields() {
+				if _, ok := oldCols[f]; !ok {
+					newFields[f] = struct{}{}
+					added = true
+				}
+			}
+		}
+		if added && incoming.GetSchemaVersion() > watermark {
+			watermark = incoming.GetSchemaVersion()
+		}
+	}
+	if len(newFields) == 0 {
+		return nil
+	}
+	fieldIDs := make([]int64, 0, len(newFields))
+	for f := range newFields {
+		fieldIDs = append(fieldIDs, f)
+	}
+	roundID, err := m.allocator.AllocID(ctx)
+	if err != nil {
+		return merr.Wrap(err, "failed to allocate bump_defence roundID for refresh")
+	}
+	if err := m.backfillGate.RegisterWatermark(ctx, job.GetCollectionId(), roundID, fieldIDs, watermark); err != nil {
+		return merr.Wrap(err, "failed to register bump_defence gate for refresh")
+	}
+	mlog.Info(ctx, "registered bump_defence gate for external refresh",
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.FieldCollectionID(job.GetCollectionId()),
+		mlog.Int64s("fieldIDs", fieldIDs),
+		mlog.Int32("watermark", watermark))
+	return nil
 }
 
 // wrapTask builds a scheduler-facing task wrapper around a persisted proto

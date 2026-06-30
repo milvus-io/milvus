@@ -497,6 +497,20 @@ func WrapErrServiceInternalMsg(fmt string, args ...any) error {
 	return wrapMsg(ErrServiceInternal, fmt, args...)
 }
 
+// WrapErrServiceFieldBackfillInProgress is raised by the proxy bump_defence gate when a
+// search/query targets a field whose backfill round is not yet ready on all in-scope
+// segments. Retriable: the SDK should poll until the gate is revoked.
+func WrapErrServiceFieldBackfillInProgress(collectionID, fieldID int64, msg ...string) error {
+	err := wrapFields(ErrServiceFieldBackfillInProgress,
+		value("collection", collectionID),
+		value("field", fieldID),
+	)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, msg ...string) error {
 	err := wrapFields(ErrServiceCrossClusterRouting,
 		value("expectedCluster", expectedCluster),

@@ -84,6 +84,13 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
 
+	// bump_defence: NO gate is registered here, even for an external collection. The
+	// gate is round-scoped and a backfill round only starts when a refresh runs; between
+	// this DDL and that refresh the segment set uniformly lacks the field (external
+	// collections have no insert path), so there is no mixed state to protect -- segcore
+	// FieldAccessible rejects the unmaterialized field cleanly. The refresh-apply path
+	// (datacoord applyFinishedJobSegments) registers the gate when the round's segment
+	// patches actually land.
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err

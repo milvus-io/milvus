@@ -86,6 +86,10 @@ type mixCoordImpl struct {
 
 	// file resource observer
 	fileResourceObserver *FileResourceObserver
+
+	// bump_defence: round-major gate registry + revoke observer (mixCoord owns lifecycle)
+	backfillGate         *BackfillAtomicGate
+	backfillGateObserver *BackfillAtomicGateObserver
 }
 
 func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
@@ -160,6 +164,13 @@ func (s *mixCoordImpl) initInternal() error {
 	s.queryCoordServer.SetMixCoord(s)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
 
+	// bump_defence: construct the registry (etcd-backed) + inject into the registration
+	// sites (rootcoord DDL, datacoord Spark commit / refresh apply). mixCoordImpl itself
+	// is the ProxyGatePusher (PushGatedFields below). The readiness provider + observer
+	// are built after the sub-coords are up (querycoord dist must be ready).
+	s.backfillGate = NewBackfillAtomicGate(s.metaKVCreator(), s)
+	s.rootcoordServer.SetBackfillAtomicGate(s.backfillGate)
+
 	// Register WAL callbacks
 	RegisterWALCallbacks(s)
 
@@ -184,6 +195,7 @@ func (s *mixCoordImpl) initInternal() error {
 	g, _ := errgroup.WithContext(s.ctx)
 	g.Go(func() error {
 		s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
+		s.datacoordServer.SetBackfillAtomicGate(s.backfillGate)
 		if err := s.datacoordServer.Init(); err != nil {
 			mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
 			return err
@@ -211,7 +223,33 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 
 	s.fileResourceObserver.Start()
+
+	// bump_defence: now that the sub-coords are up, build the layered readiness provider
+	// (DataView = datacoord meta, SegmentDist = querycoord) + observer, reload persisted
+	// rounds (restart recovery), and start the periodic revoke sweep. mixCoord owns
+	// Start/Stop.
+	readiness := NewReadinessProvider(
+		NewDistReaderAdapter(s.queryCoordServer.GetSegmentDistManager()),
+		s.datacoordServer,
+	)
+	s.backfillGateObserver = NewBackfillAtomicGateObserver(s.ctx, s.backfillGate, readiness, 0)
+	if err := s.backfillGate.Reload(s.ctx); err != nil {
+		mlog.Warn(s.ctx, "bump_defence registry reload failed", mlog.Err(err))
+	}
+	s.backfillGateObserver.Start()
 	return nil
+}
+
+// PushGatedFields implements ProxyGatePusher: it pushes the collection's union
+// gated-field set to all proxies by invalidating their collection-meta cache with the
+// defence payload, so they re-pull (and enforce) the gated set.
+func (s *mixCoordImpl) PushGatedFields(ctx context.Context, collectionID int64, fieldIDs []int64) error {
+	_, err := s.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+		CollectionID:       collectionID,
+		DefenceUpdate:      true,
+		DefenceGatedFields: fieldIDs,
+	})
+	return err
 }
 
 func (s *mixCoordImpl) initKVCreator() {
@@ -359,6 +397,9 @@ func (s *mixCoordImpl) Stop() error {
 	s.session.Stop()
 
 	s.fileResourceObserver.Stop()
+	if s.backfillGateObserver != nil {
+		s.backfillGateObserver.Stop()
+	}
 	s.cancel()
 	return nil
 }

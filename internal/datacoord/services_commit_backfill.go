@@ -74,6 +74,25 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
+	// bump_defence: derive the field IDs this backfill commits (result.NewFieldNames) so
+	// each per-batch BatchUpdateManifest message can DECLARE them via field_backfill. The
+	// gate is NOT registered here — it is registered by the batch's ack callback, where the
+	// applied per-segment versions are known (v2's DataVersion is only assigned by the apply,
+	// see meta.UpdateSegmentColumnGroupsOperator) and where registration is atomic with the
+	// durable manifest apply, so a broadcast that never lands cannot leave a dangling gate.
+	var backfillFieldIDs []int64
+	if s.backfillGate != nil && len(result.NewFieldNames) > 0 {
+		newNames := make(map[string]struct{}, len(result.NewFieldNames))
+		for _, n := range result.NewFieldNames {
+			newNames[n] = struct{}{}
+		}
+		for _, f := range coll.GetSchema().GetFields() {
+			if _, ok := newNames[f.GetName()]; ok {
+				backfillFieldIDs = append(backfillFieldIDs, f.GetFieldID())
+			}
+		}
+	}
+
 	// Split items across multiple broadcast messages so a single
 	// BatchUpdateManifestMessageBody never exceeds the broker's message size
 	// limit (Pulsar defaults to 5MiB). Each batch acquires its own broadcaster
@@ -89,7 +108,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			end = len(items)
 		}
 		batch := items[start:end]
-		if err := broadcastBackfillBatch(ctx, coll, result.CollectionID, channels, batch); err != nil {
+		if err := broadcastBackfillBatch(ctx, coll, result.CollectionID, channels, batch, backfillFieldIDs); err != nil {
 			log.Error(ctx, "CommitBackfillResult broadcast batch failed",
 				mlog.Err(err), mlog.Int("batchStart", start), mlog.Int("batchEnd", end))
 			lastErr = err
@@ -137,6 +156,7 @@ func broadcastBackfillBatch(
 	collectionID int64,
 	channels []string,
 	items []*messagespb.BatchUpdateManifestItem,
+	backfillFieldIDs []int64,
 ) error {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
 		message.NewSharedDBNameResourceKey(coll.GetDbName()),
@@ -147,13 +167,18 @@ func broadcastBackfillBatch(
 	}
 	defer broadcaster.Close()
 
+	body := &message.BatchUpdateManifestMessageBody{Items: items}
+	if len(backfillFieldIDs) > 0 {
+		// Declare the backfilled fields so this batch's ack callback registers the
+		// bump_defence gate (keyed on the broadcast ID) with the applied per-segment
+		// versions. A generic manifest update leaves field_backfill nil -> no gate.
+		body.FieldBackfill = &messagespb.FieldBackfill{FieldIds: backfillFieldIDs}
+	}
 	_, err = broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
 		WithHeader(&message.BatchUpdateManifestMessageHeader{
 			CollectionId: collectionID,
 		}).
-		WithBody(&message.BatchUpdateManifestMessageBody{
-			Items: items,
-		}).
+		WithBody(body).
 		WithBroadcast(channels).
 		MustBuildBroadcast(),
 	)
