@@ -121,9 +121,6 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/partitions/load":      "LoadPartitions",
 	"/v2/vectordb/partitions/release":   "ReleasePartitions",
 
-	"/v2/vectordb/namespaces/prewarm":          "Prewarm",
-	"/v2/vectordb/namespaces/prewarm/describe": "DescribePrewarmTask",
-
 	"/v2/vectordb/users/list":            "ListCredUsers",
 	"/v2/vectordb/users/describe":        "SelectUser",
 	"/v2/vectordb/users/create":          "CreateCredential",
@@ -272,9 +269,6 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(PartitionCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.dropPartition))))
 	router.POST(PartitionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionsReq{} }, wrapperTraceLog(h.loadPartitions))))
 	router.POST(PartitionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionsReq{} }, wrapperTraceLog(h.releasePartitions))))
-
-	router.POST(NamespaceCategory+PrewarmAction, timeoutMiddleware(wrapperPost(func() any { return &NamespacePrewarmReq{} }, wrapperTraceLog(h.prewarmNamespace))))
-	router.POST(NamespaceCategory+PrewarmAction+"/"+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &DescribePrewarmTaskReq{} }, wrapperTraceLog(h.describePrewarmTask))))
 
 	router.POST(UserCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listUsers))))
 	router.POST(UserCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &UserReq{} }, wrapperTraceLog(h.describeUser))))
@@ -2666,65 +2660,6 @@ func (h *HandlersV2) releasePartitions(ctx context.Context, c *gin.Context, anyR
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
-}
-
-func (h *HandlersV2) prewarmNamespace(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	httpReq := anyReq.(*NamespacePrewarmReq)
-	namespaceName := httpReq.NamespaceName
-	req := &milvuspb.PrewarmRequest{
-		DbName:         dbName,
-		CollectionName: httpReq.CollectionName,
-		Namespace:      &namespaceName,
-		TtlSeconds:     httpReq.TtlSeconds,
-		Priority:       httpReq.Priority,
-	}
-	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Prewarm", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
-		return h.proxy.Prewarm(reqCtx, req.(*milvuspb.PrewarmRequest))
-	})
-	if err == nil {
-		prewarmResp := resp.(*milvuspb.PrewarmResponse)
-		returnNamespace := prewarmResp.GetNamespace()
-		if returnNamespace == "" {
-			returnNamespace = namespaceName
-		}
-		HTTPReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode: merr.Code(nil),
-			HTTPReturnData: gin.H{
-				"taskId":        prewarmResp.GetTaskID(),
-				"namespaceName": returnNamespace,
-			},
-		})
-	}
-	return resp, err
-}
-
-func (h *HandlersV2) describePrewarmTask(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	httpReq := anyReq.(*DescribePrewarmTaskReq)
-	req := &milvuspb.DescribePrewarmTaskRequest{
-		TaskID: httpReq.TaskID,
-	}
-	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribePrewarmTask", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
-		return h.proxy.DescribePrewarmTask(reqCtx, req.(*milvuspb.DescribePrewarmTaskRequest))
-	})
-	if err == nil {
-		describeResp := resp.(*milvuspb.DescribePrewarmTaskResponse)
-		returnData := gin.H{
-			"taskId":   describeResp.GetTaskID(),
-			"state":    prewarmTaskStateName(describeResp.GetState()),
-			"progress": describeResp.GetProgress(),
-		}
-		if describeResp.GetErrorMessage() != "" {
-			returnData["errorMessage"] = describeResp.GetErrorMessage()
-		}
-		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
-	}
-	return resp, err
-}
-
-func prewarmTaskStateName(state milvuspb.PrewarmTaskState) string {
-	return strings.TrimPrefix(state.String(), "PrewarmTaskState")
 }
 
 func (h *HandlersV2) listUsers(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
