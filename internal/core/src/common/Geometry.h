@@ -83,12 +83,24 @@ class Geometry {
         geometry_ = geom;
     }
 
-    // Copy assignment
+    // Copy assignment (deep clone). Releases any geometry this instance
+    // already owns before taking a clone of `other`, so the two instances
+    // never share a raw GEOSGeometry* (which would double-free on
+    // destruction).
     Geometry&
     operator=(const Geometry& other) {
         if (this != &other) {
-            geometry_ = other.geometry_;
+            if (geometry_ != nullptr) {
+                GEOSGeom_destroy_r(ctx_, geometry_);
+                geometry_ = nullptr;
+            }
             ctx_ = other.ctx_;
+            if (other.IsValid()) {
+                GEOSGeometry* cloned =
+                    GEOSGeom_clone_r(other.ctx_, other.geometry_);
+                AssertInfo(cloned != nullptr, "Failed to clone geometry");
+                geometry_ = cloned;
+            }
         }
         return *this;
     }
@@ -103,6 +115,27 @@ class Geometry {
         } else {
             geometry_ = nullptr;
         }
+    }
+
+    // Move constructor (transfers ownership, no GEOS allocation). Being
+    // noexcept lets std::vector relocate by move instead of clone-then-destroy.
+    Geometry(Geometry&& other) noexcept
+        : geometry_(other.geometry_), ctx_(other.ctx_) {
+        other.geometry_ = nullptr;
+    }
+
+    // Move assignment (transfers ownership, releases any existing geometry).
+    Geometry&
+    operator=(Geometry&& other) noexcept {
+        if (this != &other) {
+            if (geometry_ != nullptr) {
+                GEOSGeom_destroy_r(ctx_, geometry_);
+            }
+            geometry_ = other.geometry_;
+            ctx_ = other.ctx_;
+            other.geometry_ = nullptr;
+        }
+        return *this;
     }
 
     bool
