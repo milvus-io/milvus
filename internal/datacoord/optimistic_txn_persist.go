@@ -13,6 +13,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -253,7 +254,7 @@ func classifyTxnFailure(ops []txnOp) error {
 	case hasDelete:
 		return ErrKeyNotFound
 	}
-	return fmt.Errorf("txn precondition failed")
+	return merr.WrapErrServiceInternalMsg("txn precondition failed")
 }
 
 // ============================================================
@@ -326,7 +327,7 @@ func (p *tikvPersist) Scan(ctx context.Context, prefix string) ([]string, [][]by
 	for _, key := range keyBytes {
 		entry, ok := entries[string(key)]
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("%w: %s", ErrKeyNotFound, string(key))
+			return nil, nil, nil, merr.Wrapf(ErrKeyNotFound, "%s", string(key))
 		}
 		ks = append(ks, string(key))
 		vals = append(vals, append([]byte(nil), entry.Value...))
@@ -414,7 +415,7 @@ func (t *tikvTxn) validateTiKVTxn(txn *transaction.KVTxn) error {
 		case opInsert:
 			_, err := txn.Get(t.ctx, keyBytes, kv.WithReturnCommitTS())
 			if err == nil {
-				return fmt.Errorf("%w: %s", ErrKeyAlreadyExists, op.key)
+				return merr.Wrapf(ErrKeyAlreadyExists, "%s", op.key)
 			}
 			if !tikverr.IsErrNotFound(err) {
 				return err
@@ -423,19 +424,19 @@ func (t *tikvTxn) validateTiKVTxn(txn *transaction.KVTxn) error {
 		case opUpdate:
 			entry, err := txn.Get(t.ctx, keyBytes, kv.WithReturnCommitTS())
 			if tikverr.IsErrNotFound(err) {
-				return fmt.Errorf("%w: %s", ErrKeyNotFound, op.key)
+				return merr.Wrapf(ErrKeyNotFound, "%s", op.key)
 			}
 			if err != nil {
 				return err
 			}
 			if int64(entry.CommitTS) != op.expectedVersion {
-				return fmt.Errorf("%w: %s", ErrCASFailed, op.key)
+				return merr.Wrapf(ErrCASFailed, "%s", op.key)
 			}
 
 		case opDelete:
 			_, err := txn.Get(t.ctx, keyBytes, kv.WithReturnCommitTS())
 			if tikverr.IsErrNotFound(err) {
-				return fmt.Errorf("%w: %s", ErrKeyNotFound, op.key)
+				return merr.Wrapf(ErrKeyNotFound, "%s", op.key)
 			}
 			if err != nil {
 				return err
@@ -524,19 +525,19 @@ func (t *memTxn) Commit() ([]TxnResult, error) {
 		switch op.kind {
 		case opInsert:
 			if _, ok := p.data[op.key]; ok {
-				return nil, fmt.Errorf("%w: %s", ErrKeyAlreadyExists, op.key)
+				return nil, merr.Wrapf(ErrKeyAlreadyExists, "%s", op.key)
 			}
 		case opUpdate:
 			entry, ok := p.data[op.key]
 			if !ok {
-				return nil, fmt.Errorf("%w: %s", ErrKeyNotFound, op.key)
+				return nil, merr.Wrapf(ErrKeyNotFound, "%s", op.key)
 			}
 			if entry.version != op.expectedVersion {
 				return nil, ErrCASFailed
 			}
 		case opDelete:
 			if _, ok := p.data[op.key]; !ok {
-				return nil, fmt.Errorf("%w: %s", ErrKeyNotFound, op.key)
+				return nil, merr.Wrapf(ErrKeyNotFound, "%s", op.key)
 			}
 		}
 	}

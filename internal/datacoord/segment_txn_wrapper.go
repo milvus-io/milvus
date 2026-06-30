@@ -9,6 +9,7 @@ import (
 
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // BinlogIncrement names the FieldBinlogs that an Update writes as side-prefix
@@ -82,7 +83,7 @@ func (w *SegmentTxnWrapper) Scan(ctx context.Context, prefix string) ([]*datapb.
 	for i, v := range values {
 		seg := &datapb.SegmentInfo{}
 		if err := proto.Unmarshal(v, seg); err != nil {
-			return nil, nil, fmt.Errorf("unmarshal SegmentInfo: %w", err)
+			return nil, nil, merr.WrapErrDataIntegrity(err, "unmarshal SegmentInfo")
 		}
 		segments = append(segments, seg)
 		keptVers = append(keptVers, versions[i])
@@ -229,7 +230,7 @@ func (t *SegmentTxn) buildSegmentWrite(seg *datapb.SegmentInfo, inc BinlogIncrem
 	datacoordkv.ResetBinlogFields(stripped)
 	value, err := proto.Marshal(stripped)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("marshal SegmentInfo: %w", err)
+		return nil, nil, nil, merr.WrapErrSerializationFailed(err, "marshal SegmentInfo")
 	}
 	if inc.IsEmpty() {
 		return value, nil, nil, nil
