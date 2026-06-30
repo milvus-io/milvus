@@ -78,7 +78,8 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
                            double json_stats_shredding_ratio_threshold,
                            int64_t json_stats_write_batch_size,
                            uint32_t tantivy_index_version)
-    : ScalarIndex<std::string>(JSON_KEY_STATS_INDEX_TYPE) {
+    : ScalarIndex<std::string>(JSON_KEY_STATS_INDEX_TYPE),
+      file_manager_context_(ctx) {
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     segment_id_ = ctx.fieldDataMeta.segment_id;
@@ -1128,7 +1129,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
         translator = std::make_unique<
             segcore::storagev1translator::BsonInvertedIndexTranslator>(
-            load_info, disk_file_manager_);
+            load_info, file_manager_context_);
 
     bson_index_cache_slot_ =
         cachinglayer::Manager::GetInstance().CreateCacheSlot(

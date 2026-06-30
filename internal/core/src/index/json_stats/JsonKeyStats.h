@@ -673,6 +673,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     int64_t num_rows_{0};
     bool is_built_ = false;
     std::string path_;
+    milvus::storage::FileManagerContext file_manager_context_;
     milvus::storage::ChunkManagerPtr rcm_;
     std::shared_ptr<milvus::storage::MemFileManagerImpl> mem_file_manager_;
     std::shared_ptr<milvus::storage::DiskFileManagerImpl> disk_file_manager_;

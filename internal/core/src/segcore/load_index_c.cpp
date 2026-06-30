@@ -292,17 +292,8 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        auto local_chunk_manager =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager();
-        auto index_file_path_prefix =
-            milvus::storage::GenIndexPathPrefix(local_chunk_manager,
-                                                load_index_info->index_build_id,
-                                                load_index_info->index_version,
-                                                load_index_info->segment_id,
-                                                load_index_info->field_id,
-                                                false);
-        local_chunk_manager->RemoveDir(index_file_path_prefix);
+        load_index_info->cache_index.reset();
+        load_index_info->index.reset();
         auto status = CStatus();
         status.error_code = milvus::Success;
         status.error_msg = "";
