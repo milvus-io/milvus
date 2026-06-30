@@ -2487,6 +2487,334 @@ INSTANTIATE_TEST_SUITE_P(
         return info.param == ScalarArraySegType::kSealed ? "Sealed" : "Growing";
     });
 
+// ---------------------------------------------------------------------------
+// JSON-array MATCH_* (brute-force EvalJson path).
+//
+// The MATCH_* target is a JSON field plus a nested path that resolves to an
+// array-of-scalars leaf (e.g. json["arr"]); the predicate uses bare `$` for the
+// scalar element. EvalJson -> EvalJsonBrute walks the JSON array per row,
+// builds a per-element match bitmap, and applies the quantifier with the SAME
+// empty/vacuous semantics as scalar/struct arrays (MatchSingleRow /
+// MatchEmptyElements):
+//   - MATCH_ANY     : >=1 matching element; empty -> false
+//   - MATCH_ALL     : every element matches; empty -> true (vacuous)
+//   - MATCH_LEAST(N): >=N matches;            empty -> N<=0
+//   - MATCH_MOST(N) : <=N matches;            empty -> N>=0
+//   - MATCH_EXACT(N): ==N matches;            empty -> N==0
+//
+// A NULL JSON row and a JSON whose path is missing/not-an-array both yield zero
+// elements (ExtractJsonElementValues returns 0 for !row_valid or array_at
+// error), so they are treated EXACTLY like an empty array `[]`. This mirrors the
+// documented current scalar/struct-array NULL behavior.
+class JsonArrayMatchExprTest
+    : public ::testing::TestWithParam<ScalarArraySegType> {
+ protected:
+    // Build an insert proto: pk (INT64) + a JSON field holding the given raw
+    // JSON document strings, one per row. `valid` (optional, same length as
+    // `json_rows`) supplies the null bitmap for the nullable variant; pass
+    // empty for an all-valid field.
+    std::unique_ptr<InsertRecordProto>
+    BuildJsonInsert(const Schema& schema,
+                    FieldId pk_fid,
+                    FieldId json_fid,
+                    const std::vector<std::string>& json_rows,
+                    const std::vector<bool>& valid) {
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        const int64_t N = static_cast<int64_t>(json_rows.size());
+
+        std::vector<int64_t> ids(N);
+        std::iota(ids.begin(), ids.end(), 0);
+        auto id_array =
+            CreateDataArrayFrom(ids.data(), nullptr, N, schema[pk_fid]);
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        // CreateDataArrayFrom dispatches DataType::JSON to a const std::string*
+        // backing buffer (the raw JSON document text per row).
+        const bool* valid_ptr = nullptr;
+        FixedVector<bool> valid_storage;
+        if (!valid.empty()) {
+            valid_storage.resize(N);
+            for (int64_t i = 0; i < N; ++i) {
+                valid_storage[i] = valid[i];
+            }
+            valid_ptr = valid_storage.data();
+        }
+        auto json_array = CreateDataArrayFrom(
+            json_rows.data(), valid_ptr, N, schema[json_fid]);
+        insert_data->mutable_fields_data()->AddAllocated(json_array.release());
+
+        insert_data->set_num_rows(N);
+        return insert_data;
+    }
+
+    std::shared_ptr<SegmentInterface>
+    MakeSegment(SchemaPtr schema, std::unique_ptr<InsertRecordProto> insert) {
+        const int64_t N = insert->num_rows();
+        std::vector<idx_t> row_ids(N);
+        std::vector<Timestamp> tss(N);
+        for (int64_t i = 0; i < N; ++i) {
+            row_ids[i] = i;
+            tss[i] = i;
+        }
+
+        if (GetParam() == ScalarArraySegType::kGrowing) {
+            auto seg = CreateGrowingSegment(schema, empty_index_meta);
+            seg->PreInsert(N);
+            seg->Insert(0, N, row_ids.data(), tss.data(), insert.get());
+            return std::shared_ptr<SegmentInterface>(std::move(seg));
+        }
+
+        GeneratedData generated;
+        generated.schema_ = schema;
+        generated.raw_ = insert.release();
+        for (int64_t i = 0; i < N; ++i) {
+            generated.row_ids_.push_back(i);
+            generated.timestamps_.push_back(i);
+        }
+        auto seg = CreateSealedWithFieldDataLoaded(schema, generated);
+        return std::shared_ptr<SegmentInterface>(std::move(seg));
+    }
+
+    std::set<int64_t>
+    RetrieveMatchedRows(SegmentInterface* seg,
+                        const Schema& schema,
+                        SchemaPtr schema_ptr,
+                        const std::string& expr) {
+        ScopedSchemaHandle schema_handle(schema);
+        auto plan_str = schema_handle.Parse(expr);
+        auto plan = CreateRetrievePlanByExpr(
+            schema_ptr, plan_str.data(), plan_str.size());
+        EXPECT_NE(plan, nullptr);
+        auto result = seg->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+        EXPECT_NE(result, nullptr);
+        std::set<int64_t> rows;
+        for (const auto& offset : result->offset()) {
+            rows.insert(offset);
+        }
+        return rows;
+    }
+};
+
+TEST_P(JsonArrayMatchExprTest, IntArrayAtPath) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // row0: [95,80]  row1: [40]  row2: [100,100,100]  row3: [] (empty array)
+    std::vector<std::string> rows = {
+        R"({"arr":[95,80]})",
+        R"({"arr":[40]})",
+        R"({"arr":[100,100,100]})",
+        R"({"arr":[]})",
+    };
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, {});
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(json["arr"], $ > 90): row0(95) & row2(100) -> {0,2}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ > 90))"),
+              (std::set<int64_t>{0, 2}));
+
+    // MATCH_ALL(json["arr"], $ >= 60): row0(95,80) & row2(100s) true;
+    // row1(40) false; row3 [] vacuously true -> {0,2,3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ALL(json["arr"], $ >= 60))"),
+              (std::set<int64_t>{0, 2, 3}));
+
+    // MATCH_LEAST(json["arr"], $ == 100, threshold=2): only row2 has >=2 -> {2}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_LEAST(json["arr"], $ == 100, threshold=2))"),
+        (std::set<int64_t>{2}));
+
+    // MATCH_EXACT(json["arr"], $ == 100, threshold=3): only row2 has exactly 3.
+    EXPECT_EQ(
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_EXACT(json["arr"], $ == 100, threshold=3))"),
+        (std::set<int64_t>{2}));
+
+    // MATCH_MOST(json["arr"], $ > 90, threshold=0): rows with 0 matches.
+    // row0->1, row1->0, row2->3, row3->0 -> {1,3}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_MOST(json["arr"], $ > 90, threshold=0))"),
+        (std::set<int64_t>{1, 3}));
+
+    // Compound element predicate with two `$` references: element in (60,90).
+    // row0(80) matches; row1/row2/row3 none -> {0}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_ANY(json["arr"], $ > 60 && $ < 90))"),
+              (std::set<int64_t>{0}));
+
+    // Range form lowers to a BinaryRangeExpr over the element -> same as above.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(),
+                  *schema,
+                  schema,
+                  R"(MATCH_ANY(json["arr"], 60 < $ < 90))"),
+              (std::set<int64_t>{0}));
+
+    // Empty-array (row3) vacuous-truth edge case made explicit:
+    //   - MATCH_ALL includes the empty row (no element violates the predicate).
+    //   - MATCH_ANY can never be satisfied by an empty array.
+    auto match_all_60 = RetrieveMatchedRows(
+        seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ >= 60))");
+    EXPECT_NE(match_all_60.find(3), match_all_60.end())
+        << "empty JSON array row must satisfy MATCH_ALL (vacuous truth)";
+    auto match_any_ge0 = RetrieveMatchedRows(
+        seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ >= 0))");
+    EXPECT_EQ(match_any_ge0.find(3), match_any_ge0.end())
+        << "empty JSON array row must never satisfy MATCH_ANY";
+}
+
+TEST_P(JsonArrayMatchExprTest, VarCharArrayAtPath) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // row0: ["x","y"]  row1: ["z"]  row2: [] (empty)  row3: ["x"]
+    std::vector<std::string> rows = {
+        R"({"arr":["x","y"]})",
+        R"({"arr":["z"]})",
+        R"({"arr":[]})",
+        R"({"arr":["x"]})",
+    };
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, {});
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(json["arr"], $ == "x") -> {0,3}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ == "x"))"),
+              (std::set<int64_t>{0, 3}));
+
+    // MATCH_ALL(json["arr"], $ != ""): every element non-empty; row2 [] vacuous.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ALL(json["arr"], $ != ""))"),
+              (std::set<int64_t>{0, 1, 2, 3}));
+
+    // Compound string predicate with two `$` references.
+    EXPECT_EQ(
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_ANY(json["arr"], $ == "x" || $ == "y"))"),
+        (std::set<int64_t>{0, 3}));
+}
+
+TEST_P(JsonArrayMatchExprTest, BareRootArray) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    // The JSON document itself is the array (empty nested path -> root array).
+    // row0: [1,2,3]  row1: [10]  row2: [] (empty)
+    std::vector<std::string> rows = {
+        R"([1,2,3])",
+        R"([10])",
+        R"([])",
+    };
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, {});
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(json, $ > 5): row0(1,2,3) has no element >5; row1(10) matches;
+    // row2 [] never matches MATCH_ANY -> {1}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ANY(json, $ > 5))"),
+              (std::set<int64_t>{1}));
+
+    // MATCH_ALL(json, $ >= 1): row0(1,2,3) all >=1; row1(10) >=1;
+    // row2 [] vacuous -> {0,1,2}.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ALL(json, $ >= 1))"),
+              (std::set<int64_t>{0, 1, 2}));
+}
+
+// Nullable JSON: a NULL row carries zero elements, identical to an empty array,
+// so it follows the same vacuous-truth rules as `[]`.
+TEST_P(JsonArrayMatchExprTest, NullableJsonArrayAtPath) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto json_fid =
+        schema->AddDebugField("json", DataType::JSON, /*nullable=*/true);
+
+    // row0: [95,80]  row1: NULL  row2: [100,100,100]  row3: [] (empty)  row4: [40]
+    std::vector<std::string> rows = {
+        R"({"arr":[95,80]})",
+        R"({})",  // backing text for the NULL row; valid bit is false below
+        R"({"arr":[100,100,100]})",
+        R"({"arr":[]})",
+        R"({"arr":[40]})",
+    };
+    std::vector<bool> valid = {true, false, true, true, true};
+    auto insert = BuildJsonInsert(*schema, pk_fid, json_fid, rows, valid);
+    auto seg = MakeSegment(schema, std::move(insert));
+
+    // MATCH_ANY(json["arr"], $ > 90): row0(95) & row2(100) -> {0,2}.
+    // NULL(1)/empty(3)/row4(40) excluded.
+    EXPECT_EQ(RetrieveMatchedRows(
+                  seg.get(), *schema, schema, R"(MATCH_ANY(json["arr"], $ > 90))"),
+              (std::set<int64_t>{0, 2}));
+
+    // MATCH_ALL(json["arr"], $ >= 60): row0 & row2 true; NULL(1) and empty(3)
+    // vacuously true; row4(40) false -> {0,1,2,3}.
+    EXPECT_EQ(RetrieveMatchedRows(seg.get(),
+                                  *schema,
+                                  schema,
+                                  R"(MATCH_ALL(json["arr"], $ >= 60))"),
+              (std::set<int64_t>{0, 1, 2, 3}));
+
+    // MATCH_LEAST(json["arr"], $ == 100, threshold=2): only row2 -> {2}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_LEAST(json["arr"], $ == 100, threshold=2))"),
+        (std::set<int64_t>{2}));
+
+    // MATCH_MOST(json["arr"], $ > 90, threshold=0): rows with 0 matches:
+    // NULL(1), empty(3), row4(40) -> {1,3,4}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_MOST(json["arr"], $ > 90, threshold=0))"),
+        (std::set<int64_t>{1, 3, 4}));
+
+    // MATCH_EXACT(json["arr"], $ == 100, threshold=0): rows with exactly 0
+    // matches of (==100): row0, NULL(1), empty(3), row4 -> {0,1,3,4}.
+    EXPECT_EQ(
+        RetrieveMatchedRows(seg.get(),
+                            *schema,
+                            schema,
+                            R"(MATCH_EXACT(json["arr"], $ == 100, threshold=0))"),
+        (std::set<int64_t>{0, 1, 3, 4}));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SegTypes,
+    JsonArrayMatchExprTest,
+    ::testing::Values(ScalarArraySegType::kSealed,
+                      ScalarArraySegType::kGrowing),
+    [](const ::testing::TestParamInfo<ScalarArraySegType>& info) {
+        return info.param == ScalarArraySegType::kSealed ? "Sealed" : "Growing";
+    });
+
 namespace milvus::segcore {
 // Test-only accessor for the private FillDefaultValueFields() entry point.
 // ApplyLoadDiff() normally calls it for diff.fields_to_fill_default during a

@@ -3458,6 +3458,190 @@ func TestScalarArrayMatchVariants(t *testing.T) {
 	}
 }
 
+// TestJSONArrayMatchProto verifies the MatchExpr proto produced when the
+// MATCH_* target is a JSON path that resolves to an array-of-scalars leaf:
+// the MatchColumnInfo must carry DataType==JSON, the JSON field name/id and
+// the nested path, while the predicate's `$` accessor resolves to an
+// element-level JSON ColumnInfo at the same nested path.
+func TestJSONArrayMatchProto(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	jsonField, err := helper.GetFieldFromName("JSONField")
+	assert.NoError(t, err)
+
+	t.Run("MatchAny_SinglePath", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > 90)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, "JSONField", matchExpr.GetColumn().GetFieldName())
+		assert.Equal(t, jsonField.GetFieldID(), matchExpr.GetColumn().GetFieldId())
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, []string{"a"}, matchExpr.GetColumn().GetNestedPath())
+		assert.Equal(t, planpb.MatchType_MatchAny, matchExpr.GetMatchType())
+		assert.Equal(t, int64(0), matchExpr.GetCount())
+
+		// The `$` accessor inside the predicate resolves to an element-level
+		// JSON ColumnInfo, anchored at the same field and nested path.
+		ure := matchExpr.GetPredicate().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		ci := ure.GetColumnInfo()
+		assert.True(t, ci.GetIsElementLevel())
+		assert.Equal(t, schemapb.DataType_JSON, ci.GetDataType())
+		assert.Equal(t, jsonField.GetFieldID(), ci.GetFieldId())
+		assert.Equal(t, []string{"a"}, ci.GetNestedPath())
+	})
+
+	t.Run("MatchAll_NestedPath_Compound", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ALL(JSONField["a"]["b"], $ >= 60 && $ < 90)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, []string{"a", "b"}, matchExpr.GetColumn().GetNestedPath())
+		assert.Equal(t, planpb.MatchType_MatchAll, matchExpr.GetMatchType())
+		assert.Equal(t, int64(0), matchExpr.GetCount())
+	})
+
+	t.Run("MatchLeast_Threshold", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_LEAST(JSONField["a"], $ == 100, threshold=2)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, []string{"a"}, matchExpr.GetColumn().GetNestedPath())
+		assert.Equal(t, planpb.MatchType_MatchLeast, matchExpr.GetMatchType())
+		assert.Equal(t, int64(2), matchExpr.GetCount())
+	})
+
+	t.Run("MatchMost_Threshold", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_MOST(JSONField["a"], $ > 1, threshold=3)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, planpb.MatchType_MatchMost, matchExpr.GetMatchType())
+		assert.Equal(t, int64(3), matchExpr.GetCount())
+	})
+
+	t.Run("MatchExact_Threshold", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_EXACT(JSONField["a"], $ == true, threshold=1)`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Equal(t, planpb.MatchType_MatchExact, matchExpr.GetMatchType())
+		assert.Equal(t, int64(1), matchExpr.GetCount())
+	})
+
+	t.Run("BareJSONField_RootArray", func(t *testing.T) {
+		// A bare JSON field name targets the root array; nested path is empty.
+		expr, err := ParseExpr(helper, `MATCH_ANY(JSONField, $ == "x")`, nil)
+		assert.NoError(t, err)
+
+		matchExpr := expr.GetMatchExpr()
+		assert.NotNil(t, matchExpr)
+		assert.Equal(t, "JSONField", matchExpr.GetColumn().GetFieldName())
+		assert.Equal(t, jsonField.GetFieldID(), matchExpr.GetColumn().GetFieldId())
+		assert.Equal(t, schemapb.DataType_JSON, matchExpr.GetColumn().GetDataType())
+		assert.Empty(t, matchExpr.GetColumn().GetNestedPath())
+		assert.Equal(t, planpb.MatchType_MatchAny, matchExpr.GetMatchType())
+
+		ci := matchExpr.GetPredicate().GetUnaryRangeExpr().GetColumnInfo()
+		assert.True(t, ci.GetIsElementLevel())
+		assert.Equal(t, schemapb.DataType_JSON, ci.GetDataType())
+		assert.Empty(t, ci.GetNestedPath())
+	})
+}
+
+// TestJSONArrayMatchVariants exercises the valid/invalid surface of MATCH_* on
+// a JSON-array target across all five operators, compound/range predicates,
+// every scalar element family, and the parser-level negative cases.
+func TestJSONArrayMatchVariants(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	validExprs := []string{
+		// all five operators
+		`MATCH_ANY(JSONField["a"], $ > 90)`,
+		`MATCH_ALL(JSONField["a"], $ >= 60 && $ < 90)`,
+		`MATCH_LEAST(JSONField["a"], $ == 100, threshold=2)`,
+		`MATCH_MOST(JSONField["a"], $ < 50, threshold=3)`,
+		`MATCH_EXACT(JSONField["a"], $ == 100, threshold=1)`,
+
+		// bare JSON field root array
+		`MATCH_ANY(JSONField, $ == "x")`,
+		`MATCH_ANY(JSONField, $ > 1)`,
+
+		// nested path
+		`MATCH_ANY(JSONField["a"]["b"], $ > 5)`,
+
+		// string element family
+		`MATCH_ANY(JSONField["a"], $ == "x" || $ == "y")`,
+		`MATCH_ALL(JSONField["a"], $ != "")`,
+		`MATCH_ANY(JSONField["a"], $ in ["a", "b", "c"])`,
+
+		// numeric family (int widens with float)
+		`MATCH_ANY(JSONField["a"], $ > 5 || $ < 10.5)`,
+		`MATCH_ANY(JSONField["a"], $ > 1.5 && $ < 10)`,
+		`MATCH_ANY(JSONField["a"], $ in [1, 2, 3])`,
+
+		// bool family
+		`MATCH_ANY(JSONField["a"], $ == true)`,
+		`MATCH_ANY(JSONField["a"], $ == true || $ == false)`,
+
+		// compound range predicates
+		`MATCH_ANY(JSONField["a"], $ > 1 && $ < 10)`,
+		`MATCH_ANY(JSONField["a"], 1 < $ < 10)`,
+		`MATCH_ANY(JSONField["a"], $ > "a" && $ < "z")`,
+
+		// combined with other top-level predicates
+		`Int64Field > 0 && MATCH_ANY(JSONField["a"], $ > 90)`,
+		`MATCH_ANY(JSONField["a"], $ > 90) || Int64Field > 0`,
+
+		// case-insensitive function name
+		`match_any(JSONField["a"], $ == "x")`,
+	}
+	for _, e := range validExprs {
+		assertValidExpr(t, helper, e)
+	}
+
+	invalidExprs := []string{
+		// cross-family literals against the same element accessor
+		`MATCH_ANY(JSONField, $ > 1 || $ == "x")`,
+		`MATCH_ANY(JSONField["a"], $ == "x" || $ > 5)`,
+		`MATCH_ANY(JSONField["a"], $ == true || $ == 1)`,
+		`MATCH_ANY(JSONField["a"], $ == true || $ == "x")`,
+		`MATCH_ANY(JSONField["a"], $ in [1, "a"])`,
+
+		// $[sub] sub-field accessor is not valid on a JSON target
+		`MATCH_ANY(JSONField["a"], $[sub] > 90)`,
+		`MATCH_ANY(JSONField, $[color] == "x")`,
+
+		// nested MATCH_* is rejected
+		`MATCH_ANY(JSONField["a"], MATCH_ALL(JSONField["a"], $ > 0))`,
+	}
+	for _, e := range invalidExprs {
+		assertInvalidExpr(t, helper, e)
+	}
+
+	// Template placeholders are not supported inside a JSON MATCH_* predicate.
+	t.Run("TemplatePlaceholderRejected", func(t *testing.T) {
+		_, err := ParseExpr(helper, `MATCH_ANY(JSONField["a"], $ > {threshold})`, map[string]*schemapb.TemplateValue{
+			"threshold": generateTemplateValue(schemapb.DataType_Int64, int64(90)),
+		})
+		assert.Error(t, err)
+	})
+}
+
 func TestExpr_ArrayContains(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
