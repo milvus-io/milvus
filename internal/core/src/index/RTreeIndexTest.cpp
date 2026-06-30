@@ -16,9 +16,11 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <stddef.h>
+#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <thread>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -896,4 +898,70 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
 
     // Clean up any remaining index files
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS filtering test");
+}
+
+// Exercises the growing-segment path where a single writer keeps inserting
+// geometries (RTreeIndex::AddGeometry) while reader threads concurrently call
+// Count() and QueryCandidates(). Before the locking fix these read total row
+// counts / null_offset_ / wrapper_ and the boost rtree size without holding
+// any lock, racing the incremental inserts. Run under ASAN/TSAN this asserts
+// the accesses are now properly synchronized; it must also not crash and must
+// converge to the expected final count.
+TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    // Seed one geometry so wrapper_ is published before readers start querying
+    // (QueryCandidates asserts a non-null wrapper).
+    rtree.AddGeometry(CreatePointWKB(0.0, 0.0), 0);
+
+    constexpr int kRows = 4000;
+    std::atomic<bool> stop{false};
+    std::atomic<int> reader_iters{0};
+
+    auto reader = [&]() {
+        auto ctx = GEOS_init_r();
+        // A box covering the inserted points [0, kRows] x [0, kRows].
+        milvus::Geometry query_geom(
+            ctx,
+            "POLYGON ((-1 -1, 100000 -1, 100000 100000, -1 100000, -1 -1))");
+        while (!stop.load(std::memory_order_relaxed)) {
+            volatile int64_t c = rtree.Count();
+            (void)c;
+            std::vector<int64_t> candidates;
+            rtree.QueryCandidates(
+                ::milvus::proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+                query_geom,
+                candidates);
+            reader_iters.fetch_add(1, std::memory_order_relaxed);
+        }
+        GEOS_finish_r(ctx);
+    };
+
+    std::vector<std::thread> readers;
+    for (int t = 0; t < 4; ++t) {
+        readers.emplace_back(reader);
+    }
+
+    // Single writer, mirroring the per-segment serialized insert pipeline.
+    for (int i = 1; i <= kRows; ++i) {
+        if (i % 7 == 0) {
+            // Interleave null geometries (exercises the null_offset_ path).
+            rtree.AddGeometry(std::string(), i);
+        } else {
+            rtree.AddGeometry(
+                CreatePointWKB(static_cast<double>(i), static_cast<double>(i)),
+                i);
+        }
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& th : readers) {
+        th.join();
+    }
+
+    EXPECT_GT(reader_iters.load(), 0);
+    // Final count = seeded row 0 plus kRows incremental rows.
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kRows + 1));
 }
