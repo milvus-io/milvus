@@ -9,6 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <cstddef>
+#include <cstdint>
+
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
@@ -25,5 +28,22 @@ TEST(MmapChunkManager, Register) {
         milvus::storage::MmapManager::GetInstance().GetMmapChunkManager();
     auto segment_descriptor = mcm->Register();
     ASSERT_TRUE(mcm->HasRegister(segment_descriptor));
+    ASSERT_NO_THROW(mcm->UnRegister(segment_descriptor));
+}
+
+TEST(MmapChunkManager, AllocateKeepsTypedBuffersAligned) {
+    auto mcm =
+        milvus::storage::MmapManager::GetInstance().GetMmapChunkManager();
+    auto segment_descriptor = mcm->Register();
+
+    auto first = mcm->Allocate(segment_descriptor, 1);
+    ASSERT_NE(first, nullptr);
+
+    auto typed_buffer = mcm->Allocate(segment_descriptor, sizeof(double));
+    ASSERT_NE(typed_buffer, nullptr);
+    ASSERT_EQ(
+        reinterpret_cast<uintptr_t>(typed_buffer) % alignof(std::max_align_t),
+        0);
+
     ASSERT_NO_THROW(mcm->UnRegister(segment_descriptor));
 }
