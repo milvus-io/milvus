@@ -211,6 +211,81 @@ func createTestSnapshotData() *SnapshotData {
 
 // =========================== SnapshotWriter Tests ===========================
 
+func TestSnapshotMetadata_ChannelSeekPositionsRoundTrip(t *testing.T) {
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: int32(SnapshotFormatVersion),
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           101,
+			Name:         "per_channel_snapshot",
+			CollectionId: 100,
+			CreateTs:     100,
+			ChannelSeekPositions: []*msgpb.MsgPosition{
+				{
+					ChannelName: "by-dev-rootcoord-dml_0_100v0",
+					Timestamp:   100,
+					MsgID:       []byte{1, 2, 3},
+				},
+				{
+					ChannelName: "by-dev-rootcoord-dml_1_100v1",
+					Timestamp:   1000,
+					MsgID:       []byte{4, 5, 6},
+				},
+			},
+		},
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{Name: "test_collection"},
+		},
+	}
+
+	metadataJSON, err := protojson.MarshalOptions{
+		UseProtoNames:   true,
+		EmitUnpopulated: false,
+	}.Marshal(metadata)
+	require.NoError(t, err)
+
+	restored := &datapb.SnapshotMetadata{}
+	err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(metadataJSON, restored)
+	require.NoError(t, err)
+	require.NotNil(t, restored.GetSnapshotInfo())
+
+	positions := restored.GetSnapshotInfo().GetChannelSeekPositions()
+	require.Len(t, positions, 2)
+	assert.Equal(t, "by-dev-rootcoord-dml_0_100v0", positions[0].GetChannelName())
+	assert.Equal(t, uint64(100), positions[0].GetTimestamp())
+	assert.Equal(t, []byte{1, 2, 3}, positions[0].GetMsgID())
+	assert.Equal(t, "by-dev-rootcoord-dml_1_100v1", positions[1].GetChannelName())
+	assert.Equal(t, uint64(1000), positions[1].GetTimestamp())
+	assert.Equal(t, []byte{4, 5, 6}, positions[1].GetMsgID())
+}
+
+func TestSnapshotMetadata_LegacySnapshotWithoutChannelSeekPositions(t *testing.T) {
+	metadataJSON := []byte(`{
+  "format_version": 3,
+  "snapshot_info": {
+    "name": "legacy_snapshot",
+    "id": "99",
+    "collection_id": "100",
+    "partition_ids": ["1"],
+    "create_ts": "12345"
+  },
+  "collection": {
+    "schema": {
+      "name": "legacy_collection"
+    }
+  },
+  "manifest_list": [],
+  "segment_ids": [],
+  "build_ids": []
+}`)
+
+	metadata := &datapb.SnapshotMetadata{}
+	err := protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(metadataJSON, metadata)
+	require.NoError(t, err)
+	require.NotNil(t, metadata.GetSnapshotInfo())
+	assert.Equal(t, int64(12345), metadata.GetSnapshotInfo().GetCreateTs())
+	assert.Empty(t, metadata.GetSnapshotInfo().GetChannelSeekPositions())
+}
+
 func TestSnapshotWriter_Save_RealAvro(t *testing.T) {
 	// Use real ChunkManager and Avro operations, only mock storage layer
 	tempDir := t.TempDir()
