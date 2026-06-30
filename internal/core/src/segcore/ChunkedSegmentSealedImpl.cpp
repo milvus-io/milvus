@@ -344,12 +344,10 @@ for_each_sorted_pk_match(
         if constexpr (std::same_as<PK, int64_t>) {
             auto src = reinterpret_cast<const int64_t*>(pw.get()->RawData());
             auto chunk_row_num = pk_column->chunk_row_nums(i);
-            auto chunk_end = src + chunk_row_num;
             for (size_t j = 0; j < pks.size(); ++j) {
                 auto target = std::get<int64_t>(pks[j]);
-                auto [match_begin, match_end] =
-                    std::equal_range(src, chunk_end, target);
-                for (auto it = match_begin; it != match_end; ++it) {
+                auto it = std::lower_bound(src, src + chunk_row_num, target);
+                for (; it != src + chunk_row_num && *it == target; ++it) {
                     callback(j, it - src + num_rows_until_chunk);
                 }
             }
