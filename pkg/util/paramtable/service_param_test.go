@@ -273,6 +273,8 @@ func TestServiceParam(t *testing.T) {
 
 		assert.NotEmpty(t, Params.SslCACert.GetValue())
 
+		assert.False(t, Params.DisableAWSChunkedEncoding.GetAsBool())
+
 		assert.Equal(t, Params.UseIAM.GetAsBool(), false)
 
 		assert.Equal(t, Params.CloudProvider.GetValue(), "aws")
