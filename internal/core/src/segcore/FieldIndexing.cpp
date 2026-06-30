@@ -638,7 +638,12 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                 // Create accessor for DataArray
                 auto accessor = [&geometry_array, &valid_data](
                                     int64_t i) -> std::pair<std::string, bool> {
-                    bool is_valid = valid_data.empty() || valid_data[i];
+                    // Guard valid_data[i] the same way the geometry payload is
+                    // guarded below: a nullable DataArray may carry a shorter
+                    // valid_data than the row count, so an unchecked index is
+                    // an out-of-bounds read.
+                    bool is_valid = valid_data.empty() ||
+                                    (i < valid_data.size() && valid_data[i]);
                     if (is_valid && i < geometry_array.data_size()) {
                         return {geometry_array.data(i), true};
                     }
