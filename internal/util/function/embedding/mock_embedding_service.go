@@ -253,6 +253,27 @@ func CreateCohereEmbeddingServer[T int8 | float32]() *httptest.Server {
 	return ts
 }
 
+// CreateTwelveLabsEmbeddingServer mimics the TwelveLabs /v1.3/embed endpoint,
+// which takes a single text per multipart/form-data request and returns one
+// embedding segment.
+func CreateTwelveLabsEmbeddingServer(dim int) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseMultipartForm(1 << 20)
+		text := r.FormValue("text")
+		emb := mockEmbedding[float32]([]string{text}, dim)[0]
+
+		res := twelveLabsEmbeddingResponse{ModelName: r.FormValue("model_name")}
+		res.TextEmbedding.Segments = []struct {
+			Float []float32 `json:"float"`
+		}{{Float: emb}}
+
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
 func CreateTEIEmbeddingServer(dim int) *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req tei.EmbeddingRequest

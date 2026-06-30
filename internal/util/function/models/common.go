@@ -140,6 +140,12 @@ const (
 	GeminiAKEnvStr string = "MILVUS_GEMINI_API_KEY"
 )
 
+// TwelveLabs
+
+const (
+	TwelveLabsAKEnvStr string = "MILVUS_TWELVELABS_API_KEY"
+)
+
 // TEI and vllm
 
 const (

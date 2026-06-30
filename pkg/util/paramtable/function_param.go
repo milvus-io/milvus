@@ -119,6 +119,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your Gemini embedding url, Default is the official embedding url"
 			case "gemini.enable":
 				return "Whether to enable Gemini model service"
+			case "twelvelabs.credential":
+				return "The name in the credential configuration item"
+			case "twelvelabs.url":
+				return "Your TwelveLabs embedding url, Default is the official embedding url"
+			case "twelvelabs.enable":
+				return "Whether to enable TwelveLabs model service"
 			default:
 				return ""
 			}
