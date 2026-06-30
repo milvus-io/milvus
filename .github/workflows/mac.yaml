@@ -1,13 +1,7 @@
 name: Mac Code Checker
 
-# This workflow is triggered on master pushes, schedule, or manual dispatch.
+# This workflow is triggered by manual dispatch.
 on:
-  push:
-    branches:
-      - master
-  schedule:
-    # Runs at 17:00 UTC every day, for refreshing cache every day
-    - cron: '0 17 * * *'
   workflow_dispatch:
     inputs:
       branch:
