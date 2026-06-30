@@ -343,7 +343,7 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 // and errors are recorded on the span.
 func runAckCallbackWithTrace(baseCtx context.Context, msg message.BroadcastMutableMessage, fn func(ctx context.Context) error) error {
 	parentCtx := message.ExtractTraceContext(baseCtx, msg)
-	ctx, span := message.StartSpan(parentCtx, message.SpanNameWALBCCallback)
+	ctx, span := message.StartSpanForMessage(parentCtx, msg, message.SpanNameWALBCCallback)
 	defer span.End()
 	err := fn(ctx)
 	if err != nil {

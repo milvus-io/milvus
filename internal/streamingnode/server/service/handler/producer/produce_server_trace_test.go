@@ -37,7 +37,7 @@ func TestHandleProduce_ExtractsTraceContext(t *testing.T) {
 	// gRPC client does in Task 4).
 	props := map[string]string{
 		"_v": "1",
-		"_t": strconv.FormatInt(int64(message.MessageTypeTimeTick), 10),
+		"_t": strconv.FormatInt(int64(message.MessageTypeInsert), 10),
 	}
 	injectedMsg := message.NewMutableMessageBeforeAppend([]byte("test-payload"), props)
 	message.InjectTraceContext(clientCtx, injectedMsg)

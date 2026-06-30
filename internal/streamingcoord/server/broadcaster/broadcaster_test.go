@@ -151,7 +151,7 @@ func TestBroadcaster(t *testing.T) {
 	bc.Close()
 	broadcastAPI, err = bc.WithResourceKeys(context.Background())
 	assert.NoError(t, err)
-	_, err = broadcastAPI.Broadcast(context.Background(), nil)
+	_, err = broadcastAPI.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}))
 	assert.Error(t, err)
 	err = bc.Ack(context.Background(), mock_message.NewMockImmutableMessage(t))
 	assert.Error(t, err)
