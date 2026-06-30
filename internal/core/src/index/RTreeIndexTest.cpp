@@ -931,3 +931,61 @@ TEST_F(RTreeIndexTest, GrowingConcurrentAddAndQuery) {
     // Final count = seeded row 0 plus kRows incremental rows.
     EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kRows + 1));
 }
+
+// Multiple concurrent writers building the same growing index. This mirrors
+// IndexingRecord::AppendingIndex's documented "concurrent, reentrant" contract:
+// several threads may race on the first-time wrapper_ initialization and then
+// keep inserting. Run under ASAN/TSAN this asserts the lazy init is idempotent
+// and wrapper_/total_num_rows_/null_offset_ are never touched unsynchronized.
+TEST_F(RTreeIndexTest, GrowingConcurrentMultiWriter) {
+    milvus::storage::FileManagerContext ctx_build(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    milvus::index::RTreeIndex<std::string> rtree(ctx_build);
+
+    constexpr int kWriters = 6;
+    constexpr int kPerWriter = 1000;
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop_readers{false};
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&, w]() {
+            // Spin so every writer hits the first AddGeometry at ~the same time
+            // and they race on the lazy wrapper_ initialization.
+            while (!go.load(std::memory_order_relaxed)) {
+            }
+            for (int j = 0; j < kPerWriter; ++j) {
+                int64_t off = static_cast<int64_t>(w) * kPerWriter + j;
+                if (j % 5 == 0) {
+                    rtree.AddGeometry(std::string(), off);  // null geometry
+                } else {
+                    rtree.AddGeometry(CreatePointWKB(static_cast<double>(off),
+                                                     static_cast<double>(off)),
+                                      off);
+                }
+            }
+        });
+    }
+
+    std::vector<std::thread> readers;
+    for (int r = 0; r < 2; ++r) {
+        readers.emplace_back([&]() {
+            while (!stop_readers.load(std::memory_order_relaxed)) {
+                volatile int64_t c = rtree.Count();  // safe before/after init
+                (void)c;
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_relaxed);
+    for (auto& t : writers) {
+        t.join();
+    }
+    stop_readers.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    // Every row (null + non-null, disjoint offsets) must be accounted for once.
+    EXPECT_EQ(rtree.Count(), static_cast<int64_t>(kWriters * kPerWriter));
+}
