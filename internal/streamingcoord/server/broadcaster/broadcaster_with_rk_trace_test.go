@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -33,6 +34,7 @@ func TestBroadcasterWithRK_InjectsTraceContextBeforeTaskPersist(t *testing.T) {
 
 	// Stub the inner broadcast call to capture the msg Properties after injection.
 	var capturedMsg message.BroadcastMutableMessage
+	resourceKey := message.NewExclusiveCollectionNameResourceKey("db", "collection")
 	mockey.Mock((*broadcastTaskManager).broadcast).To(
 		func(_ *broadcastTaskManager, _ context.Context, msg message.BroadcastMutableMessage, _ uint64, _ *lockGuards) (*types.BroadcastAppendResult, error) {
 			capturedMsg = msg
@@ -48,6 +50,8 @@ func TestBroadcasterWithRK_InjectsTraceContextBeforeTaskPersist(t *testing.T) {
 
 	b := &broadcasterWithRK{
 		broadcaster: &broadcastTaskManager{},
+		broadcastID: 11,
+		guards:      buildTestLockGuards(resourceKey),
 	}
 	_, err := b.Broadcast(ctx, msg)
 	assert.NoError(t, err)
@@ -62,12 +66,17 @@ func TestBroadcasterWithRK_InjectsTraceContextBeforeTaskPersist(t *testing.T) {
 	}
 	assert.Equal(t, message.SpanNameWALBroadcast, broadcastSpan.Name, "wal.broadcast span should be emitted")
 	assert.Equal(t, expectedTraceID, broadcastSpan.SpanContext.TraceID())
+	assertSpanAttribute(t, broadcastSpan.Attributes, "message.type", message.MessageTypeDropCollection.String())
+	assertSpanInt64Attribute(t, broadcastSpan.Attributes, "broadcast.id", 11)
+	assertSpanStringSliceAttribute(t, broadcastSpan.Attributes, "broadcast.vchannels", []string{"v1", "v2"})
 
 	// Verify _tc was injected on the msg observed by the inner broadcast call.
 	sc := trace.SpanContextFromContext(message.ExtractTraceContext(context.Background(), capturedMsg))
 	assert.True(t, sc.IsValid(), "_tc should be present after Broadcast")
 	assert.Equal(t, broadcastSpan.SpanContext.TraceID(), sc.TraceID())
 	assert.Equal(t, broadcastSpan.SpanContext.SpanID(), sc.SpanID())
+	assert.Equal(t, uint64(11), capturedMsg.BroadcastHeader().BroadcastID)
+	assert.True(t, capturedMsg.BroadcastHeader().ResourceKeys.Contain(resourceKey))
 }
 
 func TestBroadcasterWithRK_KeepsExistingTraceContext(t *testing.T) {
@@ -100,6 +109,8 @@ func TestBroadcasterWithRK_KeepsExistingTraceContext(t *testing.T) {
 
 	b := &broadcasterWithRK{
 		broadcaster: &broadcastTaskManager{},
+		broadcastID: 11,
+		guards:      buildTestLockGuards(message.NewExclusiveCollectionNameResourceKey("db", "collection")),
 	}
 	_, err := b.Broadcast(callerCtx, msg)
 	assert.NoError(t, err)
@@ -132,4 +143,45 @@ func buildTestBroadcastMessageForTrace(t *testing.T) message.BroadcastMutableMes
 		t.Fatalf("failed to build broadcast message: %v", err)
 	}
 	return msg.OverwriteBroadcastHeader(0)
+}
+
+func buildTestLockGuards(keys ...message.ResourceKey) *lockGuards {
+	guards := &lockGuards{}
+	for _, key := range keys {
+		guards.append(&lockGuard{key: key})
+	}
+	return guards
+}
+
+func assertSpanAttribute(t *testing.T, attrs []attribute.KeyValue, key string, value string) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			assert.Equal(t, value, attr.Value.AsString())
+			return
+		}
+	}
+	t.Fatalf("missing span attribute %q", key)
+}
+
+func assertSpanInt64Attribute(t *testing.T, attrs []attribute.KeyValue, key string, value int64) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			assert.Equal(t, value, attr.Value.AsInt64())
+			return
+		}
+	}
+	t.Fatalf("missing span attribute %q", key)
+}
+
+func assertSpanStringSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, value []string) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			assert.ElementsMatch(t, value, attr.Value.AsStringSlice())
+			return
+		}
+	}
+	t.Fatalf("missing span attribute %q", key)
 }

@@ -122,6 +122,7 @@ func TestStartSpanForMessage_AddsMessageAttributes(t *testing.T) {
 	defer otel.SetTracerProvider(prev)
 
 	msg := CreateTestEmptyInsertMesage(1, nil)
+	msg.WithTimeTick(100).WithTxnContext(TxnContext{TxnID: 42})
 	_, span := StartSpanForMessage(context.Background(), msg, SpanNameWALAppend)
 	span.End()
 
@@ -130,6 +131,8 @@ func TestStartSpanForMessage_AddsMessageAttributes(t *testing.T) {
 	assert.Equal(t, SpanNameWALAppend, spans[0].Name)
 	assertSpanAttribute(t, spans[0].Attributes, spanAttrMessageType, MessageTypeInsert.String())
 	assertSpanAttribute(t, spans[0].Attributes, spanAttrVChannel, "v1")
+	assertSpanInt64Attribute(t, spans[0].Attributes, spanAttrTimeTick, 100)
+	assertSpanInt64Attribute(t, spans[0].Attributes, spanAttrTxnID, 42)
 	assertSpanBoolAttribute(t, spans[0].Attributes, spanAttrReplicate, false)
 
 	msgID := testMessageID("1")
@@ -146,6 +149,33 @@ func TestStartSpanForMessage_AddsMessageAttributes(t *testing.T) {
 	spans = exporter.GetSpans()
 	require.Len(t, spans, 2)
 	assertSpanBoolAttribute(t, spans[1].Attributes, spanAttrReplicate, true)
+}
+
+func TestStartSpanForMessage_AddsBroadcastAttributes(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	msg := NewDropCollectionMessageBuilderV1().
+		WithHeader(&messagespb.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		WithBroadcast([]string{"v1", "v2"}).
+		MustBuildBroadcast().
+		OverwriteBroadcastHeader(11)
+	_, span := StartSpanForMessage(context.Background(), msg, SpanNameWALBroadcast)
+	span.End()
+
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1)
+	assert.Equal(t, SpanNameWALBroadcast, spans[0].Name)
+	assertSpanAttribute(t, spans[0].Attributes, spanAttrMessageType, MessageTypeDropCollection.String())
+	assertSpanInt64Attribute(t, spans[0].Attributes, spanAttrBroadcastID, 11)
+	assertSpanStringSliceAttribute(t, spans[0].Attributes, spanAttrBroadcastVChannels, []string{"v1", "v2"})
 }
 
 func TestImmutableTxnMessageBuildCopiesCommitTraceContext(t *testing.T) {
@@ -226,6 +256,28 @@ func assertSpanBoolAttribute(t *testing.T, attrs []attribute.KeyValue, key strin
 	for _, attr := range attrs {
 		if string(attr.Key) == key {
 			assert.Equal(t, value, attr.Value.AsBool())
+			return
+		}
+	}
+	t.Fatalf("missing span attribute %q", key)
+}
+
+func assertSpanInt64Attribute(t *testing.T, attrs []attribute.KeyValue, key string, value int64) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			assert.Equal(t, value, attr.Value.AsInt64())
+			return
+		}
+	}
+	t.Fatalf("missing span attribute %q", key)
+}
+
+func assertSpanStringSliceAttribute(t *testing.T, attrs []attribute.KeyValue, key string, value []string) {
+	t.Helper()
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			assert.ElementsMatch(t, value, attr.Value.AsStringSlice())
 			return
 		}
 	}

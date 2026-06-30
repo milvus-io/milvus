@@ -18,7 +18,12 @@ const (
 
 	spanAttrMessageType = "message.type"
 	spanAttrVChannel    = "message.vchannel"
+	spanAttrTimeTick    = "message.timetick"
 	spanAttrReplicate   = "message.replicate"
+	spanAttrTxnID       = "txn.id"
+
+	spanAttrBroadcastID        = "broadcast.id"
+	spanAttrBroadcastVChannels = "broadcast.vchannels"
 
 	SpanNameWALAutocommit      = "wal.autocommit"
 	SpanNameWALTxn             = "wal.txn"
@@ -40,24 +45,33 @@ func StartSpanForMessage(ctx context.Context, msg BasicMessage, spanName string)
 	if !shouldTraceMessage(msg) {
 		return ctx, noopSpan
 	}
-	return otel.Tracer(tracerName).Start(ctx, spanName, trace.WithAttributes(
+	attrs := []attribute.KeyValue{
 		attribute.String(spanAttrMessageType, msg.MessageType().String()),
 		attribute.String(spanAttrVChannel, getVChannel(msg)),
 		attribute.Bool(spanAttrReplicate, isReplicateMessage(msg)),
-	))
+	}
+	if msg.Properties().Exist(messageTimeTick) {
+		attrs = append(attrs, attribute.Int64(spanAttrTimeTick, int64(msg.TimeTick())))
+	}
+	if txnCtx := msg.TxnContext(); txnCtx != nil {
+		attrs = append(attrs, attribute.Int64(spanAttrTxnID, int64(txnCtx.TxnID)))
+	}
+	if broadcastHeader := msg.BroadcastHeader(); broadcastHeader != nil {
+		attrs = append(attrs,
+			attribute.Int64(spanAttrBroadcastID, int64(broadcastHeader.BroadcastID)),
+			attribute.StringSlice(spanAttrBroadcastVChannels, broadcastHeader.VChannels),
+		)
+	}
+	return otel.Tracer(tracerName).Start(ctx, spanName, trace.WithAttributes(attrs...))
 }
 
 func shouldTraceMessage(msg BasicMessage) bool {
 	return msg != nil && msg.MessageType() != MessageTypeTimeTick
 }
 
-type messageWithVChannel interface {
-	VChannel() string
-}
-
 func getVChannel(msg BasicMessage) string {
-	if msgWithVChannel, ok := msg.(messageWithVChannel); ok {
-		return msgWithVChannel.VChannel()
+	if vchannel, ok := msg.Properties().Get(messageVChannel); ok {
+		return vchannel
 	}
 	return ""
 }

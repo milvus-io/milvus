@@ -51,6 +51,9 @@ func TestRunAckCallbackWithTrace_OpensChildSpan(t *testing.T) {
 	for _, s := range spans {
 		if s.Name == message.SpanNameWALBCCallback {
 			assert.Equal(t, originTraceID, s.SpanContext.TraceID())
+			assertSpanAttribute(t, s.Attributes, "message.type", message.MessageTypeDropCollection.String())
+			assertSpanInt64Attribute(t, s.Attributes, "broadcast.id", 0)
+			assertSpanStringSliceAttribute(t, s.Attributes, "broadcast.vchannels", []string{"v1", "v2"})
 			found = true
 		}
 	}
