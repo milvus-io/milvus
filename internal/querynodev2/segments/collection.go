@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -113,7 +114,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		// separate from the barrier timestamp so stale schema payloads cannot roll
 		// back fields, while newer properties-only payloads can still refresh.
 		if plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, logicalSchemaVersion, schemaBarrierTs); shouldUpdate {
-			if err := collection.ccollection.UpdateSchema(schema, plan.segcoreSchemaVersion); err != nil {
+			if err := collection.updateSchema(schema, plan.segcoreSchemaVersion); err != nil {
 				return err
 			}
 			collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
@@ -128,7 +129,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		// Always update index meta to ensure newly indexed fields are visible
 		// for search plan creation (CollectionIndexMeta::HasField check).
 		if meta != nil {
-			if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
+			if err := collection.updateIndexMeta(meta); err != nil {
 				return err
 			}
 		}
@@ -169,7 +170,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return nil
 	}
 
-	if err := collection.ccollection.UpdateSchema(schema, plan.segcoreSchemaVersion); err != nil {
+	if err := collection.updateSchema(schema, plan.segcoreSchemaVersion); err != nil {
 		return err
 	}
 	collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
@@ -349,6 +350,72 @@ func (c *Collection) ID() int64 {
 // GetCCollection returns the CCollection of collection
 func (c *Collection) GetCCollection() *segcore.CCollection {
 	return c.ccollection
+}
+
+func (c *Collection) NewSearchRequest(req *querypb.SearchRequest, placeholderGroup []byte) (*segcore.SearchRequest, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.ccollection == nil {
+		return nil, merr.WrapErrServiceInternal("create search request on released collection")
+	}
+	return segcore.NewSearchRequest(c.ccollection, req, placeholderGroup)
+}
+
+func (c *Collection) NewRetrievePlan(req *querypb.QueryRequest) (*segcore.RetrievePlan, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.ccollection == nil {
+		return nil, merr.WrapErrServiceInternal("create retrieve plan on released collection")
+	}
+	return segcore.NewRetrievePlan(
+		c.ccollection,
+		req.Req.GetSerializedExprPlan(),
+		req.Req.GetMvccTimestamp(),
+		req.Req.Base.GetMsgID(),
+		req.Req.GetConsistencyLevel(),
+		req.Req.GetCollectionTtlTimestamps(),
+		req.Req.GetEntityTtlPhysicalTime(),
+	)
+}
+
+func (c *Collection) CreateCSegment(req *segcore.CreateCSegmentRequest) (segcore.CSegment, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.ccollection == nil {
+		return nil, merr.WrapErrServiceInternal("create segment on released collection")
+	}
+	req.Collection = c.ccollection
+	return segcore.CreateCSegment(req)
+}
+
+func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+	if meta == nil {
+		return nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.ccollection == nil {
+		return merr.WrapErrServiceInternal("update index meta on released collection")
+	}
+	if proto.Equal(c.ccollection.IndexMeta(), meta) {
+		return nil
+	}
+	return c.ccollection.UpdateIndexMeta(meta)
+}
+
+func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uint64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.ccollection == nil {
+		return merr.WrapErrServiceInternal("update schema on released collection")
+	}
+	return c.ccollection.UpdateSchema(schema, version)
 }
 
 func (c *Collection) setSchema(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64, segcoreSchemaVersion uint64) {
