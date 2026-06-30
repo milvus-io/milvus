@@ -18,3 +18,9 @@ generate-mockery: getdeps
 	$(INSTALL_PATH)/mockery --name=Client --dir=$(PWD)/mq/msgdispatcher --output=$(PWD)/mq/msgsdispatcher --filename=mock_client.go --with-expecter --structname=MockClient --outpkg=msgdispatcher --inpackage
 	$(INSTALL_PATH)/mockery --name=Logger --dir=$(PWD)/eventlog --output=$(PWD)/eventlog --filename=mock_logger.go --with-expecter --structname=MockLogger --outpkg=eventlog --inpackage
 	$(INSTALL_PATH)/mockery --name=MessageID --dir=$(PWD)/mq/common --output=$(PWD)/mq/msgstream/mqwrapper --filename=mock_id.go --with-expecter --structname=MockMessageID --outpkg=mqwrapper --inpackage
+
+# mocks for the querycoord metadata package moved into pkg/v3/coordmeta/querycoord
+# (and its QueryCoordCatalog persistence interface under pkg/v3/metastore).
+generate-mockery-coordmeta-querycoord: getdeps
+	$(INSTALL_PATH)/mockery --name=QueryCoordCatalog --dir=$(PWD)/metastore --output=$(PWD)/metastore/mocks --filename=mock_querycoord_catalog.go --with-expecter --structname=QueryCoordCatalog --outpkg=mocks
+	$(INSTALL_PATH)/mockery --name=Broker --dir=$(PWD)/coordmeta/querycoord --output=$(PWD)/coordmeta/querycoord --filename=mock_broker.go --with-expecter --structname=MockBroker --inpackage

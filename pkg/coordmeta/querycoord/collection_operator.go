@@ -14,12 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metastore
+package querycoord
 
-import pkgmetastore "github.com/milvus-io/milvus/pkg/v3/metastore"
+// CollectionOperator is a function that can be used to modify a collection
+type CollectionOperator func(collection *Collection) (changed bool)
 
-// QueryCoordCatalog now lives in the shared pkg/v3/metastore package so the
-// pooled catalog service can reuse the same persistence interface. This alias
-// keeps internal/metastore call sites (and the QueryCoord KV catalog impl under
-// internal/metastore/kv/querycoord) working unchanged.
-type QueryCoordCatalog = pkgmetastore.QueryCoordCatalog
+func SetNotifierCollectionOp(notifier chan struct{}) CollectionOperator {
+	return func(collection *Collection) (changed bool) {
+		collection.setRefreshNotifier(notifier)
+		return true
+	}
+}
