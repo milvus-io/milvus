@@ -42,6 +42,26 @@ func TestNewGRPCStatusFromStreamingError(t *testing.T) {
 	assert.Equal(t, codes.FailedPrecondition, st.Code())
 
 	st = NewGRPCStatusFromStreamingError(
+		NewUnrecoverableError("test"),
+	)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
+		NewResourceAcquired("test"),
+	)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
+		NewReplicateViolation("test"),
+	)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
+		NewWALNameMismatchError("expected", "actual"),
+	)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	st = NewGRPCStatusFromStreamingError(
 		New(10086, "test"),
 	)
 	assert.Equal(t, codes.Unknown, st.Code())
