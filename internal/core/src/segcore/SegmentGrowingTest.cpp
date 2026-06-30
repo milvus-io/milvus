@@ -68,6 +68,36 @@
 using namespace milvus::segcore;
 using namespace milvus;
 
+namespace {
+
+void
+AddStorageV3SystemFields(const SchemaPtr& schema) {
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+}
+
+bool
+ManifestHasField(const milvus::test::V3SegmentTestData& test_data,
+                 FieldId field_id) {
+    auto field_column = std::to_string(field_id.get());
+    auto column_groups = test_data.GetColumnGroups();
+    for (size_t i = 0; i < column_groups->size(); ++i) {
+        const auto& columns = column_groups->at(i)->columns;
+        if (std::find(columns.begin(), columns.end(), field_column) !=
+            columns.end()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 TEST(Growing, DeleteCount) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -142,6 +172,7 @@ TEST(Growing, RealCount) {
 
 TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     auto schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     constexpr int64_t dim = 4;
     auto vec = schema->AddDebugField(
@@ -165,6 +196,8 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     milvus::test::V3SegmentTestData test_data(
         schema, 2, 3, dim, TestLocalPath, base_path);
     ASSERT_EQ(test_data.NumColumnGroups(), 2);
+    ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
+    ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
 
     constexpr int64_t checkpoint_rows = 4;
     milvus::proto::segcore::SegmentLoadInfo load_info;
@@ -212,6 +245,7 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
 
 TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
     auto schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
 
@@ -221,6 +255,8 @@ TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
     std::filesystem::remove_all(base_path);
     milvus::test::V3SegmentTestData test_data(
         schema, 1, 2, 1, TestLocalPath, base_path);
+    ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
+    ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
 
     milvus::proto::segcore::SegmentLoadInfo load_info;
     load_info.set_collectionid(1);

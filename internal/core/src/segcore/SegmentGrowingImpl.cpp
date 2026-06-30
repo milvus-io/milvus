@@ -136,23 +136,32 @@ AssertLoadedFieldRows(
 }
 
 void
-AssertLoadedFieldRowsIfPresent(
+AssertAllLoadedFieldRows(
     const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
         column_group_results,
-    FieldId field_id,
-    int64_t expected_rows,
-    const char* field_name) {
+    int64_t expected_rows) {
     if (expected_rows == 0) {
         return;
     }
-    auto rows = GetLoadedFieldRows(column_group_results, field_id);
-    AssertInfo(rows == -1 || rows == expected_rows,
-               "growing segment StorageV3 manifest loads {} rows for {} "
-               "field {}, but SegmentLoadInfo expects {} rows",
-               rows,
-               field_name,
-               field_id.get(),
-               expected_rows);
+
+    std::unordered_map<FieldId, int64_t> loaded_rows;
+    for (const auto& column_group_result : column_group_results) {
+        for (const auto& [field_id, field_data] : column_group_result) {
+            auto& rows = loaded_rows[field_id];
+            for (const auto& data : field_data) {
+                rows += data->get_num_rows();
+            }
+        }
+    }
+
+    for (const auto& [field_id, rows] : loaded_rows) {
+        AssertInfo(rows == expected_rows,
+                   "growing segment StorageV3 manifest loads {} rows for "
+                   "field {}, but SegmentLoadInfo expects {} rows",
+                   rows,
+                   field_id.get(),
+                   expected_rows);
+    }
 }
 
 int32_t
@@ -2713,13 +2722,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     AssertInfo(primary_field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
     AssertLoadedFieldRows(
         column_group_results, primary_field_id, num_rows, "primary");
+    AssertAllLoadedFieldRows(column_group_results, num_rows);
     auto timestamp_rows =
         GetLoadedFieldRows(column_group_results, TimestampFieldID);
     auto row_id_rows = GetLoadedFieldRows(column_group_results, RowFieldID);
-    AssertLoadedFieldRowsIfPresent(
-        column_group_results, TimestampFieldID, num_rows, "timestamp");
-    AssertLoadedFieldRowsIfPresent(
-        column_group_results, RowFieldID, num_rows, "row ID");
 
     auto reserved_offset = PreInsert(num_rows);
     text_loaded_row_count_ = num_rows;
