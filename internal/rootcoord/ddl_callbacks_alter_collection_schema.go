@@ -102,7 +102,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}
 	}
 	if plan.HasFunction() {
-		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
+		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan, typeutil.IsExternalCollection(coll.ToCollectionSchemaPB())); err != nil {
 			return err
 		}
 		for _, function := range coll.Functions {
@@ -457,6 +457,10 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	}
 	switch targetFunc.Type {
 	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+	case schemapb.FunctionType_TextEmbedding:
+		if !typeutil.IsExternalCollection(coll.ToCollectionSchemaPB()) {
+			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
+		}
 	default:
 		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
 	}

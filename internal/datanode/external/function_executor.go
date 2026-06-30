@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -26,10 +27,17 @@ import (
 // defaultReadBufferSize matches the buffer size used elsewhere for FFIPackedReader.
 const defaultReadBufferSize = 64 * 1024 * 1024
 
+// FunctionExecutionResult carries manifest and stats metadata produced by
+// function execution for one external segment.
+type FunctionExecutionResult struct {
+	ManifestPath  string
+	Bm25Statslogs []*datapb.FieldBinlog
+}
+
 // ExecuteFunctionsForSegment computes function-output columns for an external
 // segment and returns a manifest that references both the external original
 // files (for input columns) and a newly written packed file (for function
-// output columns).
+// output columns), plus coordinator-facing stats metadata for BM25 outputs.
 //
 // Streaming pipeline (no full-segment InsertData materialization):
 //  1. Build an input manifest referencing the segment's external fragments.
@@ -52,7 +60,8 @@ func ExecuteFunctionsForSegment(
 	segmentID int64,
 	basePath string,
 	clusterID string,
-) (string, error) {
+	bm25StatsLogIDs map[int64]int64,
+) (*FunctionExecutionResult, error) {
 	log := mlog.With()
 	log.Info(ctx, "executing functions for external table segment",
 		mlog.FieldSegmentID(segmentID),
@@ -77,36 +86,36 @@ func ExecuteFunctionsForSegment(
 		},
 	)
 	if err != nil {
-		return "", merr.Wrap(err, "create input manifest")
+		return nil, merr.Wrap(err, "create input manifest")
 	}
 	_, inputVersion, err := packed.UnmarshalManifestPath(inputManifestPath)
 	if err != nil {
-		return "", merr.Wrap(err, "parse input manifest path")
+		return nil, merr.Wrap(err, "parse input manifest path")
 	}
 
 	outputFields, outputSchema, err := buildOutputSchema(schema)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	outputArrow, err := storage.ConvertToArrowSchema(outputSchema, true)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	inputSchema, executionSchema, requiredInputFields, err := buildFunctionExecutionSchema(schema)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	reader, err := openInputReader(ctx, schema, inputManifestPath, inputSchema, storageConfig, collectionID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer reader.Close()
 
 	colGroups := []storagecommon.ColumnGroup{{Columns: lo.Range(len(outputFields))}}
 	writer, err := packed.NewFFIPackedWriter(basePath, outputArrow, colGroups, storageConfig, nil)
 	if err != nil {
-		return "", merr.Wrap(err, "open output writer")
+		return nil, merr.Wrap(err, "open output writer")
 	}
 	writer.AsNewColumnGroups()
 
@@ -115,31 +124,35 @@ func ExecuteFunctionsForSegment(
 	totalRows, err := streamBatches(ctx, schema, executionSchema, outputSchema, outputArrow,
 		requiredInputFields, reader, writer, bm25Acc, clusterID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	output, err := writer.Close()
 	if err != nil {
-		return "", merr.Wrap(err, "close output writer")
+		return nil, merr.Wrap(err, "close output writer")
 	}
 	if output != nil {
 		defer output.Destroy()
 	}
 
 	updates := &packed.ManifestUpdates{NewFiles: output}
-	if err := appendBM25Stats(ctx, bm25Acc, storageConfig, basePath, updates); err != nil {
-		return "", err
+	bm25Statslogs, err := appendBM25Stats(ctx, bm25Acc, storageConfig, basePath, updates, bm25StatsLogIDs)
+	if err != nil {
+		return nil, err
 	}
 	manifestPath, err := packed.CommitManifestUpdates(basePath, inputVersion, storageConfig, updates)
 	if err != nil {
-		return "", merr.Wrap(err, "commit function output manifest")
+		return nil, merr.Wrap(err, "commit function output manifest")
 	}
 
 	log.Info(ctx, "function execution completed",
 		mlog.FieldSegmentID(segmentID),
 		mlog.Int64("rows", totalRows),
 		mlog.String("manifestPath", manifestPath))
-	return manifestPath, nil
+	return &FunctionExecutionResult{
+		ManifestPath:  manifestPath,
+		Bm25Statslogs: bm25Statslogs,
+	}, nil
 }
 
 // buildOutputSchema returns the output FieldSchema list and a wrapping
@@ -398,15 +411,32 @@ func writeOutputBatch(
 // Returns an empty map if the schema declares no BM25 functions.
 func newBM25Accumulators(schema *schemapb.CollectionSchema) map[int64]*storage.BM25Stats {
 	acc := make(map[int64]*storage.BM25Stats)
+	for _, outID := range bm25OutputFieldIDs(schema) {
+		acc[outID] = storage.NewBM25Stats()
+	}
+	return acc
+}
+
+// bm25OutputFieldIDs returns the unique output field IDs declared by BM25 functions.
+func bm25OutputFieldIDs(schema *schemapb.CollectionSchema) []int64 {
+	if schema == nil {
+		return nil
+	}
+	var outputFieldIDs []int64
+	seen := make(map[int64]struct{})
 	for _, fn := range schema.GetFunctions() {
 		if fn.GetType() != schemapb.FunctionType_BM25 {
 			continue
 		}
 		for _, outID := range fn.GetOutputFieldIds() {
-			acc[outID] = storage.NewBM25Stats()
+			if _, ok := seen[outID]; ok {
+				continue
+			}
+			seen[outID] = struct{}{}
+			outputFieldIDs = append(outputFieldIDs, outID)
 		}
 	}
-	return acc
+	return outputFieldIDs
 }
 
 // accumulateBM25Stats appends per-batch sparse vectors into the running
@@ -437,30 +467,53 @@ func appendBM25Stats(
 	storageConfig *indexpb.StorageConfig,
 	basePath string,
 	updates *packed.ManifestUpdates,
-) error {
+	bm25StatsLogIDs map[int64]int64,
+) ([]*datapb.FieldBinlog, error) {
 	if len(acc) == 0 {
-		return nil
+		return nil, nil
 	}
 	log := mlog.With()
 	if updates == nil {
-		return merr.WrapErrServiceInternalMsg("manifest updates is nil")
+		return nil, merr.WrapErrServiceInternalMsg("manifest updates is nil")
 	}
 
 	entries := make([]packed.StatEntry, 0, len(acc))
+	bm25Statslogs := make([]*datapb.FieldBinlog, 0, len(acc))
+	nextLocalLogID := int64(storage.CompoundStatsType)
 	for outID, stats := range acc {
+		logID := bm25StatsLogIDs[outID]
+		if logID == 0 && len(bm25StatsLogIDs) == 0 {
+			logID = nextLocalLogID
+			nextLocalLogID++
+		}
+		if logID == 0 {
+			return nil, merr.WrapErrServiceInternalMsg("bm25 stats log id not allocated for field %d", outID)
+		}
 		blob, err := stats.Serialize()
 		if err != nil {
-			return merr.Wrapf(err, "serialize bm25 stats for field %d", outID)
+			return nil, merr.Wrapf(err, "serialize bm25 stats for field %d", outID)
 		}
-		fullPath := path.Join(basePath, fmt.Sprintf("_stats/bm25.%d/%d", outID, 0))
+		fullPath := path.Join(basePath, fmt.Sprintf("_stats/bm25.%d/%d", outID, logID))
 		if err := packed.WriteFile(storageConfig, fullPath, blob); err != nil {
-			return merr.Wrapf(err, "write bm25 stats file %s", fullPath)
+			return nil, merr.Wrapf(err, "write bm25 stats file %s", fullPath)
 		}
+		size := int64(len(blob))
 		entries = append(entries, packed.StatEntry{
 			Key:   fmt.Sprintf("bm25.%d", outID),
 			Files: []string{fullPath},
 			Metadata: map[string]string{
-				"memory_size": strconv.FormatInt(int64(len(blob)), 10),
+				"memory_size": strconv.FormatInt(size, 10),
+			},
+		})
+		bm25Statslogs = append(bm25Statslogs, &datapb.FieldBinlog{
+			FieldID: outID,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogID:      logID,
+					LogSize:    size,
+					MemorySize: size,
+					EntriesNum: stats.NumRow(),
+				},
 			},
 		})
 		log.Info(ctx, "registered bm25 stats",
@@ -469,7 +522,7 @@ func appendBM25Stats(
 			mlog.Int64("numRow", stats.NumRow()))
 	}
 	updates.Stats = append(updates.Stats, entries...)
-	return nil
+	return bm25Statslogs, nil
 }
 
 // finalizeBM25Stats serializes each per-field accumulator, writes the blob
@@ -497,7 +550,7 @@ func finalizeBM25Stats(
 	}
 
 	updates := &packed.ManifestUpdates{}
-	if err := appendBM25Stats(ctx, acc, storageConfig, basePath, updates); err != nil {
+	if _, err := appendBM25Stats(ctx, acc, storageConfig, basePath, updates, nil); err != nil {
 		return "", err
 	}
 	return packed.CommitManifestUpdates(basePath, version, storageConfig, updates)

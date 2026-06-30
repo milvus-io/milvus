@@ -926,9 +926,14 @@ func transformStructArrayFieldSubNames(structFieldSchema *schemapb.StructArrayFi
 	}
 }
 
-// validateAddFieldRequest validates both the old schema constraints and the new field properties
-// for an AddCollectionField request. It is the single source of truth for add-field validation.
 func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *schemapb.FieldSchema) error {
+	return validateAddFieldRequestWithOptions(schema, newFieldSchema, false)
+}
+
+// validateAddFieldRequestWithOptions validates both the old schema constraints and the new field properties.
+// For external collections, allowExternalFunctionOutput lets AlterCollectionSchema validate generated
+// function output fields without treating them as source-backed external fields.
+func validateAddFieldRequestWithOptions(schema *schemapb.CollectionSchema, newFieldSchema *schemapb.FieldSchema, allowExternalFunctionOutput bool) error {
 	// --- old schema constraints ---
 	fieldList := typeutil.NewSet[string]()
 	for _, field := range schema.GetFields() {
@@ -949,21 +954,23 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
 	}
 	isExternalCollection := typeutil.IsExternalCollection(schema)
-	if isExternalCollection && newFieldSchema.GetExternalField() == "" {
+	isExternalFunctionOutput := allowExternalFunctionOutput && newFieldSchema.GetIsFunctionOutput()
+	if isExternalCollection && isExternalFunctionOutput && newFieldSchema.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("function output field %s in external collection %s must not have external_field mapping", newFieldSchema.GetName(), schema.GetName())
+	}
+	if isExternalCollection && !isExternalFunctionOutput && newFieldSchema.GetExternalField() == "" {
 		return merr.WrapErrParameterInvalidMsg("add field operation on external collection requires external_field mapping, field name = %s", newFieldSchema.GetName())
 	}
 	if !isExternalCollection && newFieldSchema.GetExternalField() != "" {
 		return merr.WrapErrParameterInvalidMsg("add field operation does not support external field mapping, field name = %s", newFieldSchema.GetName())
 	}
+	schemaWithNewField := proto.Clone(schema).(*schemapb.CollectionSchema)
+	schemaWithNewField.Fields = append(schemaWithNewField.GetFields(), proto.Clone(newFieldSchema).(*schemapb.FieldSchema))
 	if isExternalCollection {
-		schemaWithNewField := proto.Clone(schema).(*schemapb.CollectionSchema)
-		schemaWithNewField.Fields = append(schemaWithNewField.GetFields(), proto.Clone(newFieldSchema).(*schemapb.FieldSchema))
 		if err := typeutil.ValidateExternalCollectionResolvedSchema(schemaWithNewField); err != nil {
 			return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 		}
 	}
-	schemaWithNewField := proto.Clone(schema).(*schemapb.CollectionSchema)
-	schemaWithNewField.Fields = append(schemaWithNewField.GetFields(), proto.Clone(newFieldSchema).(*schemapb.FieldSchema))
 	if err := validateTextStorageV3Enabled(schemaWithNewField); err != nil {
 		return err
 	}
@@ -1100,24 +1107,47 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	isExternalCollection := typeutil.IsExternalCollection(t.oldSchema)
+	if isExternalCollection {
+		if addRequest.GetDoPhysicalBackfill() {
+			return merr.WrapErrParameterInvalidMsg(
+				"external collection does not support physical backfill; run RefreshExternalCollection after schema mutation")
+		}
+		if plan.Kind == schemautil.AlterSchemaAddFunction {
+			return merr.WrapErrParameterInvalidMsg("external collection add function must include its output field")
+		}
+	}
 
+	var newFieldSchema *schemapb.FieldSchema
 	if plan.HasField() {
-		if err := validateAddFieldRequest(t.oldSchema, plan.Field); err != nil {
-			return err
-		}
-		if err := ValidateField(plan.Field, t.oldSchema); err != nil {
-			return err
-		}
-
 		if plan.Kind == schemautil.AlterSchemaAddField {
+			if isExternalCollection && plan.Field.GetIsFunctionOutput() {
+				return merr.WrapErrParameterInvalidMsg("source-backed field %s in external collection %s must not be marked as function output",
+					plan.Field.GetName(), t.oldSchema.GetName())
+			}
+			if err := validateAddFieldRequest(t.oldSchema, plan.Field); err != nil {
+				return err
+			}
+			if err := ValidateField(plan.Field, t.oldSchema); err != nil {
+				return err
+			}
 			if !plan.Field.GetNullable() {
 				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", plan.Field.GetName()))
 			}
 			return nil
 		}
+
+		newFieldSchema = proto.Clone(plan.Field).(*schemapb.FieldSchema)
+		newFieldSchema.IsFunctionOutput = true
+		if err := validateAddFieldRequestWithOptions(t.oldSchema, newFieldSchema, true); err != nil {
+			return err
+		}
+		if err := ValidateField(newFieldSchema, t.oldSchema); err != nil {
+			return err
+		}
 	}
 	if plan.HasFunction() {
-		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
+		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan, isExternalCollection); err != nil {
 			return err
 		}
 	}
@@ -1127,10 +1157,15 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	// + new function, then validate only the new function to avoid re-checking existing
 	// functions' runtime providers.
 	mergedSchema := proto.Clone(t.oldSchema).(*schemapb.CollectionSchema)
-	if plan.HasField() {
-		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(plan.Field).(*schemapb.FieldSchema))
+	if newFieldSchema != nil {
+		mergedSchema.Fields = append(mergedSchema.Fields, newFieldSchema)
 	}
-	mergedSchema.Functions = append(mergedSchema.Functions, plan.Function)
+	mergedSchema.Functions = append(mergedSchema.Functions, proto.Clone(plan.Function).(*schemapb.FunctionSchema))
+	if isExternalCollection {
+		if err := typeutil.ValidateExternalCollectionResolvedSchema(mergedSchema); err != nil {
+			return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+		}
+	}
 	if err := validator.ValidateFunction(mergedSchema, plan.Function.GetName(), false); err != nil {
 		return err
 	}
@@ -1330,6 +1365,9 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 	}
 
 	if !dropOutputFields {
+		if typeutil.IsExternalCollection(schema) {
+			return merr.WrapErrParameterInvalidMsg("external collection function must be dropped with its output field: %s", functionName)
+		}
 		if targetFunc.GetType() == schemapb.FunctionType_BM25 {
 			return merr.WrapErrParameterInvalidMsg("BM25 function must be dropped with its output field in drop_function_field interface: %s", functionName)
 		}
@@ -1338,6 +1376,10 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 
 	switch targetFunc.GetType() {
 	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+	case schemapb.FunctionType_TextEmbedding:
+		if !typeutil.IsExternalCollection(schema) {
+			return merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
+		}
 	default:
 		return merr.WrapErrParameterInvalidMsg("only BM25 and MinHash functions support dropping output fields: %s", functionName)
 	}

@@ -214,6 +214,19 @@ func applyExternalCollectionSegmentUpdate(
 	updatedSegments []*datapb.SegmentInfo,
 	logFields ...mlog.Field,
 ) error {
+	return applyExternalCollectionSegmentUpdateWithSchemaVersion(ctx, mt, collectionID, false, 0, keptSegmentIDs, updatedSegments, logFields...)
+}
+
+func applyExternalCollectionSegmentUpdateWithSchemaVersion(
+	ctx context.Context,
+	mt *meta,
+	collectionID int64,
+	checkSchemaVersion bool,
+	expectedSchemaVersion int32,
+	keptSegmentIDs []int64,
+	updatedSegments []*datapb.SegmentInfo,
+	logFields ...mlog.Field,
+) error {
 	if mt == nil {
 		return merr.WrapErrServiceInternalMsg("meta is nil, cannot update segments")
 	}
@@ -355,6 +368,20 @@ func applyExternalCollectionSegmentUpdate(
 	var operators []UpdateOperator
 	var patchErr error
 
+	if checkSchemaVersion {
+		schemaVersionGuardOperator := func(modPack *updateSegmentPack) bool {
+			collection := modPack.meta.GetCollection(collectionID)
+			if collection == nil || collection.Schema == nil {
+				return modPack.fail(merr.WrapErrServiceInternalMsg("collection %d not found in meta", collectionID))
+			}
+			if collection.Schema.GetVersion() != expectedSchemaVersion {
+				return modPack.fail(merr.WrapErrServiceInternalMsg("external collection schema changed during refresh; rerun refresh"))
+			}
+			return true
+		}
+		operators = append(operators, schemaVersionGuardOperator)
+	}
+
 	validationOperator := func(modPack *updateSegmentPack) bool {
 		for _, incoming := range upsertSegmentMap {
 			existing := modPack.meta.segments.GetSegment(incoming.GetID())
@@ -406,7 +433,7 @@ func applyExternalCollectionSegmentUpdate(
 	}
 	operators = append(operators, dropOperator)
 
-	// Operator 2: Add new segments or patch existing active segments.
+	// Operator 3: Add new segments or patch existing active segments.
 	for _, seg := range normalizedUpdatedSegments {
 		incoming := seg
 		upsertOperator := func(modPack *updateSegmentPack) bool {
@@ -571,6 +598,7 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
+	cloned.Bm25Statslogs = incoming.GetBm25Statslogs()
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
@@ -579,10 +607,12 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 
 // SetJobInfo processes a complete job-level response and updates segment information atomically.
 func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *datapb.RefreshExternalCollectionTaskResponse) error {
-	return applyExternalCollectionSegmentUpdate(
+	return applyExternalCollectionSegmentUpdateWithSchemaVersion(
 		ctx,
 		t.mt,
 		t.GetCollectionId(),
+		true,
+		t.GetSchemaVersion(),
 		resp.GetKeptSegments(),
 		resp.GetUpdatedSegments(),
 		mlog.Int64("taskID", t.GetTaskId()),
@@ -626,7 +656,10 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	t.ExternalCollectionRefreshTask = updatedTask
 
 	// Get current segments for the collection
-	segments := t.mt.SelectSegments(ctx, CollectionFilter(t.GetCollectionId()))
+	segments := t.mt.SelectSegments(ctx,
+		CollectionFilter(t.GetCollectionId()),
+		SegmentFilterFunc(isSegmentHealthy),
+	)
 
 	currentSegments := make([]*datapb.SegmentInfo, 0, len(segments))
 	for _, seg := range segments {
@@ -654,16 +687,16 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		mlog.Int64("idEnd", idEnd),
 		mlog.Int64("count", idEnd-idBegin))
 
-	// Use the current collection schema as this task's snapshot. There is no
-	// job/task-level schema-version gate for the current additive-only refresh
-	// scope: if AddField races after this request is built, the task may finish
-	// with the older schema and skip the new field, and a later refresh will
-	// self-heal it through missing-column detection. Drop, rename, or type
-	// changes must reintroduce stronger schema coordination, such as a gate or
-	// lock, before they are supported.
+	// Use the task schema as the worker snapshot. If the collection schema has
+	// moved on before dispatch, fail this refresh task and let the caller retry
+	// with a fresh task built from the new schema.
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
 		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
+		return
+	}
+	if collInfo.Schema.GetVersion() != t.GetSchemaVersion() {
+		err = merr.WrapErrServiceInternalMsg("external collection schema changed during refresh; rerun refresh")
 		return
 	}
 	if len(collInfo.Partitions) != 1 {

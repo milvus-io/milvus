@@ -213,6 +213,7 @@ func (t *RefreshExternalCollectionTask) refreshMilvusTableSegmentManifest(
 	}
 	updated := proto.Clone(seg).(*datapb.SegmentInfo)
 	updated.ManifestPath = manifestPath
+	updated.SchemaVersion = t.req.GetSchema().GetVersion()
 	updated.StorageVersion = storage.StorageV3
 	return updated, nil
 }

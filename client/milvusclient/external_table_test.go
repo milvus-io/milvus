@@ -17,12 +17,22 @@
 package milvusclient
 
 import (
+	"context"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestRefreshExternalCollectionOption(t *testing.T) {
@@ -222,4 +232,187 @@ func TestConvertToEntityJobInfo_AllStates(t *testing.T) {
 		assert.Equal(t, "test_collection", result.CollectionName)
 		assert.Equal(t, int64(75), result.Progress)
 	})
+}
+
+func TestAlterCollectionSchemaOption(t *testing.T) {
+	t.Run("add_function", func(t *testing.T) {
+		field := entity.NewField().
+			WithName("bm25_sparse").
+			WithDataType(entity.FieldTypeSparseVector)
+		fn := entity.NewFunction().
+			WithName("bm25_fn").
+			WithInputFields("text").
+			WithOutputFields("bm25_sparse").
+			WithType(entity.FunctionTypeBM25)
+
+		req := NewAlterCollectionSchemaAddFunctionOption("external_coll", fn, field).
+			WithDbName("default").
+			Request()
+
+		assert.Equal(t, "default", req.GetDbName())
+		assert.Equal(t, "external_coll", req.GetCollectionName())
+		add := req.GetAction().GetAddRequest()
+		require.NotNil(t, add)
+		require.False(t, add.GetDoPhysicalBackfill())
+		require.Len(t, add.GetFieldInfos(), 1)
+		require.Equal(t, "bm25_sparse", add.GetFieldInfos()[0].GetFieldSchema().GetName())
+		require.Equal(t, schemapb.DataType_SparseFloatVector, add.GetFieldInfos()[0].GetFieldSchema().GetDataType())
+		require.Len(t, add.GetFuncSchema(), 1)
+		require.Equal(t, "bm25_fn", add.GetFuncSchema()[0].GetName())
+		require.Equal(t, []string{"text"}, add.GetFuncSchema()[0].GetInputFieldNames())
+		require.Equal(t, []string{"bm25_sparse"}, add.GetFuncSchema()[0].GetOutputFieldNames())
+	})
+
+	t.Run("add_field", func(t *testing.T) {
+		field := entity.NewField().
+			WithName("category").
+			WithDataType(entity.FieldTypeVarChar).
+			WithMaxLength(1024).
+			WithExternalField("text_zh").
+			WithNullable(true)
+
+		req := NewAlterCollectionSchemaAddFieldOption("external_coll", field).
+			WithDbName("default").
+			Request()
+
+		assert.Equal(t, "default", req.GetDbName())
+		assert.Equal(t, "external_coll", req.GetCollectionName())
+		add := req.GetAction().GetAddRequest()
+		require.NotNil(t, add)
+		require.False(t, add.GetDoPhysicalBackfill())
+		require.Empty(t, add.GetFuncSchema())
+		require.Len(t, add.GetFieldInfos(), 1)
+		fieldSchema := add.GetFieldInfos()[0].GetFieldSchema()
+		require.NotNil(t, fieldSchema)
+		require.Equal(t, "category", fieldSchema.GetName())
+		require.Equal(t, schemapb.DataType_VarChar, fieldSchema.GetDataType())
+		require.Equal(t, "text_zh", fieldSchema.GetExternalField())
+		require.True(t, fieldSchema.GetNullable())
+	})
+
+	t.Run("drop_field", func(t *testing.T) {
+		req := NewAlterCollectionSchemaDropFieldOption("external_coll", "obsolete").Request()
+		drop := req.GetAction().GetDropRequest()
+		require.NotNil(t, drop)
+		require.Equal(t, "obsolete", drop.GetFieldName())
+	})
+
+	t.Run("drop_function", func(t *testing.T) {
+		req := NewAlterCollectionSchemaDropFunctionOption("external_coll", "bm25_fn").Request()
+		drop := req.GetAction().GetDropRequest()
+		require.NotNil(t, drop)
+		require.Equal(t, "bm25_fn", drop.GetFunctionName())
+		require.False(t, drop.GetDropFunctionOutputFields())
+	})
+
+	t.Run("drop_function_output_fields", func(t *testing.T) {
+		req := NewAlterCollectionSchemaDropFunctionOption("external_coll", "bm25_fn").
+			WithDropOutputFields(true).
+			Request()
+		drop := req.GetAction().GetDropRequest()
+		require.NotNil(t, drop)
+		require.Equal(t, "bm25_fn", drop.GetFunctionName())
+		require.True(t, drop.GetDropFunctionOutputFields())
+	})
+}
+
+type alterCollectionSchemaTestServer struct {
+	milvuspb.UnimplementedMilvusServiceServer
+	lastReq *milvuspb.AlterCollectionSchemaRequest
+	resp    *milvuspb.AlterCollectionSchemaResponse
+	err     error
+}
+
+// AlterCollectionSchema captures alter schema requests for client wrapper tests.
+func (s *alterCollectionSchemaTestServer) AlterCollectionSchema(
+	ctx context.Context,
+	req *milvuspb.AlterCollectionSchemaRequest,
+) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	s.lastReq = req
+	return s.resp, s.err
+}
+
+// newAlterCollectionSchemaTestClient creates a bufconn-backed client and cleanup hook.
+func newAlterCollectionSchemaTestClient(
+	t *testing.T,
+	server *alterCollectionSchemaTestServer,
+) (*Client, func()) {
+	t.Helper()
+	listener := bufconn.Listen(1024 * 1024)
+	grpcServer := grpc.NewServer()
+	milvuspb.RegisterMilvusServiceServer(grpcServer, server)
+	go func() {
+		_ = grpcServer.Serve(listener)
+	}()
+
+	dialer := func(context.Context, string) (net.Conn, error) {
+		return listener.Dial()
+	}
+	conn, err := grpc.DialContext(
+		context.Background(),
+		"bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+
+	client := &Client{service: milvuspb.NewMilvusServiceClient(conn)}
+	cleanup := func() {
+		_ = conn.Close()
+		grpcServer.Stop()
+		_ = listener.Close()
+	}
+	return client, cleanup
+}
+
+func TestClientAlterCollectionSchema(t *testing.T) {
+	server := &alterCollectionSchemaTestServer{
+		resp: &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()},
+	}
+	client, cleanup := newAlterCollectionSchemaTestClient(t, server)
+	defer cleanup()
+
+	field := entity.NewField().
+		WithName("bm25_sparse").
+		WithDataType(entity.FieldTypeSparseVector)
+	fn := entity.NewFunction().
+		WithName("bm25_fn").
+		WithInputFields("text").
+		WithOutputFields("bm25_sparse").
+		WithType(entity.FunctionTypeBM25)
+
+	err := client.AlterCollectionSchema(
+		context.Background(),
+		NewAlterCollectionSchemaAddFunctionOption("external_coll", fn, field),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, server.lastReq)
+	require.Equal(t, "external_coll", server.lastReq.GetCollectionName())
+	require.NotNil(t, server.lastReq.GetAction().GetAddRequest())
+}
+
+func TestClientAlterCollectionSchemaFailure(t *testing.T) {
+	server := &alterCollectionSchemaTestServer{
+		resp: &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg("bad alter request")),
+		},
+	}
+	client, cleanup := newAlterCollectionSchemaTestClient(t, server)
+	defer cleanup()
+
+	err := client.AlterCollectionSchema(
+		context.Background(),
+		NewAlterCollectionSchemaDropFunctionOption("external_coll", "bm25_fn"),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bad alter request")
+
+	server.resp = nil
+	server.err = status.Error(codes.Internal, "rpc failure")
+	err = client.AlterCollectionSchema(
+		context.Background(),
+		NewAlterCollectionSchemaDropFunctionOption("external_coll", "bm25_fn"),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rpc failure")
 }

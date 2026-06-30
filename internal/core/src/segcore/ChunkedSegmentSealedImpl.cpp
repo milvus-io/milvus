@@ -173,10 +173,26 @@ get_bit(const BitsetType& bitset, FieldId field_id) {
     return bitset[pos];
 }
 
+// field_exists_in_schema accepts system fields and fields declared by the
+// current collection schema.
 static inline bool
 field_exists_in_schema(const SchemaPtr& schema, FieldId field_id) {
     return field_id.get() < START_USER_FIELDID ||
            schema->get_fields().find(field_id) != schema->get_fields().end();
+}
+
+// Resolve a physical load column only when it belongs to the current schema.
+static inline std::optional<FieldId>
+resolve_loadable_column_field(const SchemaPtr& schema,
+                              const std::string& column_name) {
+    auto field_id = schema->ResolveColumnFieldId(column_name);
+    if (!field_id.has_value()) {
+        return std::nullopt;
+    }
+    if (!field_exists_in_schema(schema, field_id.value())) {
+        return std::nullopt;
+    }
+    return field_id;
 }
 
 static inline bool
@@ -728,14 +744,35 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
     // standard LoadColumnGroup overload.
     std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
     cg_field_ids.reserve(column_groups->size());
+    size_t skipped_column_count = 0;
+    std::string first_skipped_column;
     for (size_t i = 0; i < column_groups->size(); ++i) {
         auto cg = column_groups->at(i);
         std::vector<FieldId> field_ids;
         field_ids.reserve(cg->columns.size());
         for (auto& column : cg->columns) {
-            field_ids.emplace_back(schema_->ResolveColumnFieldId(column));
+            auto field_id = resolve_loadable_column_field(schema_, column);
+            if (!field_id.has_value()) {
+                if (skipped_column_count == 0) {
+                    first_skipped_column = column;
+                }
+                ++skipped_column_count;
+                continue;
+            }
+            field_ids.emplace_back(field_id.value());
+        }
+        if (field_ids.empty()) {
+            continue;
         }
         cg_field_ids.emplace_back(static_cast<int>(i), std::move(field_ids));
+    }
+    if (skipped_column_count > 0) {
+        LOG_INFO(
+            "[LoadColumnGroups] segment {} skips {} manifest columns not in "
+            "current schema, first skipped column: {}",
+            id_,
+            skipped_column_count,
+            first_skipped_column);
     }
 
     // Split each column group's fields into eager (warmup=sync/async) and

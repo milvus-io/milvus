@@ -507,6 +507,17 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
+			bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+			if err != nil {
+				mlog.Warn(ctx, "failed to resolve bm25 stats paths for segment",
+					mlog.FieldCollectionID(req.GetCollectionID()),
+					mlog.FieldSegmentID(info.GetSegmentID()),
+					mlog.Err(err))
+				return nil, err
+			}
+			if len(bm25Paths) == 0 {
+				return nil, nil
+			}
 			if err := idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
 				mlog.Warn(ctx, "failed to load bm25 stats for segment",
 					mlog.FieldCollectionID(req.GetCollectionID()),

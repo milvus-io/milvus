@@ -6,10 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -24,6 +27,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type failingReopenCSegment struct {
+	segcore.CSegment
+}
+
+func (failingReopenCSegment) Reopen(context.Context, *segcore.ReopenRequest) error {
+	return errors.New("reopen failed")
+}
 
 type SegmentSuite struct {
 	suite.Suite
@@ -152,6 +163,48 @@ func (suite *SegmentSuite) TearDownTest() {
 	suite.growing.Release(context.Background())
 	DeleteCollection(suite.collection)
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+}
+
+func TestLocalSegmentReopenFailureKeepsOldLoadInfo(t *testing.T) {
+	paramtable.Init()
+
+	collectionID := int64(100)
+	partitionID := int64(10)
+	segmentID := int64(1)
+	schema := &schemapb.CollectionSchema{
+		Name: "external_reopen_test",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:       100,
+				Name:          "id",
+				DataType:      schemapb.DataType_Int64,
+				IsPrimaryKey:  true,
+				ExternalField: "id",
+			},
+		},
+	}
+	collection := NewCollectionWithoutSegcoreForTest(collectionID, schema)
+	collection.setSchema(schema, 2, 0, initialSegcoreSchemaVersion(2, 0))
+	oldLoadInfo := &querypb.SegmentLoadInfo{
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		SegmentID:     segmentID,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID),
+		ManifestPath:  `{"base_path":"seg1","ver":1}`,
+	}
+	base, err := newBaseSegment(collection, SegmentTypeSealed, 1, oldLoadInfo)
+	require.NoError(t, err)
+	segment := &LocalSegment{
+		baseSegment: base,
+		ptrLock:     state.NewLoadStateLock(state.LoadStateOnlyMeta),
+		csegment:    failingReopenCSegment{},
+	}
+
+	newLoadInfo := proto.Clone(oldLoadInfo).(*querypb.SegmentLoadInfo)
+	newLoadInfo.ManifestPath = `{"base_path":"seg1","ver":2}`
+	err = segment.Reopen(context.Background(), newLoadInfo)
+	require.Error(t, err)
+	require.Equal(t, oldLoadInfo.GetManifestPath(), segment.LoadInfo().GetManifestPath())
 }
 
 func (suite *SegmentSuite) TestLoadInfo() {
