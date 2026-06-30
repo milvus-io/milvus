@@ -173,6 +173,8 @@ type prewarmOption struct {
 	replicaNum     int
 	resourceGroups []string
 	loadParams     map[string]string
+	ttl            time.Duration
+	priority       string
 }
 
 func (opt *prewarmOption) Request() *milvuspb.PrewarmRequest {
@@ -182,6 +184,8 @@ func (opt *prewarmOption) Request() *milvuspb.PrewarmRequest {
 		ReplicaNumber:  int32(opt.replicaNum),
 		ResourceGroups: opt.resourceGroups,
 		LoadParams:     opt.loadParams,
+		TtlSeconds:     int64(opt.ttl / time.Second),
+		Priority:       opt.priority,
 	}
 }
 
@@ -203,10 +207,42 @@ func (opt *prewarmOption) WithLoadParam(key, value string) *prewarmOption {
 	return opt
 }
 
+func (opt *prewarmOption) WithTTL(ttl time.Duration) *prewarmOption {
+	opt.ttl = ttl
+	return opt
+}
+
+func (opt *prewarmOption) WithPriority(priority string) *prewarmOption {
+	opt.priority = priority
+	return opt
+}
+
 func NewPrewarmOption(collectionName string, namespace string) *prewarmOption {
 	return &prewarmOption{
 		collectionName: collectionName,
 		namespace:      namespace,
+	}
+}
+
+type DescribePrewarmTaskOption interface {
+	Request() *milvuspb.DescribePrewarmTaskRequest
+}
+
+var _ DescribePrewarmTaskOption = (*describePrewarmTaskOption)(nil)
+
+type describePrewarmTaskOption struct {
+	taskID string
+}
+
+func (opt *describePrewarmTaskOption) Request() *milvuspb.DescribePrewarmTaskRequest {
+	return &milvuspb.DescribePrewarmTaskRequest{
+		TaskID: opt.taskID,
+	}
+}
+
+func NewDescribePrewarmTaskOption(taskID string) *describePrewarmTaskOption {
+	return &describePrewarmTaskOption{
+		taskID: taskID,
 	}
 }
 

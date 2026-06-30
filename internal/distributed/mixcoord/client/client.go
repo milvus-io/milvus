@@ -1639,14 +1639,25 @@ func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 }
 
 // Prewarm ensures namespace partition data is loaded and prefetched in QueryCoord.
-func (c *Client) Prewarm(ctx context.Context, req *querypb.PrewarmRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *Client) Prewarm(ctx context.Context, req *querypb.PrewarmRequest, opts ...grpc.CallOption) (*querypb.PrewarmResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.PrewarmResponse, error) {
 		return client.Prewarm(ctx, req)
+	})
+}
+
+func (c *Client) DescribePrewarmTask(ctx context.Context, req *querypb.DescribePrewarmTaskRequest, opts ...grpc.CallOption) (*querypb.DescribePrewarmTaskResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.DescribePrewarmTaskResponse, error) {
+		return client.DescribePrewarmTask(ctx, req)
 	})
 }
 

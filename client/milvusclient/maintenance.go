@@ -122,13 +122,50 @@ func (c *Client) LoadPartitions(ctx context.Context, option LoadPartitionsOption
 	return task, err
 }
 
-func (c *Client) Prewarm(ctx context.Context, option PrewarmOption, callOptions ...grpc.CallOption) error {
+type PrewarmResult struct {
+	TaskID    string
+	Namespace string
+}
+
+type DescribePrewarmTaskResult struct {
+	TaskID       string
+	State        milvuspb.PrewarmTaskState
+	Progress     int32
+	ErrorMessage string
+}
+
+func (c *Client) Prewarm(ctx context.Context, option PrewarmOption, callOptions ...grpc.CallOption) (PrewarmResult, error) {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	var result PrewarmResult
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Prewarm(ctx, req, callOptions...)
-		return merr.CheckRPCCall(resp, err)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		result.TaskID = resp.GetTaskID()
+		result.Namespace = resp.GetNamespace()
+		return nil
 	})
+	return result, err
+}
+
+func (c *Client) DescribePrewarmTask(ctx context.Context, option DescribePrewarmTaskOption, callOptions ...grpc.CallOption) (DescribePrewarmTaskResult, error) {
+	req := option.Request()
+
+	var result DescribePrewarmTaskResult
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.DescribePrewarmTask(ctx, req, callOptions...)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		result.TaskID = resp.GetTaskID()
+		result.State = resp.GetState()
+		result.Progress = resp.GetProgress()
+		result.ErrorMessage = resp.GetErrorMessage()
+		return nil
+	})
+	return result, err
 }
 
 func (c *Client) GetLoadState(ctx context.Context, option GetLoadStateOption, callOptions ...grpc.CallOption) (entity.LoadState, error) {

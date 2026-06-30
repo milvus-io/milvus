@@ -2925,6 +2925,65 @@ func (_c *MixCoord_DescribeIndex_Call) RunAndReturn(run func(context.Context, *i
 	return _c
 }
 
+// DescribePrewarmTask provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) DescribePrewarmTask(_a0 context.Context, _a1 *querypb.DescribePrewarmTaskRequest) (*querypb.DescribePrewarmTaskResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribePrewarmTask")
+	}
+
+	var r0 *querypb.DescribePrewarmTaskResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DescribePrewarmTaskRequest) (*querypb.DescribePrewarmTaskResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DescribePrewarmTaskRequest) *querypb.DescribePrewarmTaskResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.DescribePrewarmTaskResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.DescribePrewarmTaskRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_DescribePrewarmTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribePrewarmTask'
+type MixCoord_DescribePrewarmTask_Call struct {
+	*mock.Call
+}
+
+// DescribePrewarmTask is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.DescribePrewarmTaskRequest
+func (_e *MixCoord_Expecter) DescribePrewarmTask(_a0 interface{}, _a1 interface{}) *MixCoord_DescribePrewarmTask_Call {
+	return &MixCoord_DescribePrewarmTask_Call{Call: _e.mock.On("DescribePrewarmTask", _a0, _a1)}
+}
+
+func (_c *MixCoord_DescribePrewarmTask_Call) Run(run func(_a0 context.Context, _a1 *querypb.DescribePrewarmTaskRequest)) *MixCoord_DescribePrewarmTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.DescribePrewarmTaskRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_DescribePrewarmTask_Call) Return(_a0 *querypb.DescribePrewarmTaskResponse, _a1 error) *MixCoord_DescribePrewarmTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_DescribePrewarmTask_Call) RunAndReturn(run func(context.Context, *querypb.DescribePrewarmTaskRequest) (*querypb.DescribePrewarmTaskResponse, error)) *MixCoord_DescribePrewarmTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DescribeResourceGroup provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) DescribeResourceGroup(_a0 context.Context, _a1 *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -8279,23 +8338,23 @@ func (_c *MixCoord_PinSnapshotData_Call) RunAndReturn(run func(context.Context, 
 }
 
 // Prewarm provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) Prewarm(_a0 context.Context, _a1 *querypb.PrewarmRequest) (*commonpb.Status, error) {
+func (_m *MixCoord) Prewarm(_a0 context.Context, _a1 *querypb.PrewarmRequest) (*querypb.PrewarmResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Prewarm")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *querypb.PrewarmResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest) (*querypb.PrewarmResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest) *querypb.PrewarmResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*querypb.PrewarmResponse)
 		}
 	}
 
@@ -8327,12 +8386,12 @@ func (_c *MixCoord_Prewarm_Call) Run(run func(_a0 context.Context, _a1 *querypb.
 	return _c
 }
 
-func (_c *MixCoord_Prewarm_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_Prewarm_Call {
+func (_c *MixCoord_Prewarm_Call) Return(_a0 *querypb.PrewarmResponse, _a1 error) *MixCoord_Prewarm_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MixCoord_Prewarm_Call) RunAndReturn(run func(context.Context, *querypb.PrewarmRequest) (*commonpb.Status, error)) *MixCoord_Prewarm_Call {
+func (_c *MixCoord_Prewarm_Call) RunAndReturn(run func(context.Context, *querypb.PrewarmRequest) (*querypb.PrewarmResponse, error)) *MixCoord_Prewarm_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -3477,7 +3478,7 @@ type prewarmTask struct {
 	*milvuspb.PrewarmRequest
 	ctx      context.Context
 	mixCoord types.MixCoordClient
-	result   *commonpb.Status
+	result   *milvuspb.PrewarmResponse
 
 	collectionID UniqueID
 }
@@ -3534,12 +3535,14 @@ func (t *prewarmTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *prewarmTask) GetLoadPriority() commonpb.LoadPriority {
-	loadPriority := commonpb.LoadPriority_HIGH
-	loadPriorityStr, ok := t.LoadParams[LoadPriorityName]
-	if ok && loadPriorityStr == "low" {
-		loadPriority = commonpb.LoadPriority_LOW
+	priority := strings.ToLower(t.GetPriority())
+	if priority == "" {
+		priority = strings.ToLower(t.GetLoadParams()[LoadPriorityName])
 	}
-	return loadPriority
+	if priority == "low" {
+		return commonpb.LoadPriority_LOW
+	}
+	return commonpb.LoadPriority_HIGH
 }
 
 func (t *prewarmTask) Execute(ctx context.Context) error {
@@ -3581,9 +3584,18 @@ func (t *prewarmTask) Execute(ctx context.Context) error {
 		mlog.Int64("partitionID", partitionID),
 		mlog.String("namespace", t.GetNamespace()),
 		mlog.Int32("priority", int32(request.GetPriority())))
-	t.result, err = t.mixCoord.Prewarm(ctx, request)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
+	prewarmResp, err := t.mixCoord.Prewarm(ctx, request)
+	if err = merr.CheckRPCCall(prewarmResp, err); err != nil {
 		return err
+	}
+	status := prewarmResp.GetStatus()
+	if status == nil {
+		status = merr.Success()
+	}
+	t.result = &milvuspb.PrewarmResponse{
+		Status:    status,
+		TaskID:    prewarmResp.GetTaskID(),
+		Namespace: prewarmResp.Namespace,
 	}
 
 	return nil
