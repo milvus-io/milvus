@@ -26,8 +26,8 @@ expr:
 	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
-	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
-	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
+	| op=(MATCH_ALL | MATCH_ANY) '(' (Identifier | JSONIdentifier) ',' expr ')'                                                 # MatchSimple
+	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' (Identifier | JSONIdentifier) ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast

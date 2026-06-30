@@ -47,6 +47,11 @@ type ParserVisitor struct {
 	currentStructArrayField string
 	// currentElementArrayField is set when inside MATCH_*/element_filter on a SCALAR array; nil otherwise.
 	currentElementArrayField *schemapb.FieldSchema
+	// currentJSONMatchField/Path are set when inside a MATCH_* on a JSON array
+	// target (bare JSON field or json["path"]); nil/empty otherwise. The $ accessor
+	// then resolves to a JSON element-level ColumnInfo carrying this path.
+	currentJSONMatchField *schemapb.FieldSchema
+	currentJSONMatchPath  []string
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
@@ -1207,9 +1212,18 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 // getColumnInfoFromElementSelf resolves the `$` element-self token to an element-level
 // ColumnInfo for the scalar array currently being matched (v.currentElementArrayField).
 func (v *ParserVisitor) getColumnInfoFromElementSelf() (*planpb.ColumnInfo, error) {
+	if v.currentJSONMatchField != nil {
+		return &planpb.ColumnInfo{
+			FieldId:        v.currentJSONMatchField.GetFieldID(),
+			DataType:       schemapb.DataType_JSON,
+			NestedPath:     v.currentJSONMatchPath,
+			Nullable:       v.currentJSONMatchField.GetNullable(),
+			IsElementLevel: true,
+		}, nil
+	}
 	field := v.currentElementArrayField
 	if field == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("$ can only be used inside MATCH_*/element_filter on a scalar array field")
+		return nil, merr.WrapErrParameterInvalidMsg("$ can only be used inside MATCH_*/element_filter on a scalar array or JSON field")
 	}
 
 	// `$` denotes a single array element, so it resolves to the array's element
@@ -2869,6 +2883,63 @@ func validateAndExtractMinShouldMatch(minShouldMatchExpr interface{}) ([]*planpb
 }
 
 // VisitElementFilter handles ElementFilter(structArrayField, elementExpr) syntax.
+// splitJSONPathSegments parses a bracket chain like `["a"][0]["b"]` into
+// path segments: ["a", "0", "b"]. String keys (in single or double quotes)
+// have their quotes stripped; numeric segments are kept as-is. The caller is
+// responsible for any field-type-specific validation (e.g. rejecting string
+// keys on a plain Array field). errCtx is the text shown in error messages
+// (typically the full original identifier text).
+func splitJSONPathSegments(bracketChain, errCtx string) ([]string, error) {
+	if bracketChain == "" {
+		return nil, nil
+	}
+	ss := strings.Split(bracketChain, "][")
+	result := make([]string, 0, len(ss))
+	for _, s := range ss {
+		seg := strings.Trim(s, "[]")
+		if seg == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid identifier: %s", errCtx)
+		}
+		if (strings.HasPrefix(seg, "\"") && strings.HasSuffix(seg, "\"")) ||
+			(strings.HasPrefix(seg, "'") && strings.HasSuffix(seg, "'")) {
+			key := seg[1 : len(seg)-1]
+			if key == "" {
+				return nil, merr.WrapErrParameterInvalidMsg("invalid identifier: %s", errCtx)
+			}
+			result = append(result, key)
+		} else if _, err := strconv.ParseInt(seg, 10, 64); err == nil {
+			result = append(result, seg)
+		} else {
+			return nil, merr.WrapErrParameterInvalidMsg("json key must be enclosed in double quotes or single quotes: \"%s\"", seg)
+		}
+	}
+	return result, nil
+}
+
+// resolveJSONMatchTarget resolves a JSONIdentifier MATCH target (e.g. json["a"]["b"])
+// to its JSON field and nested path. Mirrors pr-49581's buildMatchContextFromJSONIdentifier.
+func (v *ParserVisitor) resolveJSONMatchTarget(identifier string) (*schemapb.FieldSchema, []string, error) {
+	identifier = decodeUnicode(identifier)
+	fieldName := strings.Split(identifier, "[")[0]
+	field, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
+	if err != nil {
+		return nil, nil, merr.WrapErrParameterInvalidMsg("match target field not found: %s", fieldName)
+	}
+	if field.GetDataType() != schemapb.DataType_JSON {
+		return nil, nil, merr.WrapErrParameterInvalidMsg("path-style match target %q requires a JSON field, got: %s", identifier, field.GetDataType())
+	}
+	nestedPath := make([]string, 0)
+	if fieldName != field.Name {
+		nestedPath = append(nestedPath, fieldName)
+	}
+	segments, err := splitJSONPathSegments(identifier[len(fieldName):], identifier)
+	if err != nil {
+		return nil, nil, err
+	}
+	nestedPath = append(nestedPath, segments...)
+	return field, nestedPath, nil
+}
+
 // resolveArrayMatchTarget classifies the first argument of a MATCH_*/element_filter
 // expression so a clearly-invalid scalar target is rejected at parse time (rather
 // than succeeding here and failing later in segcore as a System error).
@@ -3028,54 +3099,79 @@ func (v *ParserVisitor) VisitElementSelf(ctx *parser.ElementSelfContext) interfa
 // parseMatchExpr is a helper function for parsing match expressions
 // matchType: the type of match operation (MatchAll, MatchAny, MatchLeast, MatchMost)
 // count: for MatchLeast/MatchMost, the count parameter (N); for MatchAll/MatchAny, this is ignored (0)
-func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
-	// Check for nested match expression - not allowed
-	if v.currentStructArrayField != "" || v.currentElementArrayField != nil {
+func (v *ParserVisitor) parseMatchExpr(identNode, jsonIdentNode antlr.TerminalNode, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
+	// nested-match guard
+	if v.currentStructArrayField != "" || v.currentElementArrayField != nil || v.currentJSONMatchField != nil {
 		return merr.WrapErrParameterInvalidMsg("nested %s is not supported, already inside a match/element_filter expression", funcName)
 	}
 
-	// Resolve the named field: scalar array vs struct array. Set the appropriate
-	// context (with a defer to reset it) for element expression parsing.
-	scalarArrayField, isStruct, err := v.resolveArrayMatchTarget(structArrayFieldName, funcName)
-	if err != nil {
-		return err
-	}
-	if isStruct {
-		// struct array path (original behavior): sub-field validation happens
-		// during $[subField] resolution inside the predicate.
-		v.currentStructArrayField = structArrayFieldName
-		defer func() { v.currentStructArrayField = "" }()
-	} else {
-		v.currentElementArrayField = scalarArrayField
-		defer func() { v.currentElementArrayField = nil }()
+	var column *planpb.MatchColumnInfo
+
+	switch {
+	case jsonIdentNode != nil:
+		// JSON path target: MATCH_ANY(json["a"], $ > 90)
+		field, jsonPath, err := v.resolveJSONMatchTarget(jsonIdentNode.GetText())
+		if err != nil {
+			return err
+		}
+		v.currentJSONMatchField = field
+		v.currentJSONMatchPath = jsonPath
+		defer func() { v.currentJSONMatchField = nil; v.currentJSONMatchPath = nil }()
+		column = &planpb.MatchColumnInfo{
+			FieldId:    field.GetFieldID(),
+			FieldName:  field.GetName(),
+			DataType:   schemapb.DataType_JSON,
+			NestedPath: jsonPath,
+		}
+	default:
+		fieldName := identNode.GetText()
+		// bare JSON field → root JSON array: MATCH_ANY(jsonField, $ > 90)
+		if f, ferr := v.schema.GetFieldFromName(fieldName); ferr == nil && f.GetDataType() == schemapb.DataType_JSON {
+			v.currentJSONMatchField = f
+			defer func() { v.currentJSONMatchField = nil; v.currentJSONMatchPath = nil }()
+			column = &planpb.MatchColumnInfo{
+				FieldId:   f.GetFieldID(),
+				FieldName: f.GetName(),
+				DataType:  schemapb.DataType_JSON,
+			}
+		} else {
+			scalarArrayField, isStruct, err := v.resolveArrayMatchTarget(fieldName, funcName)
+			if err != nil {
+				return err
+			}
+			column = &planpb.MatchColumnInfo{FieldName: fieldName}
+			if isStruct {
+				v.currentStructArrayField = fieldName
+				defer func() { v.currentStructArrayField = "" }()
+				column.DataType = schemapb.DataType_ArrayOfStruct
+				if structField := v.schema.GetStructArrayFieldFromName(fieldName); structField != nil {
+					column.FieldId = structField.GetFieldID()
+				}
+			} else {
+				v.currentElementArrayField = scalarArrayField
+				defer func() { v.currentElementArrayField = nil }()
+				column.FieldId = scalarArrayField.GetFieldID()
+				column.DataType = schemapb.DataType_Array
+				column.ElementType = scalarArrayField.GetElementType()
+			}
+		}
 	}
 
-	// Parse the predicate expression
+	// parse predicate (same as current code)
 	predicate := exprCtx.Accept(v)
 	if err := getError(predicate); err != nil {
 		return merr.WrapErrParameterInvalidMsg("cannot parse predicate expression: %s, error: %s", exprCtx.GetText(), err)
 	}
-
 	predicateExpr := getExpr(predicate)
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
 	}
 
-	// Build the target locator. Scalar array and struct array are distinguished
-	// by data_type so the executor can dispatch without re-deriving from the name;
-	// field_name is always carried for name-based resolution and observability.
-	column := &planpb.MatchColumnInfo{
-		FieldName: structArrayFieldName,
-	}
-	if isStruct {
-		column.DataType = schemapb.DataType_ArrayOfStruct
-		if structField := v.schema.GetStructArrayFieldFromName(structArrayFieldName); structField != nil {
-			column.FieldId = structField.GetFieldID()
+	// JSON element-type consistency validation
+	if column.GetDataType() == schemapb.DataType_JSON {
+		if err := validateJSONMatchElementType(predicateExpr.expr, &jsonMatchContext{fieldID: column.GetFieldId(), jsonPath: column.GetNestedPath()}); err != nil {
+			return err
 		}
-	} else {
-		column.FieldId = scalarArrayField.GetFieldID()
-		column.DataType = schemapb.DataType_Array
-		column.ElementType = scalarArrayField.GetElementType()
 	}
 
 	// Build MatchExpr proto
@@ -3097,7 +3193,6 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 // VisitMatchSimple handles MATCH_ALL and MATCH_ANY expressions
 // Syntax: MATCH_ALL/MATCH_ANY(structArrayField, $[intField] == 1 && $[strField] == "aaa")
 func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interface{} {
-	structArrayFieldName := ctx.Identifier().GetText()
 	var matchType planpb.MatchType
 	var opName string
 	switch ctx.GetOp().GetTokenType() {
@@ -3110,14 +3205,12 @@ func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interfa
 	default:
 		return merr.WrapErrParameterInvalidMsg("unhandled match operator: %s", ctx.GetOp().GetText())
 	}
-	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), matchType, 0, opName)
+	return v.parseMatchExpr(ctx.Identifier(), ctx.JSONIdentifier(), ctx.Expr(), matchType, 0, opName)
 }
 
 // VisitMatchThreshold handles MATCH_LEAST, MATCH_MOST, and MATCH_EXACT expressions
 // Syntax: MATCH_LEAST/MATCH_MOST/MATCH_EXACT(structArrayField, $[intField] == 1, threshold=N)
 func (v *ParserVisitor) VisitMatchThreshold(ctx *parser.MatchThresholdContext) interface{} {
-	structArrayFieldName := ctx.Identifier().GetText()
-
 	countStr := ctx.IntegerConstant().GetText()
 	count, err := strconv.ParseInt(countStr, 10, 64)
 	if err != nil {
@@ -3149,5 +3242,5 @@ func (v *ParserVisitor) VisitMatchThreshold(ctx *parser.MatchThresholdContext) i
 		return merr.WrapErrParameterInvalidMsg("unhandled match threshold operator: %s", ctx.GetOp().GetText())
 	}
 
-	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), matchType, count, opName)
+	return v.parseMatchExpr(ctx.Identifier(), ctx.JSONIdentifier(), ctx.Expr(), matchType, count, opName)
 }
