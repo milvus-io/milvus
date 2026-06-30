@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/builder.h>
+#include <fmt/core.h>
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <memory>
@@ -17,6 +19,7 @@
 
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "cachinglayer/Manager.h"
@@ -37,6 +40,31 @@ using namespace milvus::index;
 
 namespace {
 
+bool
+IsValidAt(const std::vector<uint8_t>& valid_data, size_t i) {
+    return ((valid_data[i >> 3] >> (i & 0x07)) & 1) != 0;
+}
+
+std::shared_ptr<arrow::BinaryArray>
+MakeNullableJsonArray(const std::vector<std::string>& json_strings,
+                      const std::vector<uint8_t>& valid_data) {
+    arrow::BinaryBuilder builder;
+    for (size_t i = 0; i < json_strings.size(); ++i) {
+        auto status = IsValidAt(valid_data, i) ? builder.Append(json_strings[i])
+                                               : builder.AppendNull();
+        AssertInfo(status.ok(),
+                   "failed to build nullable JSON Arrow array: {}",
+                   status.ToString());
+    }
+
+    std::shared_ptr<arrow::Array> array;
+    auto status = builder.Finish(&array);
+    AssertInfo(status.ok(),
+               "failed to finish nullable JSON Arrow array: {}",
+               status.ToString());
+    return std::static_pointer_cast<arrow::BinaryArray>(array);
+}
+
 milvus::index::CacheJsonKeyStatsPtr
 BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
                          const milvus::FieldId json_fid,
@@ -46,16 +74,23 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
                          int64_t segment_id,
                          int64_t field_id,
                          int64_t build_id,
-                         int64_t version_id) {
+                         int64_t version_id,
+                         const std::vector<uint8_t>* valid_data = nullptr) {
     std::vector<milvus::Json> data;
     data.reserve(json_strings.size());
     for (const auto& s : json_strings) {
         data.emplace_back(simdjson::padded_string(s));
     }
 
+    auto nullable = valid_data != nullptr;
     auto field_data =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
-    field_data->add_json_data(data);
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, nullable);
+    if (valid_data != nullptr) {
+        field_data->FillFieldData(
+            MakeNullableJsonArray(json_strings, *valid_data));
+    } else {
+        field_data->add_json_data(data);
+    }
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -64,6 +99,7 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     proto::schema::FieldSchema field_schema;
     field_schema.set_data_type(proto::schema::DataType::JSON);
     field_schema.set_fieldid(json_fid.get());
+    field_schema.set_nullable(nullable);
 
     storage::FieldDataMeta field_meta{
         collection_id, partition_id, segment_id, field_id, field_schema};
@@ -225,4 +261,73 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
         bool should_match = ((i % 7) == 0) || ((i % 7) == 2) || ((i % 7) == 5);
         EXPECT_EQ(bool(result[i]), should_match);
     }
+}
+
+TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathErrorsButMasksFieldNull) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+
+    auto segment = segcore::CreateSealedSegment(schema);
+
+    std::vector<std::string> json_raw_data = {
+        R"({"a": "1"})",    // equal, filtered out
+        R"({"a": "123"})",  // string mismatch, kept
+        R"({"a": 1})",      // type mismatch for string compare, kept
+        R"({"b": 1})",      // path missing, kept
+        R"({"a": null})",   // JSON path error, kept
+        R"({})",            // path missing, kept
+        R"({"a": "321"})",  // string mismatch, kept
+        R"({"a": "123"})",  // field-level null, filtered out by valid data
+    };
+    std::vector<uint8_t> valid_data{0b01111111};
+
+    const int64_t collection_id = 1101;
+    const int64_t partition_id = 2101;
+    const int64_t segment_id = 3101;
+    const int64_t field_id = json_fid.get();
+    const int64_t build_id = 5101;
+    const int64_t version_id = 1;
+    const std::string root_path = TestLocalPath;
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          root_path,
+                                          collection_id,
+                                          partition_id,
+                                          segment_id,
+                                          field_id,
+                                          build_id,
+                                          version_id,
+                                          &valid_data);
+    segment->LoadJsonStats(json_fid, stats);
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    json_field->FillFieldData(MakeNullableJsonArray(json_raw_data, valid_data));
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
+
+    proto::plan::GenericValue val;
+    val.set_string_val("1");
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::NotEqual,
+        val,
+        std::vector<proto::plan::GenericValue>());
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    auto result = query::ExecuteQueryExpr(
+        plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+
+    ASSERT_EQ(result.size(), json_raw_data.size());
+    EXPECT_FALSE(result[0]);
+    for (int i = 1; i <= 6; ++i) {
+        EXPECT_TRUE(result[i]) << "row " << i;
+    }
+    EXPECT_FALSE(result[7]);
+    EXPECT_EQ(result.count(), 6);
 }

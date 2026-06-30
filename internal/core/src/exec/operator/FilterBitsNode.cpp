@@ -23,6 +23,25 @@
 
 namespace milvus {
 namespace exec {
+
+namespace {
+
+void
+ConvertPredicateToFilteredBitset(TargetBitmapView data,
+                                 TargetBitmapView valid,
+                                 const size_t size) {
+    // FilterBitsNode outputs a filtered-row bitset: 1 means excluded. A SQL-style
+    // predicate passes only when it is definitely TRUE, so UNKNOWN/NULL must be
+    // excluded together with FALSE.
+    data.flip();
+    TargetBitmap invalid(valid);
+    invalid.flip();
+    data.inplace_or(invalid, size);
+    valid.set();
+}
+
+}  // namespace
+
 PhyFilterBitsNode::PhyFilterBitsNode(
     int32_t operator_id,
     DriverContext* driverctx,
@@ -119,7 +138,11 @@ PhyFilterBitsNode::GetOutput() {
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }
-    bitset.flip();
+    TargetBitmapView bitset_view(bitset);
+    TargetBitmapView valid_bitset_view(valid_bitset);
+    ConvertPredicateToFilteredBitset(
+        bitset_view, valid_bitset_view, bitset.size());
+
     AssertInfo(bitset.size() == need_process_rows_,
                "bitset size: {}, need_process_rows_: {}",
                bitset.size(),
