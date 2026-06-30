@@ -13,6 +13,20 @@ var wildcards = map[byte]struct{}{
 
 var escapeCharacter byte = '\\'
 
+// trailingWildcard reports whether the pattern ends in an unescaped '%'.
+// A trailing '%' preceded by an odd number of backslashes is escaped (a
+// literal '%'), so it is not a wildcard.
+func trailingWildcard(pattern string) bool {
+	if len(pattern) == 0 || pattern[len(pattern)-1] != '%' {
+		return false
+	}
+	backslashes := 0
+	for i := len(pattern) - 2; i >= 0 && pattern[i] == escapeCharacter; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 0
+}
+
 func optimizeLikePattern(pattern string) (planpb.OpType, string, bool) {
 	if len(pattern) == 0 {
 		return planpb.OpType_Equal, "", true
@@ -42,8 +56,11 @@ func optimizeLikePattern(pattern string) (planpb.OpType, string, bool) {
 		return buf.String(), true
 	}
 
+	// A leading '%' is always a wildcard (nothing can escape it), but a trailing
+	// '%' preceded by an odd number of backslashes is escaped — a literal '%',
+	// not a wildcard — so it must not trigger prefix/inner optimization.
 	leading := pattern[0] == '%'
-	trailing := pattern[len(pattern)-1] == '%'
+	trailing := trailingWildcard(pattern)
 
 	switch {
 	case leading && trailing:
