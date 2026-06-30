@@ -486,7 +486,7 @@ Schema::GetPhysicalColumnName(FieldId field_id) const {
     return std::to_string(field_id.get());
 }
 
-FieldId
+std::optional<FieldId>
 Schema::ResolveColumnFieldId(const std::string& column_name) const {
     if (is_external_collection()) {
         if (is_milvus_table_external_collection()) {
@@ -505,9 +505,7 @@ Schema::ResolveColumnFieldId(const std::string& column_name) const {
             field_id.has_value()) {
             return field_id.value();
         }
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "external column '{}' not found in schema",
-                  column_name);
+        return std::nullopt;
     }
     if (auto field_id = ParseFieldIdColumnName(column_name);
         field_id.has_value()) {
