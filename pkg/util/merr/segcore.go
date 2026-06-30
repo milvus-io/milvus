@@ -18,6 +18,22 @@ package merr
 
 import "github.com/cockroachdb/errors"
 
+// onUnmappedSegcoreCode, if set, is invoked once per occurrence whenever a C++
+// segcore code arrives that is not registered in segcoreCodeTable (classification
+// drift). merr is a leaf package and cannot import pkg/metrics or pkg/mlog (both
+// import merr, directly or transitively, which would create an import cycle), so
+// the observability side-effect (a counter + a rate-limited WARN) is injected by
+// a node-side package via RegisterUnmappedSegcoreCodeObserver. It is set once at
+// init time and only read afterward, so no locking is needed.
+var onUnmappedSegcoreCode func(code int32)
+
+// RegisterUnmappedSegcoreCodeObserver installs the callback invoked for every
+// unregistered segcore code seen by classifySegcoreError. Call it once at init
+// from a package that may import metrics/logging.
+func RegisterUnmappedSegcoreCodeObserver(fn func(code int32)) {
+	onUnmappedSegcoreCode = fn
+}
+
 // segcore error codes are produced by the C++ core (milvus::ErrorCode, defined
 // in milvus-common's EasyAssert.h, value range 2000-2099) and travel to Go via
 // the CGO CStatus{error_code, error_msg} boundary. Historically two Go paths
@@ -166,7 +182,14 @@ var segcoreCodeTable = map[int32]segcoreClass{
 func classifySegcoreError(code int32, msg string) error {
 	cls, ok := segcoreCodeTable[code]
 	if !ok {
+		// Runtime degrade (never panic): an unregistered C++ code falls back to a
+		// generic non-retriable system error. Notify the observer (if installed)
+		// so this classification drift is observable -- a growing counter means
+		// the C++ side added an ErrorCode the table has not been taught about yet.
 		cls = segcoreClass{sentinel: ErrSegcore}
+		if onUnmappedSegcoreCode != nil {
+			onUnmappedSegcoreCode(code)
+		}
 	}
 
 	// Stamp the original C++ code into the segcoreCode field on the sentinel,

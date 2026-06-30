@@ -121,7 +121,20 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		err := SegcoreError(2055, "future code")
 		assert.ErrorIs(t, err, ErrSegcore)
 		assert.Equal(t, SystemError, GetErrorType(err))
+		assert.False(t, Status(err).GetRetriable())
 		assert.False(t, IsSegcoreSignal(2055))
+	})
+
+	t.Run("unmapped_code_observer", func(t *testing.T) {
+		// The drift observer fires only for codes absent from the table, with the
+		// raw code, so the node side can bump a metric / log a warning.
+		var got []int32
+		RegisterUnmappedSegcoreCodeObserver(func(code int32) { got = append(got, code) })
+		defer RegisterUnmappedSegcoreCodeObserver(nil)
+
+		_ = SegcoreError(2056, "future code") // unregistered -> observed
+		_ = SegcoreError(2042, "bad param")   // registered -> not observed
+		assert.Equal(t, []int32{2056}, got)
 	})
 
 	t.Run("wire_code_projection", func(t *testing.T) {
