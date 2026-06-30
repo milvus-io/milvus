@@ -29,7 +29,7 @@ func TestValidateAlterSchemaAddFunctionPlan_StandaloneAddRejected(t *testing.T) 
 		Kind:     AlterSchemaAddFunction,
 		Function: &schemapb.FunctionSchema{Name: "f", Type: schemapb.FunctionType_TextEmbedding},
 	}
-	err := ValidateAlterSchemaAddFunctionPlan(plan)
+	err := ValidateAlterSchemaAddFunctionPlan(plan, false)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "adding a function over existing fields is not supported")
 }

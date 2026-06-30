@@ -1688,6 +1688,7 @@ message ExternalCollectionRefreshJob {
   // segments are the collection's contents and are being served, and only the
   // index wait ran out of budget. A failed job with 0 applied nothing.
   int64 index_wait_started_time = 13;
+  int32 schema_version = 14;     // Collection schema version used when the refresh job was submitted
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
@@ -1729,6 +1730,7 @@ message ExternalCollectionRefreshTask {
   string result_path = 22;
   // SHA-256 checksum of the serialized task result payload.
   bytes result_checksum = 23;
+  int32 schema_version = 24;  // Collection schema version copied from the parent refresh job
 }
 
 message GetRefreshExternalCollectionProgressResponse {
