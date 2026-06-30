@@ -16,6 +16,7 @@
 
 #include "storage/MmapChunkManager.h"
 
+#include <cstddef>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -36,6 +37,12 @@ namespace milvus::storage {
 namespace {
 static constexpr int kMmapDefaultProt = PROT_WRITE | PROT_READ;
 static constexpr int kMmapDefaultFlags = MAP_SHARED;
+static constexpr uint64_t kMmapAllocationAlignment = alignof(std::max_align_t);
+
+uint64_t
+AlignUp(uint64_t offset, uint64_t alignment) {
+    return ((offset + alignment - 1) / alignment) * alignment;
+}
 };  // namespace
 
 // todo(cqy): After confirming the append parallelism of multiple fields, adjust the lock granularity.
@@ -137,10 +144,13 @@ MmapBlock::Get(const uint64_t size) {
     AssertInfo(is_valid_,
                "Fail to get memory from invalid MmapBlock under file:{}.",
                file_name_);
-    if (file_size_ - offset_.load() < size) {
+    auto current_offset = offset_.load();
+    auto aligned_offset = AlignUp(current_offset, kMmapAllocationAlignment);
+    if (aligned_offset > file_size_ || file_size_ - aligned_offset < size) {
         return nullptr;
     } else {
-        return (void*)(addr_ + offset_.fetch_add(size));
+        offset_.store(aligned_offset + size);
+        return static_cast<void*>(addr_ + aligned_offset);
     }
 }
 

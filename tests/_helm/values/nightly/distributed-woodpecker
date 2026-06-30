@@ -98,6 +98,9 @@ extraConfigFiles:
         storageFormat:
           enabled: true
       targetVecIndexVersion: 10
+      compaction:
+        bumpSchemaVersion:
+          enabled: true
       gc:
         interval: 1800
         missingTolerance: 1800
