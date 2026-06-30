@@ -1768,7 +1768,8 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     const ArithHighPrecisionType<float>& right_operand,
     const ArithHighPrecisionType<float>& value,
     const size_t size) {
-    if constexpr (AOp == ArithOpType::Mod) {
+    if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
+                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor) {
         return false;
     } else {
         if constexpr (AOp == ArithOpType::Div) {
@@ -1850,7 +1851,8 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     const ArithHighPrecisionType<double>& right_operand,
     const ArithHighPrecisionType<double>& value,
     const size_t size) {
-    if constexpr (AOp == ArithOpType::Mod) {
+    if constexpr (AOp == ArithOpType::Mod || AOp == ArithOpType::BitAnd ||
+                  AOp == ArithOpType::BitOr || AOp == ArithOpType::BitXor) {
         return false;
     } else {
         if constexpr (AOp == ArithOpType::Div) {
