@@ -85,9 +85,10 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 
 	// add msg to out if msg pass check of filter
 	for _, msg := range streamMsgPack.Msgs {
+		ctx := msg.TraceCtx()
 		err := fNode.filtrate(collection, msg)
 		if err != nil {
-			mlog.Debug(context.TODO(), "filter invalid message",
+			mlog.Debug(ctx, "filter invalid message",
 				mlog.String("message type", msg.Type().String()),
 				mlog.String("channel", fNode.channel),
 				mlog.FieldCollectionID(fNode.collectionID),

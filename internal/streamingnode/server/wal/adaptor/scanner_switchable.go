@@ -176,6 +176,9 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				// when we switch from tailing mode to catchup mode.
 				continue
 			}
+			if shouldStartConsumeSpan(msg) {
+				startConsumeSpanForMessage(ctx, msg)
+			}
 			if err := s.HandleMessage(ctx, msg); err != nil {
 				return nil, err
 			}
@@ -292,4 +295,18 @@ func isTailingScanImmutableMessage(msg message.ImmutableMessage) (message.Immuta
 		return msg.ImmutableMessage, true
 	}
 	return msg, false
+}
+
+func shouldStartConsumeSpan(msg message.ImmutableMessage) bool {
+	if msg.TxnContext() == nil {
+		return true
+	}
+	return msg.MessageType() == message.MessageTypeCommitTxn
+}
+
+func startConsumeSpanForMessage(ctx context.Context, msg message.ImmutableMessage) {
+	ctx = message.ExtractTraceContext(ctx, msg)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALConsume)
+	message.OverwriteTraceContext(ctx, msg)
+	span.End()
 }

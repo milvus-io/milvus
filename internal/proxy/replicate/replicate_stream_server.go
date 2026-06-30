@@ -119,8 +119,12 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	if err != nil {
 		return err
 	}
+	ctx := message.ExtractTraceContext(p.streamServer.Context(), msg)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameReplicateSecondary)
+	message.OverwriteTraceContext(ctx, msg)
+	defer span.End()
+
 	sourceTs := msg.ReplicateHeader().TimeTick
-	ctx := p.streamServer.Context()
 	mlog.Debug(ctx, "recv replicate message from client",
 		mlog.String("messageID", reqMsg.GetId().GetId()),
 		mlog.Uint64("sourceTimeTick", sourceTs),
@@ -138,6 +142,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
+	span.RecordError(err)
 	// unexpected error, will close the stream and wait for client to reconnect.
 	mlog.Warn(ctx, "append replicate message to wal failed", mlog.FieldMessage(msg), mlog.Err(err))
 	return err

@@ -188,13 +188,14 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 	}
 
 	p.appendWG.Add(1)
-	p.logger.Debug(context.TODO(), "recv produce message from client", mlog.Int64("requestID", req.RequestId))
-	// Update metrics.
 	msg := message.NewMutableMessageBeforeAppend(req.GetMessage().GetPayload(), req.GetMessage().GetProperties())
+	ctx := message.ExtractTraceContext(p.produceServer.Context(), msg)
+	p.logger.Debug(ctx, "recv produce message from client", mlog.Int64("requestID", req.RequestId))
+	// Update metrics.
 	metricsGuard := p.metrics.StartProduce()
 	if err := p.validateMessage(msg); err != nil {
-		p.logger.Warn(context.TODO(), "produce message validation failed", mlog.Int64("requestID", req.RequestId), mlog.Err(err))
-		p.sendProduceResult(req.RequestId, nil, err)
+		p.logger.Warn(ctx, "produce message validation failed", mlog.Int64("requestID", req.RequestId), mlog.Err(err))
+		p.sendProduceResult(ctx, req.RequestId, nil, err)
 		metricsGuard.Finish(err)
 		p.appendWG.Done()
 		return
@@ -202,12 +203,12 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 
 	// Append message to wal.
 	// Concurrent append request can be executed concurrently.
-	p.wal.AppendAsync(p.produceServer.Context(), msg, func(appendResult *wal.AppendResult, err error) {
+	p.wal.AppendAsync(ctx, msg, func(appendResult *wal.AppendResult, err error) {
 		defer func() {
 			metricsGuard.Finish(err)
 			p.appendWG.Done()
 		}()
-		p.sendProduceResult(req.RequestId, appendResult, err)
+		p.sendProduceResult(ctx, req.RequestId, appendResult, err)
 	})
 }
 
@@ -255,12 +256,12 @@ func (p *ProduceServer) UpdateRateLimitState(state ratelimit.RateLimitState) {
 }
 
 // sendProduceResult sends the produce result to client.
-func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendResult, err error) {
+func (p *ProduceServer) sendProduceResult(ctx context.Context, reqID int64, appendResult *wal.AppendResult, err error) {
 	resp := &streamingpb.ProduceMessageResponse{
 		RequestId: reqID,
 	}
 	if err != nil {
-		p.logger.Warn(context.TODO(), "append message to wal failed", mlog.Int64("requestID", reqID), mlog.Err(err))
+		p.logger.Warn(ctx, "append message to wal failed", mlog.Int64("requestID", reqID), mlog.Err(err))
 		resp.Response = &streamingpb.ProduceMessageResponse_Error{Error: status.AsStreamingError(err).AsPBError()}
 	} else {
 		resp.Response = &streamingpb.ProduceMessageResponse_Result{Result: appendResult.IntoProto()}
@@ -270,9 +271,9 @@ func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendR
 	// all pending response message should be dropped, client side will handle it.
 	select {
 	case p.produceMessageCh <- resp:
-		p.logger.Debug(context.TODO(), "send produce message response to client", mlog.Int64("requestID", reqID), mlog.Any("appendResult", appendResult), mlog.Err(err))
+		p.logger.Debug(ctx, "send produce message response to client", mlog.Int64("requestID", reqID), mlog.Any("appendResult", appendResult), mlog.Err(err))
 	case <-p.produceServer.Context().Done():
-		p.logger.Warn(context.TODO(), "stream closed before produce message response sent", mlog.Int64("requestID", reqID), mlog.Any("appendResult", appendResult), mlog.Err(err))
+		p.logger.Warn(ctx, "stream closed before produce message response sent", mlog.Int64("requestID", reqID), mlog.Any("appendResult", appendResult), mlog.Err(err))
 		return
 	}
 }

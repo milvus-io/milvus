@@ -3,6 +3,8 @@
 package mock_message
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -1087,6 +1089,39 @@ func (_c *MockMutableMessage_WithReplicateHeader_Call) RunAndReturn(run func(*me
 	return _c
 }
 
+// WithTraceContext provides a mock function with given fields: ctx
+func (_m *MockMutableMessage) WithTraceContext(ctx context.Context) {
+	_m.Called(ctx)
+}
+
+// MockMutableMessage_WithTraceContext_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithTraceContext'
+type MockMutableMessage_WithTraceContext_Call struct {
+	*mock.Call
+}
+
+// WithTraceContext is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockMutableMessage_Expecter) WithTraceContext(ctx interface{}) *MockMutableMessage_WithTraceContext_Call {
+	return &MockMutableMessage_WithTraceContext_Call{Call: _e.mock.On("WithTraceContext", ctx)}
+}
+
+func (_c *MockMutableMessage_WithTraceContext_Call) Run(run func(ctx context.Context)) *MockMutableMessage_WithTraceContext_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithTraceContext_Call) Return() *MockMutableMessage_WithTraceContext_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockMutableMessage_WithTraceContext_Call) RunAndReturn(run func(context.Context)) *MockMutableMessage_WithTraceContext_Call {
+	_c.Run(run)
+	return _c
+}
+
 // WithTimeTick provides a mock function with given fields: tt
 func (_m *MockMutableMessage) WithTimeTick(tt uint64) message.MutableMessage {
 	ret := _m.Called(tt)
@@ -1236,7 +1271,8 @@ func (_c *MockMutableMessage_WithWALTerm_Call) RunAndReturn(run func(int64) mess
 func NewMockMutableMessage(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockMutableMessage {
+},
+) *MockMutableMessage {
 	mock := &MockMutableMessage{}
 	mock.Mock.Test(t)
 

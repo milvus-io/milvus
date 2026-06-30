@@ -297,7 +297,6 @@ func (bm *broadcastTaskManager) Close() {
 
 // addBroadcastTask adds the broadcast task into the manager.
 func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) *broadcastTask {
-	msg = msg.OverwriteBroadcastHeader(broadcastID, guards.ResourceKeys()...)
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
