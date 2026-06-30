@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -126,6 +127,36 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	}
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
+
+	// bump_defence (registration A): register a gate for the newly-added BOUND field
+	// (function output, or external_field-mapped on an external collection) BEFORE the
+	// dataView-changing broadcast, so old segments (schema_version < V) are protected
+	// until the backfill (compaction / refresh) materializes the field everywhere. A
+	// regular plain add_field (unbound) is born correctly-served as NULL -> no gate.
+	// NOTE: the F-in-load_fields guard is deferred; registering unconditionally for a
+	// bound field over-protects (safe direction), never leaks a partial.
+	if c.backfillGate != nil && plan.HasField() {
+		field := plan.Field
+		bound := field.GetIsFunctionOutput() ||
+			(typeutil.IsExternalCollection(schema) && field.GetExternalField() != "")
+		if bound {
+			var vectorFieldIDs, scalarFieldIDs []int64
+			if typeutil.IsVectorType(field.GetDataType()) {
+				vectorFieldIDs = []int64{field.GetFieldID()}
+			} else {
+				scalarFieldIDs = []int64{field.GetFieldID()}
+			}
+			v := schema.GetVersion()
+			roundID, aerr := c.idAllocator.AllocOne()
+			if aerr != nil {
+				mlog.Warn(ctx, "failed to allocate bump_defence roundID; skip registration", mlog.Err(aerr))
+			} else if err := c.backfillGate.RegisterWatermark(ctx, coll.CollectionID, roundID, vectorFieldIDs, scalarFieldIDs, v); err != nil {
+				mlog.Warn(ctx, "failed to register bump_defence for added field",
+					mlog.FieldCollectionID(coll.CollectionID),
+					mlog.Int64("fieldID", field.GetFieldID()), mlog.Err(err))
+			}
+		}
 	}
 
 	// Broadcast.

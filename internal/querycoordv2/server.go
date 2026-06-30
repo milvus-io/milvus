@@ -238,6 +238,19 @@ func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
 	s.fileResourceObserver = observer
 }
 
+// GetSegmentDistManager exposes ONLY the querynode segment distribution so the
+// mixCoord-level bump_defence readiness provider can read the dist report (the dist-only
+// readiness witness). The witness reads per-segment loaded index fields + schema/data
+// version; it never needs the channel dist or the manager's write methods, so the return
+// is narrowed to the read interface rather than the whole DistributionManager. Returns nil
+// before Init builds the dist manager.
+func (s *Server) GetSegmentDistManager() meta.SegmentDistManagerInterface {
+	if s.dist == nil {
+		return nil
+	}
+	return s.dist.SegmentDistManager
+}
+
 func (s *Server) Init() error {
 	mlog.Info(s.ctx, "QueryCoord start init",
 		mlog.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),

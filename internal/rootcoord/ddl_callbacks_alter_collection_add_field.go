@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -82,6 +83,28 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	}
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
+
+	// bump_defence (registration B): an external-collection field is always bound
+	// (external_field-mapped — validation enforces it), so register a gate BEFORE the
+	// broadcast; it materializes on the next RefreshExternalCollection. A regular plain
+	// add_field is unbound (NULL is correct) -> no gate.
+	if c.backfillGate != nil && typeutil.IsExternalCollection(schema) {
+		var vectorFieldIDs, scalarFieldIDs []int64
+		if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+			vectorFieldIDs = []int64{fieldSchema.GetFieldID()}
+		} else {
+			scalarFieldIDs = []int64{fieldSchema.GetFieldID()}
+		}
+		v := schema.GetVersion()
+		roundID, aerr := c.idAllocator.AllocOne()
+		if aerr != nil {
+			mlog.Warn(ctx, "failed to allocate bump_defence roundID; skip registration", mlog.Err(aerr))
+		} else if err := c.backfillGate.RegisterWatermark(ctx, coll.CollectionID, roundID, vectorFieldIDs, scalarFieldIDs, v); err != nil {
+			mlog.Warn(ctx, "failed to register bump_defence for external add_field",
+				mlog.FieldCollectionID(coll.CollectionID),
+				mlog.Int64("fieldID", fieldSchema.GetFieldID()), mlog.Err(err))
+		}
 	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
