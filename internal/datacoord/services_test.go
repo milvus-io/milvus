@@ -1063,17 +1063,20 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, s.meta.collections.Len())
+		coll, ok := s.meta.collections.Get(1)
+		assert.True(t, ok)
+		assert.Equal(t, []int64{1}, coll.Partitions)
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(1, &collectionInfo{ID: 1})
+		collections.Insert(1, &collectionInfo{ID: 1, Partitions: []int64{0, 2}})
 		s := &Server{meta: &meta{collections: collections}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
 			CollectionID: 1,
-			PartitionIDs: []int64{1},
+			PartitionIDs: []int64{2},
 			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
 		}
 
@@ -1086,6 +1089,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		coll, ok = s.meta.collections.Get(1)
 		assert.True(t, ok)
 		assert.NotNil(t, coll.Properties)
+		assert.Equal(t, []int64{2}, coll.Partitions)
 	})
 }
 
