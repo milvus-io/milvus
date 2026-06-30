@@ -766,6 +766,91 @@ func TestExpr_TextMatch(t *testing.T) {
 	}
 }
 
+func TestExpr_TextMatchFuzzy(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// the field must enable match first, otherwise fuzzy match is rejected.
+	assertInvalidExpr(t, helper, `text_match_fuzzy(VarCharField, "query", max_edit_distance=1)`)
+	enableMatch(schema)
+
+	for _, v := range []int64{0, 1, 2} {
+		expr := fmt.Sprintf(`text_match_fuzzy(VarCharField, "query", max_edit_distance=%d)`, v)
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan)
+
+		ure := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatchFuzzy, ure.GetOp())
+		assert.Equal(t, "query", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, v, extra[0].GetInt64Val())
+	}
+
+	{
+		// a templated query is filled at plan time and the edit distance survives.
+		expr := `text_match_fuzzy(VarCharField, {q}, max_edit_distance=2)`
+		mv := map[string]*schemapb.TemplateValue{
+			"q": generateTemplateValue(schemapb.DataType_VarChar, "hello"),
+		}
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:       10,
+			MetricType: "L2",
+		}, mv, nil)
+		assert.NoError(t, err, expr)
+		ure := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.NotNil(t, ure)
+		assert.Equal(t, planpb.OpType_TextMatchFuzzy, ure.GetOp())
+		assert.Equal(t, "hello", ure.GetValue().GetStringVal())
+		extra := ure.GetExtraValues()
+		assert.Equal(t, 1, len(extra))
+		assert.Equal(t, int64(2), extra[0].GetInt64Val())
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=3)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max_edit_distance should be in [0, 2]")
+	}
+
+	{
+		// the distance argument is required by the grammar.
+		expr := `text_match_fuzzy(VarCharField, "query")`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=1.5)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+	}
+
+	{
+		expr := `text_match_fuzzy(VarCharField, "query", max_edit_distance=9223372036854775808)`
+		_, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid max_edit_distance value")
+	}
+
+	unsupported := []string{
+		`text_match_fuzzy(not_exist, "query", max_edit_distance=1)`,
+		`text_match_fuzzy(BoolField, "query", max_edit_distance=1)`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
 	schema := newTestSchema(true)
 	enableMatch(schema)

@@ -929,6 +929,56 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	}
 }
 
+func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) interface{} {
+	identifier := ctx.Identifier().GetText()
+	column, err := v.translateIdentifierWithText(identifier, true)
+	if err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(column)
+	if !typeutil.IsStringType(column.dataType) {
+		return merr.WrapErrQueryPlanMsg("text match operation on non-string is unsupported")
+	}
+	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
+		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
+	}
+
+	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(), "text_match_fuzzy query")
+	if err != nil {
+		return err
+	}
+	var value *planpb.GenericValue
+	if !isTemplate {
+		value = NewString(queryText)
+	}
+
+	// tantivy's fuzzy automaton only supports an edit distance of 0, 1 or 2.
+	distanceText := ctx.IntegerConstant().GetText()
+	maxEditDistance, err := strconv.ParseInt(distanceText, 0, 64)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid max_edit_distance value: %s", distanceText)
+	}
+	if maxEditDistance < 0 || maxEditDistance > 2 {
+		return merr.WrapErrParameterInvalidMsg("max_edit_distance should be in [0, 2], got %d", maxEditDistance)
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo:           columnInfo,
+					Op:                   planpb.OpType_TextMatchFuzzy,
+					Value:                value,
+					TemplateVariableName: placeholder,
+					ExtraValues:          []*planpb.GenericValue{NewInt(maxEditDistance)},
+				},
+			},
+			IsTemplate: isTemplate,
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext) interface{} {
 	// Parse the integer constant for minimum_should_match
 	integerConstant := ctx.IntegerConstant().GetText()
