@@ -292,6 +292,11 @@ message AlterCollectionMessageHeader {
     CacheExpirations cache_expirations = 4;
     repeated int64 flushed_segment_ids = 5; // will be filled by wal shard manager.
     repeated int64 dropped_field_ids = 6; // field IDs removed by this alter operation, used to cascade-delete indexes in ack callback.
+    // Optional. Present only when this alter adds backfilled (function-output) fields:
+    // it declares the field set so the ack callback registers the bump_defence gate
+    // (message declares, ack registers -- same pattern as BatchUpdateManifest). Absent
+    // for any other alter -> no gate action.
+    FieldBackfill field_backfill = 7;
 }
 
 // AlterCollectionMessageBody is the body of alter collection message.
@@ -812,6 +817,23 @@ message BatchUpdateManifestMessageHeader {
 // BatchUpdateManifestMessageBody is the body of batch update manifest message.
 message BatchUpdateManifestMessageBody {
     repeated BatchUpdateManifestItem items = 1;
+    // Optional. Present only when this batch is a field-backfill commit; it declares
+    // which fields the batch backfills. The ack callback (where the applied per-segment
+    // versions become known) uses it to register the bump_defence gate over the
+    // committed segments. Absent for a generic manifest update -- presence is the
+    // "is-backfill" signal and the gate step stays a no-op when it is nil.
+    FieldBackfill field_backfill = 2;
+}
+
+// FieldBackfill declares the field set a BatchUpdateManifest batch backfills, so the
+// batch's ack callback can register the bump_defence gate for those fields.
+message FieldBackfill {
+    repeated int64 field_ids = 1;
+    // source is the COMMIT-level identity of the backfill (e.g. the result path). One
+    // logical commit is split into many batches only for message-size reasons; every
+    // batch carries the same source so their registrations dedupe onto ONE gate round.
+    // Stable across RPC retries and ack-callback retries.
+    string source = 2;
 }
 
 // BatchUpdateManifestItem is an item in batch update manifest message.

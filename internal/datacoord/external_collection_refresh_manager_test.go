@@ -1357,8 +1357,7 @@ func TestHandleJobFinished_TriggersExploreTempCleanup(t *testing.T) {
 
 	mgr := NewExternalCollectionRefreshManager(
 		ctx, mt, scheduler, alloc, refreshMeta, nil,
-		testCollectionGetter(mt), schemaUpdater, cm,
-	).(*externalCollectionRefreshManager)
+		testCollectionGetter(mt), schemaUpdater, cm).(*externalCollectionRefreshManager)
 
 	job := &datapb.ExternalCollectionRefreshJob{
 		JobId:          555,

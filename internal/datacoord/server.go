@@ -167,11 +167,24 @@ type Server struct {
 
 	// file resource
 	fileResourceObserver FileResourceObserver
+
+	// bump_defence registry (mixCoord-owned; injected via SetBackfillAtomicGate)
+	backfillGate BackfillAtomicGateRegistrar
 }
 
 type FileResourceObserver interface {
 	InitDataCoord(manager session.NodeManager)
 	Notify()
+}
+
+// BackfillAtomicGateRegistrar is the primitive-only slice of the bump_defence registry (mixCoord) that the
+// datacoord Spark-backfill registration site (the BatchUpdateManifest ack callback) needs. The
+// coordinator *BackfillAtomicGate satisfies it structurally; no BackfillRound type crosses the import
+// boundary (coordinator imports datacoord, not vice-versa).
+type BackfillAtomicGateRegistrar interface {
+	// RegisterExternal must be called AFTER the manifest apply landed in meta, so the
+	// round's write side holds by construction from registration onwards.
+	RegisterExternal(ctx context.Context, collectionID, roundID int64, source string, fieldIDs []int64) error
 }
 
 type CollectionNameInfo struct {
@@ -230,6 +243,12 @@ func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) 
 
 func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
 	s.fileResourceObserver = observer
+}
+
+// SetBackfillAtomicGate injects the bump_defence registry (mixCoord-owned). Used by the
+// Spark-backfill registration site (CommitBackfillResult).
+func (s *Server) SetBackfillAtomicGate(reg BackfillAtomicGateRegistrar) {
+	s.backfillGate = reg
 }
 
 // QuitSignal returns signal when server quits

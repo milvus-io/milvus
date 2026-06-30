@@ -140,6 +140,23 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	msgType := request.GetBase().GetMsgType()
 	var aliasName []string
 
+	// bump_defence: a defence-update push carries the collection's current gated field
+	// set and is NOT a cache invalidation -- apply it and return before the
+	// msgType-driven eviction switch. The push carries no Base, so falling through would
+	// hit the default evict-all branch on every observer re-push (each ~10s sweep),
+	// flushing the collection's cached meta for the whole life of a backfill. The gated
+	// set is a *MetaCache-specific feature, so type-assert rather than widen the Cache
+	// interface (which would force a mock regen across the proxy test suite).
+	if request.GetDefenceUpdate() {
+		if mc, ok := globalMetaCache.(*MetaCache); ok {
+			mc.SetGatedFields(collectionID, request.GetDefenceGatedFields())
+		}
+		mlog.Info(ctx, "applied bump_defence gated-field push",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Int("gatedFieldCount", len(request.GetDefenceGatedFields())))
+		return merr.Success(), nil
+	}
+
 	if globalMetaCache != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:

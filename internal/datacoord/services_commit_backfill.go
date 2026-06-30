@@ -18,16 +18,19 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -74,6 +77,22 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
+	// bump_defence: resolve the field IDs this backfill commits so each per-batch
+	// BatchUpdateManifest message can DECLARE them via field_backfill (the gate itself
+	// is registered by the batch's ack callback, atomic with the durable apply). A
+	// validation failure REJECTS the whole commit: applying the mutation without a gate
+	// would be a silent fail-open.
+	backfillFieldIDs, ferr := resolveBackfillGateFields(coll.GetSchema(), result)
+	if ferr != nil {
+		log.Warn(ctx, "CommitBackfillResult rejected: invalid bump_defence gate declaration", mlog.Err(ferr))
+		return &datapb.CommitBackfillResultResponse{
+			Status:          merr.Status(ferr),
+			TotalSegments:   total,
+			SegmentStatuses: statuses,
+			FailedSegments:  int32(len(statuses)),
+		}, nil
+	}
+
 	// Split items across multiple broadcast messages so a single
 	// BatchUpdateManifestMessageBody never exceeds the broker's message size
 	// limit (Pulsar defaults to 5MiB). Each batch acquires its own broadcaster
@@ -81,6 +100,12 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// Broadcast call and would panic on any subsequent call. Failure of one
 	// batch does not cancel subsequent batches; per-segment statuses reflect
 	// batch-level outcomes.
+	// The commit-level gate identity: every batch of this commit carries it so all their
+	// registrations dedupe onto ONE bump_defence round (batching is a message-size
+	// artifact, not a semantic boundary). The raw result path is stable across RPC
+	// retries of the same commit.
+	backfillSource := fmt.Sprintf("backfillresult:%s", req.GetResultPath())
+
 	channels := []string{streaming.WAL().ControlChannel()}
 	var lastErr error
 	for start := 0; start < len(items); start += maxItemsPerBroadcast {
@@ -89,7 +114,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			end = len(items)
 		}
 		batch := items[start:end]
-		if err := broadcastBackfillBatch(ctx, coll, result.CollectionID, channels, batch); err != nil {
+		if err := broadcastBackfillBatch(ctx, coll, result.CollectionID, channels, batch, backfillFieldIDs, backfillSource); err != nil {
 			log.Error(ctx, "CommitBackfillResult broadcast batch failed",
 				mlog.Err(err), mlog.Int("batchStart", start), mlog.Int("batchEnd", end))
 			lastErr = err
@@ -121,6 +146,85 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}, nil
 }
 
+// resolveBackfillGateFields resolves and validates the field set the bump_defence gate
+// must cover for this commit. The declared NewFieldNames is the SINGLE information
+// source (mandatory, every name validated against the schema); the V2 column-group
+// payload is used purely as a CONSISTENCY CHECK against it -- the two exist
+// independently in external input, and when they contradict neither side can be
+// trusted, so any inconsistency rejects the whole commit rather than silently
+// preferring one source:
+//   - a V2 column group carrying a field unknown to the schema -> reject;
+//   - a V2 column group writing a field NOT declared -> reject;
+//   - a declared field backed by no mutation (when there are no V3 entries whose
+//     opaque manifests could carry it) -> reject.
+func resolveBackfillGateFields(schema *schemapb.CollectionSchema, result *BackfillResult) ([]int64, error) {
+	byName := make(map[string]int64, len(schema.GetFields()))
+	byID := make(map[int64]struct{}, len(schema.GetFields()))
+	for _, f := range schema.GetFields() {
+		byName[f.GetName()] = f.GetFieldID()
+		byID[f.GetFieldID()] = struct{}{}
+	}
+
+	// The declaration: mandatory and schema-validated. Committing without it would
+	// apply the mutation ungated (silent fail-open).
+	if len(result.NewFieldNames) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"backfill result declares no newFieldNames; committing it without a gate would expose partial results")
+	}
+	declared := make(map[int64]struct{}, len(result.NewFieldNames))
+	for _, name := range result.NewFieldNames {
+		fid, ok := byName[name]
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"backfill result newFieldNames entry %q does not match any collection field", name)
+		}
+		declared[fid] = struct{}{}
+	}
+
+	// The V2 mutation payload: consistency check against the declaration.
+	mutated := make(map[int64]struct{})
+	hasV3 := false
+	for segID, entry := range result.Segments {
+		if !entry.IsV2() {
+			hasV3 = true
+			continue
+		}
+		for _, cg := range entry.ColumnGroups {
+			for _, fid := range cg.FieldIDs {
+				if fid < common.StartOfUserFieldID {
+					continue // system columns ride along; nothing searchable to gate
+				}
+				if _, ok := byID[fid]; !ok {
+					return nil, merr.WrapErrParameterInvalidMsg(
+						"backfill result segment %s carries column-group field %d unknown to the collection schema", segID, fid)
+				}
+				if _, ok := declared[fid]; !ok {
+					return nil, merr.WrapErrParameterInvalidMsg(
+						"backfill result segment %s writes field %d which newFieldNames does not declare", segID, fid)
+				}
+				mutated[fid] = struct{}{}
+			}
+		}
+	}
+	// Without V3 entries every declared field must be backed by a mutation; with V3
+	// entries the undeclared remainder is presumed to live in the opaque manifests.
+	if !hasV3 {
+		for fid := range declared {
+			if _, ok := mutated[fid]; !ok {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"backfill result declares field %d in newFieldNames but no column group writes it", fid)
+			}
+		}
+	}
+
+	out := make([]int64, 0, len(declared))
+	for fid := range declared {
+		out = append(out, fid)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out, nil
+}
+
 // maxItemsPerBroadcast caps the number of BatchUpdateManifestItem entries
 // packed into a single broadcast message. With item payloads in the
 // ~1-2KiB range for V2 column groups this stays well under Pulsar's default
@@ -137,6 +241,8 @@ func broadcastBackfillBatch(
 	collectionID int64,
 	channels []string,
 	items []*messagespb.BatchUpdateManifestItem,
+	backfillFieldIDs []int64,
+	backfillSource string,
 ) error {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
 		message.NewSharedDBNameResourceKey(coll.GetDbName()),
@@ -147,13 +253,19 @@ func broadcastBackfillBatch(
 	}
 	defer broadcaster.Close()
 
+	body := &message.BatchUpdateManifestMessageBody{Items: items}
+	if len(backfillFieldIDs) > 0 {
+		// Declare the backfilled fields + the commit-level source so this batch's ack
+		// callback registers the bump_defence gate and all batches of the same commit
+		// dedupe onto one round. A generic manifest update leaves field_backfill
+		// nil -> no gate.
+		body.FieldBackfill = &messagespb.FieldBackfill{FieldIds: backfillFieldIDs, Source: backfillSource}
+	}
 	_, err = broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
 		WithHeader(&message.BatchUpdateManifestMessageHeader{
 			CollectionId: collectionID,
 		}).
-		WithBody(&message.BatchUpdateManifestMessageBody{
-			Items: items,
-		}).
+		WithBody(body).
 		WithBroadcast(channels).
 		MustBuildBroadcast(),
 	)

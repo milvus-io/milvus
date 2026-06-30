@@ -68,6 +68,10 @@ var (
 	ErrServiceUnimplemented        = newMilvusError("service unimplemented", 10, false)
 	ErrServiceTimeTickLongDelay    = newMilvusError("time tick long delay", 11, false)
 	ErrServiceResourceInsufficient = newMilvusError("service resource insufficient", 12, true)
+	// ErrServiceFieldBackfillInProgress is returned by the proxy bump_defence gate when a
+	// search/query targets a field whose backfill round has not yet finished on all
+	// in-scope segments. Retriable so the SDK polls until the gate is revoked.
+	ErrServiceFieldBackfillInProgress = newMilvusError("field backfill in progress", 13, true)
 
 	// Collection related
 	ErrCollectionNotFound                      = newMilvusError("collection not found", 100, false) // SystemError by default: internal retry.Do paths (datacoord handler/recovery) must keep retrying through a transient not-found; the proxy boundary stamps it InputError for users via WrapErrAsInputErrorWhen.

@@ -238,6 +238,14 @@ func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
 	s.fileResourceObserver = observer
 }
 
+// GetTargetManager exposes the target manager so the mixCoord-level bump_defence
+// readiness provider can read the currentTarget build-time version -- the durable
+// evidence that a target built after the backfill finished has passed the promote
+// barrier (all replicas loaded + reopened). Returns nil before Init builds it.
+func (s *Server) GetTargetManager() meta.TargetManagerInterface {
+	return s.targetMgr
+}
+
 func (s *Server) Init() error {
 	mlog.Info(s.ctx, "QueryCoord start init",
 		mlog.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),

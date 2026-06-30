@@ -175,6 +175,9 @@ type Core struct {
 
 	fileResourceObserver FileResourceObserver
 
+	// bump_defence registry (mixCoord-owned; injected via SetBackfillAtomicGate)
+	backfillGate BackfillAtomicGateRegistrar
+
 	// telemetry manager for client telemetry collection and command management
 	telemetryMgr *telemetry.TelemetryManager
 }
@@ -184,6 +187,17 @@ type FileResourceObserver interface {
 	InitMeta(meta IMetaTable)
 	Notify()
 	Sync() error
+}
+
+// BackfillAtomicGateRegistrar is the primitive-only slice of the bump_defence registry (mixCoord) that
+// the rootcoord registration site (the AlterCollection ack callback, for add_function_field) needs.
+// The coordinator *BackfillAtomicGate satisfies it structurally; no BackfillRound type crosses the
+// import boundary (coordinator imports rootcoord, not vice-versa).
+type BackfillAtomicGateRegistrar interface {
+	// RegisterWatermark is called from the AlterCollection ack callback with the DDL's
+	// WAL timetick, so a failed broadcast never arms a gate and a registration failure
+	// is retried by the ack loop.
+	RegisterWatermark(ctx context.Context, collectionID, roundID int64, fieldIDs []int64, watermark int32, schemaChangeTimeTick uint64) error
 }
 
 // --------------------- function --------------------------
@@ -214,6 +228,12 @@ func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 
 func (c *Core) SetFileResourceObserver(observer FileResourceObserver) {
 	c.fileResourceObserver = observer
+}
+
+// SetBackfillAtomicGate injects the bump_defence registry (mixCoord-owned). Used by the DDL
+// registration sites (add_function_field; external-collection add_field).
+func (c *Core) SetBackfillAtomicGate(reg BackfillAtomicGateRegistrar) {
+	c.backfillGate = reg
 }
 
 func (c *Core) GetStateCode() commonpb.StateCode {

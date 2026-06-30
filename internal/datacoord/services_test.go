@@ -3789,9 +3789,12 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			})
 		}
 
+		// V3 entries carry no per-field payload, so the commit MUST declare the
+		// backfilled fields (validated against the schema) or it is rejected.
 		jsonStr := `{
           "success": true,
           "collectionId": 100,
+          "newFieldNames": ["f_new"],
           "segments": {
             "1001": {"version": 10, "rowCount": 5, "outputPath": "s3a://bkt/seg/1001", "manifestPaths": []},
             "1002": {"version": 20, "rowCount": 7, "outputPath": "s3a://bkt/seg/1002", "manifestPaths": []}
@@ -3804,6 +3807,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 				Status:         merr.Success(),
 				DbName:         "default",
 				CollectionName: "test_collection",
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 102, Name: "f_new"},
+				}},
 			}, nil)
 
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
@@ -3939,6 +3945,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		jsonStr := `{
           "success": true,
           "collectionId": 100,
+          "newFieldNames": ["f_new"],
           "segments": {
             "101": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []},
             "102": {"version": 20, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
@@ -3950,6 +3957,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 				Status:         merr.Success(),
 				DbName:         "default",
 				CollectionName: "c",
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 102, Name: "f_new"},
+				}},
 			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
@@ -3998,6 +4008,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		jsonStr := `{
           "success": true,
           "collectionId": 100,
+          "newFieldNames": ["f_backfilled"],
           "segments": {
             "201": {
               "version": -1,
@@ -4015,6 +4026,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Status: merr.Success(), DbName: "default", CollectionName: "c",
+				// the column group's field must be resolvable in the schema (the gate
+				// scope derives from the mutation itself)
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "f_backfilled"},
+				}},
 			}, nil)
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
@@ -4261,7 +4277,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		}
 		// Build a JSON result referencing every segment.
 		var b strings.Builder
-		b.WriteString(`{"success": true, "collectionId": 100, "segments": {`)
+		b.WriteString(`{"success": true, "collectionId": 100, "newFieldNames": ["f_new"], "segments": {`)
 		for i, id := range segIDs {
 			if i > 0 {
 				b.WriteByte(',')
@@ -4274,6 +4290,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Status: merr.Success(), DbName: "default", CollectionName: "c",
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 102, Name: "f_new"},
+				}},
 			}, nil)
 
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))

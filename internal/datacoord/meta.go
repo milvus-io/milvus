@@ -2615,6 +2615,18 @@ func isSegmentHealthy(segment *SegmentInfo) bool {
 		segment.GetState() != commonpb.SegmentState_Dropped
 }
 
+// isSealedDataSegment reports whether a segment is a sealed-side, read-visible carrier of
+// user data: healthy, not importing, not invisible, not L0 (delete logs only), and not
+// growing. This is the segment population that schema-change accounting operates on
+// (the DDL schema-version consistency gate and the bump_defence DataView).
+func isSealedDataSegment(si *SegmentInfo) bool {
+	return isSegmentHealthy(si) &&
+		!si.GetIsImporting() &&
+		!si.GetIsInvisible() &&
+		si.GetLevel() != datapb.SegmentLevel_L0 &&
+		si.GetState() != commonpb.SegmentState_Growing
+}
+
 func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()

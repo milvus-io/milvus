@@ -1157,6 +1157,15 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
 
+	// bump_defence: reject a search on a gated (backfill-in-progress) field HERE -- the
+	// earliest point the anns field id is known and BEFORE the expensive CreateSearchPlan
+	// below, so gated polls skip plan compilation. Retriable -> the SDK polls until the gate
+	// is revoked. Covers both the advanced and regular search paths (both build their plan
+	// here). *MetaCache-specific; type-assert to avoid widening the Cache interface.
+	if mc, ok := globalMetaCache.(*MetaCache); ok && mc.IsFieldGated(t.GetCollectionID(), annField.GetFieldID()) {
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrServiceFieldBackfillInProgress(t.GetCollectionID(), annField.GetFieldID())
+	}
+
 	hasFilter := dsl != "" || len(exprTemplateValues) > 0
 	searchType := internalpb.SearchType_DEFAULT
 	// if function rerank is set, keep searchType DEFAULT; optimizations will be disabled in queryhook

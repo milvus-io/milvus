@@ -461,6 +461,23 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	if err := c.cascadeDropFieldIndexesInline(ctx, result); err != nil {
 		return err
 	}
+	// bump_defence: the message declares the backfilled (function output) fields, the
+	// ack registers the gate. Runs after the meta apply; an error propagates into the
+	// ack retry loop (registration is atomic with the DDL landing, and a failed
+	// broadcast never reaches here so no gate can dangle). The DDL's WAL timetick (max
+	// across the vchannel appends) becomes the round's write-side checkpoint threshold.
+	if fb := header.GetFieldBackfill(); fb != nil {
+		var tick uint64
+		for _, appendResult := range result.Results {
+			if ts := appendResult.TimeTick; ts > tick {
+				tick = ts
+			}
+		}
+		if err := c.registerFunctionFieldGate(ctx, header.CollectionId, fb.GetFieldIds(),
+			body.GetUpdates().GetSchema().GetVersion(), tick); err != nil {
+			return err
+		}
+	}
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
 		return merr.Wrap(err, "failed to broadcast altered collection")
 	}
