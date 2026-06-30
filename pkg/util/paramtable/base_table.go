@@ -214,6 +214,7 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		CaCertFile:      etcdConfig.EtcdTLSCACert.GetValue(),
 		MinVersion:      etcdConfig.EtcdTLSMinVersion.GetValue(),
 		KeyPrefix:       etcdConfig.RootPath.GetValue(),
+		DialTimeout:     etcdConfig.DialTimeout.GetAsDuration(time.Millisecond),
 		RefreshInterval: refreshInterval,
 	}
 
