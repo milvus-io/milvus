@@ -4543,7 +4543,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
-		DefaultValue: "16",
+		DefaultValue: "64",
 		Export:       true,
 	}
 	p.MaxGroupNQ.Init(base.mgr)
@@ -4551,7 +4551,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.NQMergeRatio = ParamItem{
 		Key:          "queryNode.grouping.nqMergeRatio",
 		Version:      "2.6.17",
-		DefaultValue: "3.0",
+		DefaultValue: "16.0",
 		Doc:          "Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.",
 		Export:       true,
 	}

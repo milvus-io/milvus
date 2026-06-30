@@ -621,8 +621,8 @@ queryNode:
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   grouping:
-    maxNQ: 16
-    nqMergeRatio: 3 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
+    maxNQ: 64
+    nqMergeRatio: 16 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
     maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
   search:
