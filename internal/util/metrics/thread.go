@@ -18,6 +18,10 @@ package metrics
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,11 +40,52 @@ type threadWatcher struct {
 	stopOnce  sync.Once
 	wg        sync.WaitGroup
 	ch        chan struct{}
+	samples   map[int32]threadSample
 }
+
+type threadSample struct {
+	group string
+	cpu   uint64
+}
+
+type threadStat struct {
+	tid   int32
+	name  string
+	state byte
+	cpu   uint64
+}
+
+var threadNameGroupRules = []struct {
+	prefix string
+	group  string
+}{
+	{prefix: "knowhere_build", group: "knowhere_build"},
+	{prefix: "knowhere_search", group: "knowhere_search"},
+	{prefix: "knowhere_fetch", group: "knowhere_fetch"},
+	{prefix: "rocksdb:high", group: "rocksdb_high"},
+	{prefix: "rocksdb:low", group: "rocksdb_low"},
+	{prefix: "rocksdb:bottom", group: "rocksdb_bottom"},
+	{prefix: "MILVUS_FL_WR", group: "file_write"},
+	{prefix: "MILVUS_SEARCH", group: "milvus_search"},
+	{prefix: "MILVUS_LOAD", group: "milvus_load"},
+	{prefix: "HIGH_SEGC_POOL", group: "segcore_high"},
+	{prefix: "MIDD_SEGC_POOL", group: "segcore_middle"},
+	{prefix: "LOW_SEGC_POOL", group: "segcore_low"},
+	{prefix: "CGO_SQ", group: "cgo_sq"},
+	{prefix: "CGO_LOAD", group: "cgo_load"},
+	{prefix: "CGO_DYN", group: "cgo_dynamic"},
+	{prefix: "CGO_WARMUP", group: "cgo_warmup"},
+}
+
+const (
+	threadWatcherInterval  = 5 * time.Second
+	unclassifiedThreadPool = "unclassified"
+)
 
 func NewThreadWatcher() *threadWatcher {
 	return &threadWatcher{
-		ch: make(chan struct{}),
+		ch:      make(chan struct{}),
+		samples: make(map[int32]threadSample),
 	}
 }
 
@@ -55,7 +100,7 @@ func (thw *threadWatcher) Start() {
 }
 
 func (thw *threadWatcher) watchThreadNum() {
-	ticker := time.NewTicker(time.Second * 30)
+	ticker := time.NewTicker(threadWatcherInterval)
 	defer ticker.Stop()
 	pid := os.Getpid()
 	p, err := process.NewProcess(int32(pid))
@@ -73,11 +118,125 @@ func (thw *threadWatcher) watchThreadNum() {
 			}
 			log.Debug("thread watcher observe thread num", zap.Int32("threadNum", threadNum))
 			metrics.ThreadNum.Set(float64(threadNum))
+			thw.updateNamedThreadCPUActiveNum()
 		case <-thw.ch:
 			log.Info("thread watcher exit")
 			return
 		}
 	}
+}
+
+func (thw *threadWatcher) updateNamedThreadCPUActiveNum() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+
+	current, err := collectNamedThreadStats()
+	if err != nil {
+		log.Warn("thread watcher failed to collect named thread stats", zap.Error(err))
+		return
+	}
+
+	activeByGroup, nextSamples := collectActiveThreadGroups(current, thw.samples)
+
+	for _, rule := range threadNameGroupRules {
+		metrics.ThreadCPUActiveNumByPool.WithLabelValues(rule.group).Set(float64(activeByGroup[rule.group]))
+	}
+	metrics.ThreadCPUActiveNumByPool.WithLabelValues(unclassifiedThreadPool).Set(float64(activeByGroup[unclassifiedThreadPool]))
+	thw.samples = nextSamples
+}
+
+func collectActiveThreadGroups(current []threadStat, previous map[int32]threadSample) (map[string]int, map[int32]threadSample) {
+	activeByGroup := make(map[string]int)
+	nextSamples := make(map[int32]threadSample, len(current))
+	for _, stat := range current {
+		group, classified := classifyThreadName(stat.name)
+		if !classified {
+			group = unclassifiedThreadPool
+		}
+		nextSamples[stat.tid] = threadSample{
+			group: group,
+			cpu:   stat.cpu,
+		}
+
+		previousSample, existed := previous[stat.tid]
+		if !existed {
+			continue
+		}
+		// Treat runnable and uninterruptible-sleep threads as active even
+		// without a CPU-time delta, so blocked I/O work is still visible.
+		if previousSample.group == group && (stat.cpu > previousSample.cpu || stat.state == 'R' || stat.state == 'D') {
+			activeByGroup[group]++
+		}
+	}
+	return activeByGroup, nextSamples
+}
+
+func collectNamedThreadStats() ([]threadStat, error) {
+	taskDir := "/proc/self/task"
+	entries, err := os.ReadDir(taskDir)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := make([]threadStat, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		tid64, err := strconv.ParseInt(entry.Name(), 10, 32)
+		if err != nil {
+			continue
+		}
+		tid := int32(tid64)
+		statBytes, err := os.ReadFile(filepath.Join(taskDir, entry.Name(), "stat"))
+		if err != nil {
+			continue
+		}
+		name, state, cpu, err := parseThreadStat(string(statBytes))
+		if err != nil {
+			continue
+		}
+		stats = append(stats, threadStat{
+			tid:   tid,
+			name:  name,
+			state: state,
+			cpu:   cpu,
+		})
+	}
+	return stats, nil
+}
+
+func parseThreadStat(stat string) (string, byte, uint64, error) {
+	startComm := strings.IndexByte(stat, '(')
+	endComm := strings.LastIndexByte(stat, ')')
+	if startComm < 0 || startComm >= endComm || endComm+2 >= len(stat) {
+		return "", 0, 0, strconv.ErrSyntax
+	}
+	name := stat[startComm+1 : endComm]
+
+	fields := strings.Fields(stat[endComm+2:])
+	if len(fields) <= 12 || len(fields[0]) == 0 {
+		return "", 0, 0, strconv.ErrSyntax
+	}
+	utime, err := strconv.ParseUint(fields[11], 10, 64)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	stime, err := strconv.ParseUint(fields[12], 10, 64)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return name, fields[0][0], utime + stime, nil
+}
+
+func classifyThreadName(name string) (string, bool) {
+	for _, rule := range threadNameGroupRules {
+		if strings.HasPrefix(name, rule.prefix) {
+			return rule.group, true
+		}
+	}
+	return unclassifiedThreadPool, false
 }
 
 func (thw *threadWatcher) Stop() {
