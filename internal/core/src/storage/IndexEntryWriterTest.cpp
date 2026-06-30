@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -164,6 +165,7 @@ class DelayedFailingInputStream : public milvus::InputStream {
         size_t offset;
         std::chrono::milliseconds delay;
         bool fail;
+        std::shared_ptr<std::atomic<int>> completion_count = nullptr;
     };
 
     DelayedFailingInputStream(std::shared_ptr<milvus::InputStream> base,
@@ -201,6 +203,10 @@ class DelayedFailingInputStream : public milvus::InputStream {
         for (const auto& rule : rules_) {
             if (rule.offset == offset) {
                 std::this_thread::sleep_for(rule.delay);
+                if (rule.completion_count) {
+                    rule.completion_count->fetch_add(1,
+                                                     std::memory_order_relaxed);
+                }
                 if (rule.fail) {
                     return 0;
                 }
@@ -729,6 +735,42 @@ TEST_F(IndexEntryWriterV3Test, ReadEntriesToFilesMultiRangeParallel) {
     ::unlink(file_a.c_str());
     ::unlink(file_b.c_str());
     ::unlink(file_c.c_str());
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntriesToFilesDrainsFuturesAfterReadError) {
+    const std::string file_path = kV3FilePath + "_tofiles_drain_error";
+    constexpr size_t kRangeSize = 16 * 1024 * 1024;
+    const size_t entry_size = 2 * kRangeSize + 1024;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("entry", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto slow_read_done = std::make_shared<std::atomic<int>>(0);
+    auto base_input = CreateInputStream(file_path);
+    auto input = std::make_shared<DelayedFailingInputStream>(
+        base_input,
+        std::vector<DelayedFailingInputStream::Rule>{
+            {MILVUS_V3_MAGIC_SIZE, std::chrono::milliseconds(0), true},
+            {MILVUS_V3_MAGIC_SIZE + kRangeSize,
+             std::chrono::milliseconds(200),
+             false,
+             slow_read_done},
+        });
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    std::string local_file = GetRootPath() + "/drain_error_output.bin";
+    std::vector<std::pair<std::string, std::string>> pairs = {
+        {"entry", local_file}};
+    EXPECT_THROW(reader->ReadEntriesToFiles(pairs), milvus::SegcoreError);
+    EXPECT_EQ(slow_read_done->load(std::memory_order_relaxed), 1);
+
+    ::unlink(local_file.c_str());
 }
 
 // =============================================================================
