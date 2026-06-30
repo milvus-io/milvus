@@ -185,26 +185,52 @@ func (s *globalTaskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
-	var fallbackNodeID int64 = NullNodeID
-	var maxAvailable int64 = -1
-
-	for nodeID, ws := range workerSlots {
-		if ws.AvailableSlots >= taskSlot {
-			ws.AvailableSlots -= taskSlot
-			return nodeID
-		}
-		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
-			maxAvailable = ws.AvailableSlots
-			fallbackNodeID = nodeID
-		}
+// newNodeSlotHeap builds a max-heap of worker nodes ordered by their available
+// slots, so the most-available (least-loaded) node always sits at the top.
+func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*session.WorkerSlots] {
+	slots := make([]*session.WorkerSlots, 0, len(workerSlots))
+	for _, ws := range workerSlots {
+		slots = append(slots, ws)
 	}
+	return typeutil.NewObjectArrayBasedMaximumHeap(slots, func(ws *session.WorkerSlots) int64 {
+		return ws.AvailableSlots
+	})
+}
 
-	if fallbackNodeID != NullNodeID {
-		workerSlots[fallbackNodeID].AvailableSlots = 0
-		return fallbackNodeID
+// pickNode selects the least-loaded node (the one with the most available slots)
+// for a task requiring taskSlot slots, instead of the first node that happens to
+// fit. Always assigning to the most-available node spreads tasks evenly across
+// DataNodes (water-filling on available slots) rather than packing them onto
+// whichever node is iterated first.
+//
+// It returns NullNodeID when no node has any available slot. When even the
+// most-available node cannot fully satisfy taskSlot, it falls back to that node
+// on a best-effort basis and drains its slots, preserving the previous behavior.
+//
+// The picked node's slots are updated in place; the caller reuses the same heap
+// across all tasks in a scheduling round so later picks observe the decremented
+// slots.
+func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*session.WorkerSlots], taskSlot int64) int64 {
+	if slotHeap.Len() == 0 {
+		return NullNodeID
 	}
-	return NullNodeID
+	// Pop the most-available node, mutate its slots, then push it back. An element
+	// must not be mutated while it stays in the heap, or the heap order breaks.
+	ws := slotHeap.Pop()
+	if ws.AvailableSlots <= 0 {
+		// The most-available node has no slot, so neither does any other node.
+		slotHeap.Push(ws)
+		return NullNodeID
+	}
+	if ws.AvailableSlots >= taskSlot {
+		ws.AvailableSlots -= taskSlot
+	} else {
+		// No node can fully satisfy the request; assign to the most-available
+		// node on a best-effort basis and drain its slots.
+		ws.AvailableSlots = 0
+	}
+	slotHeap.Push(ws)
+	return ws.NodeID
 }
 
 func (s *globalTaskScheduler) schedule() {
@@ -215,6 +241,9 @@ func (s *globalTaskScheduler) schedule() {
 	nodeSlots := s.cluster.QuerySlot()
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
+	// Build the node-slot max-heap once per round and reuse it across all picks,
+	// so each task is placed on the currently least-loaded node.
+	slotHeap := newNodeSlotHeap(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
 	for {
@@ -230,7 +259,7 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(nodeSlots, taskSlot)
+		nodeID := s.pickNode(slotHeap, taskSlot)
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
 			break
