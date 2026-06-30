@@ -4424,7 +4424,7 @@ func TestGarbageCollector_recycleDroppedSegment_CtxCanceledBeforeDrop(t *testing
 
 	var dropCalls atomic.Int32
 	mockDrop := mockey.Mock((*meta).DropSegment).To(
-		func(m *meta, ctx context.Context, sid int64) error {
+		func(m *meta, ctx context.Context, segment *SegmentInfo) error {
 			dropCalls.Inc()
 			return nil
 		}).Build()

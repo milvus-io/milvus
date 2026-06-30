@@ -221,11 +221,9 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 		State:        commonpb.SegmentState_Flushed,
 		NumOfRows:    6,
 	}}, 0)
-	mt := &meta{
-		catalog:     catalog,
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.catalog = catalog
+	mt.collections = newTestCollections(100)
 	mgr := &externalCollectionRefreshManager{
 		mt:          mt,
 		refreshMeta: refreshMeta,

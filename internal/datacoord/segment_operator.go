@@ -203,6 +203,19 @@ func clearBinlogPaths(fieldBinlogs []*datapb.FieldBinlog) {
 	}
 }
 
+func cloneAndClearBinlogPaths(fieldBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	cloned := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
+	for _, fieldBinlog := range fieldBinlogs {
+		if fieldBinlog == nil {
+			cloned = append(cloned, nil)
+			continue
+		}
+		cloned = append(cloned, typeutil.Clone(fieldBinlog))
+	}
+	clearBinlogPaths(cloned)
+	return cloned
+}
+
 func mergeSegmentMutations(dst map[int64][]SegmentOperator, src map[int64][]SegmentOperator) {
 	for segmentID, operators := range src {
 		dst[segmentID] = append(dst[segmentID], operators...)

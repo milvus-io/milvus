@@ -687,15 +687,19 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
 		// Update binlog information for all segments
 		for _, result := range resp.GetSegmentResults() {
+			binlogs := cloneAndClearBinlogPaths(result.GetBinlogs())
+			statslogs := cloneAndClearBinlogPaths(result.GetStatslogs())
+			deltalogs := cloneAndClearBinlogPaths(result.GetDeltalogs())
+			bm25Statslogs := cloneAndClearBinlogPaths(result.GetBm25Logs())
 			// Update binlog info and segment state to Flushed
 			// For StorageV3+ segments, also update manifest_path
 			var err error
 			mutations := map[int64][]SegmentOperator{
 				result.GetSegmentId(): {func(seg *SegmentInfo) (BinlogIncrement, bool) {
-					seg.Binlogs = result.GetBinlogs()
-					seg.Statslogs = result.GetStatslogs()
-					seg.Deltalogs = result.GetDeltalogs()
-					seg.Bm25Statslogs = result.GetBm25Logs()
+					seg.Binlogs = binlogs
+					seg.Statslogs = statslogs
+					seg.Deltalogs = deltalogs
+					seg.Bm25Statslogs = bm25Statslogs
 					seg.State = commonpb.SegmentState_Flushed
 					seg.IsImporting = false
 					if manifestPath := result.GetManifestPath(); manifestPath != "" {
