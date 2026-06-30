@@ -1935,6 +1935,39 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<int64_t>(0);
                  return val % 3 <= 2;
              }},
+            // Bitwise AND/OR/XOR over an array integer element. long_array
+            // values span a wide range, so OR/XOR clauses use a mid-range
+            // threshold to keep the result mixed; AND clauses test low bits.
+            {"(long_array[0] & 1) == 0",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return (val & 1) == 0;
+             }},
+            {"(long_array[0] & 1) != 0",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return (val & 1) != 0;
+             }},
+            {"(long_array[0] & 8) == 8",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return (val & 8) == 8;
+             }},
+            {"(long_array[0] | 4) < 5000",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return (val | 4) < 5000;
+             }},
+            {"(long_array[0] ^ 15) < 5000",
+             "long",
+             [](milvus::Array& array) {
+                 auto val = array.get_data<int64_t>(0);
+                 return (val ^ 15) < 5000;
+             }},
             // float_array[1024] + 2.2 == 133.2
             {"float_array[1024] + 2.2 == 133.2",
              "float",
