@@ -603,6 +603,27 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
             size = std::min(size, real_batch_size - processed_rows);
 
             if (size > 0) {
+                // The coarse bitmaps are sized by the index row count
+                // (RTreeIndex::Count()), while `size` is driven by the
+                // segment's active rows. The Insert path indexes a row
+                // (AppendingIndex) before the ack-responder makes it
+                // searchable, so active_count <= index Count() must always
+                // hold; guard it explicitly so a violated invariant surfaces
+                // as a clear error instead of an out-of-bounds read from the
+                // coarse bitmaps.
+                AssertInfo(
+                    static_cast<int64_t>(current_index_chunk_pos_ + size) <=
+                            static_cast<int64_t>(
+                                cached_index_chunk_res_->size()) &&
+                        static_cast<int64_t>(current_index_chunk_pos_ + size) <=
+                            static_cast<int64_t>(coarse_valid_global_.size()),
+                    "growing geometry coarse bitmap too small: pos {} + size "
+                    "{} exceeds result {} / valid {} (index row count lagged "
+                    "segment active rows)",
+                    current_index_chunk_pos_,
+                    size,
+                    cached_index_chunk_res_->size(),
+                    coarse_valid_global_.size());
                 batch_result.append(
                     *cached_index_chunk_res_, current_index_chunk_pos_, size);
                 batch_valid.append(
