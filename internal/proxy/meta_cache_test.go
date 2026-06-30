@@ -808,7 +808,11 @@ func (c *MockMixCoordClientInterface) LoadPartitions(ctx context.Context, req *q
 	panic("implement me")
 }
 
-func (c *MockMixCoordClientInterface) Prewarm(ctx context.Context, req *querypb.PrewarmRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *MockMixCoordClientInterface) Prewarm(ctx context.Context, req *querypb.PrewarmRequest, opts ...grpc.CallOption) (*querypb.PrewarmResponse, error) {
+	panic("implement me")
+}
+
+func (c *MockMixCoordClientInterface) DescribePrewarmTask(ctx context.Context, req *querypb.DescribePrewarmTaskRequest, opts ...grpc.CallOption) (*querypb.DescribePrewarmTaskResponse, error) {
 	panic("implement me")
 }
 

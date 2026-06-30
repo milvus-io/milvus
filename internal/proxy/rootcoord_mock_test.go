@@ -1537,8 +1537,12 @@ func (coord *MixCoordMock) LoadPartitions(ctx context.Context, in *querypb.LoadP
 	return merr.Success(), nil
 }
 
-func (coord *MixCoordMock) Prewarm(ctx context.Context, in *querypb.PrewarmRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
+func (coord *MixCoordMock) Prewarm(ctx context.Context, in *querypb.PrewarmRequest, opts ...grpc.CallOption) (*querypb.PrewarmResponse, error) {
+	return &querypb.PrewarmResponse{Status: merr.Success()}, nil
+}
+
+func (coord *MixCoordMock) DescribePrewarmTask(ctx context.Context, in *querypb.DescribePrewarmTaskRequest, opts ...grpc.CallOption) (*querypb.DescribePrewarmTaskResponse, error) {
+	return &querypb.DescribePrewarmTaskResponse{Status: merr.Success()}, nil
 }
 
 func (coord *MixCoordMock) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

@@ -1758,9 +1758,9 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 }
 
 // Prewarm preloads namespace partition data into query node memory/cache.
-func (node *Proxy) Prewarm(ctx context.Context, request *milvuspb.PrewarmRequest) (*commonpb.Status, error) {
+func (node *Proxy) Prewarm(ctx context.Context, request *milvuspb.PrewarmRequest) (*milvuspb.PrewarmResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return merr.Status(err), nil
+		return &milvuspb.PrewarmResponse{Status: merr.Status(err)}, nil
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Prewarm")
@@ -1781,7 +1781,7 @@ func (node *Proxy) Prewarm(ctx context.Context, request *milvuspb.PrewarmRequest
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
 
-		return merr.Status(err), nil
+		return &milvuspb.PrewarmResponse{Status: merr.Status(err)}, nil
 	}
 
 	mlog.Debug(ctx,
@@ -1796,7 +1796,7 @@ func (node *Proxy) Prewarm(ctx context.Context, request *milvuspb.PrewarmRequest
 			mlog.Uint64("BeginTS", pt.BeginTs()),
 			mlog.Uint64("EndTS", pt.EndTs()))
 
-		return merr.Status(err), nil
+		return &milvuspb.PrewarmResponse{Status: merr.Status(err)}, nil
 	}
 
 	mlog.Debug(ctx,
@@ -1806,6 +1806,58 @@ func (node *Proxy) Prewarm(ctx context.Context, request *milvuspb.PrewarmRequest
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return pt.result, nil
+}
+
+func (node *Proxy) DescribePrewarmTask(ctx context.Context, request *milvuspb.DescribePrewarmTaskRequest) (*milvuspb.DescribePrewarmTaskResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DescribePrewarmTaskResponse{
+			Status: merr.Status(err),
+			TaskID: request.GetTaskID(),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribePrewarmTask")
+	defer sp.End()
+	method := "DescribePrewarmTask"
+	tr := timerecord.NewTimeRecorder(method)
+	mlog.Debug(ctx, rpcReceived(method), mlog.String("taskID", request.GetTaskID()))
+
+	resp, err := node.mixCoord.DescribePrewarmTask(ctx, &querypb.DescribePrewarmTaskRequest{
+		Base:   commonpbutil.UpdateMsgBase(request.GetBase()),
+		TaskID: request.GetTaskID(),
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		mlog.Warn(ctx, "failed to describe prewarm task", mlog.String("taskID", request.GetTaskID()), mlog.Err(err))
+		return &milvuspb.DescribePrewarmTaskResponse{
+			Status: merr.Status(err),
+			TaskID: request.GetTaskID(),
+		}, nil
+	}
+
+	mlog.Debug(ctx, rpcDone(method), mlog.String("taskID", request.GetTaskID()))
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.DescribePrewarmTaskResponse{
+		Status:       merr.Success(),
+		TaskID:       resp.GetTaskID(),
+		State:        toMilvusPrewarmTaskState(resp.GetState()),
+		Progress:     resp.GetProgress(),
+		ErrorMessage: resp.GetErrorMessage(),
+	}, nil
+}
+
+func toMilvusPrewarmTaskState(state querypb.PrewarmTaskState) milvuspb.PrewarmTaskState {
+	switch state {
+	case querypb.PrewarmTaskState_PrewarmTaskStatePending:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStatePending
+	case querypb.PrewarmTaskState_PrewarmTaskStateWarming:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStateWarming
+	case querypb.PrewarmTaskState_PrewarmTaskStateCompleted:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStateCompleted
+	case querypb.PrewarmTaskState_PrewarmTaskStateFailed:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStateFailed
+	default:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStateUnknown
+	}
 }
 
 // ReleasePartitions release specific partitions from query nodes.

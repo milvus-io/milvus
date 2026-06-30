@@ -305,7 +305,39 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	return merr.Success(), nil
 }
 
-func (s *Server) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*commonpb.Status, error) {
+const prewarmTaskIDPrefix = "prewarm_"
+
+func (s *Server) initPrewarmTaskStore() *prewarmTaskStore {
+	s.prewarmTaskMu.Lock()
+	defer s.prewarmTaskMu.Unlock()
+
+	if s.prewarmTasks == nil {
+		s.prewarmTasks = newPrewarmTaskStore()
+	}
+	return s.prewarmTasks
+}
+
+func (s *Server) preparePrewarmTaskID(req *querypb.PrewarmRequest) (string, error) {
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	msgID := req.Base.GetMsgID()
+	if msgID == 0 {
+		if s.idAllocator != nil {
+			allocated, err := s.idAllocator()
+			if err != nil {
+				return "", merr.Wrap(err, "failed to allocate prewarm task id")
+			}
+			msgID = allocated
+		} else {
+			msgID = time.Now().UnixNano()
+		}
+		req.Base.MsgID = msgID
+	}
+	return fmt.Sprintf("%s%d", prewarmTaskIDPrefix, msgID), nil
+}
+
+func (s *Server) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*querypb.PrewarmResponse, error) {
 	logger := mlog.With(
 		mlog.Int64("dbID", req.GetDbID()),
 		mlog.Int64("collectionID", req.GetCollectionID()),
@@ -316,28 +348,61 @@ func (s *Server) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*com
 	logger.Info(ctx, "received prewarm request")
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		logger.Warn(ctx, "failed to prewarm", mlog.Err(err))
-		return merr.Status(err), nil
+		return &querypb.PrewarmResponse{Status: merr.Status(err)}, nil
 	}
 
 	if err := validatePrewarmRequest(req); err != nil {
 		logger.Warn(ctx, "invalid prewarm request", mlog.Err(err))
-		return merr.Status(err), nil
+		return &querypb.PrewarmResponse{Status: merr.Status(err)}, nil
 	}
 
 	if s.jobScheduler == nil {
 		err := merr.WrapErrServiceInternalMsg("querycoord job scheduler is not initialized")
 		logger.Warn(ctx, "failed to prewarm", mlog.Err(err))
-		return merr.Status(err), nil
+		return &querypb.PrewarmResponse{Status: merr.Status(err)}, nil
 	}
 
-	job := newPrewarmJob(ctx, s, req)
-	s.jobScheduler.Add(job)
-	if err := job.Wait(); err != nil {
-		logger.Warn(ctx, "failed to prewarm", mlog.Err(err))
-		return merr.Status(err), nil
+	taskID, err := s.preparePrewarmTaskID(req)
+	if err != nil {
+		logger.Warn(ctx, "failed to prepare prewarm task id", mlog.Err(err))
+		return &querypb.PrewarmResponse{Status: merr.Status(err)}, nil
 	}
-	logger.Info(ctx, "prewarm done")
-	return merr.Success(), nil
+
+	s.initPrewarmTaskStore().create(taskID)
+	job := newPrewarmJob(ctx, s, req, taskID)
+	s.jobScheduler.Add(job)
+	logger.Info(ctx, "prewarm task submitted", mlog.String("taskID", taskID))
+	return &querypb.PrewarmResponse{
+		Status:    merr.Success(),
+		TaskID:    taskID,
+		Namespace: req.Namespace,
+	}, nil
+}
+
+func (s *Server) DescribePrewarmTask(ctx context.Context, req *querypb.DescribePrewarmTaskRequest) (*querypb.DescribePrewarmTaskResponse, error) {
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return &querypb.DescribePrewarmTaskResponse{Status: merr.Status(err)}, nil
+	}
+
+	taskID := req.GetTaskID()
+	if taskID == "" {
+		err := merr.WrapErrParameterInvalidMsg("taskID is required")
+		return &querypb.DescribePrewarmTaskResponse{Status: merr.Status(err)}, nil
+	}
+
+	record, ok := s.initPrewarmTaskStore().describe(taskID)
+	if !ok {
+		err := merr.WrapErrParameterInvalidMsg("prewarm task %q not found", taskID)
+		return &querypb.DescribePrewarmTaskResponse{Status: merr.Status(err)}, nil
+	}
+
+	return &querypb.DescribePrewarmTaskResponse{
+		Status:       merr.Success(),
+		TaskID:       record.taskID,
+		State:        record.state,
+		Progress:     record.progress,
+		ErrorMessage: record.errorMessage,
+	}, nil
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {

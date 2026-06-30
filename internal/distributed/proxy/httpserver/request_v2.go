@@ -527,6 +527,24 @@ type PartitionsReq struct {
 func (req *PartitionsReq) GetDbName() string         { return req.DbName }
 func (req *PartitionsReq) GetCollectionName() string { return req.CollectionName }
 
+type NamespacePrewarmReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	NamespaceName  string `json:"namespaceName" binding:"required"`
+	TtlSeconds     int64  `json:"ttlSeconds"`
+	Priority       string `json:"priority"`
+}
+
+func (req *NamespacePrewarmReq) GetDbName() string         { return req.DbName }
+func (req *NamespacePrewarmReq) GetCollectionName() string { return req.CollectionName }
+
+type DescribePrewarmTaskReq struct {
+	DbName string `json:"dbName"`
+	TaskID string `json:"taskId" binding:"required"`
+}
+
+func (req *DescribePrewarmTaskReq) GetDbName() string { return req.DbName }
+
 type UserReq struct {
 	UserName string `json:"userName" binding:"required"`
 }

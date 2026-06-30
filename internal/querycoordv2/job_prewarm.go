@@ -28,9 +28,10 @@ type prewarmJob struct {
 	*job.BaseJob
 	server *Server
 	req    *querypb.PrewarmRequest
+	taskID string
 }
 
-func newPrewarmJob(ctx context.Context, server *Server, req *querypb.PrewarmRequest) *prewarmJob {
+func newPrewarmJob(ctx context.Context, server *Server, req *querypb.PrewarmRequest, taskID string) *prewarmJob {
 	msgID := int64(0)
 	if req.GetBase() != nil {
 		msgID = req.GetBase().GetMsgID()
@@ -39,14 +40,20 @@ func newPrewarmJob(ctx context.Context, server *Server, req *querypb.PrewarmRequ
 		BaseJob: job.NewBaseJob(ctx, msgID, req.GetCollectionID()),
 		server:  server,
 		req:     req,
+		taskID:  taskID,
 	}
 }
 
 func (j *prewarmJob) PreExecute() error {
-	return validatePrewarmRequest(j.req)
+	err := validatePrewarmRequest(j.req)
+	if err != nil {
+		j.server.initPrewarmTaskStore().fail(j.taskID, err)
+	}
+	return err
 }
 
 func (j *prewarmJob) Execute() (err error) {
+	j.server.initPrewarmTaskStore().warming(j.taskID, 10)
 	partitionID := j.req.GetPartitionIDs()[0]
 	defer func() {
 		clearErr := j.server.clearPrewarmForceSyncWarmup(j.Context(), j.req.GetCollectionID(), partitionID)
@@ -58,5 +65,15 @@ func (j *prewarmJob) Execute() (err error) {
 	if err := j.server.ensurePrewarmPartitionLoaded(j.Context(), j.req); err != nil {
 		return err
 	}
+	j.server.initPrewarmTaskStore().warming(j.taskID, 60)
 	return j.server.prewarmLoadedSegments(j.Context(), j.req)
+}
+
+func (j *prewarmJob) PostExecute() {
+	err := j.Error()
+	if err != nil {
+		j.server.initPrewarmTaskStore().fail(j.taskID, err)
+		return
+	}
+	j.server.initPrewarmTaskStore().complete(j.taskID)
 }
