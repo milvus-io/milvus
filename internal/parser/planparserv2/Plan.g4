@@ -21,6 +21,7 @@ expr:
 	| expr REGEXMATCH expr                                                                                  # RegexMatch
 	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
 	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
+	| TEXTMATCHFUZZY'('Identifier',' expr ',' MAX_EDIT_DISTANCE ASSIGN IntegerConstant ')'                  # TextMatchFuzzy
 	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
@@ -69,6 +70,7 @@ NE: '!=';
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
+TEXTMATCHFUZZY: 'text_match_fuzzy'|'TEXT_MATCH_FUZZY';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 MATCH_ALL: 'match_all' | 'MATCH_ALL';
@@ -79,6 +81,7 @@ MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
+MAX_EDIT_DISTANCE: 'max_edit_distance' | 'MAX_EDIT_DISTANCE';
 THRESHOLD: 'threshold' | 'THRESHOLD';
 REGEXMATCH: '=~';
 REGEXNOTMATCH: '!~';
