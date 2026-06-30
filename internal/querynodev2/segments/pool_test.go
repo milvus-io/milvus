@@ -83,25 +83,61 @@ func TestResizePools(t *testing.T) {
 		assert.Equal(t, expectedCap, GetLoadPool().Cap())
 	})
 
-	t.Run("WarmupPool", func(t *testing.T) {
-		expectedCap := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
+	t.Run("MutatePool", func(t *testing.T) {
+		defer pt.Save(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, "2")
 
-		ResizeWarmupPool(&config.Event{
+		expectedCap := hardware.GetCPUNum() * pt.QueryNodeCfg.MutatePoolSizeFactor.GetAsInt()
+		ResizeMutatePool(&config.Event{
 			HasUpdated: true,
 		})
-		assert.Equal(t, expectedCap, GetWarmupPool().Cap())
+		assert.Equal(t, expectedCap, GetMutatePool().Cap())
 
-		pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, strconv.FormatFloat(pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat()*2, 'f', 10, 64))
-		ResizeWarmupPool(&config.Event{
+		pt.Save(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, "4")
+		ResizeMutatePool(&config.Event{
 			HasUpdated: true,
 		})
-		assert.Equal(t, expectedCap, GetWarmupPool().Cap())
+		assert.Equal(t, hardware.GetCPUNum()*4, GetMutatePool().Cap())
 
-		pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, "0")
-		ResizeWarmupPool(&config.Event{
+		// factor <= 0 clamps to CPUNum so the mutate pool is never zero-sized.
+		pt.Save(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, "0")
+		ResizeMutatePool(&config.Event{
 			HasUpdated: true,
 		})
-		assert.Equal(t, expectedCap, GetWarmupPool().Cap())
+		assert.Equal(t, hardware.GetCPUNum(), GetMutatePool().Cap())
+	})
+
+	t.Run("DynamicPool", func(t *testing.T) {
+		defer pt.Save(pt.QueryNodeCfg.DynamicPoolSizeFactor.Key, "1")
+
+		pt.Save(pt.QueryNodeCfg.DynamicPoolSizeFactor.Key, "3")
+		ResizeDynamicPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, hardware.GetCPUNum()*3, GetDynamicPool().Cap())
+
+		// factor <= 0 clamps to CPUNum.
+		pt.Save(pt.QueryNodeCfg.DynamicPoolSizeFactor.Key, "0")
+		ResizeDynamicPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, hardware.GetCPUNum(), GetDynamicPool().Cap())
+	})
+
+	t.Run("DeletePool", func(t *testing.T) {
+		defer pt.Save(pt.QueryNodeCfg.DeletePoolSizeFactor.Key, "1")
+
+		pt.Save(pt.QueryNodeCfg.DeletePoolSizeFactor.Key, "3")
+		ResizeDeletePool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, hardware.GetCPUNum()*3, GetDeletePool().Cap())
+
+		// factor <= 0 clamps to CPUNum.
+		pt.Save(pt.QueryNodeCfg.DeletePoolSizeFactor.Key, "0")
+		ResizeDeletePool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, hardware.GetCPUNum(), GetDeletePool().Cap())
 	})
 
 	t.Run("BfApplyPool", func(t *testing.T) {
