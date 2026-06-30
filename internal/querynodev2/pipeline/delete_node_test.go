@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -80,9 +81,9 @@ func (suite *DeleteNodeSuite) TestBasic() {
 		Segment:    mockSegmentManager,
 	}
 	suite.delegator = delegator.NewMockShardDelegator(suite.T())
-	suite.delegator.EXPECT().ProcessDelete(mock.Anything, mock.Anything).Run(
-		func(deleteData []*delegator.DeleteData, ts uint64) {
-			for _, data := range deleteData {
+	suite.delegator.EXPECT().ProcessDeleteBatches(mock.Anything).Run(
+		func(batches []delegator.DeleteBatch) {
+			for _, data := range batches[0].Data {
 				for _, pk := range data.PrimaryKeys {
 					suite.True(lo.Contains(suite.deletePKs, pk.GetValue().(int64)))
 				}
@@ -94,6 +95,54 @@ func (suite *DeleteNodeSuite) TestBasic() {
 	in := suite.buildDeleteNodeMsg()
 	suite.delegator.EXPECT().UpdateTSafe(in.timeRange.timestampMax).Return()
 	// run
+	out := node.Operate(in)
+	suite.Nil(out)
+}
+
+func (suite *DeleteNodeSuite) TestProcessDeleteBatchesUseDeleteMsgEndTs() {
+	mockCollectionManager := segments.NewMockCollectionManager(suite.T())
+	mockSegmentManager := segments.NewMockSegmentManager(suite.T())
+	suite.manager = &segments.Manager{
+		Collection: mockCollectionManager,
+		Segment:    mockSegmentManager,
+	}
+	suite.delegator = delegator.NewMockShardDelegator(suite.T())
+
+	first := buildDeleteMsg(suite.collectionID, suite.partitionIDs[0], suite.channel, 1)
+	first.SetTs(10)
+	first.PrimaryKeys = genDeletePK(10)
+	second := buildDeleteMsg(suite.collectionID, suite.partitionIDs[1], suite.channel, 1)
+	second.SetTs(20)
+	second.PrimaryKeys = genDeletePK(20)
+	third := buildDeleteMsg(suite.collectionID, suite.partitionIDs[0], suite.channel, 1)
+	third.SetTs(10)
+	third.PrimaryKeys = genDeletePK(30)
+
+	in := &deleteNodeMsg{
+		deleteMsgs: []*DeleteMsg{first, second, third},
+		timeRange: TimeRange{
+			timestampMin: 10,
+			timestampMax: 30,
+		},
+	}
+
+	suite.delegator.EXPECT().ProcessDeleteBatches(mock.Anything).Run(
+		func(batches []delegator.DeleteBatch) {
+			suite.Require().Len(batches, 2)
+			suite.Equal(uint64(10), batches[0].Ts)
+			suite.Equal(uint64(20), batches[1].Ts)
+			suite.Len(batches[0].Data, 1)
+			suite.Len(batches[1].Data, 1)
+			suite.ElementsMatch([]int64{10, 30}, lo.Map(batches[0].Data[0].PrimaryKeys, func(pk storage.PrimaryKey, _ int) int64 {
+				return pk.GetValue().(int64)
+			}))
+			suite.ElementsMatch([]int64{20}, lo.Map(batches[1].Data[0].PrimaryKeys, func(pk storage.PrimaryKey, _ int) int64 {
+				return pk.GetValue().(int64)
+			}))
+		})
+	suite.delegator.EXPECT().UpdateTSafe(uint64(30)).Return()
+
+	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
 	out := node.Operate(in)
 	suite.Nil(out)
 }

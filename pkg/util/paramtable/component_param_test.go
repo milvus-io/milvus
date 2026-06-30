@@ -448,6 +448,11 @@ func TestComponentParam(t *testing.T) {
 		length := Params.FlowGraphMaxQueueLength.GetAsInt32()
 		assert.Equal(t, int32(16), length)
 
+		assert.Equal(t, 8, Params.DMLMicroBatchMaxMsgNum.GetAsInt())
+		params.Save(Params.DMLMicroBatchMaxMsgNum.Key, "4")
+		assert.Equal(t, 4, Params.DMLMicroBatchMaxMsgNum.GetAsInt())
+		params.Reset(Params.DMLMicroBatchMaxMsgNum.Key)
+
 		maxParallelism := Params.FlowGraphMaxParallelism.GetAsInt32()
 		assert.Equal(t, int32(1024), maxParallelism)
 

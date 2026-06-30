@@ -591,6 +591,8 @@ queryNode:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
+    dmlMicroBatch:
+      maxMsgNum: 8 # Maximum number of DML messages in one micro-batch drained by query node data sync pipeline. The batcher only drains already buffered messages and does not wait for more messages.
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
