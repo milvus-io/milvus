@@ -118,6 +118,7 @@ const bool DEFAULT_JSON_KEY_STATS_ENABLED = true;
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
 const bool DEFAULT_ENABLE_PARQUET_STATS_SKIP_INDEX = false;
+const bool DEFAULT_ENABLE_VORTEX_SCAN_PUSHDOWN = true;
 
 // skipindex stats related
 const double DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE = 0.01;
@@ -152,6 +153,10 @@ const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
 const float EPSILON = 0.0000000119;
 const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
 const std::string MMAP_ENABLED_KEY = "mmap.enabled";
+constexpr const char* LOCAL_FORMAT_KEY = "local_format";
+constexpr const char* LOCAL_FORMAT_RAW = "raw";
+constexpr const char* LOCAL_FORMAT_VORTEX = "vortex";
+constexpr const char* STORAGE_FORMAT_VORTEX = "vortex";
 
 const int64_t LOGICAL_BITS = 18;
 // Warmup policy keys

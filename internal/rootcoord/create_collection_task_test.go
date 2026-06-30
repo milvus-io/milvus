@@ -349,6 +349,32 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("primary field rejects vortex local format", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.LocalFormatKey, Value: common.LocalFormatVortex},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "local_format vortex is not supported for primary key field")
+	})
+
 	t.Run("has system fields", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{

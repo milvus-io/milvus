@@ -15,25 +15,60 @@
 // limitations under the License.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
+#include "common/EasyAssert.h"
 #include "common/OffsetMapping.h"
 #include "common/bson_view.h"
+#include "mmap/ChunkedColumnScanCommon.h"
 namespace milvus {
 
 using namespace milvus::cachinglayer;
 
 class ChunkedColumnInterface {
  public:
+    enum class LocalFormat {
+        Raw,
+        Vortex,
+    };
+
+    using ScanValueKind = milvus::ScanValueKind;
+    using ValueEncoding = milvus::ValueEncoding;
+    using ValidityEncoding = milvus::ValidityEncoding;
+    using ValueView = milvus::ValueView;
+    using ValidityView = milvus::ValidityView;
+    using ScanBatch = milvus::ScanBatch;
+    using ScanCursor = milvus::ScanCursor;
+    using ScanOutput = milvus::ScanOutput;
+    using ScanProjection = milvus::ScanProjection;
+    using ScanPredicate = milvus::ScanPredicate;
+    using ScanOptions = milvus::ScanOptions;
+    using ScanResult = milvus::ScanResult;
+
     virtual ~ChunkedColumnInterface() = default;
 
     // Check if this column is part of a multi-field column group.
     // Used to guard DropFieldData from breaking shared storage.
     virtual bool
     IsInMultiFieldColumnGroup() const {
+        return false;
+    }
+
+    virtual LocalFormat
+    GetLocalFormat() const {
+        return LocalFormat::Raw;
+    }
+
+    virtual bool
+    SupportsScanPushdown(const ScanOptions&) const {
         return false;
     }
 
@@ -179,6 +214,9 @@ class ChunkedColumnInterface {
             }
         }
     }
+
+    virtual ScanResult
+    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
 
     // Get number of rows before a specific chunk
     virtual int64_t
@@ -373,6 +411,11 @@ class ChunkedColumnInterface {
     }
 
  protected:
+    virtual std::optional<DataType>
+    GetDefaultScanDataType() const {
+        return std::nullopt;
+    }
+
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
