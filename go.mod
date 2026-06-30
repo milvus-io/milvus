@@ -69,7 +69,7 @@ require (
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260630084425-f36c2a6b3279
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260630120422-fa142bbae2e0
 	github.com/milvus-io/milvus/client/v2 v2.6.2
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
