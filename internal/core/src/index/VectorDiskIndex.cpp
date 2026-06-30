@@ -788,7 +788,8 @@ template <typename T>
 knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
                                        const knowhere::Json& conf,
-                                       const BitsetView& bitset) const {
+                                       const BitsetView& bitset,
+                                       milvus::OpContext* op_context) const {
     auto make_empty_iterators = [](int64_t num_queries) {
         std::vector<knowhere::IndexNode::IteratorPtr> iterators;
         iterators.reserve(num_queries);
@@ -818,7 +819,7 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
         }
         return make_empty_iterators(num_queries);
     }
-    return this->index_.AnnIterator(dataset, conf, bitset, false);
+    return this->index_.AnnIterator(dataset, conf, bitset, false, op_context);
 }
 
 template <typename T>
