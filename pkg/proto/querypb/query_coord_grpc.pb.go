@@ -26,6 +26,7 @@ const (
 	QueryCoord_ShowLoadPartitions_FullMethodName         = "/milvus.proto.query.QueryCoord/ShowLoadPartitions"
 	QueryCoord_LoadPartitions_FullMethodName             = "/milvus.proto.query.QueryCoord/LoadPartitions"
 	QueryCoord_Prewarm_FullMethodName                    = "/milvus.proto.query.QueryCoord/Prewarm"
+	QueryCoord_DescribePrewarmTask_FullMethodName        = "/milvus.proto.query.QueryCoord/DescribePrewarmTask"
 	QueryCoord_ReleasePartitions_FullMethodName          = "/milvus.proto.query.QueryCoord/ReleasePartitions"
 	QueryCoord_LoadCollection_FullMethodName             = "/milvus.proto.query.QueryCoord/LoadCollection"
 	QueryCoord_ReleaseCollection_FullMethodName          = "/milvus.proto.query.QueryCoord/ReleaseCollection"
@@ -73,7 +74,8 @@ type QueryCoordClient interface {
 	ShowLoadCollections(ctx context.Context, in *ShowCollectionsRequest, opts ...grpc.CallOption) (*ShowCollectionsResponse, error)
 	ShowLoadPartitions(ctx context.Context, in *ShowPartitionsRequest, opts ...grpc.CallOption) (*ShowPartitionsResponse, error)
 	LoadPartitions(ctx context.Context, in *LoadPartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	Prewarm(ctx context.Context, in *PrewarmRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	Prewarm(ctx context.Context, in *PrewarmRequest, opts ...grpc.CallOption) (*PrewarmResponse, error)
+	DescribePrewarmTask(ctx context.Context, in *DescribePrewarmTaskRequest, opts ...grpc.CallOption) (*DescribePrewarmTaskResponse, error)
 	ReleasePartitions(ctx context.Context, in *ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, in *ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -153,9 +155,18 @@ func (c *queryCoordClient) LoadPartitions(ctx context.Context, in *LoadPartition
 	return out, nil
 }
 
-func (c *queryCoordClient) Prewarm(ctx context.Context, in *PrewarmRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
+func (c *queryCoordClient) Prewarm(ctx context.Context, in *PrewarmRequest, opts ...grpc.CallOption) (*PrewarmResponse, error) {
+	out := new(PrewarmResponse)
 	err := c.cc.Invoke(ctx, QueryCoord_Prewarm_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryCoordClient) DescribePrewarmTask(ctx context.Context, in *DescribePrewarmTaskRequest, opts ...grpc.CallOption) (*DescribePrewarmTaskResponse, error) {
+	out := new(DescribePrewarmTaskResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_DescribePrewarmTask_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +523,8 @@ type QueryCoordServer interface {
 	ShowLoadCollections(context.Context, *ShowCollectionsRequest) (*ShowCollectionsResponse, error)
 	ShowLoadPartitions(context.Context, *ShowPartitionsRequest) (*ShowPartitionsResponse, error)
 	LoadPartitions(context.Context, *LoadPartitionsRequest) (*commonpb.Status, error)
-	Prewarm(context.Context, *PrewarmRequest) (*commonpb.Status, error)
+	Prewarm(context.Context, *PrewarmRequest) (*PrewarmResponse, error)
+	DescribePrewarmTask(context.Context, *DescribePrewarmTaskRequest) (*DescribePrewarmTaskResponse, error)
 	ReleasePartitions(context.Context, *ReleasePartitionsRequest) (*commonpb.Status, error)
 	LoadCollection(context.Context, *LoadCollectionRequest) (*commonpb.Status, error)
 	ReleaseCollection(context.Context, *ReleaseCollectionRequest) (*commonpb.Status, error)
@@ -570,8 +582,11 @@ func (UnimplementedQueryCoordServer) ShowLoadPartitions(context.Context, *ShowPa
 func (UnimplementedQueryCoordServer) LoadPartitions(context.Context, *LoadPartitionsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LoadPartitions not implemented")
 }
-func (UnimplementedQueryCoordServer) Prewarm(context.Context, *PrewarmRequest) (*commonpb.Status, error) {
+func (UnimplementedQueryCoordServer) Prewarm(context.Context, *PrewarmRequest) (*PrewarmResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Prewarm not implemented")
+}
+func (UnimplementedQueryCoordServer) DescribePrewarmTask(context.Context, *DescribePrewarmTaskRequest) (*DescribePrewarmTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribePrewarmTask not implemented")
 }
 func (UnimplementedQueryCoordServer) ReleasePartitions(context.Context, *ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleasePartitions not implemented")
@@ -767,6 +782,24 @@ func _QueryCoord_Prewarm_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(QueryCoordServer).Prewarm(ctx, req.(*PrewarmRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryCoord_DescribePrewarmTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribePrewarmTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).DescribePrewarmTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_DescribePrewarmTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).DescribePrewarmTask(ctx, req.(*DescribePrewarmTaskRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1477,6 +1510,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Prewarm",
 			Handler:    _QueryCoord_Prewarm_Handler,
+		},
+		{
+			MethodName: "DescribePrewarmTask",
+			Handler:    _QueryCoord_DescribePrewarmTask_Handler,
 		},
 		{
 			MethodName: "ReleasePartitions",

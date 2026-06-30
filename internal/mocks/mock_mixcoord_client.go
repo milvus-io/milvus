@@ -3701,6 +3701,80 @@ func (_c *MockMixCoordClient_DescribeIndex_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// DescribePrewarmTask provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) DescribePrewarmTask(ctx context.Context, in *querypb.DescribePrewarmTaskRequest, opts ...grpc.CallOption) (*querypb.DescribePrewarmTaskResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribePrewarmTask")
+	}
+
+	var r0 *querypb.DescribePrewarmTaskResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DescribePrewarmTaskRequest, ...grpc.CallOption) (*querypb.DescribePrewarmTaskResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DescribePrewarmTaskRequest, ...grpc.CallOption) *querypb.DescribePrewarmTaskResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.DescribePrewarmTaskResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.DescribePrewarmTaskRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_DescribePrewarmTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribePrewarmTask'
+type MockMixCoordClient_DescribePrewarmTask_Call struct {
+	*mock.Call
+}
+
+// DescribePrewarmTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.DescribePrewarmTaskRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) DescribePrewarmTask(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_DescribePrewarmTask_Call {
+	return &MockMixCoordClient_DescribePrewarmTask_Call{Call: _e.mock.On("DescribePrewarmTask",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_DescribePrewarmTask_Call) Run(run func(ctx context.Context, in *querypb.DescribePrewarmTaskRequest, opts ...grpc.CallOption)) *MockMixCoordClient_DescribePrewarmTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.DescribePrewarmTaskRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_DescribePrewarmTask_Call) Return(_a0 *querypb.DescribePrewarmTaskResponse, _a1 error) *MockMixCoordClient_DescribePrewarmTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_DescribePrewarmTask_Call) RunAndReturn(run func(context.Context, *querypb.DescribePrewarmTaskRequest, ...grpc.CallOption) (*querypb.DescribePrewarmTaskResponse, error)) *MockMixCoordClient_DescribePrewarmTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DescribeResourceGroup provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) DescribeResourceGroup(ctx context.Context, in *querypb.DescribeResourceGroupRequest, opts ...grpc.CallOption) (*querypb.DescribeResourceGroupResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -9844,7 +9918,7 @@ func (_c *MockMixCoordClient_PinSnapshotData_Call) RunAndReturn(run func(context
 }
 
 // Prewarm provides a mock function with given fields: ctx, in, opts
-func (_m *MockMixCoordClient) Prewarm(ctx context.Context, in *querypb.PrewarmRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (_m *MockMixCoordClient) Prewarm(ctx context.Context, in *querypb.PrewarmRequest, opts ...grpc.CallOption) (*querypb.PrewarmResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -9858,16 +9932,16 @@ func (_m *MockMixCoordClient) Prewarm(ctx context.Context, in *querypb.PrewarmRe
 		panic("no return value specified for Prewarm")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *querypb.PrewarmResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest, ...grpc.CallOption) (*querypb.PrewarmResponse, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest, ...grpc.CallOption) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmRequest, ...grpc.CallOption) *querypb.PrewarmResponse); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*querypb.PrewarmResponse)
 		}
 	}
 
@@ -9907,12 +9981,12 @@ func (_c *MockMixCoordClient_Prewarm_Call) Run(run func(ctx context.Context, in 
 	return _c
 }
 
-func (_c *MockMixCoordClient_Prewarm_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_Prewarm_Call {
+func (_c *MockMixCoordClient_Prewarm_Call) Return(_a0 *querypb.PrewarmResponse, _a1 error) *MockMixCoordClient_Prewarm_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockMixCoordClient_Prewarm_Call) RunAndReturn(run func(context.Context, *querypb.PrewarmRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_Prewarm_Call {
+func (_c *MockMixCoordClient_Prewarm_Call) RunAndReturn(run func(context.Context, *querypb.PrewarmRequest, ...grpc.CallOption) (*querypb.PrewarmResponse, error)) *MockMixCoordClient_Prewarm_Call {
 	_c.Call.Return(run)
 	return _c
 }
