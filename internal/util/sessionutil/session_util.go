@@ -71,6 +71,17 @@ func isNotSessionVersionCheckFailure(err error) bool {
 	return !errors.Is(err, errSessionVersionCheckFailure)
 }
 
+func isAllowedCoordinatorSessionVersionDowngrade(current, session semver.Version) bool {
+	// Permit the verified 3.0.x -> 2.6.x rollback path while keeping other
+	// major/minor downgrades behind the session-version fence.
+	return current.Major == 2 && current.Minor == 6 &&
+		session.Major == 3 && session.Minor == 0
+}
+
+func isLowerMajorMinorVersion(current, session semver.Version) bool {
+	return current.Major < session.Major || (current.Major == session.Major && current.Minor < session.Minor)
+}
+
 // EnableEmbededQueryNodeLabel set server labels for embedded query node.
 func EnableEmbededQueryNodeLabel() {
 	os.Setenv(NewServerLabel(typeutil.QueryNodeRole, LabelStreamingNodeEmbeddedQueryNode), "1")
@@ -383,8 +394,14 @@ func (s *Session) checkVersionForCoordinator() (*mvccpb.KeyValue, error) {
 	if err != nil {
 		return nil, err
 	}
-	if common.Version.Major < version.Major || (common.Version.Major == version.Major && common.Version.Minor < version.Minor) {
-		return nil, errors.Wrapf(errSessionVersionCheckFailure, "current version(%s), session version(%s)", common.Version.String(), version.String())
+	if isLowerMajorMinorVersion(common.Version, version) {
+		if !isAllowedCoordinatorSessionVersionDowngrade(common.Version, version) {
+			return nil, errors.Wrapf(errSessionVersionCheckFailure, "current version(%s), session version(%s)", common.Version.String(), version.String())
+		}
+		s.Logger().Warn("allow coordinator session version downgrade",
+			zap.String("currentVersion", common.Version.String()),
+			zap.String("sessionVersion", version.String()),
+		)
 	}
 	return resp.Kvs[0], nil
 }
