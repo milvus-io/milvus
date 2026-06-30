@@ -2609,7 +2609,8 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     // indexes can be built from resolved text instead of raw LOB references.
     InitTextLobPaths(manifest_path);
 
-    auto arrow_schema = schema_->ConvertToLoonArrowSchema();
+    auto arrow_schema =
+        schema_->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
