@@ -87,7 +87,13 @@ RTreeIndex<T>::InitForBuildIndex(bool is_growing) {
         }
     }
 
-    wrapper_ = std::make_shared<RTreeIndexWrapper>(index_file_path, true);
+    auto wrapper = std::make_shared<RTreeIndexWrapper>(index_file_path, true);
+    // For a growing segment this runs on the first incremental insert while
+    // concurrent searches may already read wrapper_ (via Count/QueryCandidates);
+    // publish the new wrapper under the write lock so those readers never
+    // observe a torn shared_ptr.
+    std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+    wrapper_ = std::move(wrapper);
 }
 
 template <typename T>
@@ -143,7 +149,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
 
     // 1. Extract and load null_offset file(s) if present
     {
-        auto find_file = [&](const std::string& target) -> auto{
+        auto find_file = [&](const std::string& target) -> auto {
             return std::find_if(
                 files.begin(), files.end(), [&](const std::string& filename) {
                     return GetFileName(filename) == target;
@@ -507,12 +513,20 @@ void
 RTreeIndex<T>::QueryCandidates(proto::plan::GISFunctionFilterExpr_GISOp op,
                                const Geometry query_geometry,
                                std::vector<int64_t>& candidate_offsets) {
-    AssertInfo(wrapper_ != nullptr, "R-Tree index wrapper is null");
+    // Snapshot wrapper_ under the shared lock: on a growing segment it is
+    // published lazily by InitForBuildIndex() under the write lock, so an
+    // unsynchronized read here could observe a torn shared_ptr.
+    std::shared_ptr<RTreeIndexWrapper> wrapper;
+    {
+        std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper = wrapper_;
+    }
+    AssertInfo(wrapper != nullptr, "R-Tree index wrapper is null");
 
     // Create GEOS context and ensure it's properly released
     GEOSContextHandle_t ctx = GEOS_init_r();
 
-    wrapper_->query_candidates(
+    wrapper->query_candidates(
         op, query_geometry.GetGeometry(), ctx, candidate_offsets);
     GEOS_finish_r(ctx);
 }
@@ -616,9 +630,14 @@ RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
             reinterpret_cast<const uint8_t*>(wkb_data.data());
         wrapper_->add_geometry(data_ptr, wkb_data.size(), row_offset);
 
-        // Update total row count
-        if (row_offset >= total_num_rows_) {
-            total_num_rows_ = row_offset + 1;
+        // Update total row count under the same lock that guards readers
+        // (Count/NumRows), so the non-null path is symmetric with the null
+        // path below and never races a concurrent search on the growing index.
+        {
+            std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+            if (row_offset >= total_num_rows_) {
+                total_num_rows_ = row_offset + 1;
+            }
         }
 
         LOG_DEBUG("Added geometry at row offset {}", row_offset);
