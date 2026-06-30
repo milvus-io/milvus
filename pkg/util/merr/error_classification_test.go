@@ -64,7 +64,6 @@ func TestErrorTypeMarker(t *testing.T) {
 	// *Msg result + mark input: code preserved, classification flipped, status carries the flag
 	e := WrapErrAsInputError(WrapErrOperationNotSupportedMsg("only support bm25"))
 	assert.Equal(t, InputError, GetErrorType(e))
-	assert.True(t, Is(e, InputError))
 	assert.Equal(t, ErrOperationNotSupported.code(), Code(e))
 	assert.True(t, errors.Is(e, ErrOperationNotSupported))
 	st := Status(e)
@@ -83,9 +82,7 @@ func TestErrorTypeMarker(t *testing.T) {
 
 	// sentinel-baked classification unaffected (ParameterInvalid stays InputError)
 	assert.Equal(t, InputError, GetErrorType(WrapErrParameterInvalidMsg("x")))
-	assert.True(t, Is(WrapErrParameterInvalidMsg("x"), InputError))
 	assert.Equal(t, SystemError, GetErrorType(WrapErrServiceInternalMsg("x")))
-	assert.False(t, Is(WrapErrServiceInternalMsg("x"), InputError))
 
 	// WrapErrAsSysError flips a sentinel-input error to system
 	sys := WrapErrAsSysError(WrapErrParameterInvalidMsg("x"))

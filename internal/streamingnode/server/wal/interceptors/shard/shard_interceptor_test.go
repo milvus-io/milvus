@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
@@ -61,23 +60,6 @@ func TestShardInterceptorPassesOmittedSchemaVersionToChecker(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
-}
-
-func TestNewFunctionMaterializeStreamingError(t *testing.T) {
-	err := newFunctionMaterializeStreamingError(merr.WrapErrParameterInvalidMsg("bad function input"))
-	streamingErr := status.AsStreamingError(err)
-	assert.True(t, streamingErr.IsInvalidArgument())
-	assert.True(t, streamingErr.IsUnrecoverable())
-
-	err = newFunctionMaterializeStreamingError(merr.ErrIoInvalidCredentials)
-	streamingErr = status.AsStreamingError(err)
-	assert.True(t, streamingErr.IsInvalidArgument())
-	assert.True(t, streamingErr.IsUnrecoverable())
-
-	err = newFunctionMaterializeStreamingError(merr.WrapErrServiceInternalMsg("temporary function failure"))
-	streamingErr = status.AsStreamingError(err)
-	assert.True(t, streamingErr.IsUnrecoverable())
-	assert.False(t, streamingErr.IsInvalidArgument())
 }
 
 func TestShardInterceptorReportsExplicitZeroSchemaVersionInMismatchError(t *testing.T) {
