@@ -41,18 +41,36 @@ TEST(StorageErrorCode, BinlogReaderOutOfRangeIsDataFormatBroken) {
     EXPECT_EQ(err_pair.get_error_code(), milvus::ErrorCode::DataFormatBroken);
 }
 
-// ArrowStatusToErrorCode maps arrow failure categories onto the segcore codes
+// ArrowStatusToErrorCode delegates to the producer's classification
+// (milvus_storage::ToSegcoreError). For a plain arrow status with no structured
+// ExtendStatusDetail it falls back to a coarse mapping; these are the categories
 // whose retry policy the Go classifier honors.
 TEST(StorageErrorCode, ArrowStatusToErrorCodeMapping) {
     using milvus::storage::ArrowStatusToErrorCode;
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::OutOfMemory("oom")),
               milvus::ErrorCode::MemAllocateFailed);  // retriable
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::IOError("io")),
-              milvus::ErrorCode::FileReadFailed);  // retriable
+              milvus::ErrorCode::StorageTransientError);  // 2045, retriable
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::Invalid("bad")),
               milvus::ErrorCode::DataFormatBroken);  // permanent data error
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::TypeError("type")),
               milvus::ErrorCode::DataFormatBroken);
     EXPECT_EQ(ArrowStatusToErrorCode(arrow::Status::UnknownError("?")),
-              milvus::ErrorCode::UnexpectedError);  // unclassified internal
+              milvus::ErrorCode::StorageError);  // 2044, permanent internal
+}
+
+// When the producer attaches a structured ExtendStatusDetail, the fine code
+// survives: a transient PackedStorageIO must classify as the RETRIABLE
+// StorageTransientError(2045), never the non-retriable StorageError(2044).
+TEST(StorageErrorCode, ArrowStatusWithExtendDetailPreservesFineCode) {
+    using milvus::storage::ArrowStatusToErrorCode;
+    EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
+                  milvus_storage::ExtendStatusCode::PackedStorageIO, "io")),
+              milvus::ErrorCode::StorageTransientError);
+    EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
+                  milvus_storage::ExtendStatusCode::PackedFileCorrupted, "bad")),
+              milvus::ErrorCode::DataFormatBroken);
+    EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
+                  milvus_storage::ExtendStatusCode::PackedInvalidArgs, "args")),
+              milvus::ErrorCode::InvalidParameter);
 }
