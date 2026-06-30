@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -61,6 +62,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus::segcore;
@@ -136,6 +138,67 @@ TEST(Growing, RealCount) {
     status = segment->Delete(c, del_ids3.get(), del_tss3.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(0, segment->get_real_count());
+}
+
+TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+
+    std::map<std::string, std::string> analyzer_params;
+    auto text = schema->AddDebugVarcharField(FieldName("text"),
+                                             DataType::VARCHAR,
+                                             65535,
+                                             false,
+                                             true,
+                                             true,
+                                             analyzer_params,
+                                             std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      "growing_recovery_checkpoint_row_cap")
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema, 2, 3, 1, TestLocalPath, base_path);
+
+    constexpr int64_t checkpoint_rows = 4;
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(3);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(checkpoint_rows);
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    segment->Load(trace_ctx, nullptr);
+    ASSERT_EQ(segment->get_row_count(), checkpoint_rows);
+
+    std::vector<int64_t> row_ids = {checkpoint_rows};
+    std::vector<Timestamp> timestamps = {100};
+    std::vector<int64_t> pks = {100000};
+    std::vector<std::string> texts = {"text after recovery checkpoint"};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(1);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, 1, (*schema)[pk]).release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(texts.data(), nullptr, 1, (*schema)[text])
+            .release());
+
+    auto offset = segment->PreInsert(1);
+    ASSERT_EQ(offset, checkpoint_rows);
+    ASSERT_NO_THROW(segment->Insert(
+        offset, 1, row_ids.data(), timestamps.data(), insert_data.get()));
+    EXPECT_EQ(segment->get_row_count(), checkpoint_rows + 1);
+
+    std::filesystem::remove_all(base_path);
 }
 
 TEST(Growing, InsertSkipsMissingFunctionOutputField) {

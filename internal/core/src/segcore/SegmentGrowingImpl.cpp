@@ -2620,9 +2620,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
     for (int64_t i = 0; i < column_groups->size(); ++i) {
-        auto future = pool.Submit([this, column_groups, properties, i] {
-            return LoadColumnGroup(column_groups, properties, i);
-        });
+        auto future =
+            pool.Submit([this, column_groups, properties, i, num_rows] {
+                return LoadColumnGroup(column_groups, properties, i, num_rows);
+            });
         load_group_futures.emplace_back(std::move(future));
     }
 
@@ -2675,7 +2676,8 @@ std::unordered_map<FieldId, std::vector<FieldDataPtr>>
 SegmentGrowingImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    int64_t index) {
+    int64_t index,
+    int64_t row_limit) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
     auto column_group = column_groups->at(index);
@@ -2721,10 +2723,19 @@ SegmentGrowingImpl::LoadColumnGroup(
     }
 
     std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
+    // Growing recovery may reuse a manifest that already contains rows past the
+    // segment checkpoint. Only load rows covered by SegmentLoadInfo so WAL
+    // replay can append the remaining rows at the expected offsets.
+    int64_t loaded_rows = 0;
     for (auto& future : part_futures) {
         auto part_result = future.get();
         for (auto& record_batch : part_result) {
+            if (loaded_rows >= row_limit) {
+                break;
+            }
             auto batch_num_rows = record_batch->num_rows();
+            auto rows_to_load =
+                std::min<int64_t>(batch_num_rows, row_limit - loaded_rows);
             for (auto i = 0; i < record_batch->num_columns(); ++i) {
                 auto column = record_batch->column_name(i);
 
@@ -2741,11 +2752,15 @@ SegmentGrowingImpl::LoadColumnGroup(
                             !IsSparseFloatVectorDataType(data_type)
                         ? field.get_dim()
                         : 1,
-                    batch_num_rows);
+                    rows_to_load);
                 auto array = record_batch->column(i);
+                if (rows_to_load < batch_num_rows) {
+                    array = array->Slice(0, rows_to_load);
+                }
                 field_data->FillFieldData(array);
                 field_data_map[field_id].push_back(field_data);
             }
+            loaded_rows += rows_to_load;
         }
     }
 
