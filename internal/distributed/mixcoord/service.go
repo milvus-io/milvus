@@ -639,8 +639,12 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 }
 
 // Prewarm ensures namespace partition data is loaded and prefetched in QueryCoord.
-func (s *Server) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*commonpb.Status, error) {
+func (s *Server) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*querypb.PrewarmResponse, error) {
 	return s.mixCoord.Prewarm(ctx, req)
+}
+
+func (s *Server) DescribePrewarmTask(ctx context.Context, req *querypb.DescribePrewarmTaskRequest) (*querypb.DescribePrewarmTaskResponse, error) {
+	return s.mixCoord.DescribePrewarmTask(ctx, req)
 }
 
 // ReleasePartitions releases the data of the specified partition in QueryCoord.

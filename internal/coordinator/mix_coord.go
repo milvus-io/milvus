@@ -965,8 +965,12 @@ func (s *mixCoordImpl) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 	return s.queryCoordServer.LoadPartitions(ctx, req)
 }
 
-func (s *mixCoordImpl) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*commonpb.Status, error) {
+func (s *mixCoordImpl) Prewarm(ctx context.Context, req *querypb.PrewarmRequest) (*querypb.PrewarmResponse, error) {
 	return s.queryCoordServer.Prewarm(ctx, req)
+}
+
+func (s *mixCoordImpl) DescribePrewarmTask(ctx context.Context, req *querypb.DescribePrewarmTaskRequest) (*querypb.DescribePrewarmTaskResponse, error) {
+	return s.queryCoordServer.DescribePrewarmTask(ctx, req)
 }
 
 func (s *mixCoordImpl) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {

@@ -703,6 +703,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260701064602-f3ac444e4dc0 h1:luZF6/O3j9i0o6WIK7L8jXmHUQcGrWn0q+k3AKMee70=
 github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260701064602-f3ac444e4dc0/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260630063952-22564555b3ac h1:Eog2H/cbrp7dp1CaLeSgP68eMpAFDqTasQAW3viK3XU=
+github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260630063952-22564555b3ac/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865 h1:LcUqBlKC4j15LhT303yQDX/XxyHG4haEQqbHgZZA4SY=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
 github.com/testcontainers/testcontainers-go v0.35.0 h1:uADsZpTKFAtp8SLK+hMwSaa+X+JiERHtd4sQAFmXeMo=

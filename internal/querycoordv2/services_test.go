@@ -2444,8 +2444,8 @@ func (j *blockingQueryCoordJob) Execute() error {
 	}
 }
 
-func (suite *ServiceSuite) TestPrewarmIsSerializedByJobScheduler() {
-	mockey.PatchConvey("TestPrewarmIsSerializedByJobScheduler", suite.T(), func() {
+func (suite *ServiceSuite) TestPrewarmReturnsTaskBeforeSchedulerJobCompletes() {
+	mockey.PatchConvey("TestPrewarmReturnsTaskBeforeSchedulerJobCompletes", suite.T(), func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
@@ -2488,36 +2488,58 @@ func (suite *ServiceSuite) TestPrewarmIsSerializedByJobScheduler() {
 			Return(merr.Success(), nil).
 			Once()
 
-		type prewarmResult struct {
-			status *commonpb.Status
-			err    error
-		}
-		done := make(chan prewarmResult, 1)
-		go func() {
-			status, err := suite.server.Prewarm(ctx, &querypb.PrewarmRequest{
-				Schema:       schema,
-				Namespace:    &namespace,
-				CollectionID: collectionID,
-				PartitionIDs: []int64{partitionID},
-			})
-			done <- prewarmResult{status: status, err: err}
-		}()
+		resp, err := suite.server.Prewarm(ctx, &querypb.PrewarmRequest{
+			Base: &commonpb.MsgBase{
+				MsgID: 10001,
+			},
+			Schema:       schema,
+			Namespace:    &namespace,
+			CollectionID: collectionID,
+			PartitionIDs: []int64{partitionID},
+		})
 
-		select {
-		case result := <-done:
-			suite.Failf("prewarm completed before prior collection job", "status=%v err=%v", result.status, result.err)
-		case <-time.After(100 * time.Millisecond):
-		}
+		suite.NoError(err)
+		suite.True(merr.Ok(resp.GetStatus()))
+		suite.Equal("prewarm_10001", resp.GetTaskID())
+
+		describe, err := suite.server.DescribePrewarmTask(ctx, &querypb.DescribePrewarmTaskRequest{
+			TaskID: resp.GetTaskID(),
+		})
+		suite.NoError(err)
+		suite.True(merr.Ok(describe.GetStatus()))
+		suite.Equal(querypb.PrewarmTaskState_PrewarmTaskStatePending, describe.GetState())
+		suite.EqualValues(0, describe.GetProgress())
+
 		close(blockingJob.release)
-
-		select {
-		case result := <-done:
-			suite.NoError(result.err)
-			suite.True(merr.Ok(result.status))
-		case <-ctx.Done():
-			suite.Fail("prewarm did not complete after prior collection job released")
-		}
+		suite.Eventually(func() bool {
+			describe, err := suite.server.DescribePrewarmTask(ctx, &querypb.DescribePrewarmTaskRequest{
+				TaskID: resp.GetTaskID(),
+			})
+			return err == nil &&
+				merr.Ok(describe.GetStatus()) &&
+				describe.GetState() == querypb.PrewarmTaskState_PrewarmTaskStateCompleted &&
+				describe.GetProgress() == 100
+		}, 3*time.Second, 50*time.Millisecond)
 	})
+}
+
+func (suite *ServiceSuite) TestDescribePrewarmTaskReportsFailedTask() {
+	ctx := context.Background()
+	taskID := "prewarm_failed"
+	expectedErr := merr.WrapErrServiceInternalMsg("mock prewarm failure")
+
+	suite.server.initPrewarmTaskStore()
+	suite.server.prewarmTasks.create(taskID)
+	suite.server.prewarmTasks.fail(taskID, expectedErr)
+
+	resp, err := suite.server.DescribePrewarmTask(ctx, &querypb.DescribePrewarmTaskRequest{
+		TaskID: taskID,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp.GetStatus()))
+	suite.Equal(querypb.PrewarmTaskState_PrewarmTaskStateFailed, resp.GetState())
+	suite.EqualValues(100, resp.GetProgress())
+	suite.Contains(resp.GetErrorMessage(), "mock prewarm failure")
 }
 
 func (suite *ServiceSuite) TestPrewarmLoadMissingPartitionUsesDefaultLoadFields() {

@@ -22,7 +22,9 @@ service QueryCoord {
 
     rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {
     }
-    rpc Prewarm(PrewarmRequest) returns (common.Status) {
+    rpc Prewarm(PrewarmRequest) returns (PrewarmResponse) {
+    }
+    rpc DescribePrewarmTask(DescribePrewarmTaskRequest) returns (DescribePrewarmTaskResponse) {
     }
     rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {
     }
@@ -299,6 +301,33 @@ message PrewarmRequest {
     bool force_sync_warmup = 12;
     int32 replica_number = 13;
     repeated string resource_groups = 14;
+}
+
+enum PrewarmTaskState {
+    PrewarmTaskStateUnknown = 0;
+    PrewarmTaskStatePending = 1;
+    PrewarmTaskStateWarming = 2;
+    PrewarmTaskStateCompleted = 3;
+    PrewarmTaskStateFailed = 4;
+}
+
+message PrewarmResponse {
+    common.Status status = 1;
+    string taskID = 2;
+    optional string namespace = 3;
+}
+
+message DescribePrewarmTaskRequest {
+    common.MsgBase base = 1;
+    string taskID = 2;
+}
+
+message DescribePrewarmTaskResponse {
+    common.Status status = 1;
+    string taskID = 2;
+    PrewarmTaskState state = 3;
+    int32 progress = 4;
+    string error_message = 5;
 }
 
 message ReleasePartitionsRequest {

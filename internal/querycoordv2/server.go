@@ -102,6 +102,8 @@ type Server struct {
 	// Schedulers
 	jobScheduler  *job.Scheduler
 	taskScheduler task.Scheduler
+	prewarmTaskMu sync.Mutex
+	prewarmTasks  *prewarmTaskStore
 
 	// HeartBeat
 	distController dist.Controller
@@ -147,6 +149,7 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 		ctx:            ctx,
 		cancel:         cancel,
 		metricsRequest: metricsinfo.NewMetricsRequest(),
+		prewarmTasks:   newPrewarmTaskStore(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
