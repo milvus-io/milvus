@@ -859,70 +859,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		cloned := segment.Clone()
-
-		// V3 segment: delete entire basePath recursively
-		if cloned.GetStorageVersion() == storage.StorageV3 {
-			basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
-			if err != nil {
-				log.Warn(ctx, "GC V3 segment failed to parse manifest path",
-					mlog.String("manifestPath", cloned.GetManifestPath()),
-					mlog.Err(err))
-				cloned = nil
-				continue
-			}
-			log.Info(ctx, "GC V3 segment start, removing basePath...",
-				mlog.String("basePath", basePath))
-			if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
-				log.Warn(ctx, "GC V3 segment remove basePath failed",
-					mlog.String("basePath", basePath),
-					mlog.Err(err))
-				cloned = nil
-				continue
-			}
-			if err := gc.meta.DropSegment(ctx, cloned); err != nil {
-				log.Warn(ctx, "GC segment meta failed to drop segment", mlog.Err(err))
-				cloned = nil
-				continue
-			}
-			gc.meta.PruneSegment(cloned.GetID())
-			log.Info(ctx, "GC V3 segment done")
-			cloned = nil
-			continue
-		}
-
-		// V1/V2 segment: delete individual log files
-		binlog.DecompressBinLogs(cloned.SegmentInfo)
-
-		logs := getLogs(cloned)
-		for key := range getTextLogs(cloned) {
-			logs[key] = struct{}{}
-		}
-
-		for key := range getJSONKeyLogs(cloned, gc) {
-			logs[key] = struct{}{}
-		}
-
-		log.Info(ctx, "GC segment start...", mlog.Int("insert_logs", len(cloned.GetBinlogs())),
-			mlog.Int("delta_logs", len(cloned.GetDeltalogs())),
-			mlog.Int("stats_logs", len(cloned.GetStatslogs())),
-			mlog.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
-			mlog.Int("text_logs", len(cloned.GetTextStatsLogs())),
-			mlog.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
-		if err := gc.removeObjectFiles(ctx, logs); err != nil {
-			log.Warn(ctx, "GC segment remove logs failed", mlog.Err(err))
-			cloned = nil
-			continue
-		}
-
-		if err := gc.meta.DropSegment(ctx, cloned); err != nil {
-			log.Warn(ctx, "GC segment meta failed to drop segment", mlog.Err(err))
-			cloned = nil
-			continue
-		}
-		gc.meta.PruneSegment(cloned.GetID())
-		log.Info(ctx, "GC segment meta drop segment done")
-		cloned = nil // release memory
+		gc.recycleDroppedSegment(ctx, segmentID, segment)
 	}
 }
 
@@ -989,6 +926,7 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 		log.Warn(ctx, "GC segment meta failed to drop segment", mlog.Err(err))
 		return
 	}
+	gc.meta.PruneSegment(cloned.GetID())
 	log.Info(ctx, "GC segment meta drop segment done", mlog.Int("segmentIndexes", len(segIndexes)))
 }
 

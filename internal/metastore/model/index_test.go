@@ -20,11 +20,12 @@ var (
 	}
 
 	indexModel = &Index{
-		IndexID:     indexID,
-		IndexName:   indexName,
-		IndexParams: indexParams,
-		IsDeleted:   true,
-		CreateTime:  1,
+		IndexID:          indexID,
+		IndexName:        indexName,
+		IndexParams:      indexParams,
+		IsDeleted:        true,
+		CreateTime:       1,
+		MinSchemaVersion: 7,
 	}
 
 	indexPb = &indexpb.FieldIndex{
@@ -36,19 +37,22 @@ var (
 			TypeParams:   typeParams,
 			IndexParams:  indexParams,
 		},
-		Deleted:    true,
-		CreateTime: 1,
+		Deleted:          true,
+		CreateTime:       1,
+		MinSchemaVersion: 7,
 	}
 )
 
 func TestMarshalIndexModel(t *testing.T) {
 	ret := MarshalIndexModel(indexModel)
 	assert.Equal(t, indexPb.IndexInfo.IndexID, ret.IndexInfo.IndexID)
+	assert.Equal(t, indexPb.GetMinSchemaVersion(), ret.GetMinSchemaVersion())
 	assert.Nil(t, MarshalIndexModel(nil))
 }
 
 func TestUnmarshalIndexModel(t *testing.T) {
 	ret := UnmarshalIndexModel(indexPb)
 	assert.Equal(t, indexModel.IndexID, ret.IndexID)
+	assert.Equal(t, indexModel.MinSchemaVersion, ret.MinSchemaVersion)
 	assert.Nil(t, UnmarshalIndexModel(nil))
 }

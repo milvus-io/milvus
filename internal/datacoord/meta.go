@@ -469,8 +469,9 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 	for _, result := range collectionResults {
 		numSegments += len(result.segments)
 		for j, segment := range result.segments {
-			m.segments.SetSegment(segment.ID, NewSegmentInfo(segment), result.versions[j])
-			metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String(), getSortStatus(segment.GetIsSorted()), fmt.Sprint(segment.GetStorageVersion())).Inc()
+			segmentInfo := NewSegmentInfo(segment)
+			m.segments.SetSegment(segment.ID, segmentInfo, result.versions[j])
+			metrics.DataCoordNumSegments.WithLabelValues(segmentMetricLabelValues(segmentInfo)...).Inc()
 			if segment.State == commonpb.SegmentState_Flushed {
 				numStoredRows += segment.NumOfRows
 
@@ -2641,23 +2642,13 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 		}
 		oldSchemaVersion = cloned.GetSchemaVersion()
 
+		dataChanged := !fieldBinlogsEqual(cloned.GetBinlogs(), resultSegment.GetInsertLogs()) ||
+			cloned.GetManifestPath() != resultManifest
+
 		// Replace binlogs with the merged result (original fields + new function output field).
 		// For V3 segments, buildMergedLogsV3 assigns LogID!=0 so buildBinlogKvs validation passes
 		// and getSegmentBinlogFields can detect the new field via ChildFields.
 		cloned.Binlogs = resultSegment.GetInsertLogs()
-
-		// Update BM25 stats logs: for V2 segments, stats are separate files tracked in Bm25Statslogs.
-		// Merge so that stats for previously backfilled BM25 fields are preserved when a second
-		// AlterCollectionSchema adds another BM25 function. Before merging, filter out entries
-		// whose (fieldID, logID) already exist so that crash-replay — where the same result is
-		// applied twice because datacoord crashed between the etcd write and the task state
-		// transition — does not produce duplicate stats entries.
-		// For V3 segments (manifest-based), BM25 stats are embedded in the manifest and
-		// Bm25Logs in the result is nil — skip updating Bm25Statslogs to avoid clearing existing stats.
-		if resultSegment.GetManifest() == "" {
-			dedupedBm25Logs := filterDuplicateFieldBinlogs(cloned.GetBm25Statslogs(), resultSegment.GetBm25Logs())
-			cloned.Bm25Statslogs = mergeFieldBinlogs(cloned.GetBm25Statslogs(), dedupedBm25Logs)
-		}
 
 		// Update SchemaVersion from task schema.
 		// t.Schema is set from collection.Schema at task creation time and should never be nil.
@@ -2670,12 +2661,11 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 			cloned.SchemaVersion = newVer
 		}
 
-		// Update StorageVersion only when result has manifest (true V3 segment).
-		// V2 segments on V3 clusters stay V2 — backfill forces V2 path to avoid
-		// creating partial manifests that would corrupt segment loading.
-		if resultSegment.GetManifest() != "" {
-			cloned.StorageVersion = resultSegment.GetStorageVersion()
-			cloned.ManifestPath = resultSegment.GetManifest()
+		cloned.StorageVersion = resultSegment.GetStorageVersion()
+		cloned.ManifestPath = resultManifest
+
+		if dataChanged {
+			cloned.DataVersion++
 		}
 
 		return BinlogIncrement{
@@ -2699,6 +2689,18 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 		mlog.Int64("num rows", updated.GetNumOfRows()))
 
 	return []*SegmentInfo{updated}, metricMutation, nil
+}
+
+func fieldBinlogsEqual(left, right []*datapb.FieldBinlog) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !proto.Equal(left[i], right[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *meta) completeBumpSchemaVersionReplacementMutation(
