@@ -1201,6 +1201,7 @@ TEST(TextMatch, ConcurrentReadWriteWithNull) {
     for (int64_t i = 0; i < N - 1; i++) {
         str_col_valid->at(i) = false;
     }
+    str_col_valid->at(N - 1) = true;
 
     std::thread writer([&seg, &raw_data, N]() {
         seg->PreInsert(N);
@@ -1216,7 +1217,7 @@ TEST(TextMatch, ConcurrentReadWriteWithNull) {
         ;
         const std::chrono::seconds timeout_duration{2};
         while (true) {
-            if (start - std::chrono::high_resolution_clock::now() >
+            if (std::chrono::high_resolution_clock::now() - start >
                 timeout_duration) {
                 ASSERT_TRUE(false)
                     << "Failed to get valid results within timeout";
