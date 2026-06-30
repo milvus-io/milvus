@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/samber/lo"
@@ -203,33 +204,123 @@ func adaptiveGroupSegments(segments []*SegmentView, targetSize float64) [][]*Seg
 	if len(segments) == 0 {
 		return nil
 	}
+	if targetSize <= 0 {
+		return [][]*SegmentView{segments}
+	}
+
+	segments = sortedForceMergeSegments(segments)
 
 	n := len(segments)
 
 	// Get threshold from config, fallback to default if not available
 	threshold := paramtable.Get().DataCoordCfg.CompactionMaxFullSegmentThreshold.GetAsInt()
 
-	// Use maxFull for small segment counts to maximize full segments
-	// Use larger for large segment counts for O(n) performance
-	if n <= threshold {
-		mlog.Info(context.TODO(), "adaptiveGroupSegments: using maxFullSegmentsGrouping algorithm",
-			mlog.Int("segmentCount", n),
-			mlog.Int("threshold", threshold),
-			mlog.Float64("targetSize", targetSize))
-		return maxFullSegmentsGrouping(segments, targetSize)
+	var best forceMergeGroupingPlan
+	hasBest := false
+	for _, taskInputCeiling := range []float64{2 * targetSize, 3 * targetSize} {
+		var groups [][]*SegmentView
+		// Use maxFull for small segment counts to maximize full segments.
+		// Use larger for large segment counts for O(n) performance.
+		if n <= threshold {
+			groups = maxFullSegmentsGroupingWithInputLimit(segments, targetSize, taskInputCeiling)
+		} else {
+			groups = largerGroupingSegmentsWithInputLimit(segments, targetSize, taskInputCeiling)
+		}
+		plan := newForceMergeGroupingPlan(groups, targetSize, taskInputCeiling)
+		if !hasBest || plan.betterThan(best) {
+			best = plan
+			hasBest = true
+		}
 	}
 
-	mlog.Info(context.TODO(), "adaptiveGroupSegments: using largerGroupingSegments algorithm",
-		mlog.Int("segmentCount", n),
-		mlog.Int("threshold", threshold),
-		mlog.Float64("targetSize", targetSize))
-	return largerGroupingSegments(segments, targetSize)
+	if n <= threshold {
+		mlog.Info(context.TODO(), "adaptiveGroupSegments: using bounded maxFullSegmentsGrouping algorithm",
+			mlog.Int("segmentCount", n),
+			mlog.Int("threshold", threshold),
+			mlog.Float64("targetSize", targetSize),
+			mlog.Float64("taskInputCeiling", best.taskInputCeiling))
+	} else {
+		mlog.Info(context.TODO(), "adaptiveGroupSegments: using bounded largerGroupingSegments algorithm",
+			mlog.Int("segmentCount", n),
+			mlog.Int("threshold", threshold),
+			mlog.Float64("targetSize", targetSize),
+			mlog.Float64("taskInputCeiling", best.taskInputCeiling))
+	}
+
+	return best.groups
+}
+
+type forceMergeGroupingPlan struct {
+	groups           [][]*SegmentView
+	taskInputCeiling float64
+	outputSegments   int64
+	largestTaskInput float64
+}
+
+func newForceMergeGroupingPlan(groups [][]*SegmentView, targetSize float64, taskInputCeiling float64) forceMergeGroupingPlan {
+	plan := forceMergeGroupingPlan{
+		groups:           groups,
+		taskInputCeiling: taskInputCeiling,
+	}
+	for _, group := range groups {
+		groupSize := sumSegmentSize(group)
+		plan.outputSegments += estimateResultSegmentCount(groupSize, targetSize)
+		plan.largestTaskInput = max(plan.largestTaskInput, groupSize)
+	}
+	return plan
+}
+
+func (p forceMergeGroupingPlan) betterThan(other forceMergeGroupingPlan) bool {
+	if p.outputSegments != other.outputSegments {
+		return p.outputSegments < other.outputSegments
+	}
+	if len(p.groups) != len(other.groups) {
+		return len(p.groups) > len(other.groups)
+	}
+	if p.largestTaskInput != other.largestTaskInput {
+		return p.largestTaskInput < other.largestTaskInput
+	}
+	return p.taskInputCeiling < other.taskInputCeiling
+}
+
+func sortedForceMergeSegments(segments []*SegmentView) []*SegmentView {
+	result := append([]*SegmentView(nil), segments...)
+	sort.SliceStable(result, func(i, j int) bool {
+		left := result[i]
+		right := result[j]
+		if forceMergeSegmentStartTS(left) != forceMergeSegmentStartTS(right) {
+			return forceMergeSegmentStartTS(left) < forceMergeSegmentStartTS(right)
+		}
+		if forceMergeSegmentDMLTS(left) != forceMergeSegmentDMLTS(right) {
+			return forceMergeSegmentDMLTS(left) < forceMergeSegmentDMLTS(right)
+		}
+		return left.ID < right.ID
+	})
+	return result
+}
+
+func forceMergeSegmentStartTS(segment *SegmentView) uint64 {
+	if segment == nil {
+		return 0
+	}
+	return segment.startPos.GetTimestamp()
+}
+
+func forceMergeSegmentDMLTS(segment *SegmentView) uint64 {
+	if segment == nil {
+		return 0
+	}
+	return segment.dmlPos.GetTimestamp()
 }
 
 // largerGroupingSegments groups segments to minimize number of tasks
 // Strategy: Create larger groups that produce multiple full target-sized segments
 // This approach favors fewer compaction tasks with larger batches
 func largerGroupingSegments(segments []*SegmentView, targetSize float64) [][]*SegmentView {
+	return largerGroupingSegmentsWithInputLimit(segments, targetSize, math.Inf(1))
+}
+
+func largerGroupingSegmentsWithInputLimit(segments []*SegmentView, targetSize float64, taskInputCeiling float64) [][]*SegmentView {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -246,7 +337,11 @@ func largerGroupingSegments(segments []*SegmentView, targetSize float64) [][]*Se
 
 		// Accumulate segments to form multiple target-sized outputs
 		for i < n {
-			groupSize += segments[i].Size
+			nextSize := groupSize + segments[i].Size
+			if i > groupStart && nextSize > taskInputCeiling {
+				break
+			}
+			groupSize = nextSize
 			i++
 
 			// Check if we should stop
@@ -256,6 +351,9 @@ func largerGroupingSegments(segments []*SegmentView, targetSize float64) [][]*Se
 				nextFull := int(nextSize / targetSize)
 
 				// Stop if we have full segments and next addition won't give another full segment
+				if i > groupStart && nextSize > taskInputCeiling {
+					break
+				}
 				if currentFull > 0 && nextFull == currentFull {
 					currentRemainder := math.Mod(groupSize, targetSize)
 					if currentRemainder < targetSize*defaultToleranceMB {
@@ -275,6 +373,10 @@ func largerGroupingSegments(segments []*SegmentView, targetSize float64) [][]*Se
 // Strategy: Use dynamic programming to find partitioning that produces most full segments
 // This approach minimizes tail segments and achieves best space utilization
 func maxFullSegmentsGrouping(segments []*SegmentView, targetSize float64) [][]*SegmentView {
+	return maxFullSegmentsGroupingWithInputLimit(segments, targetSize, math.Inf(1))
+}
+
+func maxFullSegmentsGroupingWithInputLimit(segments []*SegmentView, targetSize float64, taskInputCeiling float64) [][]*SegmentView {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -293,18 +395,25 @@ func maxFullSegmentsGrouping(segments []*SegmentView, targetSize float64) [][]*S
 		tailSegments int
 		numGroups    int
 		groupIndices []int
+		valid        bool
 	}
 
 	dp := make([]dpState, n+1)
-	dp[0] = dpState{fullSegments: 0, tailSegments: 0, numGroups: 0, groupIndices: make([]int, 0, n/10)}
+	dp[0] = dpState{fullSegments: 0, tailSegments: 0, numGroups: 0, groupIndices: make([]int, 0, n/10), valid: true}
 
 	for i := 1; i <= n; i++ {
 		dp[i] = dpState{fullSegments: -1, tailSegments: math.MaxInt32, numGroups: 0, groupIndices: nil}
 
 		// Try different starting positions for the last group
 		for j := 0; j < i; j++ {
+			if !dp[j].valid {
+				continue
+			}
 			// Calculate group size from j to i-1 using prefix sums (O(1) instead of O(n))
 			groupSize := prefixSum[i] - prefixSum[j]
+			if i-j > 1 && groupSize > taskInputCeiling {
+				continue
+			}
 
 			numFull := int(groupSize / targetSize)
 			remainder := math.Mod(groupSize, targetSize)
@@ -337,13 +446,14 @@ func maxFullSegmentsGrouping(segments []*SegmentView, targetSize float64) [][]*S
 					tailSegments: newTails,
 					numGroups:    newGroups,
 					groupIndices: newIndices,
+					valid:        true,
 				}
 			}
 		}
 	}
 
 	// Reconstruct groups from indices
-	if dp[n].groupIndices == nil {
+	if !dp[n].valid {
 		return [][]*SegmentView{segments}
 	}
 
