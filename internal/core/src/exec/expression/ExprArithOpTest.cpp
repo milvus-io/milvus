@@ -1001,6 +1001,36 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val & 8) == 8;
              }},
+            // Bitwise over a JSON value physically stored as a double:
+            // the executor extracts it via at_numeric()'s get_double() branch
+            // (not the int64 branch) and casts through int64_t, exactly as '%'
+            // does. json["double"] is a whole-number-valued double, so the
+            // int64_t cast is exact and parity stays mixed across rows.
+            {R"((json["double"] & 1) == 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"double"});
+                 auto val = json.template at<double>(pointer).value();
+                 return (int64_t(val) & 1) == 0;
+             }},
+            {R"((json["double"] & 1) != 0)",
+             [](const milvus::Json& json) {
+                 auto pointer = milvus::Json::pointer({"double"});
+                 auto val = json.template at<double>(pointer).value();
+                 return (int64_t(val) & 1) != 0;
+             }},
+            // Bitwise over a non-numeric JSON value: at_numeric() errors, so the
+            // row is treated as non-matching -- EQ yields false, NE yields true
+            // for every row. json["string"] holds a JSON string, never a number.
+            {R"((json["string"] & 1) == 0)",
+             [](const milvus::Json&) {
+                 // non-numeric -> non-match -> EQ is constant false
+                 return false;
+             }},
+            {R"((json["string"] & 1) != 0)",
+             [](const milvus::Json&) {
+                 // non-numeric -> non-match -> NE is constant true
+                 return true;
+             }},
             // Test cases for BinaryArithOpEvalRangeExpr GT of various data types
             {R"(json["int"] + 1 > 2)",
              [](const milvus::Json& json) {
