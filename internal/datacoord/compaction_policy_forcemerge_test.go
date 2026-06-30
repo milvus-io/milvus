@@ -40,6 +40,9 @@ func (s *ForceMergeCompactionPolicySuite) SetupTest() {
 	meta, err := newMemoryMeta(s.T())
 	s.Require().NoError(err)
 	for id, segment := range segments {
+		if segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1 {
+			segment.IsSorted = true
+		}
 		meta.segments.SetSegment(id, segment, 0)
 	}
 

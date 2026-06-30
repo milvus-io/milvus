@@ -247,12 +247,16 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			}
 
 			segInfo := info // capture
+			binlogs := cloneAndClearBinlogPaths(segInfo.GetBinlogs())
+			statslogs := cloneAndClearBinlogPaths(segInfo.GetStatslogs())
+			deltalogs := cloneAndClearBinlogPaths(segInfo.GetDeltalogs())
+			bm25Statslogs := cloneAndClearBinlogPaths(segInfo.GetBm25Logs())
 			mutations := map[int64][]SegmentOperator{
 				info.GetSegmentID(): {func(seg *SegmentInfo) (BinlogIncrement, bool) {
-					seg.Binlogs = segInfo.GetBinlogs()
-					seg.Statslogs = segInfo.GetStatslogs()
-					seg.Deltalogs = segInfo.GetDeltalogs()
-					seg.Bm25Statslogs = segInfo.GetBm25Logs()
+					seg.Binlogs = binlogs
+					seg.Statslogs = statslogs
+					seg.Deltalogs = deltalogs
+					seg.Bm25Statslogs = bm25Statslogs
 					if segInfo.GetManifestPath() != "" {
 						seg.ManifestPath = segInfo.GetManifestPath()
 					}
