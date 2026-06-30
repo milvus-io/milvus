@@ -71,6 +71,36 @@ impl IndexReaderWrapper {
         self.search(&query, bitset)
     }
 
+    // tokenize the query and OR a fuzzy (edit-distance) term query per token.
+    pub(crate) fn fuzzy_match_query(
+        &self,
+        q: &str,
+        max_edit_distance: u32,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        // clone the tokenizer to keep fuzzy_match_query thread-safe.
+        let mut tokenizer = self
+            .index
+            .tokenizer_for_field(self.field)
+            .unwrap_or(standard_analyzer(vec![]))
+            .clone();
+        let mut token_stream = tokenizer.token_stream(q);
+        use tantivy::query::{FuzzyTermQuery, Occur};
+        let distance = max_edit_distance as u8;
+        let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+        while token_stream.advance() {
+            let token = token_stream.token();
+            let term = Term::from_field_text(self.field, &token.text);
+            subqueries.push((
+                Occur::Should,
+                Box::new(FuzzyTermQuery::new(term, distance, true)),
+            ));
+        }
+        // require 1 should-clause so the result is a plain OR over the fuzzy terms.
+        let query = BooleanQuery::with_minimum_required_clauses(subqueries, 1);
+        self.search(&query, bitset)
+    }
+
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
     pub(crate) fn phrase_match_query(&self, q: &str, slop: u32, bitset: *mut c_void) -> Result<()> {
@@ -235,5 +265,57 @@ mod tests {
             .match_query_with_minimum("a b c", 10, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert!(res.is_empty());
+    }
+
+    #[test]
+    fn test_fuzzy_match_query() {
+        let dir = TempDir::new().unwrap();
+        let mut writer = IndexWriterWrapper::create_text_writer(
+            "text",
+            dir.path().to_str().unwrap(),
+            "default",
+            "",
+            "",
+            1,
+            50_000_000,
+            false,
+            TantivyIndexVersion::default_version(),
+        )
+        .unwrap();
+
+        writer.add("allergy", Some(0)).unwrap();
+        writer.add("allergic", Some(1)).unwrap();
+        writer.add("apple", Some(2)).unwrap();
+        writer.commit().unwrap();
+
+        let reader = writer.create_reader(set_bitset).unwrap();
+
+        // "alergy" is one edit away from "allergy" only.
+        let mut res: HashSet<u32> = HashSet::new();
+        reader
+            .fuzzy_match_query("alergy", 1, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![0].into_iter().collect::<HashSet<u32>>());
+
+        // distance 0 is an exact term match, so a typo finds nothing.
+        res.clear();
+        reader
+            .fuzzy_match_query("alergy", 0, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert!(res.is_empty());
+
+        // distance 2 still matches only "allergy"; "allergic" is distance 3 away.
+        res.clear();
+        reader
+            .fuzzy_match_query("alergy", 2, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![0].into_iter().collect::<HashSet<u32>>());
+
+        // a multi-token query ORs the per-token fuzzy matches.
+        res.clear();
+        reader
+            .fuzzy_match_query("alergy aple", 1, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![0, 2].into_iter().collect::<HashSet<u32>>());
     }
 }
