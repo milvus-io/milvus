@@ -48,6 +48,12 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		ElementType: schemapb.DataType_VarChar,
 	})
 
+	fields = append(fields, &schemapb.FieldSchema{
+		FieldID: 135, Name: "scores", IsPrimaryKey: false, Description: "scalar int64 array field",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	})
+
 	structArrayField := &schemapb.StructArrayFieldSchema{
 		FieldID: 132, Name: "struct_array", Fields: []*schemapb.FieldSchema{
 			{
@@ -3079,6 +3085,101 @@ func TestExpr_Match(t *testing.T) {
 		`MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=-1)`, // negative count
 		`MATCH_MOST(struct_array, $[sub_int] > 1, threshold=-1)`,  // negative count
 		`MATCH_EXACT(struct_array, $[sub_int] > 1, threshold=-1)`, // negative count
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, helper, expr)
+	}
+}
+
+func TestScalarArrayMatchAny(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	expr, err := ParseExpr(helper, `MATCH_ANY(scores, $ > 90)`, nil)
+	assert.NoError(t, err)
+
+	matchExpr := expr.GetMatchExpr()
+	assert.NotNil(t, matchExpr)
+	assert.Equal(t, "scores", matchExpr.GetStructName())
+	assert.Equal(t, planpb.MatchType_MatchAny, matchExpr.GetMatchType())
+	assert.Equal(t, int64(0), matchExpr.GetCount())
+
+	// The predicate's column must be element-level with the array's element type.
+	predicate := matchExpr.GetPredicate()
+	assert.NotNil(t, predicate)
+	ure := predicate.GetUnaryRangeExpr()
+	assert.NotNil(t, ure)
+	columnInfo := ure.GetColumnInfo()
+	assert.NotNil(t, columnInfo)
+	assert.True(t, columnInfo.GetIsElementLevel())
+	assert.Equal(t, schemapb.DataType_Int64, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_Int64, columnInfo.GetElementType())
+}
+
+func TestScalarArrayMatchVariants(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// All 5 MATCH variants + element_filter on a scalar array, using the `$` token.
+	validExprs := []string{
+		`MATCH_ANY(scores, $ > 90)`,
+		`MATCH_ALL(scores, $ > 0)`,
+		`MATCH_LEAST(scores, $ > 90, threshold=2)`,
+		`MATCH_MOST(scores, $ < 50, threshold=3)`,
+		`MATCH_EXACT(scores, $ == 100, threshold=1)`,
+		`element_filter(scores, $ > 90)`,
+
+		// range form: requires ElementSelf in Range/ReverseRange grammar rules
+		`MATCH_ANY(scores, 1 < $ < 10)`,
+		`MATCH_ALL(scores, 100 > $ > 0)`,
+
+		// combined predicates and case-insensitivity
+		`MATCH_ANY(scores, $ > 0 && $ < 100)`,
+		`match_any(scores, $ >= 0)`,
+
+		// combined with other expressions
+		`Int64Field > 0 && MATCH_ANY(scores, $ > 90)`,
+
+		// VarChar-element scalar array (StringArrayField, ElementType VarChar)
+		`MATCH_ANY(StringArrayField, $ == "abc")`,
+		`MATCH_ALL(StringArrayField, $ != "")`,
+		`MATCH_ANY(StringArrayField, $ like "prefix%")`,
+		`MATCH_ANY(StringArrayField, "a" < $ < "z")`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+
+	// Negatives.
+	invalidExprs := []string{
+		// $[sub] on a scalar array - scalar elements have no sub-fields
+		`MATCH_ANY(scores, $[sub] > 90)`,
+		`element_filter(scores, $[sub] > 90)`,
+
+		// bare $ outside any match/element_filter context
+		`$ > 90`,
+		`Int64Field > 0 && $ > 90`,
+
+		// nesting not allowed
+		`MATCH_ANY(scores, MATCH_ALL(scores, $ > 0))`,
+		`element_filter(scores, element_filter(scores, $ > 0))`,
+
+		// non-existent field / non-array field, using `$`
+		`MATCH_ANY(non_existent, $ > 90)`,
+		`MATCH_ANY(Int64Field, $ > 90)`,
+
+		// An EXISTING non-array field must be rejected at parse time even when the
+		// predicate does NOT use `$` (otherwise it would only fail later in segcore
+		// as a System error). Covers the parser field-classification path.
+		// (A non-existent name is treated as a struct-array container and validated
+		// later, so it is not asserted here.)
+		`MATCH_ANY(Int64Field, Int64Field > 0)`,
+		`MATCH_ALL(Int64Field, Int64Field > 0)`,
+		`element_filter(Int64Field, Int64Field > 0)`,
 	}
 
 	for _, expr := range invalidExprs {

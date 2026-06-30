@@ -63,7 +63,11 @@ class StringIndexSort : public StringIndex {
 
     const bool
     HasRawData() const override {
-        return true;
+        // A nested (array-element) index flattens elements and drops row
+        // boundaries plus null/empty rows, so it cannot reconstruct the per-row
+        // array structure IArrayOffsets needs. Report false so the loader keeps
+        // the raw array data (see ScalarIndexSort::HasRawData for details).
+        return !is_nested_index_;
     }
 
     void

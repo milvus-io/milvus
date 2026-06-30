@@ -139,6 +139,10 @@ func (v *BasePlanVisitor) VisitTemplateVariable(ctx *TemplateVariableContext) in
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitElementSelf(ctx *ElementSelfContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitTimestamptzCompareReverse(ctx *TimestamptzCompareReverseContext) interface{} {
 	return v.VisitChildren(ctx)
 }

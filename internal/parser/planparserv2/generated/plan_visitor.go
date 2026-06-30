@@ -106,6 +106,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#TemplateVariable.
 	VisitTemplateVariable(ctx *TemplateVariableContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#ElementSelf.
+	VisitElementSelf(ctx *ElementSelfContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#TimestamptzCompareReverse.
 	VisitTimestamptzCompareReverse(ctx *TimestamptzCompareReverseContext) interface{}
 

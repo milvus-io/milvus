@@ -4693,6 +4693,13 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             } else {
                 field_meta_ptr = &field_meta;  // need to build
             }
+        } else if (field_meta.get_data_type() == DataType::ARRAY &&
+                   array_offsets_map_.find(field_id) ==
+                       array_offsets_map_.end()) {
+            // Scalar ARRAY field (not part of a struct): build its own
+            // ArrayOffsetsSealed so MATCH_*/element_filter can resolve element
+            // ranges. struct_name stays empty to signal the scalar case below.
+            field_meta_ptr = &field_meta;  // need to build
         }
     }
 
@@ -4702,13 +4709,19 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             ArrayOffsetsSealed::BuildFromSegment(this, *field_meta_ptr);
 
         std::unique_lock lck(mutex_);
-        // Double-check after re-acquiring lock
-        auto it = struct_to_array_offsets_.find(struct_name);
-        if (it == struct_to_array_offsets_.end()) {
-            struct_to_array_offsets_[struct_name] = new_offsets;
+        if (struct_name.empty()) {
+            // Scalar ARRAY field: offsets belong only to this field, do not
+            // touch struct_to_array_offsets_.
             array_offsets_map_[field_id] = new_offsets;
         } else {
-            array_offsets_map_[field_id] = it->second;
+            // Double-check after re-acquiring lock
+            auto it = struct_to_array_offsets_.find(struct_name);
+            if (it == struct_to_array_offsets_.end()) {
+                struct_to_array_offsets_[struct_name] = new_offsets;
+                array_offsets_map_[field_id] = new_offsets;
+            } else {
+                array_offsets_map_[field_id] = it->second;
+            }
         }
     }
 }
@@ -5106,6 +5119,20 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
     const FieldMeta& field_meta, int64_t row_count) {
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
+        // Scalar ARRAY field (not part of a struct). When such a field is
+        // materialized for old sealed rows via FillDefaultValueFields(), the
+        // load path that normally builds its ArrayOffsetsSealed is bypassed, so
+        // register an all-zeros offsets here (every old row is an empty array).
+        // Without this, MATCH_*/element_filter would hit a missing-offsets
+        // assert instead of treating the filled rows as empty arrays.
+        if (field_meta.get_data_type() == DataType::ARRAY &&
+            array_offsets_map_.find(field_meta.get_id()) ==
+                array_offsets_map_.end()) {
+            std::vector<int32_t> row_to_element_start(row_count + 1, 0);
+            array_offsets_map_[field_meta.get_id()] =
+                std::make_shared<ArrayOffsetsSealed>(
+                    std::move(row_to_element_start));
+        }
         return;
     }
 

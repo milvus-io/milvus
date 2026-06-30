@@ -229,8 +229,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     SetHasOffsetInput(input != nullptr);
 
     auto schema = segment_->get_schema();
-    auto field_meta =
-        schema.GetFirstArrayFieldInStruct(expr_->get_struct_name());
+    auto field_meta = schema.ResolveArrayElementField(expr_->get_struct_name());
 
     auto array_offsets = segment_->GetArrayOffsets(field_meta.get_id());
     AssertInfo(array_offsets != nullptr, "Array offsets not available");
