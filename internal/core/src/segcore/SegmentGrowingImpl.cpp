@@ -28,6 +28,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 #include "segcore/default_fs.h"
 
 #include "NamedType/named_type_impl.hpp"
@@ -93,6 +94,66 @@ namespace milvus::segcore {
 using namespace milvus::cachinglayer;
 
 namespace {
+
+int64_t
+GetLoadedFieldRows(
+    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+        column_group_results,
+    FieldId field_id) {
+    int64_t rows = 0;
+    bool found = false;
+    for (const auto& column_group_result : column_group_results) {
+        auto it = column_group_result.find(field_id);
+        if (it == column_group_result.end()) {
+            continue;
+        }
+        found = true;
+        for (const auto& field_data : it->second) {
+            rows += field_data->get_num_rows();
+        }
+    }
+    return found ? rows : -1;
+}
+
+void
+AssertLoadedFieldRows(
+    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+        column_group_results,
+    FieldId field_id,
+    int64_t expected_rows,
+    const char* field_name) {
+    if (expected_rows == 0) {
+        return;
+    }
+    auto rows = GetLoadedFieldRows(column_group_results, field_id);
+    AssertInfo(rows == expected_rows,
+               "growing segment StorageV3 manifest loads {} rows for {} "
+               "field {}, but SegmentLoadInfo expects {} rows",
+               rows,
+               field_name,
+               field_id.get(),
+               expected_rows);
+}
+
+void
+AssertLoadedFieldRowsIfPresent(
+    const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
+        column_group_results,
+    FieldId field_id,
+    int64_t expected_rows,
+    const char* field_name) {
+    if (expected_rows == 0) {
+        return;
+    }
+    auto rows = GetLoadedFieldRows(column_group_results, field_id);
+    AssertInfo(rows == -1 || rows == expected_rows,
+               "growing segment StorageV3 manifest loads {} rows for {} "
+               "field {}, but SegmentLoadInfo expects {} rows",
+               rows,
+               field_name,
+               field_id.get(),
+               expected_rows);
+}
 
 int32_t
 GetVectorArrayLength(const proto::schema::VectorField& vec_field,
@@ -2649,8 +2710,33 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         std::rethrow_exception(load_exceptions[0]);
     }
 
+    AssertInfo(primary_field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
+    AssertLoadedFieldRows(
+        column_group_results, primary_field_id, num_rows, "primary");
+    auto timestamp_rows =
+        GetLoadedFieldRows(column_group_results, TimestampFieldID);
+    auto row_id_rows = GetLoadedFieldRows(column_group_results, RowFieldID);
+    AssertLoadedFieldRowsIfPresent(
+        column_group_results, TimestampFieldID, num_rows, "timestamp");
+    AssertLoadedFieldRowsIfPresent(
+        column_group_results, RowFieldID, num_rows, "row ID");
+
     auto reserved_offset = PreInsert(num_rows);
     text_loaded_row_count_ = num_rows;
+
+    if (timestamp_rows == -1 && num_rows > 0) {
+        std::vector<Timestamp> timestamps(num_rows, 0);
+        insert_record_.timestamps_.set_data_raw(
+            reserved_offset, timestamps.data(), num_rows);
+        stats_.mem_size += num_rows * sizeof(Timestamp);
+    }
+    if (row_id_rows == -1 && num_rows > 0) {
+        std::vector<int64_t> row_ids(num_rows);
+        std::iota(row_ids.begin(), row_ids.end(), reserved_offset);
+        insert_record_.row_ids_.set_data_raw(
+            reserved_offset, row_ids.data(), num_rows);
+        stats_.mem_size += num_rows * sizeof(int64_t);
+    }
 
     for (auto& column_group_result : column_group_results) {
         for (auto& [field_id, field_data] : column_group_result) {

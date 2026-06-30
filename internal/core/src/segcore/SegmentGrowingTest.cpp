@@ -178,6 +178,7 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     milvus::tracer::TraceContext trace_ctx;
     segment->Load(trace_ctx, nullptr);
     ASSERT_EQ(segment->get_row_count(), checkpoint_rows);
+    EXPECT_EQ(segment->get_real_count(), checkpoint_rows);
 
     std::vector<int64_t> row_ids = {checkpoint_rows};
     std::vector<Timestamp> timestamps = {100};
@@ -197,6 +198,37 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     ASSERT_NO_THROW(segment->Insert(
         offset, 1, row_ids.data(), timestamps.data(), insert_data.get()));
     EXPECT_EQ(segment->get_row_count(), checkpoint_rows + 1);
+
+    std::filesystem::remove_all(base_path);
+}
+
+TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      "growing_recovery_short_required_rows")
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema, 1, 2, 1, TestLocalPath, base_path);
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(4);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(test_data.TotalRows() + 1);
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_ANY_THROW(segment->Load(trace_ctx, nullptr));
+    EXPECT_EQ(segment->get_row_count(), 0);
 
     std::filesystem::remove_all(base_path);
 }
