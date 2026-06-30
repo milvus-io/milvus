@@ -21,9 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 )
 
 const forceMergeTestGiB = 1024 * 1024 * 1024
