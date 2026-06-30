@@ -843,15 +843,15 @@ func (m *meta) scanLegacyBinlogs(pathPrefix string, collectionID int64) (map[int
 	for i, key := range keys {
 		parts := strings.Split(key, "/")
 		if len(parts) < 2 {
-			return nil, fmt.Errorf("invalid legacy binlog key: %s", key)
+			return nil, merr.WrapErrDataIntegrityMsg("invalid legacy binlog key: %s", key)
 		}
 		segID, err := strconv.ParseInt(parts[len(parts)-2], 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid legacy binlog key %q: %w", key, err)
+			return nil, merr.WrapErrDataIntegrity(err, "invalid legacy binlog key %q", key)
 		}
 		fb := &datapb.FieldBinlog{}
 		if err := proto.Unmarshal(values[i], fb); err != nil {
-			return nil, fmt.Errorf("unmarshal FieldBinlog at %q: %w", key, err)
+			return nil, merr.WrapErrDataIntegrity(err, "unmarshal FieldBinlog at %q", key)
 		}
 		// Preserve the old-version compatibility fix from kv_catalog.listBinlogs.
 		for j, b := range fb.GetBinlogs() {
@@ -1970,7 +1970,7 @@ func isSegmentHealthy(segment *SegmentInfo) bool {
 func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 	for _, segID := range segIDs {
 		if m.segments.GetSegment(segID) == nil {
-			return false, fmt.Errorf("segment is not exist with ID = %d", segID)
+			return false, merr.WrapErrSegmentNotFound(segID)
 		}
 	}
 	return true, nil
