@@ -3531,6 +3531,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		GuaranteeTimestamp:    request.GuaranteeTimestamp,
 		ConsistencyLevel:      request.ConsistencyLevel,
 		UseDefaultConsistency: request.UseDefaultConsistency,
+		Namespace:             request.Namespace,
 	}
 
 	// Create queryTask to execute the retrieval

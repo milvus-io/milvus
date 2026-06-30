@@ -380,6 +380,9 @@ func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBas
 	return opt
 }
 
+// WithNamespace scopes the write to a collection namespace. Primary keys are
+// still collection-scoped for delete/upsert tombstones, so callers must keep
+// primary keys unique across namespaces in the same collection.
 func (opt *columnBasedDataOption) WithNamespace(namespace string) *columnBasedDataOption {
 	opt.namespace = &namespace
 	return opt
@@ -629,6 +632,9 @@ func (opt *deleteOption) WithPartition(partitionName string) *deleteOption {
 	return opt
 }
 
+// WithNamespace scopes the delete request to a collection namespace. Delete
+// tombstones are primary-key based, so callers must keep primary keys unique
+// across namespaces in the same collection.
 func (opt *deleteOption) WithNamespace(namespace string) *deleteOption {
 	opt.namespace = &namespace
 	return opt

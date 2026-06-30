@@ -163,6 +163,9 @@ func repackDeleteMsgByHash(
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
 	maxSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 	var hashValues []uint32
+	// Delete tombstones are PK+timestamp based. Namespace can narrow routing,
+	// but it is not part of the tombstone identity; PKs must stay unique across
+	// namespaces in the same collection.
 	channelID, ok, err := namespaceShardingChannelID(schema, namespace, vChannels)
 	if err != nil {
 		return nil, 0, err

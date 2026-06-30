@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -46,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -2204,6 +2206,86 @@ func TestHandleIfSearchByPK_BM25Detection(t *testing.T) {
 		// Should not find BM25 for embedding function output
 		_, found = getBM25FunctionOfAnnsField(102, functions)
 		assert.False(t, found)
+	})
+}
+
+func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery", t, func() {
+		paramtable.Init()
+		originalCache := globalMetaCache
+		defer func() { globalMetaCache = originalCache }()
+
+		namespace := "tenant_a"
+		schema := &schemapb.CollectionSchema{
+			Name:            "test_collection",
+			EnableNamespace: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID:    101,
+					Name:       "vec",
+					DataType:   schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+				},
+			},
+		}
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{schema: newSchemaInfo(schema)}, nil)
+		globalMetaCache = cache
+
+		var capturedNamespace *string
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			capturedNamespace = qt.request.Namespace
+			return &milvuspb.QueryResults{
+				Status: merr.Success(),
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "id",
+						FieldId:   100,
+						Type:      schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1}},
+								},
+							},
+						},
+					},
+					{
+						FieldName: "vec",
+						FieldId:   101,
+						Type:      schemapb.DataType_FloatVector,
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 2,
+								Data: &schemapb.VectorField_FloatVector{
+									FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}},
+								},
+							},
+						},
+					},
+				},
+			}, segcore.StorageCost{}, nil
+		}).Build()
+
+		node := &Proxy{}
+		req := &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_collection",
+			Namespace:      &namespace,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+			},
+			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
+		}
+
+		_, err := node.handleIfSearchByPK(context.Background(), req)
+		assert.NoError(t, err)
+		require.NotNil(t, capturedNamespace)
+		assert.Equal(t, namespace, *capturedNamespace)
 	})
 }
 
