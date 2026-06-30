@@ -20,11 +20,14 @@
 #include <cstdint>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 #include "common/Array.h"
 #include "common/Json.h"
 #include "common/Tracer.h"
 #include "common/VectorArray.h"
+#include "exec/expression/Expr.h"
+#include "exec/expression/Utils.h"
 #include "fmt/core.h"
 #include "opentelemetry/trace/span.h"
 
@@ -35,6 +38,7 @@ namespace exec {
 
 void
 PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     tracer::AutoSpan span(
         "PhyBinaryArithOpEvalRangeExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
@@ -2035,6 +2039,75 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+void
+PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
+    auto datatype = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        datatype = expr_->column_.element_type_;
+    }
+
+    switch (datatype) {
+        case DataType::BOOL: {
+            PrefetchRawData<bool>();
+            break;
+        }
+        case DataType::INT8: {
+            PrefetchRawData<int8_t>();
+            break;
+        }
+        case DataType::INT16: {
+            PrefetchRawData<int16_t>();
+            break;
+        }
+        case DataType::INT32: {
+            PrefetchRawData<int32_t>();
+            break;
+        }
+        case DataType::INT64: {
+            PrefetchRawData<int64_t>();
+            break;
+        }
+        case DataType::FLOAT: {
+            PrefetchRawData<float>();
+            break;
+        }
+        case DataType::DOUBLE: {
+            PrefetchRawData<double>();
+            break;
+        }
+        default: {
+            SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
+            break;
+        }
+    }
+}
+
+template <typename T>
+void
+PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
+    using H =
+        std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
+                           int64_t,
+                           T>;
+    auto& skip_index = segment_->GetSkipIndex();
+    auto value = GetValueWithCastNumber<H>(expr_->value_);
+    auto right_value = GetValueWithCastNumber<H>(expr_->right_operand_);
+
+    std::vector<int64_t> chunks_may_hit;
+    for (size_t i = 0; i < num_data_chunk_; ++i) {
+        auto skip = skip_index.CanSkipBinaryArithRange<T>(field_id_,
+                                                          i,
+                                                          expr_->op_type_,
+                                                          expr_->arith_op_type_,
+                                                          value,
+                                                          right_value);
+        if (!skip) {
+            chunks_may_hit.push_back(i);
+        }
+    }
+    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 
 template VectorPtr

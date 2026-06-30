@@ -500,7 +500,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
@@ -571,6 +571,13 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     GetColumnInfo() const override {
         return expr_->column_;
     }
+
+    void
+    PrefetchRawData() override;
+
+    template <typename T>
+    void
+    PrefetchRawData();
 
  private:
     template <typename T>

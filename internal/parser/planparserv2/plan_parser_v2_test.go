@@ -293,6 +293,127 @@ func TestExpr_Like(t *testing.T) {
 	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 }
 
+func TestExpr_RawString(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	check := func(expr string, wantOp planpb.OpType, wantVal string) {
+		plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+		assert.NoError(t, err, expr)
+		assert.NotNil(t, plan, expr)
+		ur := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.Equal(t, wantOp, ur.GetOp(), expr)
+		assert.Equal(t, wantVal, ur.GetValue().GetStringVal(), expr)
+	}
+
+	// In a raw string the backslash is NOT a string-literal escape: the content
+	// is taken verbatim (no \n/\b/\\ processing), so == sees exactly what's typed.
+	check(`A == r"a\b"`, planpb.OpType_Equal, `a\b`)
+	check(`A == r"a\nb"`, planpb.OpType_Equal, `a\nb`)
+	check(`A == r"a\\b"`, planpb.OpType_Equal, `a\\b`)
+
+	// LIKE: the raw content still passes through the LIKE escape layer (\% -> %),
+	// exactly like BigQuery's r'\%', but needs far fewer backslashes because the
+	// string-literal Unquote layer is gone.
+	check(`A like r"abc%"`, planpb.OpType_PrefixMatch, `abc`)
+	check(`A like r"%abc%"`, planpb.OpType_InnerMatch, `abc`)
+	check(`A like r"\%"`, planpb.OpType_Equal, `%`) // literal %
+	check(`A like r"a\_b%"`, planpb.OpType_PrefixMatch, `a_b`)
+	check(`A like r"\\%"`, planpb.OpType_PrefixMatch, `\`) // prefix of one literal backslash
+	check(`A like r"a\\b"`, planpb.OpType_Equal, `a\b`)    // literal a\b
+	check(`A like r'\\%'`, planpb.OpType_PrefixMatch, `\`) // single-quoted raw string
+
+	// uppercase R prefix works too
+	check(`A like R"abc%"`, planpb.OpType_PrefixMatch, `abc`)
+	// empty raw string
+	check(`A == r""`, planpb.OpType_Equal, ``)
+	// the opposite quote needs no escaping inside a raw string
+	check(`A == r"a'b"`, planpb.OpType_Equal, `a'b`)
+	check(`A == r'a"b'`, planpb.OpType_Equal, `a"b`)
+
+	// IN list accepts raw strings, taken verbatim
+	inPlan, err := CreateSearchPlan(helper, `A in [r"a\b", r"c\d"]`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	vals := inPlan.GetVectorAnns().GetPredicates().GetTermExpr().GetValues()
+	assert.Len(t, vals, 2)
+	assert.Equal(t, `a\b`, vals[0].GetStringVal())
+	assert.Equal(t, `c\d`, vals[1].GetStringVal())
+
+	// a raw string cannot end with an odd number of backslashes (unterminated)
+	assertInvalidExpr(t, helper, `A == r"x\"`)
+
+	// raw string works as a JSON path key; JSON keys are already verbatim, so a
+	// raw key yields the same nested path as a normal key.
+	jPlan, err := CreateSearchPlan(helper, `JSONField[r"a\b"] == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	jNorm, err := CreateSearchPlan(helper, `JSONField["a\b"] == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{`a\b`}, jPlan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
+	assert.Equal(t,
+		jNorm.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath(),
+		jPlan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
+
+	// Raw needs 2 backslashes where a normal literal needs 4 — same final operand.
+	rawPlan, err := CreateSearchPlan(helper, `A like r"\\%"`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	normPlan, err := CreateSearchPlan(helper, `A like "\\\\%"`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	assert.Equal(t,
+		normPlan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal(),
+		rawPlan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// Raw string in a regex (=~) reaches the engine verbatim (no escape pass).
+	rePlan, err := CreateSearchPlan(helper, `A =~ r"\d+"`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	reUR := rePlan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+	assert.Equal(t, planpb.OpType_RegexMatch, reUR.GetOp())
+	assert.Equal(t, `\d+`, reUR.GetValue().GetStringVal())
+
+	// --- raw strings must stay VERBATIM even for content the parser otherwise
+	// rewrites before/around the raw handling: CJK runes (convertHanToASCII runs
+	// pre-lex) and \uXXXX escapes (decodeUnicode runs on JSON paths). Issue
+	// #43864 follow-up — without the raw-span exemption these silently leak. ---
+
+	// CJK in a raw value reaches the matcher verbatim, not as \uXXXX.
+	check(`A == r"中文"`, planpb.OpType_Equal, `中文`)
+	check(`A like r"中%"`, planpb.OpType_PrefixMatch, `中`)
+
+	// CJK in a raw regex reaches the engine verbatim too.
+	check(`A =~ r"中文"`, planpb.OpType_RegexMatch, `中文`)
+
+	// A raw JSON key with a literal A is NOT unicode-decoded: the key is the
+	// 6 verbatim bytes, not the decoded "A".
+	jUni, err := CreateSearchPlan(helper, `JSONField[r"\u0041"] == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{`\u0041`}, jUni.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
+
+	// A raw JSON key with CJK reaches the plan verbatim (regression guard: today
+	// this only works because decodeUnicode reverses convertHanToASCII; it must
+	// keep working once both passes skip raw spans).
+	jHan, err := CreateSearchPlan(helper, `JSONField[r"中"] == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{`中`}, jHan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
+	// A raw VALUE with a literal A stays verbatim too (the value path has no
+	// unicode decoding either) — locks the value/key consistency.
+	check(`A == r"\u0041"`, planpb.OpType_Equal, `\u0041`)
+
+	// Mixed raw + normal keys in one JSON path: each segment is classified
+	// independently — the raw segment is verbatim, the normal segment decodes.
+	jMix1, err := CreateSearchPlan(helper, `JSONField[r"中"]["b"] == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{`中`, `b`}, jMix1.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
+
+	jMix2, err := CreateSearchPlan(helper, `JSONField["a"][r"\u0041"] == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{`a`, `\u0041`}, jMix2.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
+
+	// Single-quoted raw JSON key behaves the same as the double-quoted form.
+	jSq, err := CreateSearchPlan(helper, `JSONField[r'\u0041'] == 1`, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{`\u0041`}, jSq.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath())
+}
+
 func TestExpr_RegexMatch(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

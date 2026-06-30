@@ -92,6 +92,7 @@ PhyVectorSearchNode::GetOutput() {
         return nullptr;
     }
 
+    WaitPrefetch();
     span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
     span.GetSpan()->SetAttribute("topk", search_info_.topk_);
 

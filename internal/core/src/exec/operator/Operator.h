@@ -91,7 +91,7 @@ class OperatorContext {
     mutable std::unique_ptr<ExecContext> exec_context_;
 };
 
-class Operator {
+class Operator : public std::enable_shared_from_this<Operator> {
  public:
     Operator(DriverContext* ctx,
              RowTypePtr output_type,
@@ -171,6 +171,15 @@ class Operator {
     virtual const RowTypePtr&
     OutputType() const {
         return output_type_;
+    }
+
+    virtual void
+    PrefetchAsync(
+        const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
+    }
+
+    virtual void
+    WaitPrefetch() {
     }
 
  protected:

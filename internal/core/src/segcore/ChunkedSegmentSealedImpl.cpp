@@ -1074,7 +1074,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         auto column_group_info = FieldDataInfo(column_group_id.get(),
                                                num_rows,
                                                mmap_dir_path,
-                                               merged_in_load_list);
+                                               merged_in_load_list,
+                                               load_info.shard);
         LOG_INFO(
             "[StorageV2] segment {} loads column group {} with field ids "
             "{} "
@@ -1185,11 +1186,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             milvus::storage::LocalChunkManagerSingleton::GetInstance()
                 .GetChunkManager()
                 ->GetRootPath();
-        auto field_data_info =
-            FieldDataInfo(field_id.get(),
-                          num_rows,
-                          mmap_dir_path,
-                          schema_->ShouldLoadField(field_id));
+        auto field_data_info = FieldDataInfo(field_id.get(),
+                                             num_rows,
+                                             mmap_dir_path,
+                                             schema_->ShouldLoadField(field_id),
+                                             load_info.shard);
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -1398,10 +1399,22 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
     FieldId field_id,
     const std::vector<int64_t>& chunk_ids) const {
     std::shared_lock lck(mutex_);
-    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+    // AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+    //            "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
         column->PrefetchChunks(op_ctx, chunk_ids);
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
+                                          FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    if (auto column = get_column(field_id)) {
+        auto num_chunks = column->num_chunks();
+        std::vector<int64_t> ids(num_chunks);
+        std::iota(ids.begin(), ids.end(), 0);
+        column->PrefetchChunks(op_ctx, ids);
     }
 }
 
@@ -3435,7 +3448,8 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
         info_proto->index_size(),
-        info_proto->warmup_policy()};
+        info_proto->warmup_policy(),
+        std::atomic_load(&segment_load_info_)->GetInsertChannel()};
 
     std::unique_ptr<
         milvus::cachinglayer::Translator<milvus::index::TextMatchIndex>>
@@ -3518,6 +3532,8 @@ ChunkedSegmentSealedImpl::LoadJsonKeyIndex(
     if (!info_proto->base_path().empty()) {
         config[STATS_BASE_PATH_KEY] = info_proto->base_path();
     }
+    config[JSON_STATS_CACHE_SHARD_KEY] =
+        std::atomic_load(&segment_load_info_)->GetInsertChannel();
 
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, remote_chunk_manager, fs);
@@ -5074,7 +5090,12 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
             ->GetRootPath();
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto field_data_info = FieldDataInfo(field_id.get(), size, mmap_dir_path);
+    auto field_data_info = FieldDataInfo(
+        field_id.get(),
+        size,
+        mmap_dir_path,
+        false,
+        std::atomic_load(&segment_load_info_)->GetInsertChannel());
 
     auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
         field_id, IsVectorDataType(data_type), /*is_index=*/false);
@@ -5462,7 +5483,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             eager_load,
             warmup_policy,
             cache_key_suffix,
-            load_info->GetEstimatedBytesPerRow());
+            load_info->GetEstimatedBytesPerRow(),
+            load_info->GetInsertChannel());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -5612,6 +5634,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             load_info_snapshot->GetStorageVersion();
+        load_field_data_info.shard = load_info_snapshot->GetInsertChannel();
         auto fields_to_load = field_ids;
         AssertInfo(!fields_to_load.empty(),
                    "load field data with empty field list");
@@ -6779,4 +6802,17 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     return true;
 }
 
+void
+ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
+                                          FieldId field_id) const {
+    auto is_ready = this->vector_indexings_.is_ready(field_id);
+    if (is_ready) {
+        auto field_indexing =
+            this->vector_indexings_.get_field_indexing(field_id);
+        auto cache_index = field_indexing->indexing_;
+        SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
+    } else {
+        this->prefetch_chunks(op_ctx, field_id);
+    }
+}
 }  // namespace milvus::segcore
