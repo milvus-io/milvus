@@ -76,13 +76,14 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      indexing)) {
+                                                      indexing,
+                                                      op_context)) {
         return;
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
-        auto iter =
-            CachedSearchIterator(indexing, dataset, search_conf, search_bitset);
+        auto iter = CachedSearchIterator(
+            indexing, dataset, search_conf, search_bitset, op_context);
         iter.NextBatch(search_conf, search_result);
         if (has_offset_mapping) {
             offset_mapping.TransformOffsets(search_result.seg_offsets_);
