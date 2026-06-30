@@ -23,12 +23,14 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage/aliyun"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage/gcp"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage/huawei"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage/tencent"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
@@ -151,6 +153,9 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Identify milvus as the client to S3-compatible backends.
+	// SetAppInfo appends and does not replace.
+	minIOClient.SetAppInfo("milvus", MilvusVersion())
 	var bucketExists bool
 	// check valid in first query
 	checkBucketFn := func() error {
@@ -357,6 +362,15 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 		return nil, err
 	}
 	return client, nil
+}
+
+// MilvusVersion returns the build-injected version, falling back to the
+// in-process version when it is not set.
+func MilvusVersion() string {
+	if v := os.Getenv(metricsinfo.GitBuildTagsEnvKey); v != "" && v != "unknown" {
+		return v
+	}
+	return common.Version.String()
 }
 
 func parseTLSMinVersion(v string) (uint16, error) {

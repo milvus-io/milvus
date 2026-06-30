@@ -28,6 +28,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -125,6 +126,9 @@ func newMinioClient(ctx context.Context, cfg config) (*minio.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Identify milvus as the client to S3-compatible backends.
+	// SetAppInfo appends and does not replace.
+	minioClient.SetAppInfo("milvus", objectstorage.MilvusVersion())
 
 	var bucketExists bool
 	// check valid in first query
