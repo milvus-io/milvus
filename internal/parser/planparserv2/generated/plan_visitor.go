@@ -13,6 +13,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Floating.
 	VisitFloating(ctx *FloatingContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TextMatchFuzzy.
+	VisitTextMatchFuzzy(ctx *TextMatchFuzzyContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#IsNotNull.
 	VisitIsNotNull(ctx *IsNotNullContext) interface{}
 
@@ -162,4 +165,7 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#textMatchOption.
 	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#textMatchFuzzyOption.
+	VisitTextMatchFuzzyOption(ctx *TextMatchFuzzyOptionContext) interface{}
 }

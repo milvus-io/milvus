@@ -23,6 +23,7 @@ expr:
 	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
 	| TEXTMATCH'('Identifier',' expr (',' textMatchOption)? ')'                                             # TextMatch
 	| PHRASEMATCH'('Identifier',' expr (',' expr)? ')'       			                                    # PhraseMatch
+	| TEXTMATCHFUZZY'('Identifier',' expr (',' textMatchFuzzyOption)? ')'                                     # TextMatchFuzzy
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
 	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
@@ -57,6 +58,9 @@ expr:
 textMatchOption:
 	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
 
+textMatchFuzzyOption:
+	MAX_EDIT_DISTANCE ASSIGN IntegerConstant;
+
 LBRACE: '{';
 RBRACE: '}';
 
@@ -71,6 +75,7 @@ LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
+TEXTMATCHFUZZY: 'text_match_fuzzy'|'TEXT_MATCH_FUZZY';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 MATCH_ALL: 'match_all' | 'MATCH_ALL';
 MATCH_ANY: 'match_any' | 'MATCH_ANY';
@@ -80,6 +85,7 @@ MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
+MAX_EDIT_DISTANCE: 'max_edit_distance' | 'MAX_EDIT_DISTANCE';
 THRESHOLD: 'threshold' | 'THRESHOLD';
 REGEXMATCH: '=~';
 REGEXNOTMATCH: '!~';

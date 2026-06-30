@@ -362,6 +362,11 @@ RustResult tantivy_match_query(void *ptr,
 
 RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slop, void *bitset);
 
+RustResult tantivy_fuzzy_match_query(void *ptr,
+                                     const char *query,
+                                     uintptr_t max_edit_distance,
+                                     void *bitset);
+
 RustResult tantivy_register_tokenizer(void *ptr,
                                       const char *tokenizer_name,
                                       const char *analyzer_params,

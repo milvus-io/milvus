@@ -1392,7 +1392,8 @@ template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
     if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
-        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
+        expr_->op_type_ == proto::plan::OpType::PhraseMatch ||
+        expr_->op_type_ == proto::plan::OpType::TextMatchFuzzy) {
         if (has_offset_input_) {
             ThrowInfo(
                 OpTypeInvalid,
@@ -1884,7 +1885,8 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     // TextMatch/PhraseMatch use a separate text index path (segment_->GetTextIndex()),
     // not the pinned_index_ scalar index path.
     if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
-        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
+        expr_->op_type_ == proto::plan::OpType::PhraseMatch ||
+        expr_->op_type_ == proto::plan::OpType::TextMatchFuzzy) {
         exec_path_ = ExprExecPath::TextIndex;
         return;
     }
@@ -2010,6 +2012,21 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             GetValueFromProto<int64_t>(expr_->extra_values_[0]));
     }
 
+    uint32_t max_edit_distance = 1;  // default value
+    if (op_type == proto::plan::OpType::TextMatchFuzzy &&
+        expr_->extra_values_.size() > 0) {
+        max_edit_distance = static_cast<uint32_t>(
+            GetValueFromProto<int64_t>(expr_->extra_values_[0]));
+        if (max_edit_distance > 2) {
+            throw SegcoreError(
+                ErrorCode::InvalidParameter,
+                fmt::format(
+                    "max_edit_distance {} is invalid in fuzzy match query. "
+                    "Should be within [0, 2].",
+                    max_edit_distance));
+        }
+    }
+
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -2029,6 +2046,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                     res = index->MatchQuery(query, min_should_match);
                 } else if (op_type == proto::plan::OpType::PhraseMatch) {
                     res = index->PhraseMatchQuery(query, slop);
+                } else if (op_type == proto::plan::OpType::TextMatchFuzzy) {
+                    res = index->FuzzyMatchQuery(query, max_edit_distance);
                 } else {
                     ThrowInfo(OpTypeInvalid,
                               "unsupported operator type for match query: {}",

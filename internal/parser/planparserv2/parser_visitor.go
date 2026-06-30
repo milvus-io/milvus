@@ -949,6 +949,98 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 	}
 }
 
+func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) interface{} {
+	identifier := ctx.Identifier().GetText()
+	column, err := v.translateIdentifierWithText(identifier, true)
+	if err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(column)
+	if !typeutil.IsStringType(column.dataType) {
+		return merr.WrapErrQueryPlanMsg("text match fuzzy operation on non-string is unsupported")
+	}
+	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
+		return merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
+	}
+
+	queryText, placeholder, isTemplate, err := v.parseStringLiteralOrTemplate(ctx.Expr(), "text_match_fuzzy query")
+	if err != nil {
+		return err
+	}
+	var value *planpb.GenericValue
+	if !isTemplate {
+		value = NewString(queryText)
+	}
+
+	// Handle optional max_edit_distance parameter
+	var extraValues []*planpb.GenericValue
+	if ctx.TextMatchFuzzyOption() != nil {
+		maxEditDistanceExpr := ctx.TextMatchFuzzyOption().Accept(v)
+		if err, ok := maxEditDistanceExpr.(error); ok {
+			return err
+		}
+		extraVal, err := validateAndExtractMaxEditDistance(maxEditDistanceExpr)
+		if err != nil {
+			return err
+		}
+		extraValues = extraVal
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo:           columnInfo,
+					Op:                   planpb.OpType_TextMatchFuzzy,
+					Value:                value,
+					TemplateVariableName: placeholder,
+					ExtraValues:          extraValues,
+				},
+			},
+			IsTemplate: isTemplate,
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitTextMatchFuzzyOption(ctx *parser.TextMatchFuzzyOptionContext) interface{} {
+	// Parse the integer constant for max_edit_distance
+	integerConstant := ctx.IntegerConstant().GetText()
+	value, err := strconv.ParseInt(integerConstant, 0, 64)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid max_edit_distance value: %s", integerConstant)
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(value),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Int64,
+	}
+}
+
+func validateAndExtractMaxEditDistance(maxEditDistanceExpr interface{}) ([]*planpb.GenericValue, error) {
+	if maxEditDistanceValue, ok := maxEditDistanceExpr.(*ExprWithType); ok {
+		valueExpr := getValueExpr(maxEditDistanceValue)
+		if valueExpr == nil || valueExpr.GetValue() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("max_edit_distance should be a const integer expression")
+		}
+		maxEditDistance := valueExpr.GetValue().GetInt64Val()
+		if maxEditDistance < 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("max_edit_distance should be >= 0, got %d", maxEditDistance)
+		}
+		if maxEditDistance > 2 {
+			return nil, merr.WrapErrParameterInvalidMsg("max_edit_distance should be <= 2, got %d", maxEditDistance)
+		}
+		return []*planpb.GenericValue{NewInt(maxEditDistance)}, nil
+	}
+	return nil, nil
+}
+
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
 	identifier := ctx.Identifier().GetText()
 	column, err := v.translateIdentifierWithText(identifier, true)

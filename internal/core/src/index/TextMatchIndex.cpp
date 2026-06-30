@@ -407,4 +407,19 @@ TextMatchIndex::PhraseMatchQuery(const std::string& query, uint32_t slop) {
     return bitset;
 }
 
+TargetBitmap
+TextMatchIndex::FuzzyMatchQuery(const std::string& query,
+                                uint32_t max_edit_distance) {
+    tracer::AutoSpan span("TextMatchIndex::FuzzyMatchQuery",
+                          tracer::GetRootSpan());
+    if (shouldTriggerCommit()) {
+        Commit();
+        Reload();
+    }
+
+    TargetBitmap bitset{static_cast<size_t>(Count())};
+    wrapper_->fuzzy_match_query(query, max_edit_distance, &bitset);
+    return bitset;
+}
+
 }  // namespace milvus::index

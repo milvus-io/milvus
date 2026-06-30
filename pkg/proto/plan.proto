@@ -23,6 +23,7 @@ enum OpType {
   PhraseMatch = 14; // phrase match
   InnerMatch = 15; // substring (e.g., "%value%")
   RegexMatch = 16; // regex substring match (e.g., =~ "pattern")
+  TextMatchFuzzy = 17; // fuzzy text match (edit distance)
 };
 
 enum ArithOpType {

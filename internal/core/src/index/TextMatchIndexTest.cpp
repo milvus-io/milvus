@@ -1901,3 +1901,71 @@ TEST(TextMatch, ExprResCacheFilterBitsIncludesEntityTTLPhysicalTime) {
     mgr.Clear();
     ExprResCacheManager::SetEnabled(false);
 }
+
+TEST(TextMatch, FuzzyMatch) {
+    using Index = index::TextMatchIndex;
+    auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                         "unique_id",
+                                         "milvus_tokenizer",
+                                         "{}");
+    index->CreateReader(milvus::index::SetBitsetSealed);
+    // Row 0: contains "allergy" — typo-tolerant match target
+    index->AddTextSealed("allergy", true, 0);
+    // Row 1: null row — should never match
+    index->AddTextSealed("", false, 1);
+    // Row 2: contains "allergy" and "reaction" — multi-term fuzzy target
+    index->AddTextSealed("allergy reaction", true, 2);
+    index->Commit();
+    index->Reload();
+
+    // FuzzyMatchQuery with distance 1 catches the typo "alergy" → "allergy"
+    {
+        auto res = index->FuzzyMatchQuery("alergy", 1);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_TRUE(res[0]);
+        ASSERT_FALSE(res[1]);  // null row
+        ASSERT_TRUE(res[2]);
+
+        // Same query with exact text_match does NOT match
+        auto exact = index->MatchQuery("alergy", 1);
+        ASSERT_FALSE(exact[0]);
+        ASSERT_FALSE(exact[1]);
+        ASSERT_FALSE(exact[2]);
+    }
+
+    // Distance 0 means exact match only
+    {
+        auto res = index->FuzzyMatchQuery("alergy", 0);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_FALSE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_FALSE(res[2]);
+    }
+
+    // Exact query matches with fuzzy distance 0
+    {
+        auto res = index->FuzzyMatchQuery("allergy", 0);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_TRUE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_TRUE(res[2]);
+    }
+
+    // Query with no matching terms at distance 1
+    {
+        auto res = index->FuzzyMatchQuery("xyzabc", 1);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_FALSE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_FALSE(res[2]);
+    }
+
+    // Multi-token fuzzy: each token gets its own FuzzyTermQuery, OR'd together
+    {
+        auto res = index->FuzzyMatchQuery("alergy rx", 1);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_TRUE(res[0]);   // "alergy" matches "allergy"
+        ASSERT_FALSE(res[1]);  // null
+        ASSERT_TRUE(res[2]);   // both "alergy"→"allergy" and "rx"→"reaction"
+    }
+}

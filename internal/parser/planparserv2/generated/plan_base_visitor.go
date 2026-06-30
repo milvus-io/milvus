@@ -15,6 +15,10 @@ func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTextMatchFuzzy(ctx *TextMatchFuzzyContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitIsNotNull(ctx *IsNotNullContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -212,5 +216,9 @@ func (v *BasePlanVisitor) VisitPower(ctx *PowerContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitTextMatchOption(ctx *TextMatchOptionContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTextMatchFuzzyOption(ctx *TextMatchFuzzyOptionContext) interface{} {
 	return v.VisitChildren(ctx)
 }

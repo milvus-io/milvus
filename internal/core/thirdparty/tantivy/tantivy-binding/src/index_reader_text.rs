@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 
 use tantivy::{
-    query::{BooleanQuery, PhraseQuery},
+    query::{BooleanQuery, FuzzyTermQuery, PhraseQuery},
     tokenizer::{TextAnalyzer, TokenStream},
     Term,
 };
@@ -98,6 +98,38 @@ impl IndexReaderWrapper {
         let terms_with_offset: Vec<_> = positions.into_iter().zip(terms.into_iter()).collect();
         let phrase_query = PhraseQuery::new_with_offset_and_slop(terms_with_offset, slop);
         self.search(&phrase_query, bitset)
+    }
+
+    // split the query string into multiple tokens using index's default tokenizer,
+    // and execute the disjunction of FuzzyTermQuery for each token.
+    pub(crate) fn fuzzy_match_query(
+        &self,
+        q: &str,
+        distance: u8,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        // clone the tokenizer to make `fuzzy_match_query` thread-safe.
+        let mut tokenizer = self
+            .index
+            .tokenizer_for_field(self.field)
+            .unwrap_or(standard_analyzer(vec![]))
+            .clone();
+        let mut token_stream = tokenizer.token_stream(q);
+        let mut terms: Vec<Term> = Vec::new();
+        while token_stream.advance() {
+            let token = token_stream.token();
+            terms.push(Term::from_field_text(self.field, &token.text));
+        }
+        use tantivy::query::Occur;
+        let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+        for term in terms.into_iter() {
+            subqueries.push((
+                Occur::Should,
+                Box::new(FuzzyTermQuery::new(term, distance, true)),
+            ));
+        }
+        let query = BooleanQuery::new(subqueries);
+        self.search(&query, bitset)
     }
 
     pub(crate) fn register_tokenizer(&self, tokenizer_name: String, tokenizer: TextAnalyzer) {
