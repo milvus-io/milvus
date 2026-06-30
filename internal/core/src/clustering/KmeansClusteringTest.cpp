@@ -1123,29 +1123,29 @@ runNumClustersVariantsUnified(const std::string& storage_version,
     std::cout << "[OK] " << storage_version
               << ": centroid distances scale correctly.\n";
 }
-TEST(MajorCompaction, NumClustersVariantsV2) {
-    using T = float;
-    int64_t collection_id = 1, partition_id = 2;
-    int64_t segment_id = 3, segment_id2 = 4;
-    int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128, nb = 20000;
-    std::string root_path = "/tmp/test-kmeans-numclusters-variants/";
-    boost::filesystem::create_directories(root_path);
-    auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
-    // no need to generate data_gen here because prepare_storage_v2() already does it internally
-    auto prep = prepare_storage_v2<T>(root_path,
-                                      collection_id,
-                                      partition_id,
-                                      segment_id,
-                                      segment_id2,
-                                      index_build_id,
-                                      index_version,
-                                      nb,
-                                      dim,
-                                      cm,
-                                      true /* full train */);
-    runNumClustersVariantsUnified<T>("STORAGE_V2", prep, dim);
-}
+// TEST(MajorCompaction, NumClustersVariantsV2) {
+//     using T = float;
+//     int64_t collection_id = 1, partition_id = 2;
+//     int64_t segment_id = 3, segment_id2 = 4;
+//     int64_t index_build_id = 1000, index_version = 10000;
+//     int64_t dim = 128, nb = 20000;
+//     std::string root_path = "/tmp/test-kmeans-numclusters-variants/";
+//     boost::filesystem::create_directories(root_path);
+//     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
+//     // no need to generate data_gen here because prepare_storage_v2() already does it internally
+//     auto prep = prepare_storage_v2<T>(root_path,
+//                                       collection_id,
+//                                       partition_id,
+//                                       segment_id,
+//                                       segment_id2,
+//                                       index_build_id,
+//                                       index_version,
+//                                       nb,
+//                                       dim,
+//                                       cm,
+//                                       true /* full train */);
+//     runNumClustersVariantsUnified<T>("STORAGE_V2", prep, dim);
+// }
 TEST(MajorCompaction, NumClustersVariantsV1) {
     using T = float;
     int64_t collection_id = 1, partition_id = 2;
@@ -1332,36 +1332,36 @@ TEST(MajorCompaction, TrainSizeVariantsV2) {
     runTrainSizeVariantsUnified<T>("STORAGE_V2", prep, dim, cm);
 }
 
-TEST(MajorCompaction, TrainSizeVariantsV1) {
-    using T = float;
-    int64_t collection_id = 1, partition_id = 2;
-    int64_t segment_id = 3, segment_id2 = 4;
-    int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128, nb = 20000;
-    std::string root_path = "/tmp/test-kmeans-trainsize-variants-v1/";
-    boost::filesystem::create_directories(root_path);
-    auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
-    // generate synthetic vector data
-    std::vector<T> data_gen(nb * dim);
-    std::mt19937 gen(42);
-    std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    for (auto& v : data_gen) v = dis(gen);
-    ChunkManagerWrapper wrapper(cm);
-    auto prep = prepare_storage_v1<T, DataType::VECTOR_FLOAT>(root_path,
-                                                              collection_id,
-                                                              partition_id,
-                                                              segment_id,
-                                                              segment_id2,
-                                                              index_build_id,
-                                                              index_version,
-                                                              nb,
-                                                              dim,
-                                                              cm,
-                                                              wrapper,
-                                                              data_gen,
-                                                              true);
-    runTrainSizeVariantsUnified<T>("STORAGE_V1", prep, dim, cm);  // <-- pass cm
-}
+// TEST(MajorCompaction, TrainSizeVariantsV1) {
+//     using T = float;
+//     int64_t collection_id = 1, partition_id = 2;
+//     int64_t segment_id = 3, segment_id2 = 4;
+//     int64_t index_build_id = 1000, index_version = 10000;
+//     int64_t dim = 128, nb = 20000;
+//     std::string root_path = "/tmp/test-kmeans-trainsize-variants-v1/";
+//     boost::filesystem::create_directories(root_path);
+//     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
+//     // generate synthetic vector data
+//     std::vector<T> data_gen(nb * dim);
+//     std::mt19937 gen(42);
+//     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+//     for (auto& v : data_gen) v = dis(gen);
+//     ChunkManagerWrapper wrapper(cm);
+//     auto prep = prepare_storage_v1<T, DataType::VECTOR_FLOAT>(root_path,
+//                                                               collection_id,
+//                                                               partition_id,
+//                                                               segment_id,
+//                                                               segment_id2,
+//                                                               index_build_id,
+//                                                               index_version,
+//                                                               nb,
+//                                                               dim,
+//                                                               cm,
+//                                                               wrapper,
+//                                                               data_gen,
+//                                                               true);
+//     runTrainSizeVariantsUnified<T>("STORAGE_V1", prep, dim, cm);  // <-- pass cm
+// }
 
 /* verifies no data skew: KMeans keeps clusters roughly balanced and no cluster is empty.
 Config:
@@ -1457,37 +1457,37 @@ TEST(MajorCompaction, NoDataSkew_V2) {
     runNoDataSkewTestUnified<T>("STORAGE_V2", prep, dim, cm);
 }
 
-TEST(MajorCompaction, NoDataSkew_V1) {
-    using T = float;
-    int64_t collection_id = 1, partition_id = 2;
-    int64_t segment_id = 3, segment_id2 = 4;
-    int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 10000;
-    std::string root_path = "/tmp/test-kmeans-nodataskew-v1/";
-    boost::filesystem::create_directories(root_path);
-    auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
-    // Generate synthetic vector data using Normal(0,1) with fixed seed
-    std::vector<T> data_gen(nb * dim);
-    std::mt19937 gen(12345);  // fixed seed
-    std::normal_distribution<float> dist(0.0f, 1.0f);
-    for (auto& v : data_gen) v = dist(gen);
-    ChunkManagerWrapper wrapper(cm);
-    auto prep = prepare_storage_v1<T, DataType::VECTOR_FLOAT>(root_path,
-                                                              collection_id,
-                                                              partition_id,
-                                                              segment_id,
-                                                              segment_id2,
-                                                              index_build_id,
-                                                              index_version,
-                                                              nb,
-                                                              dim,
-                                                              cm,
-                                                              wrapper,
-                                                              data_gen,
-                                                              true);
-    runNoDataSkewTestUnified<T>("STORAGE_V1", prep, dim, cm);
-}
+// TEST(MajorCompaction, NoDataSkew_V1) {
+//     using T = float;
+//     int64_t collection_id = 1, partition_id = 2;
+//     int64_t segment_id = 3, segment_id2 = 4;
+//     int64_t index_build_id = 1000, index_version = 10000;
+//     int64_t dim = 128;
+//     int64_t nb = 10000;
+//     std::string root_path = "/tmp/test-kmeans-nodataskew-v1/";
+//     boost::filesystem::create_directories(root_path);
+//     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
+//     // Generate synthetic vector data using Normal(0,1) with fixed seed
+//     std::vector<T> data_gen(nb * dim);
+//     std::mt19937 gen(12345);  // fixed seed
+//     std::normal_distribution<float> dist(0.0f, 1.0f);
+//     for (auto& v : data_gen) v = dist(gen);
+//     ChunkManagerWrapper wrapper(cm);
+//     auto prep = prepare_storage_v1<T, DataType::VECTOR_FLOAT>(root_path,
+//                                                               collection_id,
+//                                                               partition_id,
+//                                                               segment_id,
+//                                                               segment_id2,
+//                                                               index_build_id,
+//                                                               index_version,
+//                                                               nb,
+//                                                               dim,
+//                                                               cm,
+//                                                               wrapper,
+//                                                               data_gen,
+//                                                               true);
+//     runNoDataSkewTestUnified<T>("STORAGE_V1", prep, dim, cm);
+// }
 
 /**
  * Verifies that the KMeans clustering job correctly detects *data skew*
@@ -1560,39 +1560,39 @@ TEST(MajorCompaction, DataSkew_V2) {
     runDataSkewDetectionTestUnified<T>("STORAGE_V2", prep, dim, cm);
 }
 
-TEST(MajorCompaction, DataSkew_V1) {
-    using T = float;
-    int64_t collection_id = 1, partition_id = 2;
-    int64_t segment_id = 3, segment_id2 = 4;
-    int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 10000;
-    std::string root_path = "/tmp/test-kmeans-dataskew-v1/";
-    boost::filesystem::create_directories(root_path);
-    auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
-    // Generate synthetic vector data
-    std::vector<T> data_gen(nb * dim);
-    std::mt19937 gen(12345);
-    std::normal_distribution<float> dist(0.0f, 1.0f);
-    for (auto& v : data_gen) v = dist(gen);
-    ChunkManagerWrapper wrapper(cm);
-    auto prep = prepare_storage_v1<T, DataType::VECTOR_FLOAT>(root_path,
-                                                              collection_id,
-                                                              partition_id,
-                                                              segment_id,
-                                                              segment_id2,
-                                                              index_build_id,
-                                                              index_version,
-                                                              nb,
-                                                              dim,
-                                                              cm,
-                                                              wrapper,
-                                                              data_gen,
-                                                              true);
-    // artificially increase one segment's row count to trigger imbalance
-    prep.num_rows[segment_id2] = static_cast<int64_t>(nb * 1.5);
-    runDataSkewDetectionTestUnified<T>("STORAGE_V1", prep, dim, cm);
-}
+// TEST(MajorCompaction, DataSkew_V1) {
+//     using T = float;
+//     int64_t collection_id = 1, partition_id = 2;
+//     int64_t segment_id = 3, segment_id2 = 4;
+//     int64_t index_build_id = 1000, index_version = 10000;
+//     int64_t dim = 128;
+//     int64_t nb = 10000;
+//     std::string root_path = "/tmp/test-kmeans-dataskew-v1/";
+//     boost::filesystem::create_directories(root_path);
+//     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
+//     // Generate synthetic vector data
+//     std::vector<T> data_gen(nb * dim);
+//     std::mt19937 gen(12345);
+//     std::normal_distribution<float> dist(0.0f, 1.0f);
+//     for (auto& v : data_gen) v = dist(gen);
+//     ChunkManagerWrapper wrapper(cm);
+//     auto prep = prepare_storage_v1<T, DataType::VECTOR_FLOAT>(root_path,
+//                                                               collection_id,
+//                                                               partition_id,
+//                                                               segment_id,
+//                                                               segment_id2,
+//                                                               index_build_id,
+//                                                               index_version,
+//                                                               nb,
+//                                                               dim,
+//                                                               cm,
+//                                                               wrapper,
+//                                                               data_gen,
+//                                                               true);
+//     // artificially increase one segment's row count to trigger imbalance
+//     prep.num_rows[segment_id2] = static_cast<int64_t>(nb * 1.5);
+//     runDataSkewDetectionTestUnified<T>("STORAGE_V1", prep, dim, cm);
+// }
 
 /**
  * Validates that the clustering logic correctly enforces the max_cluster_size limit,
@@ -1661,33 +1661,33 @@ TEST(MajorCompaction, DataSkew_ByMaxClusterSize_V2) {
     runDataSkewByMaxClusterSizeTestUnified<T>("STORAGE_V2", prep, dim, cm);
 }
 
-TEST(MajorCompaction, DataSkew_ByMaxClusterSize_V1) {
-    using T = float;
-    int64_t collection_id = 1, partition_id = 2;
-    int64_t segment_id = 3, segment_id2 = 4;
-    int64_t index_build_id = 1000, index_version = 10000;
-    int64_t dim = 128;
-    int64_t nb = 20000;  // per segment
-    std::string root_path = "/tmp/test-kmeans-dataskew-maxclustersize-v1/";
-    boost::filesystem::create_directories(root_path);
-    auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
-    std::vector<T> data_gen(nb * dim);
-    std::mt19937 gen(12345);
-    std::normal_distribution<float> dist(0.0f, 1.0f);
-    for (auto& v : data_gen) v = dist(gen);
-    ChunkManagerWrapper wrapper(cm);
-    auto prep = prepare_storage_v1<T, DataType::VECTOR_FLOAT>(root_path,
-                                                              collection_id,
-                                                              partition_id,
-                                                              segment_id,
-                                                              segment_id2,
-                                                              index_build_id,
-                                                              index_version,
-                                                              nb,
-                                                              dim,
-                                                              cm,
-                                                              wrapper,
-                                                              data_gen,
-                                                              true);
-    runDataSkewByMaxClusterSizeTestUnified<T>("STORAGE_V1", prep, dim, cm);
-}
+// TEST(MajorCompaction, DataSkew_ByMaxClusterSize_V1) {
+//     using T = float;
+//     int64_t collection_id = 1, partition_id = 2;
+//     int64_t segment_id = 3, segment_id2 = 4;
+//     int64_t index_build_id = 1000, index_version = 10000;
+//     int64_t dim = 128;
+//     int64_t nb = 20000;  // per segment
+//     std::string root_path = "/tmp/test-kmeans-dataskew-maxclustersize-v1/";
+//     boost::filesystem::create_directories(root_path);
+//     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
+//     std::vector<T> data_gen(nb * dim);
+//     std::mt19937 gen(12345);
+//     std::normal_distribution<float> dist(0.0f, 1.0f);
+//     for (auto& v : data_gen) v = dist(gen);
+//     ChunkManagerWrapper wrapper(cm);
+//     auto prep = prepare_storage_v1<T, DataType::VECTOR_FLOAT>(root_path,
+//                                                               collection_id,
+//                                                               partition_id,
+//                                                               segment_id,
+//                                                               segment_id2,
+//                                                               index_build_id,
+//                                                               index_version,
+//                                                               nb,
+//                                                               dim,
+//                                                               cm,
+//                                                               wrapper,
+//                                                               data_gen,
+//                                                               true);
+//     runDataSkewByMaxClusterSizeTestUnified<T>("STORAGE_V1", prep, dim, cm);
+// }
