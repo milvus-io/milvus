@@ -529,6 +529,9 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 	})
 
 	t.Run("return error when field binlogs present but segment schema version still behind", func(t *testing.T) {
+		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+			5: {CollectionID: collID, FieldID: 102, IndexID: 5, IndexName: "bm25_idx", MinSchemaVersion: 2},
+		}
 		// Segment with SchemaVersion=1 (behind index.MinSchemaVersion=2) BUT field 102
 		// already exists in binlogs. This is a transient inconsistency window: backfill
 		// has written the field data but the metadata-update tick has not yet bumped
@@ -557,6 +560,9 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 	})
 
 	t.Run("create index normally when MinSchemaVersion matches", func(t *testing.T) {
+		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+			5: {CollectionID: collID, FieldID: 102, IndexID: 5, IndexName: "bm25_idx", MinSchemaVersion: 2},
+		}
 		// Segment with SchemaVersion=2, matches MinSchemaVersion — should proceed normally
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
