@@ -1,30 +1,10 @@
 name: Mac Code Checker
 
-# This workflow is triggered on pushes or pull request to the repository.
+# This workflow is triggered on master pushes, schedule, or manual dispatch.
 on:
   push:
     branches:
       - master
-  pull_request:
-    # file paths to consider in the event. Optional; defaults to all.
-    paths:
-      - 'scripts/**'
-      - 'internal/**'
-      - 'pkg/**'
-      - 'client/**'
-      - 'cmd/**'
-      - 'build/**'
-      - 'tests/integration/**'
-      - 'tests/go_client/**'
-      - '.github/workflows/mac.yaml'
-      - '.env'
-      - docker-compose.yml
-      - Makefile
-      - '!**.md'
-      - '!build/ci/jenkins/**'
-      # FIXME(wxyu): not need to run code check, update the ci-passed rules and remove these two lines
-      - go.mod
-      - go.sum
   schedule:
     # Runs at 17:00 UTC every day, for refreshing cache every day
     - cron: '0 17 * * *'
@@ -37,8 +17,8 @@ on:
         type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.inputs.branch || github.sha }}
+  cancel-in-progress: false
 
 jobs:
   mac:
