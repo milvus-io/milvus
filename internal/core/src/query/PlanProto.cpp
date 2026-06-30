@@ -1000,7 +1000,9 @@ ProtoParser::ParseElementFilterExprs(
 
 expr::TypedExprPtr
 ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
-    auto struct_name = expr_pb.struct_name();
+    // field_name carries the struct/scalar array field name (the old struct_name);
+    // for struct and scalar arrays it still drives name-based field resolution.
+    auto struct_name = expr_pb.column().field_name();
     auto match_type = expr_pb.match_type();
     auto count = expr_pb.count();
     auto predicate = this->ParseExprs(expr_pb.predicate());

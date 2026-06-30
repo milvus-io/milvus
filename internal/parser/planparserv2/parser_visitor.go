@@ -3061,15 +3061,32 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
 	}
 
+	// Build the target locator. Scalar array and struct array are distinguished
+	// by data_type so the executor can dispatch without re-deriving from the name;
+	// field_name is always carried for name-based resolution and observability.
+	column := &planpb.MatchColumnInfo{
+		FieldName: structArrayFieldName,
+	}
+	if isStruct {
+		column.DataType = schemapb.DataType_ArrayOfStruct
+		if structField := v.schema.GetStructArrayFieldFromName(structArrayFieldName); structField != nil {
+			column.FieldId = structField.GetFieldID()
+		}
+	} else {
+		column.FieldId = scalarArrayField.GetFieldID()
+		column.DataType = schemapb.DataType_Array
+		column.ElementType = scalarArrayField.GetElementType()
+	}
+
 	// Build MatchExpr proto
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_MatchExpr{
 				MatchExpr: &planpb.MatchExpr{
-					StructName: structArrayFieldName,
-					Predicate:  predicateExpr.expr,
-					MatchType:  matchType,
-					Count:      count,
+					Column:    column,
+					Predicate: predicateExpr.expr,
+					MatchType: matchType,
+					Count:     count,
 				},
 			},
 		},
