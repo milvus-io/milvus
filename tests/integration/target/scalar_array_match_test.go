@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -167,7 +166,7 @@ func (s *ScalarArrayMatchSuite) setupCollection(ctx context.Context, collectionN
 	})
 	err = merr.CheckRPCCall(createCollectionStatus, err)
 	s.NoError(err)
-	mlog.Info(ctx, "CreateCollection done", zap.String("collection", collectionName))
+	mlog.Info(ctx, "CreateCollection done", mlog.String("collection", collectionName))
 
 	// insert known rows
 	pkColumn := newExplicitInt64PKFieldData(integration.Int64Field, rowNum)
@@ -238,7 +237,7 @@ func (s *ScalarArrayMatchSuite) setupCollection(ctx context.Context, collectionN
 	err = merr.CheckRPCCall(loadStatus, err)
 	s.NoError(err)
 	s.WaitForLoad(ctx, collectionName)
-	mlog.Info(ctx, "setupCollection done", zap.Bool("withScalarIndex", withScalarIndex))
+	mlog.Info(ctx, "setupCollection done", mlog.Bool("withScalarIndex", withScalarIndex))
 }
 
 // queryPKs runs a Query with the given expr and returns the matched Int64 primary keys (sorted).
