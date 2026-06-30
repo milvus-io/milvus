@@ -143,6 +143,9 @@ TEST(Growing, RealCount) {
 TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
+    constexpr int64_t dim = 4;
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
 
     std::map<std::string, std::string> analyzer_params;
     auto text = schema->AddDebugVarcharField(FieldName("text"),
@@ -160,7 +163,8 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
                          .string();
     std::filesystem::remove_all(base_path);
     milvus::test::V3SegmentTestData test_data(
-        schema, 2, 3, 1, TestLocalPath, base_path);
+        schema, 2, 3, dim, TestLocalPath, base_path);
+    ASSERT_EQ(test_data.NumColumnGroups(), 2);
 
     constexpr int64_t checkpoint_rows = 4;
     milvus::proto::segcore::SegmentLoadInfo load_info;
@@ -184,6 +188,7 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     std::vector<Timestamp> timestamps = {100};
     std::vector<int64_t> pks = {100000};
     std::vector<std::string> texts = {"text after recovery checkpoint"};
+    std::vector<float> vectors(dim, 1.0F);
 
     auto insert_data = std::make_unique<InsertRecordProto>();
     insert_data->set_num_rows(1);
@@ -191,6 +196,9 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
         CreateDataArrayFrom(pks.data(), nullptr, 1, (*schema)[pk]).release());
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(texts.data(), nullptr, 1, (*schema)[text])
+            .release());
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(vectors.data(), nullptr, 1, (*schema)[vec])
             .release());
 
     auto offset = segment->PreInsert(1);
