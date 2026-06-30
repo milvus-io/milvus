@@ -178,6 +178,27 @@ func TestStartSpanForMessage_AddsBroadcastAttributes(t *testing.T) {
 	assertSpanStringSliceAttribute(t, spans[0].Attributes, spanAttrBroadcastVChannels, []string{"v1", "v2"})
 }
 
+func TestStartSpanForMessage_SkipsAttributesWhenNotRecording(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.NeverSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	msg := CreateTestEmptyInsertMesage(1, nil)
+	msg.Properties().ToRawMap()[messageTimeTick] = "dirty-timetick"
+
+	assert.NotPanics(t, func() {
+		_, span := StartSpanForMessage(context.Background(), msg, SpanNameWALAppend)
+		assert.False(t, span.IsRecording())
+		span.End()
+	})
+	assert.Empty(t, exporter.GetSpans())
+}
+
 func TestImmutableTxnMessageBuildCopiesCommitTraceContext(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(

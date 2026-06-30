@@ -45,6 +45,15 @@ func StartSpanForMessage(ctx context.Context, msg BasicMessage, spanName string)
 	if !shouldTraceMessage(msg) {
 		return ctx, noopSpan
 	}
+	ctx, span := otel.Tracer(tracerName).Start(ctx, spanName)
+	if !span.IsRecording() {
+		return ctx, span
+	}
+	span.SetAttributes(buildMessageSpanAttributes(msg)...)
+	return ctx, span
+}
+
+func buildMessageSpanAttributes(msg BasicMessage) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		attribute.String(spanAttrMessageType, msg.MessageType().String()),
 		attribute.String(spanAttrVChannel, getVChannel(msg)),
@@ -62,7 +71,7 @@ func StartSpanForMessage(ctx context.Context, msg BasicMessage, spanName string)
 			attribute.StringSlice(spanAttrBroadcastVChannels, broadcastHeader.VChannels),
 		)
 	}
-	return otel.Tracer(tracerName).Start(ctx, spanName, trace.WithAttributes(attrs...))
+	return attrs
 }
 
 func shouldTraceMessage(msg BasicMessage) bool {
