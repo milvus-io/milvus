@@ -1398,10 +1398,22 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
     FieldId field_id,
     const std::vector<int64_t>& chunk_ids) const {
     std::shared_lock lck(mutex_);
-    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+    // AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+    //            "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
         column->PrefetchChunks(op_ctx, chunk_ids);
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
+                                          FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    if (auto column = get_column(field_id)) {
+        auto num_chunks = column->num_chunks();
+        std::vector<int64_t> ids(num_chunks);
+        std::iota(ids.begin(), ids.end(), 0);
+        column->PrefetchChunks(op_ctx, ids);
     }
 }
 
@@ -6779,4 +6791,17 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     return true;
 }
 
+void
+ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
+                                          FieldId field_id) const {
+    auto is_ready = this->vector_indexings_.is_ready(field_id);
+    if (is_ready) {
+        auto field_indexing =
+            this->vector_indexings_.get_field_indexing(field_id);
+        auto cache_index = field_indexing->indexing_;
+        SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
+    } else {
+        this->prefetch_chunks(op_ctx, field_id);
+    }
+}
 }  // namespace milvus::segcore

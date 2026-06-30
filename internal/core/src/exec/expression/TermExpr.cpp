@@ -32,6 +32,7 @@
 #include "common/bson_view.h"
 #include "common/type_c.h"
 #include "common/ScopedTimer.h"
+#include "exec/expression/Element.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Utils.h"
 #include "folly/FBVector.h"
@@ -56,6 +57,7 @@ namespace exec {
 
 void
 PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    WaitPrefetch();
     tracer::AutoSpan span(
         "PhyTermFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
@@ -1225,6 +1227,77 @@ PhyTermFilterExpr::DetermineExecPath() {
     if (data_type == DataType::ARRAY) {
         exec_path_ = ExprExecPath::RawData;
     }
+}
+
+void
+PhyTermFilterExpr::PrefetchRawData() {
+    auto datatype = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        datatype = expr_->column_.element_type_;
+    }
+
+    switch (datatype) {
+        case DataType::BOOL:
+            PrefetchRawData<bool>();
+            break;
+        case DataType::INT8:
+            PrefetchRawData<int8_t>();
+            break;
+        case DataType::INT16:
+            PrefetchRawData<int16_t>();
+            break;
+        case DataType::INT32:
+            PrefetchRawData<int32_t>();
+            break;
+        case DataType::INT64:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::TIMESTAMPTZ:
+            PrefetchRawData<int64_t>();
+            break;
+        case DataType::FLOAT:
+            PrefetchRawData<float>();
+            break;
+        case DataType::DOUBLE:
+            PrefetchRawData<double>();
+            break;
+        case DataType::VARCHAR:
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                PrefetchRawData<std::string>();
+            } else {
+                PrefetchRawData<std::string_view>();
+            }
+            break;
+        default:
+            SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
+            break;
+    }
+}
+
+template <typename T>
+void
+PhyTermFilterExpr::PrefetchRawData() {
+    auto& skip_index = segment_->GetSkipIndex();
+
+    std::vector<T> elements;
+    elements.reserve(expr_->vals_.size());
+    for (const auto& val : expr_->vals_) {
+        auto e = GetValueWithCastNumber<T>(val);
+        elements.push_back(e);
+    }
+
+    std::vector<int64_t> chunks_may_hit;
+    for (size_t i = 0; i < num_data_chunk_; ++i) {
+        auto skip = skip_index.CanSkipInQuery(field_id_, i, elements);
+        if (!skip) {
+            chunks_may_hit.push_back(i);
+        }
+    }
+
+    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
 }
 
 }  //namespace exec

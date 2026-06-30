@@ -20,6 +20,8 @@
 #include <bit>
 #include <chrono>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <type_traits>
 
@@ -117,7 +119,7 @@ ApplyValidMask(const bool* valid_data,
     }
 }
 
-class Expr {
+class Expr : public std::enable_shared_from_this<Expr> {
  public:
     Expr(DataType type,
          const std::vector<std::shared_ptr<Expr>>&& inputs,
@@ -201,6 +203,21 @@ class Expr {
     std::vector<std::shared_ptr<Expr>>&
     GetInputsRef() {
         return inputs_;
+    }
+
+    virtual void
+    PrefetchAsync(
+        const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
+        for (const auto& input : inputs_) {
+            input->PrefetchAsync(prefetch_pool);
+        }
+    }
+
+    virtual void
+    WaitPrefetch() {
+        for (const auto& input : inputs_) {
+            input->WaitPrefetch();
+        }
     }
 
  protected:
@@ -2124,7 +2141,7 @@ class SegmentExpr : public Expr {
 
  protected:
     // Check if a compatible scalar index exists for this expression.
-    // Only called internally by DetermineExecPath() and CanUseNestedIndex().
+    // Only called internally by DetermineExecPath().
     bool
     HasCompatibleScalarIndex() const {
         // Queries segment metadata directly -- no pin required, so short-
@@ -2208,7 +2225,8 @@ class SegmentExpr : public Expr {
  public:
     bool
     CanUseNestedIndex() const override {
-        if (!HasCompatibleScalarIndex() || pinned_index_.empty()) {
+        EnsureExecPathDetermined();
+        if (exec_path_ != ExprExecPath::ScalarIndex || pinned_index_.empty()) {
             return false;
         }
         auto* index_ptr = pinned_index_[0].get();
@@ -2269,8 +2287,8 @@ class SegmentExpr : public Expr {
         return false;
     }
 
-    // Determine at init time whether this expression can use JsonStats.
-    // All conditions are available at construction time.
+    // Check whether this expression can use JsonStats without pinning.
+    // All conditions are available before execution path determination.
     bool
     CanUseJsonStatsAtInit() const {
         return plan_options_.expr_use_json_stats && HasJsonStats(field_id_) &&
@@ -2285,6 +2303,7 @@ class SegmentExpr : public Expr {
     // check if this expression can be executed all at once without batch iteration.
     bool
     CanExecuteAllAtOnce() const override {
+        EnsureExecPathDetermined();
         return exec_path_ != ExprExecPath::RawData;
     }
 
@@ -2299,11 +2318,20 @@ class SegmentExpr : public Expr {
     // and JsonStats cache full results and slice via data cursor.
     bool
     UseIndexCursor() const {
+        EnsureExecPathDetermined();
         return exec_path_ == ExprExecPath::ScalarIndex;
     }
 
+    void
+    EnsureExecPathDetermined() const {
+        std::call_once(determine_exec_path_once_, [this]() {
+            const_cast<SegmentExpr*>(this)->DetermineExecPath();
+        });
+    }
+
     // Determine the execution path for this expression.
-    // Called during initialization by subclass constructors.
+    // Called from PrefetchAsync() on the prefetch pool, or lazily by direct
+    // call paths that do not prefetch before evaluating expressions.
     // Subclasses should override to implement operator-specific logic.
     // The scalar index is pinned only when we commit to the ScalarIndex
     // path. JSON path compatibility is checked via segment-level metadata
@@ -2389,6 +2417,44 @@ class SegmentExpr : public Expr {
                                               TargetBitmap(size, true));
     }
 
+    void
+    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
+                      prefetch_pool) override {
+        auto self = std::static_pointer_cast<SegmentExpr>(shared_from_this());
+        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
+            if (self->op_ctx_ != nullptr &&
+                self->op_ctx_->cancellation_token.isCancellationRequested()) {
+                return;
+            }
+            self->EnsureExecPathDetermined();
+            if (self->exec_path_ == ExprExecPath::RawData) {
+                self->PrefetchRawData();
+                self->prefetched_ = true;
+            }
+        }));
+    }
+
+    virtual void
+    PrefetchRawData() {
+        PrefetchRawData(field_id_);
+    }
+
+    void
+    PrefetchRawData(FieldId field_id) {
+        segment_->prefetch_chunks(op_ctx_, field_id);
+    }
+
+    void
+    WaitPrefetch() override {
+        if (prefetch_future_.has_value()) {
+            auto future = std::move(*prefetch_future_);
+            prefetch_future_.reset();
+            std::move(future).get();
+            return;
+        }
+        EnsureExecPathDetermined();
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
@@ -2403,8 +2469,10 @@ class SegmentExpr : public Expr {
     bool is_json_contains_{false};
     bool is_data_mode_{false};
     query::PlanOptions plan_options_;
-    // Execution path determined by DetermineExecPath() during initialization.
+    // Execution path determined once, preferably by PrefetchAsync() on the
+    // prefetch pool. Direct callers that do not prefetch determine it lazily.
     ExprExecPath exec_path_{ExprExecPath::RawData};
+    mutable std::once_flag determine_exec_path_once_;
     // Flag set by SetExecuteAllAtOnce() to enable move-based fast paths,
     // avoiding bitmap copies in ProcessIndexChunks/SliceCachedResult.
     bool execute_all_at_once_{false};
@@ -2458,6 +2526,7 @@ class SegmentExpr : public Expr {
     double json_filter_stats_latency_us_{0.0};
     double json_stats_shredding_latency_us_{0.0};
     double json_stats_shared_latency_us_{0.0};
+    std::optional<folly::Future<folly::Unit>> prefetch_future_;
 };
 
 bool
@@ -2549,6 +2618,21 @@ class ExprSet {
     SetExecuteAllAtOnce() {
         for (auto& expr : exprs_) {
             expr->SetExecuteAllAtOnce();
+        }
+    }
+
+    void
+    PrefetchAsync(
+        const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
+        for (const auto& expr : exprs_) {
+            expr->PrefetchAsync(prefetch_pool);
+        }
+    }
+
+    void
+    WaitPrefetch() {
+        for (const auto& expr : exprs_) {
+            expr->WaitPrefetch();
         }
     }
 
