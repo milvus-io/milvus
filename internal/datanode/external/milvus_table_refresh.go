@@ -207,13 +207,43 @@ func (t *RefreshExternalCollectionTask) refreshMilvusTableSegmentManifest(
 	if err != nil {
 		return nil, err
 	}
-	manifestPath, err := t.createManifestForSegment(ctx, seg.GetID(), workFragments)
-	if err != nil {
-		return nil, err
+	var manifestPath string
+	if t.hasFunctions() {
+		bm25FieldIDs := bm25OutputFieldIDs(t.req.GetSchema())
+		bm25StatsLogIDs := make(map[int64]int64, len(bm25FieldIDs))
+		if len(bm25FieldIDs) > 0 {
+			if t.preallocatedIDRange == nil {
+				return nil, merr.WrapErrParameterInvalidMsg("pre-allocated segment IDs not provided in request")
+			}
+			if t.preallocatedIDRange.End-t.nextAllocID < int64(len(bm25FieldIDs)) {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"insufficient pre-allocated IDs: need %d more but only have %d IDs in range [%d, %d)",
+					len(bm25FieldIDs),
+					t.preallocatedIDRange.End-t.nextAllocID,
+					t.preallocatedIDRange.Begin,
+					t.preallocatedIDRange.End,
+				)
+			}
+			for _, fieldID := range bm25FieldIDs {
+				bm25StatsLogIDs[fieldID] = t.nextAllocID
+				t.nextAllocID++
+			}
+		}
+		manifestPath, err = t.createManifestWithFunctions(ctx, seg.GetID(), workFragments, bm25StatsLogIDs)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		manifestPath, err = t.createManifestForSegment(ctx, seg.GetID(), workFragments)
+		if err != nil {
+			return nil, err
+		}
 	}
 	updated := proto.Clone(seg).(*datapb.SegmentInfo)
 	updated.ManifestPath = manifestPath
+	updated.SchemaVersion = t.req.GetSchema().GetVersion()
 	updated.StorageVersion = storage.StorageV3
+	updated.Bm25Statslogs = nil
 	return updated, nil
 }
 

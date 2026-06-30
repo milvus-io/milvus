@@ -19,10 +19,11 @@ package external
 // RefreshExternalCollectionTask handles updating external collection segments by fetching fragments from external sources
 // and organizing them into segments with balanced row counts.
 //
-// SEGMENT ID ALLOCATION WORKFLOW:
-// - DataCoord pre-allocates a batch of segment IDs (default 1000) via allocator.AllocN()
+// ID ALLOCATION WORKFLOW:
+// - DataCoord pre-allocates a batch of IDs (default 500000) via allocator.AllocN()
 // - Pre-allocated ID range is passed to DataNode via RefreshExternalCollectionTaskRequest.PreAllocatedSegmentIds
-// - DataNode extracts the IDRange and uses pre-allocated IDs sequentially for each new segment
+// - DataNode uses the range sequentially for segment IDs, fake binlog log IDs,
+//   and any BM25 statslog IDs produced during function execution.
 // - Manifest files are written directly to final StorageV3 insert_log paths
 //
 // NO TEMPORARY PATHS OR CLEANUP:
@@ -492,17 +493,57 @@ func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *dat
 	if len(outputColumns) == 0 {
 		return true, nil
 	}
+	bm25FieldIDs := bm25OutputFieldIDs(t.req.GetSchema())
+	schemaVersion := t.req.GetSchema().GetVersion()
+	if schemaVersion > 0 && seg.GetSchemaVersion() >= schemaVersion {
+		return segmentHasBM25Stats(seg, bm25FieldIDs, t.req.GetStorageConfig())
+	}
 	if segmentChildFieldsContainColumns(seg, outputColumns) {
-		return true, nil
+		return segmentHasBM25Stats(seg, bm25FieldIDs, t.req.GetStorageConfig())
 	}
 	if seg.GetManifestPath() == "" {
 		return false, nil
 	}
-	hasColumns, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
+	hasColumns, err := packed.ManifestHasColumns(
+		seg.GetManifestPath(),
+		t.req.GetStorageConfig(),
+		outputColumns,
+	)
 	if err != nil {
 		return false, merr.Wrapf(err, "check function output columns for segment %d", seg.GetID())
 	}
-	return hasColumns, nil
+	if !hasColumns {
+		return false, nil
+	}
+	return segmentHasBM25Stats(seg, bm25FieldIDs, t.req.GetStorageConfig())
+}
+
+// segmentHasBM25Stats checks V3 manifest stats first and falls back to legacy
+// BM25 binlog metadata only for segments without a manifest.
+func segmentHasBM25Stats(seg *datapb.SegmentInfo, fieldIDs []int64, storageConfig *indexpb.StorageConfig) (bool, error) {
+	if len(fieldIDs) == 0 {
+		return true, nil
+	}
+	if seg.GetManifestPath() != "" {
+		stats, err := packed.NewStatsResolver(seg.GetManifestPath(), storageConfig).BM25StatsPaths()
+		if err != nil {
+			return false, merr.Wrapf(err, "check BM25 stats for segment %d", seg.GetID())
+		}
+		for _, fieldID := range fieldIDs {
+			if len(stats[fieldID]) == 0 {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	required := typeutil.NewSet(fieldIDs...)
+	for _, statslog := range seg.GetBm25Statslogs() {
+		if len(statslog.GetBinlogs()) == 0 {
+			continue
+		}
+		required.Remove(statslog.GetFieldID())
+	}
+	return required.Len() == 0, nil
 }
 
 func segmentChildFieldsContainColumns(seg *datapb.SegmentInfo, columns []string) bool {
@@ -543,11 +584,13 @@ func targetExternalFields(schema *schemapb.CollectionSchema) map[int64]string {
 	if schema == nil {
 		return result
 	}
+	columnResolver := typeutil.NewStorageColumnResolver(schema)
 	for _, field := range schema.GetFields() {
-		if field.GetExternalField() == "" {
+		columnName, ok := columnResolver.SourceDataColumnName(field)
+		if !ok {
 			continue
 		}
-		result[field.GetFieldID()] = field.GetExternalField()
+		result[field.GetFieldID()] = columnName
 	}
 	return result
 }
@@ -672,27 +715,36 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 
 	// Phase 1: Allocate segment IDs (sequential, lightweight)
 	type segmentWork struct {
-		segmentID   int64
-		binlogLogID int64
-		rowCount    int64
-		fragments   []packed.Fragment
+		segmentID       int64
+		binlogLogID     int64
+		bm25StatsLogIDs map[int64]int64
+		rowCount        int64
+		fragments       []packed.Fragment
 	}
+	bm25FieldIDs := bm25OutputFieldIDs(t.req.GetSchema())
+	idsPerSegment := int64(2 + len(bm25FieldIDs))
 	var works []segmentWork
 	isMilvusTableVirtualPKTask := t.parsedSpec != nil &&
 		t.parsedSpec.Format == externalspec.FormatMilvusTable &&
 		!packed.HasExternalPrimaryKey(t.req.GetSchema())
 	isMilvusTableTask := t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable
 	appendWork := func(rowCount int64, fragments []packed.Fragment) error {
-		// Each segment needs 2 IDs: one for segment, one for fake binlog logID
-		if t.nextAllocID+1 >= t.preallocatedIDRange.End {
-			return merr.WrapErrParameterInvalidMsg("insufficient pre-allocated IDs: need 2 more but only have %d IDs in range [%d, %d)",
+		// Each segment needs one segment ID, one fake binlog ID, and one
+		// metadata log ID for each BM25 stats file materialized by functions.
+		if t.preallocatedIDRange.End-t.nextAllocID < idsPerSegment {
+			return merr.WrapErrParameterInvalidMsg("insufficient pre-allocated IDs: need %d more but only have %d IDs in range [%d, %d)",
+				idsPerSegment,
 				t.preallocatedIDRange.End-t.nextAllocID,
 				t.preallocatedIDRange.Begin,
 				t.preallocatedIDRange.End)
 		}
 		segmentID := t.nextAllocID
 		binlogLogID := t.nextAllocID + 1
-		t.nextAllocID += 2
+		bm25StatsLogIDs := make(map[int64]int64, len(bm25FieldIDs))
+		for i, fieldID := range bm25FieldIDs {
+			bm25StatsLogIDs[fieldID] = t.nextAllocID + 2 + int64(i)
+		}
+		t.nextAllocID += idsPerSegment
 		workFragments := fragments
 		if t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable {
 			var err error
@@ -702,10 +754,11 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			}
 		}
 		works = append(works, segmentWork{
-			segmentID:   segmentID,
-			binlogLogID: binlogLogID,
-			rowCount:    rowCount,
-			fragments:   workFragments,
+			segmentID:       segmentID,
+			binlogLogID:     binlogLogID,
+			bm25StatsLogIDs: bm25StatsLogIDs,
+			rowCount:        rowCount,
+			fragments:       workFragments,
 		})
 		return nil
 	}
@@ -815,7 +868,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			var manifestPath string
 			var err error
 			if t.hasFunctions() {
-				manifestPath, err = t.createManifestWithFunctions(ctx, work.segmentID, work.fragments)
+				manifestPath, err = t.createManifestWithFunctions(ctx, work.segmentID, work.fragments, work.bm25StatsLogIDs)
 			} else {
 				manifestPath, err = t.createManifestForSegment(ctx, work.segmentID, work.fragments)
 			}
@@ -830,12 +883,12 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	// for every future to finish so no goroutine is left running.
 	var firstErr error
 	for i, f := range futures {
-		path, err := f.Await()
+		manifestPath, err := f.Await()
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
 		if err == nil {
-			manifestPaths[i] = path
+			manifestPaths[i] = manifestPath
 		}
 	}
 
@@ -923,8 +976,8 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 
 	if len(manifestPaths) > 0 {
 		if samplePerSegment {
-			for i, mp := range manifestPaths {
-				if avg, ok := sampleOne(mp); ok {
+			for i, manifestPath := range manifestPaths {
+				if avg, ok := sampleOne(manifestPath); ok {
 					segmentAvgBytes[i] = avg
 					if fallbackAvg == 0 {
 						fallbackAvg = avg
@@ -986,6 +1039,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			PartitionID:    t.req.GetPartitionID(),
 			NumOfRows:      work.rowCount,
 			ManifestPath:   manifestPaths[i],
+			SchemaVersion:  t.req.GetSchema().GetVersion(),
 			StorageVersion: storage.StorageV3,
 			Level:          datapb.SegmentLevel_L1,
 			// Fake binlog so downstream treats external segments like normal
@@ -1062,6 +1116,7 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 	ctx context.Context,
 	segmentID int64,
 	fragments []packed.Fragment,
+	bm25StatsLogIDs map[int64]int64,
 ) (string, error) {
 	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	basePath := segmentInsertLogBasePath(
@@ -1081,12 +1136,16 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 		segmentID,
 		basePath,
 		clusterID,
+		bm25StatsLogIDs,
 	)
 	if err != nil {
 		return "", err
 	}
 	if t.parsedSpec.Format == externalspec.FormatMilvusTable {
-		return t.postProcessMilvusTableDeltalogs(ctx, basePath, manifestPath, segmentID, fragments)
+		manifestPath, err = t.postProcessMilvusTableDeltalogs(ctx, basePath, manifestPath, segmentID, fragments)
+		if err != nil {
+			return "", err
+		}
 	}
 	return manifestPath, nil
 }

@@ -43,6 +43,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 		ExternalSpec:  `{"format":"milvus-table"}`,
 		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
 		Schema: &schemapb.CollectionSchema{
+			Version: 7,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			},
@@ -53,6 +54,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 			PartitionID:    partitionID,
 			NumOfRows:      1000,
 			ManifestPath:   oldManifest,
+			SchemaVersion:  6,
 			StorageVersion: storage.StorageV3,
 		}},
 		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
@@ -93,7 +95,6 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 	mockSourceDeltas := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
 		Return(nil, nil).Build()
 	defer mockSourceDeltas.UnPatch()
-
 	result, err := task.organizeSegments(ctx, currentSegmentFragments, newFragments)
 	s.NoError(err)
 	s.Empty(task.GetKeptSegmentIDs())
@@ -101,9 +102,114 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 	s.Require().Len(updated, 1)
 	s.Equal(int64(1), updated[0].GetID())
 	s.Equal(newManifest, updated[0].GetManifestPath())
+	s.Equal(req.GetSchema().GetVersion(), updated[0].GetSchemaVersion())
 	s.Equal(updated, result)
 	s.Equal(int64(1), gotSegmentID)
 	s.Equal(newFragments, gotFragments)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0RefreshPreservesFunctionOutputs() {
+	ctx := context.Background()
+	partitionID := int64(2000)
+	oldManifest := packed.MarshalManifestPath("files/insert_log/1000/2000/1", 1)
+	newManifest := packed.MarshalManifestPath("files/insert_log/1000/2000/1", 2)
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:  s.collectionID,
+		PartitionID:   partitionID,
+		TaskID:        s.taskID,
+		ExternalSpec:  `{"format":"milvus-table"}`,
+		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
+		Schema: &schemapb.CollectionSchema{
+			Version: 7,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+				{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:           "bm25",
+					Type:           schemapb.FunctionType_BM25,
+					InputFieldIds:  []int64{101},
+					OutputFieldIds: []int64{102},
+				},
+			},
+		},
+		CurrentSegments: []*datapb.SegmentInfo{{
+			ID:             1,
+			CollectionID:   s.collectionID,
+			PartitionID:    partitionID,
+			NumOfRows:      1000,
+			ManifestPath:   oldManifest,
+			SchemaVersion:  7,
+			StorageVersion: storage.StorageV3,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID:     0,
+				ChildFields: []int64{100, 101, 102},
+				Binlogs: []*datapb.Binlog{{
+					LogID:      7,
+					EntriesNum: 1000,
+				}},
+			}},
+			Bm25Statslogs: []*datapb.FieldBinlog{{
+				FieldID: 102,
+				Binlogs: []*datapb.Binlog{{
+					LogID:      9,
+					EntriesNum: 1000,
+				}},
+			}},
+		}},
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
+	task.nextAllocID = req.GetPreAllocatedSegmentIds().GetBegin()
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+
+	currentSegmentFragments := packed.SegmentFragments{
+		1: []packed.Fragment{{FragmentID: 101, FilePath: "source-manifest", StartRow: 0, EndRow: 1000, RowCount: 1000}},
+	}
+	newFragments := []packed.Fragment{{
+		FragmentID: 201,
+		FilePath:   "source-manifest",
+		StartRow:   0,
+		EndRow:     1000,
+		RowCount:   1000,
+		Deltalogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{
+				LogID:      88,
+				LogPath:    "s3://source-bucket/files/insert_log/1/_delta/88",
+				EntriesNum: 99,
+			}},
+		}},
+	}}
+
+	var gotSegmentID int64
+	mockCreate := mockey.Mock(mockey.GetMethod(task, "createManifestWithFunctions")).
+		To(func(ctx context.Context, segmentID int64, fragments []packed.Fragment, bm25StatsLogIDs map[int64]int64) (string, error) {
+			gotSegmentID = segmentID
+			return newManifest, nil
+		}).Build()
+	defer mockCreate.UnPatch()
+	mockSourceDeltas := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).
+		Return(nil, nil).Build()
+	defer mockSourceDeltas.UnPatch()
+	mockGetStats := mockey.Mock(packed.GetManifestStats).Return(map[string]packed.ManifestStat{
+		"bm25.102": {Paths: []string{"files/insert_log/1000/2000/1/_stats/bm25.102/9"}},
+	}, nil).Build()
+	defer mockGetStats.UnPatch()
+
+	result, err := task.organizeSegments(ctx, currentSegmentFragments, newFragments)
+	s.NoError(err)
+	updated := task.GetUpdatedSegments()
+	s.Require().Len(updated, 1)
+	s.Equal(updated, result)
+	s.Equal(int64(1), gotSegmentID)
+	s.Equal(int64(101), task.nextAllocID)
+	s.Equal(newManifest, updated[0].GetManifestPath())
+	s.Equal(req.GetSchema().GetVersion(), updated[0].GetSchemaVersion())
+	s.Empty(updated[0].GetBm25Statslogs())
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0RefreshAlsoPatchesMissingColumns() {

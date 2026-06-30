@@ -95,6 +95,32 @@ func TestExternalCollectionRefreshMeta_NewMeta(t *testing.T) {
 	})
 }
 
+func TestExternalCollectionRefreshMetaPreservesSchemaVersion(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId:         11,
+		CollectionId:  100,
+		SchemaVersion: 7,
+		State:         indexpb.JobState_JobStateInit,
+	}
+	assert.NoError(t, refreshMeta.AddJob(job))
+	assert.EqualValues(t, 7, refreshMeta.GetJob(11).GetSchemaVersion())
+
+	task := &datapb.ExternalCollectionRefreshTask{
+		TaskId:        21,
+		JobId:         11,
+		CollectionId:  100,
+		SchemaVersion: 7,
+		State:         indexpb.JobState_JobStateInit,
+	}
+	assert.NoError(t, refreshMeta.AddTask(task))
+	assert.EqualValues(t, 7, refreshMeta.GetTask(21).GetSchemaVersion())
+}
+
 func TestExternalCollectionRefreshMeta_AddJob(t *testing.T) {
 	ctx := context.Background()
 

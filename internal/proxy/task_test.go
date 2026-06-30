@@ -7807,6 +7807,26 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 			},
 		},
 	}
+	externalOldSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	externalOldSchema.Name = "external_coll"
+	externalOldSchema.Fields[0].ExternalField = "id"
+	externalOldSchema.Fields[1].ExternalField = "text"
+	externalOldSchema.Fields[1].Nullable = true
+	externalParquetTextOldSchema := proto.Clone(externalOldSchema).(*schemapb.CollectionSchema)
+	externalParquetTextOldSchema.ExternalSource = "s3://bucket/source"
+	externalParquetTextOldSchema.ExternalSpec = `{"format":"parquet"}`
+	externalParquetTextOldSchema.Fields[1].DataType = schemapb.DataType_Text
+	externalMilvusTableTextOldSchema := proto.Clone(externalParquetTextOldSchema).(*schemapb.CollectionSchema)
+	externalMilvusTableTextOldSchema.ExternalSpec = `{"format":"milvus-table"}`
+	externalFunctionOnlyOldSchema := proto.Clone(externalOldSchema).(*schemapb.CollectionSchema)
+	externalFunctionOnlyOldSchema.Fields = append(externalFunctionOnlyOldSchema.Fields, &schemapb.FieldSchema{
+		FieldID:  102,
+		Name:     "existing_minhash_output",
+		DataType: schemapb.DataType_BinaryVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4096"},
+		},
+	})
 
 	// sparseOutputField is the output field for the BM25 function.
 	sparseOutputField := &schemapb.FieldSchema{
@@ -7902,6 +7922,37 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 				},
 			},
 		}
+	}
+	buildTextEmbeddingRequest := func() *milvuspb.AlterCollectionSchemaRequest {
+		req := buildValidRequest()
+		addRequest := req.GetAction().GetAddRequest()
+		addRequest.FieldInfos[0].FieldSchema = &schemapb.FieldSchema{
+			Name:     "embedding",
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+		addRequest.FieldInfos[0].ExtraParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+			{Key: common.MetricTypeKey, Value: "COSINE"},
+			{Key: indexparamcheck.NLIST, Value: "128"},
+		}
+		addRequest.FuncSchema = []*schemapb.FunctionSchema{
+			{
+				Name:             "embedding_func",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{"text"},
+				OutputFieldNames: []string{"embedding"},
+				Params: []*commonpb.KeyValuePair{
+					{Key: "provider", Value: "openai"},
+					{Key: "model_name", Value: "text-embedding-ada-002"},
+					{Key: "credential", Value: "mock"},
+					{Key: "dim", Value: "128"},
+				},
+			},
+		}
+		return req
 	}
 
 	buildTask := func(req *milvuspb.AlterCollectionSchemaRequest, schema *schemapb.CollectionSchema) *alterCollectionSchemaTask {
@@ -8188,6 +8239,84 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("External PreExecute allows function output without external mapping", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), externalOldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("External parquet PreExecute allows BM25 with TEXT input", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), externalParquetTextOldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("External PreExecute rejects function-only add request", func(t *testing.T) {
+		task := buildTask(buildAddFunctionRequest(minHashFunctionOnlySchema), externalFunctionOnlyOldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "must include its output field")
+	})
+
+	t.Run("External PreExecute rejects output external field mapping", func(t *testing.T) {
+		req := buildValidRequest()
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().ExternalField = "sparse_bm25"
+		task := buildTask(req, externalOldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "must not have external_field")
+	})
+
+	t.Run("External PreExecute allows source-backed add field", func(t *testing.T) {
+		req := buildAddFieldRequest("category", true, false)
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().ExternalField = "category"
+		task := buildTask(req, externalOldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("External PreExecute rejects source-backed add field without external mapping", func(t *testing.T) {
+		task := buildTask(buildAddFieldRequest("category", true, false), externalOldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "requires external_field mapping")
+	})
+
+	t.Run("External PreExecute rejects non-nullable source-backed add field", func(t *testing.T) {
+		req := buildAddFieldRequest("category", false, false)
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().ExternalField = "category"
+		task := buildTask(req, externalOldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "added field must be nullable")
+	})
+
+	t.Run("External PreExecute rejects source-backed function output flag", func(t *testing.T) {
+		req := buildAddFieldRequest("category", true, false)
+		field := req.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema()
+		field.ExternalField = "category"
+		field.IsFunctionOutput = true
+		task := buildTask(req, externalOldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "must not be marked as function output")
+	})
+
+	t.Run("External PreExecute rejects physical backfill", func(t *testing.T) {
+		req := buildAddFieldRequest("category", true, true)
+		req.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().ExternalField = "category"
+		task := buildTask(req, externalOldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not support physical backfill")
+	})
+
 	t.Run("PreExecute rejects unsupported function", func(t *testing.T) {
 		req := buildValidRequest()
 		addRequest := req.GetAction().GetAddRequest()
@@ -8200,6 +8329,34 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.ErrorContains(t, err, "only BM25 and MinHash functions are supported")
+	})
+
+	t.Run("External PreExecute supports TextEmbedding function with new output field", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
+			return map[string]string{
+				"mock.apikey": "mock",
+			}
+		}
+		ts := embedding.CreateOpenAIEmbeddingServer()
+		defer ts.Close()
+		paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+			return map[string]string{
+				"openai.url": ts.URL,
+			}
+		}
+
+		task := buildTask(buildTextEmbeddingRequest(), externalOldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("External milvus-table PreExecute rejects TextEmbedding with TEXT input", func(t *testing.T) {
+		task := buildTask(buildTextEmbeddingRequest(), externalMilvusTableTextOldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "TEXT input field")
 	})
 
 	t.Run("PreExecute ignores legacy DoPhysicalBackfill", func(t *testing.T) {
@@ -8678,7 +8835,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.Contains(t, err.Error(), "action is nil")
 	})
 
-	t.Run("empty add request fails validation", func(t *testing.T) {
+	t.Run("nil add request fails validation", func(t *testing.T) {
 		task := &alterCollectionSchemaTask{
 			ctx:       ctx,
 			oldSchema: baseSchema,
@@ -9121,6 +9278,25 @@ func TestValidateDropFunction(t *testing.T) {
 				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
 				{FieldID: 102, Name: "vec_func_out", DataType: schemapb.DataType_FloatVector},
 				{FieldID: 103, Name: "vec_other", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name: "embed_func", Type: schemapb.FunctionType_TextEmbedding,
+					InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec_func_out"},
+				},
+			},
+		}
+		err := validateDropFunction(schema, "embed_func", true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop external text embedding function field succeeds", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+				{FieldID: 102, Name: "vec_func_out", DataType: schemapb.DataType_FloatVector},
+				{FieldID: 103, Name: "vec_other", DataType: schemapb.DataType_FloatVector, ExternalField: "vec_other"},
 			},
 			Functions: []*schemapb.FunctionSchema{
 				{

@@ -29,7 +29,8 @@ const defaultReadBufferSize = 64 * 1024 * 1024
 // ExecuteFunctionsForSegment computes function-output columns for an external
 // segment and returns a manifest that references both the external original
 // files (for input columns) and a newly written packed file (for function
-// output columns).
+// output columns). BM25 stats are registered only in the V3 manifest, matching
+// the internal V3 writer path.
 //
 // Streaming pipeline (no full-segment InsertData materialization):
 //  1. Build an input manifest referencing the segment's external fragments.
@@ -52,6 +53,7 @@ func ExecuteFunctionsForSegment(
 	segmentID int64,
 	basePath string,
 	clusterID string,
+	bm25StatsLogIDs map[int64]int64,
 ) (string, error) {
 	log := mlog.With()
 	log.Info(ctx, "executing functions for external table segment",
@@ -127,7 +129,7 @@ func ExecuteFunctionsForSegment(
 	}
 
 	updates := &packed.ManifestUpdates{NewFiles: output}
-	if err := appendBM25Stats(ctx, bm25Acc, storageConfig, basePath, updates); err != nil {
+	if err := appendBM25Stats(ctx, bm25Acc, storageConfig, basePath, updates, bm25StatsLogIDs); err != nil {
 		return "", err
 	}
 	manifestPath, err := packed.CommitManifestUpdates(basePath, inputVersion, storageConfig, updates)
@@ -398,15 +400,25 @@ func writeOutputBatch(
 // Returns an empty map if the schema declares no BM25 functions.
 func newBM25Accumulators(schema *schemapb.CollectionSchema) map[int64]*storage.BM25Stats {
 	acc := make(map[int64]*storage.BM25Stats)
+	for _, outID := range bm25OutputFieldIDs(schema) {
+		acc[outID] = storage.NewBM25Stats()
+	}
+	return acc
+}
+
+// bm25OutputFieldIDs returns the output field IDs declared by BM25 functions.
+func bm25OutputFieldIDs(schema *schemapb.CollectionSchema) []int64 {
+	if schema == nil {
+		return nil
+	}
+	var outputFieldIDs []int64
 	for _, fn := range schema.GetFunctions() {
 		if fn.GetType() != schemapb.FunctionType_BM25 {
 			continue
 		}
-		for _, outID := range fn.GetOutputFieldIds() {
-			acc[outID] = storage.NewBM25Stats()
-		}
+		outputFieldIDs = append(outputFieldIDs, fn.GetOutputFieldIds()...)
 	}
-	return acc
+	return outputFieldIDs
 }
 
 // accumulateBM25Stats appends per-batch sparse vectors into the running
@@ -437,6 +449,7 @@ func appendBM25Stats(
 	storageConfig *indexpb.StorageConfig,
 	basePath string,
 	updates *packed.ManifestUpdates,
+	bm25StatsLogIDs map[int64]int64,
 ) error {
 	if len(acc) == 0 {
 		return nil
@@ -448,19 +461,24 @@ func appendBM25Stats(
 
 	entries := make([]packed.StatEntry, 0, len(acc))
 	for outID, stats := range acc {
+		logID := bm25StatsLogIDs[outID]
+		if logID == 0 {
+			return merr.WrapErrServiceInternalMsg("bm25 stats log id not allocated for field %d", outID)
+		}
 		blob, err := stats.Serialize()
 		if err != nil {
 			return merr.Wrapf(err, "serialize bm25 stats for field %d", outID)
 		}
-		fullPath := path.Join(basePath, fmt.Sprintf("_stats/bm25.%d/%d", outID, 0))
+		fullPath := path.Join(basePath, fmt.Sprintf("_stats/bm25.%d/%d", outID, logID))
 		if err := packed.WriteFile(storageConfig, fullPath, blob); err != nil {
 			return merr.Wrapf(err, "write bm25 stats file %s", fullPath)
 		}
+		size := int64(len(blob))
 		entries = append(entries, packed.StatEntry{
 			Key:   fmt.Sprintf("bm25.%d", outID),
 			Files: []string{fullPath},
 			Metadata: map[string]string{
-				"memory_size": strconv.FormatInt(int64(len(blob)), 10),
+				"memory_size": strconv.FormatInt(size, 10),
 			},
 		})
 		log.Info(ctx, "registered bm25 stats",
@@ -497,7 +515,13 @@ func finalizeBM25Stats(
 	}
 
 	updates := &packed.ManifestUpdates{}
-	if err := appendBM25Stats(ctx, acc, storageConfig, basePath, updates); err != nil {
+	statsLogIDs := make(map[int64]int64, len(acc))
+	nextLogID := int64(storage.CompoundStatsType)
+	for outID := range acc {
+		statsLogIDs[outID] = nextLogID
+		nextLogID++
+	}
+	if err := appendBM25Stats(ctx, acc, storageConfig, basePath, updates, statsLogIDs); err != nil {
 		return "", err
 	}
 	return packed.CommitManifestUpdates(basePath, version, storageConfig, updates)

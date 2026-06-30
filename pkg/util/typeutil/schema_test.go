@@ -5938,12 +5938,78 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 		assert.Contains(t, err.Error(), "dynamic field setting mismatch")
 	})
 
-	t.Run("user field count mismatch rejected", func(t *testing.T) {
+	t.Run("target may omit source fields", func(t *testing.T) {
 		target := validTarget()
 		target.Fields = target.Fields[:1]
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "user field count mismatch")
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, source, false))
+	})
+
+	t.Run("unmapped source field id cannot collide with target function output", func(t *testing.T) {
+		sourceWithExtra := proto.Clone(source).(*schemapb.CollectionSchema)
+		sourceWithExtra.Fields = append(sourceWithExtra.Fields, &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "extra",
+			DataType: schemapb.DataType_Int64,
+		})
+		target := validTarget()
+		target.Fields = append(target.Fields, &schemapb.FieldSchema{
+			FieldID:          102,
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+
+		err := ValidateMilvusTableSchemaIdentity(target, sourceWithExtra, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "field ID 102")
+	})
+
+	t.Run("unmapped source field id cannot collide with virtual primary key", func(t *testing.T) {
+		sourceWithExtra := proto.Clone(source).(*schemapb.CollectionSchema)
+		sourceWithExtra.Fields = append(sourceWithExtra.Fields, &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "extra",
+			DataType: schemapb.DataType_Int64,
+		})
+		target := validTarget()
+		target.Fields = []*schemapb.FieldSchema{
+			{
+				FieldID:      102,
+				Name:         common.VirtualPKFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+				AutoID:       true,
+			},
+			{
+				FieldID:       100,
+				Name:          "source_pk",
+				DataType:      schemapb.DataType_Int64,
+				ExternalField: "pk",
+			},
+			target.Fields[1],
+		}
+
+		err := ValidateMilvusTableSchemaIdentity(target, sourceWithExtra, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "field ID 102")
+	})
+
+	t.Run("unmapped source field with distinct id remains allowed", func(t *testing.T) {
+		sourceWithExtra := proto.Clone(source).(*schemapb.CollectionSchema)
+		sourceWithExtra.Fields = append(sourceWithExtra.Fields, &schemapb.FieldSchema{
+			FieldID:  103,
+			Name:     "extra",
+			DataType: schemapb.DataType_Int64,
+		})
+		target := validTarget()
+		target.Fields = append(target.Fields, &schemapb.FieldSchema{
+			FieldID:          102,
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithExtra, true))
 	})
 
 	t.Run("target field without mapping rejected", func(t *testing.T) {
@@ -5963,15 +6029,6 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 		err := ValidateMilvusTableSchemaIdentity(target, source, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "mapped by multiple target fields")
-	})
-
-	t.Run("unmapped source field rejected", func(t *testing.T) {
-		target := validTarget()
-		target.Fields[0].Name = "same_name"
-		target.Fields[1].Name = "same_name"
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "is not mapped by target schema")
 	})
 
 	t.Run("source function output field is not required to be mapped", func(t *testing.T) {

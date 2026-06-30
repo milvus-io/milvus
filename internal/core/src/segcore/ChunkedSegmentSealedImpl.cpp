@@ -2123,22 +2123,23 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     for (size_t i = 0; i < column_groups->size(); ++i) {
         auto cg = column_groups->at(i);
         std::vector<FieldId> field_ids;
-        std::vector<int64_t> dropped_fields;
+        std::vector<std::string> dropped_columns;
         field_ids.reserve(cg->columns.size());
         for (auto& column : cg->columns) {
             auto field_id = schema_snapshot->ResolveColumnFieldId(column);
-            if (!schema_snapshot->has_field(field_id)) {
-                dropped_fields.push_back(field_id.get());
+            if (!field_id.has_value() ||
+                !schema_snapshot->has_field(field_id.value())) {
+                dropped_columns.push_back(column);
                 continue;
             }
-            field_ids.emplace_back(field_id);
+            field_ids.emplace_back(field_id.value());
         }
-        if (!dropped_fields.empty()) {
+        if (!dropped_columns.empty()) {
             LOG_INFO(
-                "segment {} skips dropped fields {} of column group {} on "
+                "segment {} skips dropped columns {} of column group {} on "
                 "load",
                 id_,
-                fmt::format("{}", dropped_fields),
+                fmt::format("{}", dropped_columns),
                 i);
         }
         cg_field_ids.emplace_back(static_cast<int>(i), std::move(field_ids));

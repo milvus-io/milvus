@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -37,16 +38,20 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/tso"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -129,6 +134,30 @@ func buildAlterSchemaAddFunctionReq(dbName, collName string, functionSchema *sch
 			},
 		},
 	}
+}
+
+type alterSchemaBroadcastAPIMock struct {
+	broadcaster.BroadcastAPI
+	msg message.BroadcastMutableMessage
+	err error
+}
+
+func mockAlterSchemaBroadcastAPI(t *testing.T) {
+	mockBroadcast := mockey.Mock((*alterSchemaBroadcastAPIMock).Broadcast).
+		To(func(api *alterSchemaBroadcastAPIMock, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			api.msg = msg
+			if api.err != nil {
+				return nil, api.err
+			}
+			return &types.BroadcastAppendResult{}, nil
+		}).Build()
+	t.Cleanup(func() {
+		mockBroadcast.UnPatch()
+	})
+	mockClose := mockey.Mock((*alterSchemaBroadcastAPIMock).Close).Return().Build()
+	t.Cleanup(func() {
+		mockClose.UnPatch()
+	})
 }
 
 func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
@@ -856,6 +885,257 @@ func TestDDLCallbacksAlterCollectionSchemaAddRejectsStructFieldNameConflicts(t *
 	}
 }
 
+func TestBroadcastAlterCollectionSchemaAddExternalMinHash(t *testing.T) {
+	mockAlterSchemaBroadcastAPI(t)
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "externalDB" + funcutil.RandomString(10)
+	collectionName := "externalMinHash" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	db, err := core.meta.GetDatabaseByName(ctx, dbName, typeutil.MaxTimestamp)
+	require.NoError(t, err)
+
+	coll := &model.Collection{
+		CollectionID:  100,
+		DBID:          db.ID,
+		DBName:        dbName,
+		Name:          collectionName,
+		SchemaVersion: 3,
+		State:         pb.CollectionState_CollectionCreated,
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, Nullable: true, ExternalField: "text",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}},
+			},
+			{
+				FieldID: 102, Name: "dense", DataType: schemapb.DataType_FloatVector, ExternalField: "dense",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+			},
+		},
+		Properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "102"}},
+	}
+	require.NoError(t, core.meta.AddCollection(ctx, coll))
+
+	buildReq := func() *milvuspb.AlterCollectionSchemaRequest {
+		return &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: &schemapb.FieldSchema{
+								Name:       "mh",
+								DataType:   schemapb.DataType_BinaryVector,
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "512"}},
+							}, ExtraParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "BIN_IVF_FLAT"},
+								{Key: common.MetricTypeKey, Value: "HAMMING"},
+								{Key: indexparamcheck.NLIST, Value: "128"},
+							}},
+						},
+						FuncSchema: []*schemapb.FunctionSchema{{
+							Name:             "minhash_func",
+							Type:             schemapb.FunctionType_MinHash,
+							InputFieldNames:  []string{"text"},
+							OutputFieldNames: []string{"mh"},
+						}},
+					},
+				},
+			},
+		}
+	}
+
+	broadcaster := &alterSchemaBroadcastAPIMock{}
+	require.NoError(t, core.broadcastAlterCollectionSchemaAdd(ctx, broadcaster, coll, buildReq()))
+	require.NotNil(t, broadcaster.msg)
+	alterMsg := message.MustAsBroadcastAlterCollectionMessageV2(broadcaster.msg)
+	body := alterMsg.MustBody()
+	schema := body.GetUpdates().GetSchema()
+	require.NotNil(t, schema)
+	require.EqualValues(t, 4, schema.GetVersion())
+	require.EqualValues(t, 103, maxAssignedFieldIDFromSchema(schema))
+
+	newField := typeutil.GetFieldByName(schema, "mh")
+	require.NotNil(t, newField)
+	require.EqualValues(t, 103, newField.GetFieldID())
+	require.True(t, newField.GetIsFunctionOutput())
+	require.Empty(t, newField.GetExternalField())
+
+	require.Len(t, schema.GetFunctions(), 1)
+	require.NotZero(t, schema.GetFunctions()[0].GetId())
+	require.Equal(t, []int64{101}, schema.GetFunctions()[0].GetInputFieldIds())
+	require.Equal(t, []int64{103}, schema.GetFunctions()[0].GetOutputFieldIds())
+
+	reqWithMapping := buildReq()
+	reqWithMapping.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().ExternalField = "mh"
+	err = core.broadcastAlterCollectionSchemaAdd(ctx, &alterSchemaBroadcastAPIMock{}, coll, reqWithMapping)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "must not have external_field")
+
+	reqWithTextEmbedding := buildReq()
+	textEmbeddingAdd := reqWithTextEmbedding.GetAction().GetAddRequest()
+	textEmbeddingAdd.FieldInfos[0].FieldSchema = &schemapb.FieldSchema{
+		Name:     "embedding",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+	}
+	textEmbeddingAdd.FieldInfos[0].ExtraParams = []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+		{Key: common.MetricTypeKey, Value: "COSINE"},
+		{Key: indexparamcheck.NLIST, Value: "128"},
+	}
+	textEmbeddingAdd.FuncSchema = []*schemapb.FunctionSchema{
+		{
+			Name:             "embedding_func",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"embedding"},
+			Params: []*commonpb.KeyValuePair{
+				{Key: "provider", Value: "openai"},
+				{Key: "model_name", Value: "text-embedding-ada-002"},
+				{Key: "credential", Value: "mock"},
+				{Key: "dim", Value: "128"},
+			},
+		},
+	}
+	broadcaster = &alterSchemaBroadcastAPIMock{}
+	require.NoError(t, core.broadcastAlterCollectionSchemaAdd(ctx, broadcaster, coll, reqWithTextEmbedding))
+	require.NotNil(t, broadcaster.msg)
+	alterMsg = message.MustAsBroadcastAlterCollectionMessageV2(broadcaster.msg)
+	schema = alterMsg.MustBody().GetUpdates().GetSchema()
+	newField = typeutil.GetFieldByName(schema, "embedding")
+	require.NotNil(t, newField)
+	require.EqualValues(t, 103, newField.GetFieldID())
+	require.True(t, newField.GetIsFunctionOutput())
+	require.Empty(t, newField.GetExternalField())
+	require.Len(t, schema.GetFunctions(), 1)
+	require.Equal(t, []int64{101}, schema.GetFunctions()[0].GetInputFieldIds())
+	require.Equal(t, []int64{103}, schema.GetFunctions()[0].GetOutputFieldIds())
+}
+
+func TestBroadcastAlterCollectionSchemaAddExternalField(t *testing.T) {
+	mockAlterSchemaBroadcastAPI(t)
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "externalDB" + funcutil.RandomString(10)
+	collectionName := "externalAddField" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	db, err := core.meta.GetDatabaseByName(ctx, dbName, typeutil.MaxTimestamp)
+	require.NoError(t, err)
+
+	coll := &model.Collection{
+		CollectionID:  100,
+		DBID:          db.ID,
+		DBName:        dbName,
+		Name:          collectionName,
+		SchemaVersion: 3,
+		State:         pb.CollectionState_CollectionCreated,
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}},
+			},
+			{
+				FieldID: 102, Name: "dense", DataType: schemapb.DataType_FloatVector, ExternalField: "dense",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+			},
+		},
+		Properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "102"}},
+	}
+	require.NoError(t, core.meta.AddCollection(ctx, coll))
+
+	baseField := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:          "category",
+			DataType:      schemapb.DataType_VarChar,
+			Nullable:      true,
+			ExternalField: "category",
+			TypeParams:    []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "1024"}},
+		}
+	}
+	baseReq := func(field *schemapb.FieldSchema) *milvuspb.AlterCollectionSchemaRequest {
+		return &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: field},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	broadcaster := &alterSchemaBroadcastAPIMock{}
+	require.NoError(t, core.broadcastAlterCollectionSchemaAdd(ctx, broadcaster, coll, baseReq(baseField())))
+	require.NotNil(t, broadcaster.msg)
+	alterMsg := message.MustAsBroadcastAlterCollectionMessageV2(broadcaster.msg)
+	body := alterMsg.MustBody()
+	schema := body.GetUpdates().GetSchema()
+	require.NotNil(t, schema)
+	require.EqualValues(t, 4, schema.GetVersion())
+	require.EqualValues(t, 103, maxAssignedFieldIDFromSchema(schema))
+	require.Empty(t, schema.GetFunctions())
+
+	newField := typeutil.GetFieldByName(schema, "category")
+	require.NotNil(t, newField)
+	require.EqualValues(t, 103, newField.GetFieldID())
+	require.False(t, newField.GetIsFunctionOutput())
+	require.Equal(t, "category", newField.GetExternalField())
+	require.True(t, newField.GetNullable())
+
+	for _, tc := range []struct {
+		name         string
+		mutate       func(*milvuspb.AlterCollectionSchemaRequest, *schemapb.FieldSchema)
+		broadcastErr error
+		wantErr      string
+	}{
+		{
+			name: "reject duplicate field name",
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.Name = "text"
+			},
+			wantErr: "field already exists",
+		},
+		{
+			name: "reject duplicate external mapping",
+			mutate: func(req *milvuspb.AlterCollectionSchemaRequest, field *schemapb.FieldSchema) {
+				field.ExternalField = "text"
+			},
+			wantErr: "mapped by multiple fields",
+		},
+		{
+			name:         "reject broadcast failure",
+			broadcastErr: errors.New("broadcast error"),
+			wantErr:      "broadcast error",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			field := baseField()
+			req := baseReq(field)
+			if tc.mutate != nil {
+				tc.mutate(req, field)
+			}
+
+			err := core.broadcastAlterCollectionSchemaAdd(ctx, &alterSchemaBroadcastAPIMock{err: tc.broadcastErr}, coll, req)
+			require.Error(t, err)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
 func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 
@@ -1106,6 +1386,37 @@ func TestBuildSchemaForDropFunctionField(t *testing.T) {
 		for _, f := range schema.Fields {
 			require.NotEqual(t, "dense_vec", f.Name)
 		}
+	})
+
+	t.Run("external text embedding drop removes function and output field", func(t *testing.T) {
+		coll := &model.Collection{
+			Name: "test_external_coll",
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk"},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+				{FieldID: 102, Name: "dense_vec", DataType: schemapb.DataType_FloatVector},
+				{FieldID: 103, Name: "seed_vec", DataType: schemapb.DataType_SparseFloatVector, ExternalField: "seed_vec"},
+			},
+			Functions: []*model.Function{
+				{
+					Name:             "embed_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldIDs:    []int64{101},
+					InputFieldNames:  []string{"text"},
+					OutputFieldIDs:   []int64{102},
+					OutputFieldNames: []string{"dense_vec"},
+				},
+			},
+			SchemaVersion: 7,
+		}
+
+		schema, _, droppedFieldIDs, err := buildSchemaForDropFunctionField(coll, "embed_func")
+		require.NoError(t, err)
+		require.Equal(t, []int64{102}, droppedFieldIDs)
+		require.Equal(t, int32(8), schema.GetVersion())
+		require.Nil(t, typeutil.GetFieldByName(schema, "dense_vec"))
+		require.Empty(t, schema.GetFunctions())
+		require.NotNil(t, typeutil.GetFieldByName(schema, "seed_vec"))
 	})
 
 	t.Run("drop function removes function and output fields", func(t *testing.T) {

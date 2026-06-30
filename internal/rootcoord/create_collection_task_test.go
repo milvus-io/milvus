@@ -1715,10 +1715,13 @@ func TestNextMilvusTableTargetOnlyFieldID(t *testing.T) {
 			{FieldID: 0, Name: common.VirtualPKFieldName},
 			{FieldID: common.StartOfUserFieldID, Name: "target_pk"},
 		},
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.MaxFieldIDKey, Value: "110"},
+		},
 	}
 
 	next := nextMilvusTableTargetOnlyFieldID(source, target)
-	assert.Equal(t, int64(common.StartOfUserFieldID+4), next)
+	assert.Equal(t, int64(111), next)
 }
 
 func TestPrepareMilvusTableSnapshotSchemaAlignsFieldIDs(t *testing.T) {
