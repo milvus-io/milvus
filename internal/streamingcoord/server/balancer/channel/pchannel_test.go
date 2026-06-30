@@ -67,6 +67,23 @@ func TestPChannelAvailableInReplication(t *testing.T) {
 	assert.False(t, pchannel.AvailableInReplication())
 }
 
+func TestPChannelStatsManagerPChannels(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{
+		"by-dev-rootcoord-dml_0_100v0",
+		"by-dev-rootcoord-dml_3_101v0",
+	})
+
+	stats := StaticPChannelStatsManager.Get()
+	assert.ElementsMatch(t, []string{
+		"by-dev-rootcoord-dml_0",
+		"by-dev-rootcoord-dml_3",
+	}, stats.PChannels())
+
+	stats.RemoveVChannel("by-dev-rootcoord-dml_0_100v0")
+	assert.ElementsMatch(t, []string{"by-dev-rootcoord-dml_3"}, stats.PChannels())
+}
+
 func TestPChannel(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
