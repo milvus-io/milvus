@@ -298,11 +298,16 @@ RTreeIndexWrapper::get_bounding_box(const GEOSGeometry* geom,
 
 int64_t
 RTreeIndexWrapper::count() const {
+    // rtree_ is mutated by add_geometry()/bulk_load_from_field_data() under a
+    // write lock; reading its size concurrently must take the shared lock too,
+    // otherwise a growing-segment search races with incremental inserts.
+    std::shared_lock<std::shared_mutex> guard(rtree_mutex_);
     return static_cast<int64_t>(rtree_.size());
 }
 
 int64_t
 RTreeIndexWrapper::ByteSize() const {
+    std::shared_lock<std::shared_mutex> guard(rtree_mutex_);
     int64_t total = 0;
 
     // values_: vector<Value> where Value = std::pair<Box, int64_t>
