@@ -1,5 +1,7 @@
 package common
 
+import "strings"
+
 var FieldNameKeywords = map[string]struct{}{
 	"$meta":              {},
 	"like":               {},
@@ -38,4 +40,11 @@ var FieldNameKeywords = map[string]struct{}{
 	"PHRASE_MATCH":       {},
 	"random_sample":      {},
 	"RANDOM_SAMPLE":      {},
+}
+
+func IsFieldNameKeyword(fieldName string) bool {
+	if _, ok := FieldNameKeywords[fieldName]; ok {
+		return true
+	}
+	return strings.EqualFold(fieldName, "null")
 }

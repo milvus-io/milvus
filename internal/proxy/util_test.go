@@ -369,6 +369,8 @@ func TestValidateFieldName(t *testing.T) {
 		"null",
 		"Null",
 		"NULL",
+		"nUlL",
+		"NuLL",
 		"array_contains",
 		"json_contains_any",
 		"ARRAY_LENGTH",
