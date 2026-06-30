@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const interceptorName = "shard"
@@ -174,7 +175,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
 			mlog.Int32("schemaVersion", schemaVersion),
 			mlog.Err(err))
-		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")
+		return nil, status.NewUnrecoverableError("unexpected error from CheckIfCollectionSchemaVersionMatch: %s", err.Error())
 	}
 	schemaVersion = correctSchemaVersion
 	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
@@ -182,7 +183,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			mlog.Int64("collectionID", header.GetCollectionId()),
 			mlog.Int32("schemaVersion", schemaVersion),
 			mlog.Err(err))
-		return nil, status.NewInner("failed to materialize function fields before WAL append: %s", err.Error())
+		return nil, newFunctionMaterializeStreamingError(err)
 	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
@@ -233,6 +234,13 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// Update the insert message headers.
 	insertMsg.OverwriteHeader(header)
 	return appendOp(ctx, msg)
+}
+
+func newFunctionMaterializeStreamingError(err error) error {
+	if merr.Is(err, merr.InputError) || merr.IsNonRetryableErr(err) {
+		return status.NewInvalidArgument("failed to materialize function fields before WAL append: %s", err.Error())
+	}
+	return status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
 }
 
 // handleDeleteMessage handles the delete message.

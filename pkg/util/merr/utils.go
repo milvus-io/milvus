@@ -380,6 +380,10 @@ func GetErrorType(err error) ErrorType {
 	return SystemError
 }
 
+func Is(err error, errType ErrorType) bool {
+	return GetErrorType(err) == errType
+}
+
 // keeps only 2 decimal places
 func toMB[T constraints.Integer | constraints.Float](mem T) T {
 	return T(math.Round(float64(mem)/1024/1024*100) / 100)

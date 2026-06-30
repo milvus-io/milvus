@@ -70,4 +70,10 @@ func TestStreamingError(t *testing.T) {
 	assert.True(t, streamingErr.IsUnrecoverable())
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, pbErr.Code)
+
+	streamingErr = NewInvalidArgument("test")
+	assert.True(t, streamingErr.IsInvalidArgument())
+	assert.True(t, streamingErr.IsUnrecoverable())
+	pbErr = streamingErr.AsPBError()
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, pbErr.Code)
 }
