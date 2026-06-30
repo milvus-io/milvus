@@ -312,6 +312,52 @@ TEST(TextMatch, Index) {
     }
 }
 
+TEST(TextMatch, FuzzyIndex) {
+    using Index = index::TextMatchIndex;
+    auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                         "unique_id",
+                                         "milvus_tokenizer",
+                                         "{}");
+    index->CreateReader(milvus::index::SetBitsetSealed);
+    index->AddTextSealed("football, basketball, pingpang", true, 0);
+    index->AddTextSealed("", false, 1);
+    index->AddTextSealed("swimming, football", true, 2);
+    index->Commit();
+    index->Reload();
+
+    {
+        // "footbal" is one edit from "football", so distance 1 matches rows 0 and 2.
+        auto res = index->FuzzyMatchQuery("footbal", 1);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_TRUE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_TRUE(res[2]);
+
+        // the same typo under exact text match finds nothing: fuzzy really differs.
+        auto exact = index->MatchQuery("footbal", 1);
+        ASSERT_EQ(exact.size(), 3);
+        ASSERT_FALSE(exact[0]);
+        ASSERT_FALSE(exact[2]);
+
+        // distance 0 is exact, so the typo still finds nothing.
+        auto res0 = index->FuzzyMatchQuery("footbal", 0);
+        ASSERT_EQ(res0.size(), 3);
+        ASSERT_FALSE(res0[0]);
+        ASSERT_FALSE(res0[2]);
+
+        // "fotbal" is two edits from "football": excluded at distance 1, matched at distance 2.
+        auto miss = index->FuzzyMatchQuery("fotbal", 1);
+        ASSERT_EQ(miss.size(), 3);
+        ASSERT_FALSE(miss[0]);
+        ASSERT_FALSE(miss[2]);
+        auto hit = index->FuzzyMatchQuery("fotbal", 2);
+        ASSERT_EQ(hit.size(), 3);
+        ASSERT_TRUE(hit[0]);
+        ASSERT_FALSE(hit[1]);
+        ASSERT_TRUE(hit[2]);
+    }
+}
+
 TEST(TextMatch, UploadReturnsRelativeTextLogPaths) {
     auto ctx = CreateTextMatchTestFileManagerContext(1000);
     auto index = BuildTextMatchIndexForUpload(ctx);
