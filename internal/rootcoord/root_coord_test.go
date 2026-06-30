@@ -54,6 +54,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	coordmeta "github.com/milvus-io/milvus/pkg/v3/coordmeta/rootcoord"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -84,19 +85,11 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
 
-	testDB := newNameDb()
-	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
 	tso := mocktso.NewAllocator(t)
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
+	meta := coordmeta.NewMetaTableWithCatalog(rootcoord.NewCatalog(catalogKV))
 	core := newTestCore(withHealthyCode(),
-		withMeta(&MetaTable{
-			catalog:          rootcoord.NewCatalog(catalogKV),
-			names:            testDB,
-			aliases:          newNameDb(),
-			dbName2Meta:      make(map[string]*model.Database),
-			collID2Meta:      collID2Meta,
-			partitionName2ID: make(map[int64]map[string]int64),
-		}),
+		withMeta(meta),
 		withValidMixCoord(),
 		withValidProxyManager(),
 		withValidIDAllocator(),

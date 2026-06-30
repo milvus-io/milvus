@@ -543,6 +543,13 @@ generate-mockery-metastore: getdeps
 	$(INSTALL_PATH)/mockery --name=DataCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_datacoord_catalog.go --with-expecter --structname=DataCoordCatalog --outpkg=mocks
 	$(INSTALL_PATH)/mockery --name=QueryCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_querycoord_catalog.go --with-expecter --structname=QueryCoordCatalog --outpkg=mocks
 
+generate-mockery-coordmeta: getdeps
+	# rootcoord meta was moved into the pkg/v3 module; the RootCoordCatalog and the
+	# coord-local TSOAllocator mocks used by its tests live in the pkg module and
+	# must be generated from there so they do not drift from the interfaces.
+	@cd $(PWD)/pkg && $(INSTALL_PATH)/mockery --name=RootCoordCatalog --dir=./metastore --output=./metastore/mocks --filename=mock_rootcoord_catalog.go --with-expecter --structname=RootCoordCatalog --outpkg=mocks
+	@cd $(PWD)/pkg && $(INSTALL_PATH)/mockery --name=TSOAllocator --dir=./coordmeta/rootcoord --output=./coordmeta/rootcoord/mocktso --filename=allocator.go --with-expecter --structname=Allocator --outpkg=mocktso
+
 generate-mockery-utils: getdeps
 	# dependency.Factory
 	$(INSTALL_PATH)/mockery --name=Factory --dir=internal/util/dependency --output=internal/util/dependency --filename=mock_factory.go --with-expecter --structname=MockFactory --inpackage
@@ -579,7 +586,7 @@ generate-mockery-client:
 generate-mockery-cdc: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/cdc/.mockery.yaml
 
-generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal generate-mockery-client
+generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-coordmeta generate-mockery-internal generate-mockery-client
 
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"
