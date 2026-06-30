@@ -2591,6 +2591,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
             external_field="score",
         )
         self.refresh_and_wait(client, coll, external_source=url_b, external_spec=ext_spec)
+        assert self.wait_for_index_ready(client, coll, "embedding", timeout=120)
         self.load_collection(client, coll)
         assert self.query_count(client, coll) == nb
 
@@ -2623,6 +2624,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
 
         self.release_collection(client, coll)
         self.refresh_and_wait(client, coll)
+        assert self.wait_for_index_ready(client, coll, "embedding", timeout=120)
         self.load_collection(client, coll)
         reused = self.query(client, coll, filter="id >= 5000 && id < 5005", output_fields=["id", "score"], limit=10)[0]
         _assert_score_rows(reused, [5000, 5001, 5002, 5003, 5004])
