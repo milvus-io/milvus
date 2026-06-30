@@ -747,7 +747,10 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) {
         ParquetWriterFactory::CreateContext(key_types_, remote_prefix);
     parquet_writer_->Init(std::move(writer_context));
     BuildKeyStats(field_datas);
-    parquet_writer_->Close();
+    auto close_status = parquet_writer_->Close();
+    AssertInfo(close_status.ok(),
+               "failed to close json stats parquet writer: {}",
+               close_status.ToString());
     bson_inverted_index_->BuildIndex();
 
     // write meta file with layout type map and other metadata
