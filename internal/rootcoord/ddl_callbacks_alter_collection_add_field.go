@@ -100,7 +100,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	channels = append(channels, streaming.WAL().ControlChannel())
 	channels = append(channels, coll.VirtualChannelNames...)
 	// broadcast the put collection v2 message.
-	msg := message.NewAlterCollectionMessageBuilderV2().
+	msgBuilder := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
@@ -114,7 +114,11 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 				Schema:     schema,
 				Properties: properties,
 			},
-		}).
+		})
+	if typeutil.IsExternalCollection(schema) {
+		msgBuilder.WithUnreplicable()
+	}
+	msg := msgBuilder.
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {

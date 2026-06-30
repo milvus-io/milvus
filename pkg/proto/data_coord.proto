@@ -1627,6 +1627,7 @@ message ExternalCollectionRefreshJob {
   int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
   int64 progress = 10;           // Aggregated progress percentage (0-100)
   repeated int64 task_ids = 11;  // Task IDs belonging to this job
+  int32 schema_version = 13;     // Collection schema version used when the refresh job was submitted
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
@@ -1668,6 +1669,7 @@ message ExternalCollectionRefreshTask {
   string result_path = 22;
   // SHA-256 checksum of the serialized task result payload.
   bytes result_checksum = 23;
+  int32 schema_version = 24;  // Collection schema version copied from the parent refresh job
 }
 
 message GetRefreshExternalCollectionProgressResponse {
