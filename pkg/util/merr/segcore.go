@@ -143,6 +143,14 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2030: {sentinel: ErrSegcore},                   // UnistdError: syscall failure
 	2035: {sentinel: ErrSegcore},                   // MemAllocateSizeNotMatch: size logic bug (not OOM)
 	2041: {sentinel: ErrSegcore},                   // TextIndexNotFound
+
+	// milvus-storage generic fallbacks (a pair, each carrying exactly one retry
+	// verdict; see milvus-common EasyAssert.h). milvus-storage's ToSegcoreErrorCode
+	// maps a transient object-storage IO failure to StorageTransientError(2045)
+	// and a permanent/internal storage error to StorageError(2044). They must be
+	// classified consistently here: 2044 non-retriable, 2045 retriable.
+	2044: {sentinel: ErrSegcore},                  // StorageError: permanent storage fallback
+	2045: {sentinel: ErrSegcore, retriable: true}, // StorageTransientError: retriable storage IO/throttle/timeout
 }
 
 // classifySegcoreError converts a C++ segcore error code + message into a

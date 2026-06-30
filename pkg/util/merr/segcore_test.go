@@ -174,13 +174,14 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 		2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2009, 2010, 2011,
 		2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022,
 		2023, 2024, 2025, 2026, 2027, 2028, 2030, 2031, 2032, 2033, 2034,
-		2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043, 2099,
+		2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043, 2044, 2045,
+		2099,
 	}
 
 	// Regression guard: the codes we classified on purpose must stay registered
 	// with the intended property.
 	wantInput := []int32{2007, 2020, 2021, 2022, 2023, 2025, 2026, 2028, 2031, 2032, 2042}
-	wantRetriable := []int32{2012, 2013, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043}
+	wantRetriable := []int32{2012, 2013, 2014, 2015, 2018, 2027, 2034, 2036, 2037, 2040, 2043, 2045}
 	for _, c := range wantInput {
 		cls, ok := segcoreCodeTable[c]
 		assert.True(t, ok && cls.inputError, "code %d must stay registered as inputError", c)

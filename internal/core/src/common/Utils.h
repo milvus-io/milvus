@@ -185,56 +185,77 @@ KnowhereStatusString(knowhere::Status status) {
     return knowhere::Status2String(status);
 }
 
-// Map a knowhere Status to a segcore ErrorCode, preserving the three policy
-// buckets the Go classifier (pkg/util/merr/segcore.go) cares about:
-//   - input  : the caller's fault, must stay non-retriable. knowhere flags
-//              these via IsInputError (invalid_args / invalid_metric_type /
-//              out_of_range_in_json / ...). -> InvalidParameter (2042).
-//   - transient: a retry / reroute to another replica can succeed. knowhere
-//              lumps these into its inner_error category, so we pick them out
-//              explicitly by status value:
-//                malloc_error    -> MemAllocateFailed (OOM, genuinely retriable)
-//                disk_file_error -> FileReadFailed (DiskANN file load/read from
-//                                   object storage failed; dominant case is
-//                                   transient, another replica may have it).
-//   - permanent system: everything else, including knowhere_inner_error (the
-//              catch-all for swallowed C++ exceptions). -> KnowhereError (2099).
-//              Note: Status::timeout is intentionally NOT special-cased -- it is
-//              Cardinal-only, raised by BuildAsync's Interrupt on cancel-or-build
-//              -timeout (not a search timeout), and conflates cancellation with
-//              timeout, so it falls here rather than to a retriable code.
-// A few statuses that knowhere's IsInputError lumps into the input bucket are
-// really capability / data errors, not malformed caller input, so we pull them
-// out before the IsInputError check:
-//   not_implemented / invalid_instruction_set -> Unsupported (a feature or CPU
-//       capability gap, e.g. SCANN needs AVX2; the request itself is fine).
-//   invalid_serialized_index_type -> DataFormatBroken (an incompatible-version
-//       or corrupt serialized index read back from storage).
-// Callers that need a more specific code (e.g. invalid_index_error -> Unsupported,
-// build path -> IndexBuildError) should special-case before falling back here.
+// Map a knowhere::Status to a segcore ErrorCode. This is a switch with NO
+// `default:` plus a post-switch fallback, wrapped in -Werror=switch: when
+// knowhere adds a Status, this stops compiling until the new value is
+// classified here, instead of silently collapsing into KnowhereError. The
+// post-switch `return` keeps the function total and guards out-of-range values
+// without suppressing the exhaustiveness warning.
+//
+// Most of knowhere's input-bucket statuses become InvalidParameter, with three
+// deliberate exceptions pulled out of "input": not_implemented /
+// invalid_instruction_set are capability gaps (a feature or CPU-feature gap such
+// as SCANN needing AVX2; the request itself is fine) -> Unsupported; and
+// invalid_serialized_index_type is an incompatible-version / corrupt serialized
+// index read back from storage -> DataFormatBroken. malloc_error and
+// disk_file_error keep their retriable-on-the-Go-side codes. Every remaining
+// inner error -> KnowhereError.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
 inline ErrorCode
 KnowhereStatusToErrorCode(knowhere::Status status) {
     switch (status) {
+        // Caller-input errors -> InvalidParameter (non-retriable input).
+        case knowhere::Status::invalid_args:
+        case knowhere::Status::invalid_param_in_json:
+        case knowhere::Status::out_of_range_in_json:
+        case knowhere::Status::type_conflict_in_json:
+        case knowhere::Status::invalid_metric_type:
+        case knowhere::Status::empty_index:
+        case knowhere::Status::index_not_trained:
+        case knowhere::Status::index_already_trained:
+        case knowhere::Status::invalid_value_in_json:
+        case knowhere::Status::arithmetic_overflow:
+        case knowhere::Status::invalid_binary_set:
+        case knowhere::Status::invalid_index_error:
+        case knowhere::Status::invalid_cluster_error:
+            return ErrorCode::InvalidParameter;
+        // Capability gaps (feature / CPU-feature not available): the request is
+        // fine, so this is Unsupported, not malformed input.
         case knowhere::Status::not_implemented:
         case knowhere::Status::invalid_instruction_set:
             return ErrorCode::Unsupported;
+        // Incompatible-version / corrupt serialized index read back from storage.
         case knowhere::Status::invalid_serialized_index_type:
             return ErrorCode::DataFormatBroken;
-        default:
-            break;
-    }
-    if (knowhere::IsInputError(status)) {
-        return ErrorCode::InvalidParameter;
-    }
-    switch (status) {
         case knowhere::Status::malloc_error:
             return ErrorCode::MemAllocateFailed;
         case knowhere::Status::disk_file_error:
             return ErrorCode::FileReadFailed;
-        default:
+        // Server-side inner errors -> generic KnowhereError. timeout is
+        // Cardinal-only (BuildAsync cancel-or-build-timeout, not a search
+        // timeout) and conflates cancel with timeout, so it stays here rather
+        // than mapping to a retriable code.
+        case knowhere::Status::success:
+        case knowhere::Status::faiss_inner_error:
+        case knowhere::Status::hnsw_inner_error:
+        case knowhere::Status::diskann_inner_error:
+        case knowhere::Status::cuvs_inner_error:
+        case knowhere::Status::cardinal_inner_error:
+        case knowhere::Status::cuda_runtime_error:
+        case knowhere::Status::cluster_inner_error:
+        case knowhere::Status::timeout:
+        case knowhere::Status::internal_error:
+        case knowhere::Status::sparse_inner_error:
+        case knowhere::Status::brute_force_inner_error:
+        case knowhere::Status::emb_list_inner_error:
+        case knowhere::Status::aisaq_error:
+        case knowhere::Status::knowhere_inner_error:
             return ErrorCode::KnowhereError;
     }
+    return ErrorCode::KnowhereError;
 }
+#pragma GCC diagnostic pop
 
 inline std::vector<IndexType>
 DISK_INDEX_LIST() {

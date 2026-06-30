@@ -43,6 +43,7 @@
 #include "arrow/status.h"
 #include "common/Types.h"
 #include "common/type_c.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
@@ -61,30 +62,19 @@ namespace milvus::storage {
 
 // Map an arrow::Status failure to a segcore ErrorCode so the policy survives to
 // Go (pkg/util/merr/segcore.go) instead of every storage failure collapsing to
-// UnexpectedError(2001) via AssertInfo. Transient IO / OOM stay retriable;
-// malformed data is a permanent data error; anything else is an internal bug.
+// UnexpectedError(2001) via AssertInfo.
 //
-// CAVEAT: Invalid/TypeError/KeyError are treated here as permanent on-disk
-// corruption (DataFormatBroken). Only call this where those statuses genuinely
-// mean malformed *stored* data. Do NOT use it where arrow surfaces caller/config
-// validation as Invalid (a bad schema, bad URI, bad writer/reader config) -- that
-// should map to an input/parameter error, not data corruption. Current call sites
-// satisfy this: in-memory parquet parsing (PayloadReader) where Invalid == corrupt
-// bytes, and remote OpenOutputStream (IndexEntryEncryptedLocalWriter) where a
-// transient failure is IOError, not Invalid.
+// "Producer owns classification": milvus-storage classifies its own statuses in
+// milvus_storage::ToSegcoreError, which first unwraps the structured
+// ExtendStatusDetail to read the fine ExtendStatusCode (so a transient
+// PackedStorageIO becomes the retriable StorageTransientError(2045), corrupt
+// packed metadata/file becomes DataFormatBroken, etc.) and otherwise falls back
+// to a coarse arrow-status mapping (IO -> retriable transient, OOM ->
+// MemAllocateFailed, Invalid/Type/Key -> DataFormatBroken). We delegate here
+// rather than keep a second, drifting copy of that mapping in milvus.
 inline ErrorCode
 ArrowStatusToErrorCode(const arrow::Status& status) {
-    if (status.IsOutOfMemory()) {
-        return ErrorCode::MemAllocateFailed;  // 2034, retriable
-    }
-    if (status.IsIOError()) {
-        return ErrorCode::
-            FileReadFailed;  // 2014, retriable (another replica may have it)
-    }
-    if (status.IsInvalid() || status.IsTypeError() || status.IsKeyError()) {
-        return ErrorCode::DataFormatBroken;  // 2024, permanent data corruption
-    }
-    return ErrorCode::UnexpectedError;  // 2001, unclassified internal error
+    return milvus_storage::ToSegcoreError(status).get_error_code();
 }
 
 void
