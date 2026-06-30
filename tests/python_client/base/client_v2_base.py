@@ -1655,6 +1655,25 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def drop_function_field(
+        self,
+        client,
+        collection_name,
+        function_name,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_function_field, collection_name, function_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
     def drop_collection_field(
         self,
         client,
