@@ -11,7 +11,9 @@
 
 #pragma once
 #include <algorithm>
+#include <limits>
 #include <memory>
+#include <type_traits>
 #include "common/EasyAssert.h"
 #include "common/JsonCastType.h"
 #include "common/Types.h"
@@ -28,7 +30,8 @@ template <typename T>
 class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
  public:
     JsonFlatIndexQueryExecutor(std::string& json_path,
-                               const JsonFlatIndex& json_flat_index);
+                               const JsonFlatIndex& json_flat_index,
+                               bool use_comparable_value_mask);
 
     ~JsonFlatIndexQueryExecutor() {
         this->wrapper_ = nullptr;
@@ -99,6 +102,23 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         bitset &= null_bitset;
 
         return bitset;
+    }
+
+    const TargetBitmap
+    IsNull() override {
+        auto bitset = IsNotNull();
+        bitset.flip();
+        return bitset;
+    }
+
+    TargetBitmap
+    IsNotNull() override {
+        tracer::AutoSpan span("JsonFlatIndexQueryExecutor::IsNotNull",
+                              tracer::GetRootSpan());
+        if (!use_comparable_value_mask_) {
+            return InvertedIndexTantivy<T>::IsNotNull();
+        }
+        return ComparableValueBitset();
     }
 
     const TargetBitmap
@@ -175,7 +195,55 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     }
 
  private:
+    TargetBitmap
+    NumericComparableBitset() {
+        TargetBitmap bitset(this->Count());
+
+        TargetBitmap int_bitset(this->Count());
+        this->wrapper_->json_range_query(json_path_,
+                                         std::numeric_limits<int64_t>::lowest(),
+                                         std::numeric_limits<int64_t>::max(),
+                                         false,
+                                         false,
+                                         true,
+                                         true,
+                                         &int_bitset);
+        bitset |= int_bitset;
+
+        TargetBitmap double_bitset(this->Count());
+        this->wrapper_->json_range_query(json_path_,
+                                         std::numeric_limits<double>::lowest(),
+                                         std::numeric_limits<double>::max(),
+                                         false,
+                                         false,
+                                         true,
+                                         true,
+                                         &double_bitset);
+        bitset |= double_bitset;
+
+        return bitset;
+    }
+
+    TargetBitmap
+    ComparableValueBitset() {
+        TargetBitmap bitset(this->Count());
+        if constexpr (std::is_same_v<T, bool>) {
+            bool values[] = {false, true};
+            this->wrapper_->json_terms_query(json_path_, values, 2, &bitset);
+        } else if constexpr (std::is_integral_v<T>) {
+            bitset = NumericComparableBitset();
+        } else if constexpr (std::is_floating_point_v<T>) {
+            bitset = NumericComparableBitset();
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            this->wrapper_->json_prefix_query(json_path_, "", &bitset);
+        } else {
+            this->wrapper_->json_exist_query(json_path_, &bitset);
+        }
+        return bitset;
+    }
+
     std::string json_path_;
+    bool use_comparable_value_mask_{true};
 };
 
 // JsonFlatIndex is not bound to any specific type,
@@ -204,15 +272,16 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
 
     template <typename T>
     std::shared_ptr<JsonFlatIndexQueryExecutor<T>>
-    create_executor(std::string json_path) const {
+    create_executor(std::string json_path,
+                    bool use_comparable_value_mask = true) const {
         // json path should be in the format of /a/b/c, we need to convert it to tantivy path like a.b.c
         std::replace(json_path.begin(), json_path.end(), '/', '.');
         if (!json_path.empty()) {
             json_path = json_path.substr(1);
         }
 
-        return std::make_shared<JsonFlatIndexQueryExecutor<T>>(json_path,
-                                                               *this);
+        return std::make_shared<JsonFlatIndexQueryExecutor<T>>(
+            json_path, *this, use_comparable_value_mask);
     }
 
     JsonCastType
@@ -241,8 +310,11 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
 
 template <typename T>
 JsonFlatIndexQueryExecutor<T>::JsonFlatIndexQueryExecutor(
-    std::string& json_path, const JsonFlatIndex& json_flat_index) {
+    std::string& json_path,
+    const JsonFlatIndex& json_flat_index,
+    bool use_comparable_value_mask) {
     json_path_ = json_path;
+    use_comparable_value_mask_ = use_comparable_value_mask;
     this->wrapper_ = json_flat_index.wrapper_;
     this->null_offset_ = json_flat_index.null_offset_;
 }

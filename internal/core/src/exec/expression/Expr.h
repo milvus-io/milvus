@@ -1049,7 +1049,7 @@ class SegmentExpr : public Expr {
                 auto index_path = json_flat_index->GetNestedPath();
                 result.executor =
                     json_flat_index->template create_executor<IndexInnerType>(
-                        pointer.substr(index_path.size()));
+                        pointer.substr(index_path.size()), false);
                 result.index_ptr = result.executor.get();
             } else {
                 auto json_index = const_cast<index::IndexBase*>(json_pw.get());

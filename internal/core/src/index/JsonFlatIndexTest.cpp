@@ -209,6 +209,35 @@ TEST_F(JsonFlatIndexTest, TestExistsQuery) {
     ASSERT_FALSE(result[2]);  // not exist
 }
 
+TEST_F(JsonFlatIndexTest, TestComparableAndFieldValidityMasks) {
+    auto json_flat_index =
+        dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
+    ASSERT_NE(json_flat_index, nullptr);
+
+    std::string json_path = "/profile/name/preferred_name";
+    auto comparable_executor =
+        json_flat_index->create_executor<std::string>(json_path);
+    auto comparable_mask = comparable_executor->IsNotNull();
+    ASSERT_EQ(comparable_mask.size(), json_data_.size());
+    ASSERT_TRUE(comparable_mask[0]);
+    ASSERT_FALSE(comparable_mask[1]);
+    ASSERT_FALSE(comparable_mask[2]);
+
+    auto field_valid_executor =
+        json_flat_index->create_executor<std::string>(json_path, false);
+    auto field_valid_mask = field_valid_executor->IsNotNull();
+    ASSERT_EQ(field_valid_mask.size(), json_data_.size());
+    ASSERT_TRUE(field_valid_mask[0]);
+    ASSERT_TRUE(field_valid_mask[1]);
+    ASSERT_TRUE(field_valid_mask[2]);
+
+    auto field_null_mask = field_valid_executor->IsNull();
+    ASSERT_EQ(field_null_mask.size(), json_data_.size());
+    ASSERT_FALSE(field_null_mask[0]);
+    ASSERT_FALSE(field_null_mask[1]);
+    ASSERT_FALSE(field_null_mask[2]);
+}
+
 TEST_F(JsonFlatIndexTest, TestNotInQuery) {
     auto json_flat_index =
         dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
@@ -623,6 +652,37 @@ TEST_F(JsonFlatIndexExprTest, TestUnaryExpr) {
     EXPECT_TRUE(final[8]);
     EXPECT_TRUE(final[10]);
     EXPECT_TRUE(final[12]);
+}
+
+TEST_F(JsonFlatIndexExprTest, TestComparisonUnknowns) {
+    proto::plan::GenericValue value;
+    value.set_int64_val(1);
+    auto not_equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::NotEqual,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       not_equal_expr);
+    auto final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 1);
+    EXPECT_TRUE(final[2]);
+
+    auto greater_than_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::GreaterThan,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    auto not_greater_than_expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, greater_than_expr);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                  not_greater_than_expr);
+    final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 2);
+    EXPECT_TRUE(final[0]);
+    EXPECT_TRUE(final[13]);
 }
 
 TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {
