@@ -78,6 +78,15 @@ impl IndexReaderWrapper {
         max_edit_distance: u32,
         bitset: *mut c_void,
     ) -> Result<()> {
+        // tantivy's fuzzy automaton caps the edit distance at 2. Reject larger
+        // values up front: the `as u8` cast below would otherwise wrap (e.g.
+        // 256 -> 0) and silently turn a fuzzy query into an exact one.
+        if max_edit_distance > 2 {
+            return Err(TantivyBindingError::InvalidArgument(format!(
+                "max_edit_distance {} exceeds the fuzzy limit of 2",
+                max_edit_distance
+            )));
+        }
         // clone the tokenizer to keep fuzzy_match_query thread-safe.
         let mut tokenizer = self
             .index
@@ -86,13 +95,6 @@ impl IndexReaderWrapper {
             .clone();
         let mut token_stream = tokenizer.token_stream(q);
         use tantivy::query::{FuzzyTermQuery, Occur};
-        // reject out-of-range distances instead of silently truncating via `as u8`.
-        if max_edit_distance > 2 {
-            return Err(TantivyBindingError::InvalidArgument(format!(
-                "max_edit_distance {} exceeds the fuzzy limit of 2",
-                max_edit_distance
-            )));
-        }
         let distance = max_edit_distance as u8;
         let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
         while token_stream.advance() {
@@ -325,10 +327,12 @@ mod tests {
             .unwrap();
         assert_eq!(res, vec![0, 2].into_iter().collect::<HashSet<u32>>());
 
-        // an out-of-range distance is rejected, not silently truncated to 0.
+        // an out-of-range distance is rejected. 256 is chosen deliberately:
+        // `256 as u8 == 0`, so without the guard this would wrap to an exact
+        // match and return Ok; the guard must turn it into an error.
         res.clear();
         assert!(reader
-            .fuzzy_match_query("alergy", 3, &mut res as *mut _ as *mut c_void)
+            .fuzzy_match_query("alergy", 256, &mut res as *mut _ as *mut c_void)
             .is_err());
     }
 }
