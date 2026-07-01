@@ -505,6 +505,10 @@ github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b h1:TfeY0NxYxZz
 github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b/go.mod h1:iwW+9cWfIzzDseEBCCeDSN5SD16Tidvy8cwQ7ZY8Qj4=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260629094222-0912ffa3f8ef h1:1+kyqrHMpTKhOePohyrlFfwoh04VxXoRkO6RdJM4cGw=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260629094222-0912ffa3f8ef/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260612100615-43795e8f8f6e h1:axPnOhjsWqqxk0dOQRSIU2mdg52Kyl/8E6iDFZy/IpE=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260612100615-43795e8f8f6e/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260701112023-1aa0f3b3f5b6 h1:ooY+fI0aYrk2+06S9179ulyEnwSPSVnZuRX25fCwAvo=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260701112023-1aa0f3b3f5b6/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/minio/md5-simd v1.1.2 h1:Gdi1DZK69+ZVMoNHRXJyNcxrMA4dSxoYHZSQbirFg34=
 github.com/minio/md5-simd v1.1.2/go.mod h1:MzdKDxYpY2BT9XQFocsiZf/NKVtR7nkE4RoEpN+20RM=
 github.com/minio/minio-go/v7 v7.0.73 h1:qr2vi96Qm7kZ4v7LLebjte+MQh621fFWnv93p12htEo=
@@ -701,10 +705,6 @@ github.com/stretchr/testify v1.8.2/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260701064602-f3ac444e4dc0 h1:luZF6/O3j9i0o6WIK7L8jXmHUQcGrWn0q+k3AKMee70=
-github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260701064602-f3ac444e4dc0/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
-github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260630063952-22564555b3ac h1:Eog2H/cbrp7dp1CaLeSgP68eMpAFDqTasQAW3viK3XU=
-github.com/sunby/milvus-proto/go-api/v3 v3.0.0-20260630063952-22564555b3ac/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865 h1:LcUqBlKC4j15LhT303yQDX/XxyHG4haEQqbHgZZA4SY=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
 github.com/testcontainers/testcontainers-go v0.35.0 h1:uADsZpTKFAtp8SLK+hMwSaa+X+JiERHtd4sQAFmXeMo=
