@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 )
 
 func TestAppendToIncomingContext(t *testing.T) {
@@ -92,6 +93,43 @@ func TestGetCurUserFromContext(t *testing.T) {
 		assert.Equal(t, "root", u)
 		assert.Equal(t, password, p)
 	}
+}
+
+func TestIsIntraClusterRequest(t *testing.T) {
+	t.Run("no incoming metadata means in-process call", func(t *testing.T) {
+		assert.True(t, IsIntraClusterRequest(context.Background()))
+	})
+
+	t.Run("serverID without authorization", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(),
+			metadata.New(map[string]string{interceptor.ServerIDKey: "1"}))
+		assert.True(t, IsIntraClusterRequest(ctx))
+	})
+
+	t.Run("cluster key without authorization", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(),
+			metadata.New(map[string]string{interceptor.ClusterKey: "by-dev"}))
+		assert.True(t, IsIntraClusterRequest(ctx))
+	})
+
+	t.Run("authorization always wins", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{
+			interceptor.ServerIDKey: "1",
+			util.HeaderAuthorize:    crypto.Base64Encode("root:root"),
+		}))
+		assert.False(t, IsIntraClusterRequest(ctx))
+	})
+
+	t.Run("authorization only", func(t *testing.T) {
+		ctx := GetContext(context.Background(), "root:root")
+		assert.False(t, IsIntraClusterRequest(ctx))
+	})
+
+	t.Run("metadata without any known key is not intra-cluster", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(),
+			metadata.New(map[string]string{"foo": "bar"}))
+		assert.False(t, IsIntraClusterRequest(ctx))
+	})
 }
 
 func GetContext(ctx context.Context, originValue string) context.Context {

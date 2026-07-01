@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -81,6 +82,26 @@ func SetToIncomingContext(ctx context.Context, kv ...string) context.Context {
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)
+}
+
+// IsIntraClusterRequest reports whether the request comes from another Milvus
+// component rather than a user request forwarded by proxy, judged by the shape
+// of the incoming metadata:
+//   - no incoming metadata at all: an in-process call inside the same process;
+//   - metadata carries the ServerID/Cluster keys (injected by the grpcclient
+//     interceptors on every intra-cluster RPC) but no authorization key.
+//
+// A user request forwarded by proxy always carries the authorization key
+// (appended by proxy after authentication), so it never matches.
+func IsIntraClusterRequest(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return true
+	}
+	if len(md.Get(util.HeaderAuthorize)) > 0 {
+		return false
+	}
+	return len(md.Get(interceptor.ServerIDKey)) > 0 || len(md.Get(interceptor.ClusterKey)) > 0
 }
 
 func GetCurUserFromContext(ctx context.Context) (string, error) {
