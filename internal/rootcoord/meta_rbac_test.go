@@ -45,7 +45,7 @@ func generateMetaTable(_ *testing.T) *MetaTable {
 	path := funcutil.RandomString(10)
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
 	// RBAC operations talk to the catalog directly and need no reloaded cache,
-	// so construct a catalog-only MetaTable (matching the upstream behaviour)
+	// so construct a catalog-only MetaTable (matching the upstream behavior)
 	// instead of NewMetaTable, whose reload() touches global channel stats.
 	return coordmeta.NewMetaTableWithCatalog(rootcoord.NewCatalog(catalogKV))
 }

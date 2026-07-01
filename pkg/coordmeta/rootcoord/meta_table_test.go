@@ -1667,7 +1667,6 @@ func TestMetaTable_CreateDatabase(t *testing.T) {
 }
 
 func TestCreateDefaultDb(t *testing.T) {
-
 	// Save original config and restore after test
 	originalDefaultKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
 	defer func() {

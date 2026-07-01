@@ -20,7 +20,6 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -30,7 +29,7 @@ import (
 var Params = paramtable.Get()
 
 // fakeCipherHelper is a test DatabaseCipherHelper that mirrors the production
-// hookutil-backed behaviour without depending on internal/util/hookutil: when a
+// hookutil-backed behavior without depending on internal/util/hookutil: when a
 // default root key is configured it stamps the encryption properties (ezID +
 // root key) onto the database, otherwise it leaves the properties untouched.
 type fakeCipherHelper struct{}

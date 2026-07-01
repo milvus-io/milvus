@@ -42,7 +42,6 @@ import (
 )
 
 func TestMetaTable_TruncateCollection(t *testing.T) {
-
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
@@ -131,7 +130,6 @@ func TestMetaTable_TruncateCollection(t *testing.T) {
 }
 
 func TestMetaTableReloadNormalizesMaxFieldIDProperty(t *testing.T) {
-
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
