@@ -47,12 +47,14 @@ var (
 	// and other operations (insert/delete/statistics/etc.)
 	// since in concurrent situation, there operation may block each other in high payload
 
-	sqp      atomic.Pointer[conc.Pool[any]]
-	sqOnce   sync.Once
-	dp       atomic.Pointer[conc.Pool[any]]
-	dynOnce  sync.Once
-	loadPool atomic.Pointer[conc.Pool[any]]
-	loadOnce sync.Once
+	sqp        atomic.Pointer[conc.Pool[any]]
+	sqOnce     sync.Once
+	dp         atomic.Pointer[conc.Pool[any]]
+	dynOnce    sync.Once
+	loadPool   atomic.Pointer[conc.Pool[any]]
+	loadOnce   sync.Once
+	warmupPool atomic.Pointer[conc.Pool[any]]
+	warmupOnce sync.Once
 
 	// mutatePool serves the online write CGO path (segment Insert/Delete).
 	// It is isolated from the load/management work on DynamicPool so that a
@@ -75,6 +77,7 @@ var (
 	cgoTagSQ      = C.CString("CGO_SQ")
 	cgoTagLoad    = C.CString("CGO_LOAD")
 	cgoTagDynamic = C.CString("CGO_DYN")
+	cgoTagWarmup  = C.CString("CGO_WARMUP")
 	cgoTagMutate  = C.CString("CGO_MUTATE")
 )
 
@@ -146,6 +149,27 @@ func initLoadPool() {
 
 		pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, config.NewHandler("qn.loadpool.middlepriority", ResizeLoadPool))
 		mlog.Info(context.TODO(), "init loadPool done", mlog.Int("size", poolSize))
+	})
+}
+
+func initWarmupPool() {
+	warmupOnce.Do(func() {
+		pt := paramtable.Get()
+		poolSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
+		pool := conc.NewPool[any](
+			poolSize,
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagWarmup)
+			}),
+			conc.WithNonBlocking(false),
+		)
+
+		warmupPool.Store(pool)
+		pt.Watch(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, config.NewHandler("qn.warmpool.lowpriority", ResizeWarmupPool))
+		mlog.Info(context.TODO(), "init warmupPool done", mlog.Int("size", poolSize))
 	})
 }
 
@@ -226,6 +250,11 @@ func GetLoadPool() *conc.Pool[any] {
 	return loadPool.Load()
 }
 
+func GetWarmupPool() *conc.Pool[any] {
+	initWarmupPool()
+	return warmupPool.Load()
+}
+
 func GetBFApplyPool() *conc.Pool[any] {
 	initBFApplyPool()
 	return bfPool.Load()
@@ -258,6 +287,14 @@ func ResizeLoadPool(evt *config.Event) {
 		pt := paramtable.Get()
 		newSize := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
 		resizePool(GetLoadPool(), newSize, "LoadPool")
+	}
+}
+
+func ResizeWarmupPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
+		resizePool(GetWarmupPool(), newSize, "WarmupPool")
 	}
 }
 
@@ -303,6 +340,7 @@ func CollectPoolStats() []metrics.PoolStats {
 		{"SQPool", GetSQPool()},
 		{"DynamicPool", GetDynamicPool()},
 		{"LoadPool", GetLoadPool()},
+		{"WarmupPool", GetWarmupPool()},
 		{"MutatePool", GetMutatePool()},
 		{"BFApplyPool", GetBFApplyPool()},
 		{"DeletePool", GetDeletePool()},

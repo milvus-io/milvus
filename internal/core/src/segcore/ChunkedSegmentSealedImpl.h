@@ -529,12 +529,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                  int64_t count,
                                  TargetBitmapView valid_result) const override;
 
-    void
-    prefetch_chunks(milvus::OpContext* op_ctx, FieldId field_id) const override;
-
-    void
-    prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const override;
-
  protected:
     // blob and row_count
     PinWrapper<SpanBase>

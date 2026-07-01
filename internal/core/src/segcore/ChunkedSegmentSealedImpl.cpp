@@ -1629,18 +1629,6 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
         count);
 }
 
-void
-ChunkedSegmentSealedImpl::prefetch_chunks(milvus::OpContext* op_ctx,
-                                          FieldId field_id) const {
-    std::shared_lock lck(mutex_);
-    if (auto column = get_column(field_id)) {
-        auto num_chunks = column->num_chunks();
-        std::vector<int64_t> ids(num_chunks);
-        std::iota(ids.begin(), ids.end(), 0);
-        prefetch_chunks(op_ctx, field_id, ids);
-    }
-}
-
 PinWrapper<SpanBase>
 ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                           FieldId field_id,

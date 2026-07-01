@@ -390,16 +390,6 @@ class SegmentInternalInterface : public SegmentInterface {
                                  int64_t count,
                                  TargetBitmapView valid_result) const = 0;
 
-    // Convenience: prefetch all chunks of a field. Default impl enumerates
-    // [0, num_chunk(field_id)) and forwards to the typed overload.
-    virtual void
-    prefetch_chunks(milvus::OpContext* op_ctx, FieldId field_id) const {
-    }
-
-    virtual void
-    prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const {
-    }
-
     template <typename T>
     PinWrapper<Span<T>>
     chunk_data(milvus::OpContext* op_ctx,
