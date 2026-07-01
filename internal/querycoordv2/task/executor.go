@@ -222,7 +222,7 @@ func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 // not really executes the request
 func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	action := task.Actions()[step].(*SegmentAction)
-	defer action.rpcReturned.Store(true)
+	defer action.Finish()
 	ctx := task.Context()
 
 	var err error
@@ -316,7 +316,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*SegmentAction)
-	defer action.rpcReturned.Store(true)
+	defer action.Finish()
 
 	ctx := task.Context()
 	var err error

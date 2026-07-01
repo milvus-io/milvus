@@ -55,6 +55,8 @@ const (
 	TaskPriorityHigh                   // for channel checker
 )
 
+const ReasonLacksOfSegment = "lacks of segment"
+
 var TaskPriorityName = map[Priority]string{
 	TaskPriorityLow:    "Low",
 	TaskPriorityNormal: "Normal",
@@ -329,6 +331,8 @@ type SegmentTask struct {
 	loadPriority commonpb.LoadPriority
 	// for balance segment task, expected load and release execution on the same shard leader
 	shardLeaderID int64
+
+	inflightLoadUsage atomic.Pointer[inflightLoadUsage]
 }
 
 // NewSegmentTask creates a SegmentTask with actions,

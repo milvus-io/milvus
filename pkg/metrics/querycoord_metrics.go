@@ -106,6 +106,22 @@ var (
 			Help:      "the number of tasks in QueryCoord's scheduler",
 		}, []string{QueryCoordTaskType})
 
+	QueryCoordAutoscaleInflightLoadMemoryBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "autoscale_inflight_load_memory_bytes",
+			Help:      "estimated memory bytes needed by in-flight load grow segment tasks for autoscaling",
+		}, []string{NodeIDLabelName, nodeHostLabelName})
+
+	QueryCoordAutoscaleInflightLoadDiskBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "autoscale_inflight_load_disk_bytes",
+			Help:      "estimated disk bytes needed by in-flight load grow segment tasks for autoscaling",
+		}, []string{NodeIDLabelName, nodeHostLabelName})
+
 	QueryCoordNumQueryNodes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -187,6 +203,8 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordLoadLatency)
 	registry.MustRegister(QueryCoordReleaseLatency)
 	registry.MustRegister(QueryCoordTaskNum)
+	registry.MustRegister(QueryCoordAutoscaleInflightLoadMemoryBytes)
+	registry.MustRegister(QueryCoordAutoscaleInflightLoadDiskBytes)
 	registry.MustRegister(QueryCoordNumQueryNodes)
 	registry.MustRegister(QueryCoordCurrentTargetCheckpointUnixSeconds)
 	registry.MustRegister(QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds)

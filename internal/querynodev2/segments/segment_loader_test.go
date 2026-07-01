@@ -2335,6 +2335,53 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	suite.EqualValues(expected, usage.MemorySize)
 }
 
+func TestCheckLogicalSegmentSizeUsesJSONKeyStatsExpansionFactor(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.QueryNodeCfg.TieredEvictionEnabled.Key, "true")
+	defer params.Reset(params.QueryNodeCfg.TieredEvictionEnabled.Key)
+	params.Save(params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key, "1.0")
+	defer params.Reset(params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key)
+	params.Save(params.QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer params.Reset(params.QueryNodeCfg.MmapJSONStats.Key)
+	params.Save(params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key, "3.0")
+	defer params.Reset(params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key)
+
+	const collectionID = int64(10)
+	collectionManager := NewMockCollectionManager(t)
+	segmentManager := NewMockSegmentManager(t)
+	loader := &segmentLoader{
+		manager: &Manager{
+			Collection: collectionManager,
+			Segment:    segmentManager,
+		},
+	}
+	collectionManager.EXPECT().
+		Get(collectionID).
+		Return(NewCollectionWithoutSegcoreForTest(collectionID, &schemapb.CollectionSchema{
+			Name: "test_json_stats_estimate",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+		}))
+	segmentManager.EXPECT().GetLogicalResource().Return(ResourceUsage{}).Twice()
+
+	memoryBytes, diskBytes, err := loader.checkLogicalSegmentSize(context.Background(), []*querypb.SegmentLoadInfo{
+		{
+			CollectionID: collectionID,
+			SegmentID:    20,
+			NumOfRows:    1,
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				101: {FieldID: 101, MemorySize: 100},
+			},
+		},
+	}, 1024)
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, 300, memoryBytes)
+	assert.Zero(t, diskBytes)
+}
+
 func TestSeparateLoadInfoV2_ExternalFieldIndexNotSkipped(t *testing.T) {
 	// Verifies that indexes on external fields are NOT skipped in separateLoadInfoV2.
 	// Previously, external field indexes were filtered out, preventing index loading for external tables.

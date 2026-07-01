@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -43,6 +44,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -2206,6 +2208,282 @@ func (suite *TaskSuite) TestChannelTaskDeltaCache() {
 	suite.Equal(0, delta.Get(nodeID, collectionID))
 	suite.Equal(0, delta.Get(nodeID, -1))
 	suite.Equal(0, delta.Get(-1, -1))
+}
+
+func (suite *TaskSuite) TestAutoscaleInflightLoadMetrics() {
+	params := paramtable.Get()
+	params.Save(params.QueryCoordCfg.AutoscaleEnabled.Key, "false")
+	suite.T().Cleanup(func() {
+		params.Reset(params.QueryCoordCfg.AutoscaleEnabled.Key)
+	})
+
+	rgName := "rg-inflight"
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+	collectionID := int64(2001)
+	segmentID := int64(3001)
+	targetNode := int64(1)
+	targetNodeLabel := "1"
+	targetNodeHost := "querynode-1"
+	otherNodeLabel := "2"
+	otherNodeHost := "querynode-2"
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: targetNode, Hostname: targetNodeHost}))
+	metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost).Set(0)
+	metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(targetNodeLabel, targetNodeHost).Set(0)
+	metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(otherNodeLabel, otherNodeHost).Set(0)
+	metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(otherNodeLabel, otherNodeHost).Set(0)
+	partitionID := int64(100)
+	replica := meta.NewReplica(&querypb.Replica{
+		CollectionID:  collectionID,
+		ID:            20,
+		ResourceGroup: rgName,
+		Nodes:         []int64{targetNode},
+	}, typeutil.NewUniqueSet(targetNode))
+	collection := utils.CreateTestCollection(collectionID, 1)
+	collection.LoadFields = []int64{100}
+	collection.FieldIndexID = map[int64]int64{100: 11}
+	suite.NoError(suite.meta.PutCollection(ctx, collection))
+	suite.NoError(suite.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID)))
+	suite.meta.Put(ctx, replica)
+
+	segment := &datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+		NumOfRows:    100,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 100, LogSize: 80}}},
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: 300, LogSize: 240}}},
+		},
+		Statslogs: []*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 20, LogSize: 20}}},
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: 50, LogSize: 50}}},
+		},
+		Deltalogs: []*datapb.FieldBinlog{
+			{Binlogs: []*datapb.Binlog{{MemorySize: 10, LogSize: 8}}},
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, []*datapb.SegmentInfo{segment}, nil)
+	suite.NoError(suite.target.UpdateCollectionNextTarget(ctx, collectionID))
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
+				},
+				{FieldID: 101, Name: "scalar", DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil).Twice()
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, collectionID, segmentID).Return(map[int64][]*querypb.FieldIndexInfo{
+		segmentID: {
+			{FieldID: 100, IndexID: 10, IndexSize: 60},
+			{
+				FieldID:        100,
+				IndexID:        11,
+				IndexSize:      30,
+				NumRows:        100,
+				IndexFilePaths: []string{"index/11"},
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: common.DimKey, Value: "4"},
+					{Key: "M", Value: "8"},
+				},
+			},
+			{FieldID: 101, IndexID: 20, IndexSize: 90},
+		},
+	}, nil).Twice()
+
+	loadTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		collectionID,
+		replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(targetNode, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
+	)
+	suite.NoError(err)
+	loadTask.SetReason(ReasonLacksOfSegment)
+	suite.NoError(scheduler.Add(loadTask))
+
+	duplicateTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		collectionID,
+		replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(targetNode, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
+	)
+	suite.NoError(err)
+	duplicateTask.SetReason(ReasonLacksOfSegment)
+	suite.Error(scheduler.Add(duplicateTask))
+
+	ignoredTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		collectionID,
+		replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(targetNode, ActionTypeGrow, "", segmentID+1, querypb.DataScope_Historical, 100),
+	)
+	suite.NoError(err)
+	ignoredTask.SetReason("balance")
+	suite.NoError(scheduler.Add(ignoredTask))
+
+	suite.Eventually(func() bool {
+		return testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost)) == float64(60) &&
+			testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(targetNodeLabel, targetNodeHost)) == float64(0)
+	}, time.Second, 10*time.Millisecond)
+	suite.Equal(int64(60), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).MemoryBytes)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).DiskBytes)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{2}).MemoryBytes)
+	suite.Equal(int64(60), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode, 2}).MemoryBytes)
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(otherNodeLabel, otherNodeHost)))
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(otherNodeLabel, otherNodeHost)))
+
+	loadTask.Actions()[0].(*SegmentAction).Finish()
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).MemoryBytes)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).DiskBytes)
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+
+	scheduler.remove(loadTask)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).MemoryBytes)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).DiskBytes)
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+
+	removedTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		collectionID,
+		replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(targetNode, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
+	)
+	suite.NoError(err)
+	removedTask.SetReason(ReasonLacksOfSegment)
+	suite.NoError(scheduler.Add(removedTask))
+	suite.Equal(int64(60), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).MemoryBytes)
+
+	scheduler.remove(removedTask)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).MemoryBytes)
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+
+	removedTask.Actions()[0].(*SegmentAction).Finish()
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).MemoryBytes)
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+}
+
+func TestAutoscaleInflightLoadResourceSnapshot(t *testing.T) {
+	const (
+		node1      = int64(91001)
+		node2      = int64(91002)
+		node1Label = "91001"
+		node2Label = "91002"
+		node1Host  = "inflight-snapshot-node-1"
+		node2Host  = "inflight-snapshot-node-2"
+	)
+	scheduler := NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
+	t.Cleanup(func() {
+		metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.DeleteLabelValues(node1Label, node1Host)
+		metrics.QueryCoordAutoscaleInflightLoadDiskBytes.DeleteLabelValues(node1Label, node1Host)
+		metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.DeleteLabelValues(node2Label, node2Host)
+		metrics.QueryCoordAutoscaleInflightLoadDiskBytes.DeleteLabelValues(node2Label, node2Host)
+	})
+
+	scheduler.updateAutoscaleInflightLoadResource(node1, node1Host, 10, 20)
+	scheduler.updateAutoscaleInflightLoadResource(node2, node2Host, 30, 40)
+
+	assert.Equal(t, int64(10), scheduler.GetAutoscaleInflightLoadResource([]int64{node1}).MemoryBytes)
+	assert.Equal(t, int64(20), scheduler.GetAutoscaleInflightLoadResource([]int64{node1}).DiskBytes)
+	assert.Equal(t, int64(40), scheduler.GetAutoscaleInflightLoadResource([]int64{node1, node2}).MemoryBytes)
+	assert.Equal(t, int64(60), scheduler.GetAutoscaleInflightLoadResource([]int64{node1, node2}).DiskBytes)
+
+	scheduler.updateAutoscaleInflightLoadResource(node1, node1Host, -10, -20)
+	assert.Equal(t, int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{node1}).MemoryBytes)
+	assert.Equal(t, int64(30), scheduler.GetAutoscaleInflightLoadResource([]int64{node1, node2}).MemoryBytes)
+}
+
+func (suite *TaskSuite) TestAutoscaleInflightLoadMetricsSkipEstimateFailure() {
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+	collectionID := int64(2101)
+	segmentID := int64(3101)
+	targetNode := int64(1)
+	targetNodeLabel := "1"
+	targetNodeHost := "querynode-1"
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: targetNode, Hostname: targetNodeHost}))
+	metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost).Set(0)
+	metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(targetNodeLabel, targetNodeHost).Set(0)
+	partitionID := int64(100)
+	replica := meta.NewReplica(&querypb.Replica{
+		CollectionID:  collectionID,
+		ID:            21,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         []int64{targetNode},
+	}, typeutil.NewUniqueSet(targetNode))
+	collection := utils.CreateTestCollection(collectionID, 1)
+	suite.NoError(suite.meta.PutCollection(ctx, collection))
+	suite.NoError(suite.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID)))
+	suite.meta.Put(ctx, replica)
+
+	segment := &datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 100, LogSize: 80}}},
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, []*datapb.SegmentInfo{segment}, nil)
+	suite.NoError(suite.target.UpdateCollectionNextTarget(ctx, collectionID))
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "field_100", DataType: schemapb.DataType_Int64}},
+		},
+	}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, collectionID, segmentID).Return(map[int64][]*querypb.FieldIndexInfo{
+		segmentID: {{
+			FieldID:        100,
+			IndexFilePaths: []string{"/path/that/must/not/exist/index_file"},
+		}},
+	}, nil)
+
+	loadTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		collectionID,
+		replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(targetNode, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
+	)
+	suite.NoError(err)
+	loadTask.SetReason(ReasonLacksOfSegment)
+	suite.NoError(scheduler.Add(loadTask))
+
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).MemoryBytes)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).DiskBytes)
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+
+	loadTask.Actions()[0].(*SegmentAction).Finish()
+	scheduler.remove(loadTask)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).MemoryBytes)
+	suite.Equal(int64(0), scheduler.GetAutoscaleInflightLoadResource([]int64{targetNode}).DiskBytes)
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
+	suite.Equal(float64(0), testutil.ToFloat64(metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(targetNodeLabel, targetNodeHost)))
 }
 
 func (suite *TaskSuite) TestRemoveTaskWithError() {

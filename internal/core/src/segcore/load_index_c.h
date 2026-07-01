@@ -36,6 +36,12 @@ DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);
 LoadResourceRequest
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
 
+CStatus
+EstimateLoadIndexResourceFromSerializedInfo(
+    const uint8_t* serialized_load_index_info,
+    const uint64_t len,
+    LoadResourceRequest* load_resource_request);
+
 bool
 TryReserveLoadingResourceWithTimeout(CResourceUsage size,
                                      int64_t millisecond_timeout);
