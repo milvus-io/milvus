@@ -71,6 +71,10 @@ type alterCollectionFileResourceRefReserver interface {
 	reserveAlterCollectionFileResourceRefs(collectionID int64, ids []int64) error
 }
 
+type alterCollectionFileResourceRefRollbacker interface {
+	rollbackAlterCollectionFileResourceRefs(ctx context.Context, collectionID int64, ids []int64)
+}
+
 func reserveFileResourceRefs(meta IMetaTable, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
@@ -88,6 +92,17 @@ func reserveAlterCollectionFileResourceRefs(meta IMetaTable, collectionID int64,
 	return reserveFileResourceRefs(meta, ids)
 }
 
+func rollbackAlterCollectionFileResourceRefs(ctx context.Context, meta IMetaTable, collectionID int64, ids []int64) {
+	if len(ids) == 0 {
+		return
+	}
+	if rollbacker, ok := meta.(alterCollectionFileResourceRefRollbacker); ok {
+		rollbacker.rollbackAlterCollectionFileResourceRefs(ctx, collectionID, ids)
+		return
+	}
+	meta.DecFileResourceRefCnt(ids)
+}
+
 func (mt *MetaTable) reserveAlterCollectionFileResourceRefs(collectionID int64, ids []int64) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -96,6 +111,24 @@ func (mt *MetaTable) reserveAlterCollectionFileResourceRefs(collectionID int64, 
 	}
 	mt.recordFileResourceRefHoldLocked(collectionID, ids)
 	return nil
+}
+
+func (mt *MetaTable) rollbackAlterCollectionFileResourceRefs(ctx context.Context, collectionID int64, ids []int64) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	for _, id := range ids {
+		if !mt.consumeFileResourceRefHoldLocked(collectionID, id) {
+			mlog.Warn(ctx, "AlterCollection: rollback file resource reservation without hold",
+				mlog.Int64("collectionID", collectionID), mlog.Int64("fileResourceID", id))
+			continue
+		}
+		if mt.fileResourceRefCnt[id] > 0 {
+			mt.fileResourceRefCnt[id]--
+		} else {
+			mlog.Warn(ctx, "AlterCollection: rollback file resource refCnt underflow",
+				mlog.Int64("collectionID", collectionID), mlog.Int64("fileResourceID", id))
+		}
+	}
 }
 
 func (mt *MetaTable) recordFileResourceRefHoldLocked(collectionID int64, ids []int64) {

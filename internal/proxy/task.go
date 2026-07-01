@@ -2501,6 +2501,31 @@ func validateAlterAnalyzerFieldParam(collSchema *schemapb.CollectionSchema, fiel
 	return nil
 }
 
+func validateAlterAnalyzerFinalState(collSchema *schemapb.CollectionSchema, fieldName string, properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	field := getAlterCollectionFieldTarget(collSchema, fieldName)
+	if field == nil {
+		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
+	}
+	nextField := proto.Clone(field).(*schemapb.FieldSchema)
+	typeParams := common.CloneKeyValuePairs(field.GetTypeParams()).ToMap()
+	for _, prop := range properties {
+		if prop.GetKey() == common.FieldDescriptionKey {
+			continue
+		}
+		typeParams[prop.GetKey()] = prop.GetValue()
+	}
+	for _, deleteKey := range deleteKeys {
+		delete(typeParams, deleteKey)
+	}
+	nextField.TypeParams = common.NewKeyValuePairs(typeParams)
+
+	fieldHelper := typeutil.CreateFieldSchemaHelper(nextField)
+	if fieldHelper.HasAnalyzerParams() && !fieldHelper.EnableAnalyzer() {
+		return merr.WrapErrParameterInvalidMsg("field %s with analyzer_params must also set enable_analyzer to true", fieldName)
+	}
+	return nil
+}
+
 func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
@@ -2520,6 +2545,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.Properties = updatePropertiesKeys(t.Properties)
+	analyzerFieldParamMutated := false
 	for _, prop := range t.Properties {
 		if !IsKeyAllowAlter(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
@@ -2527,6 +2553,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		// Check the value type based on the key
 		switch prop.Key {
 		case common.EnableAnalyzerKey, common.AnalyzerParamKey:
+			analyzerFieldParamMutated = true
 			if err := validateAlterAnalyzerFieldParam(collSchema.CollectionSchema, t.FieldName); err != nil {
 				return err
 			}
@@ -2611,6 +2638,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
 		}
 		if isAnalyzerFieldParam(updatedKey) {
+			analyzerFieldParamMutated = true
 			if err := validateAlterAnalyzerFieldParam(collSchema.CollectionSchema, t.FieldName); err != nil {
 				return err
 			}
@@ -2629,6 +2657,12 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		deleteKeys = append(deleteKeys, updatedKey)
 	}
 	t.DeleteKeys = deleteKeys
+
+	if analyzerFieldParamMutated {
+		if err := validateAlterAnalyzerFinalState(collSchema.CollectionSchema, t.FieldName, t.Properties, t.DeleteKeys); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

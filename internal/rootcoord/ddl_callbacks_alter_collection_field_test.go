@@ -179,6 +179,18 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	meta.fileResourceRefCnt = map[int64]int{}
 
 	mixCoord := core.mixCoord.(*mocks.MixCoord)
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+		},
+	})
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey)
+	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
+
 	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
 		infos := req.GetAnalyzerInfos()
 		return len(infos) == 1 &&
@@ -202,6 +214,16 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []int64{resourceID}, coll.FileResourceIds)
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey, `{"tokenizer":"standard"}`)
+
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		DeleteKeys:     []string{common.EnableAnalyzerKey},
+	})
+	require.Error(t, merr.CheckRPCCall(resp, err))
 	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey, `{"tokenizer":"standard"}`)
 

@@ -12,7 +12,14 @@ import (
 var (
 	ErrNotPrimary   = errors.New("cluster is not primary, cannot do any DDL/DCL")
 	ErrNotSecondary = errors.New("cluster is not secondary, cannot perform force promote")
+
+	// ErrBroadcastTaskNotCreated marks a Broadcast error returned before the task is registered in the manager.
+	ErrBroadcastTaskNotCreated = errors.New("broadcast task not created")
 )
+
+func IsBroadcastTaskNotCreated(err error) bool {
+	return errors.Is(err, ErrBroadcastTaskNotCreated)
+}
 
 type Broadcaster interface {
 	// WithResourceKeys sets the resource keys of the broadcast operation.

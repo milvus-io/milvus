@@ -236,12 +236,12 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	}
 	schema.FileResourceIds = fileResourceIds
 
-	// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
-	// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
-	if err := reserveFileResourceRefs(t.meta, schema.FileResourceIds); err != nil {
-		return err
-	}
 	if len(schema.FileResourceIds) > 0 {
+		// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
+		// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
+		if err := reserveFileResourceRefs(t.meta, schema.FileResourceIds); err != nil {
+			return err
+		}
 		t.heldFileResourceIds = schema.FileResourceIds
 	}
 

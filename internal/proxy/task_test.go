@@ -6421,6 +6421,15 @@ func TestAlterCollectionField(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:      "reject analyzer params without enable analyzer",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
 			name:      "reject analyzer params on non-string field",
 			fieldName: "array_field",
 			properties: []*commonpb.KeyValuePair{

@@ -1781,6 +1781,16 @@ func TestMetaTableAlterCollectionFileResourceRefCnt(t *testing.T) {
 		require.ElementsMatch(t, []int64{resourceID}, meta.collID2Meta[collectionID].FileResourceIds)
 	})
 
+	t.Run("rollback request path reservation", func(t *testing.T) {
+		meta, _ := newMeta(nil, map[int64]int{})
+		require.NoError(t, reserveAlterCollectionFileResourceRefs(meta, collectionID, []int64{resourceID}))
+
+		rollbackAlterCollectionFileResourceRefs(context.Background(), meta, collectionID, []int64{resourceID})
+
+		require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
+		require.NotContains(t, meta.fileResourceRefHolds, collectionID)
+	})
+
 	t.Run("replay or replicated task adds refCnt without reservation", func(t *testing.T) {
 		meta, catalog := newMeta(nil, map[int64]int{resourceID: 1})
 		catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, true).Return(nil).Once()
@@ -1795,7 +1805,7 @@ func TestMetaTableAlterCollectionFileResourceRefCnt(t *testing.T) {
 
 	t.Run("recovery hold prevents double increment for pending alter", func(t *testing.T) {
 		meta, catalog := newMeta(nil, map[int64]int{})
-		meta.RecoverFileResourceRefCnt(map[int64][]int64{collectionID: []int64{resourceID}})
+		meta.RecoverFileResourceRefCnt(map[int64][]int64{collectionID: {resourceID}})
 		catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, true).Return(nil).Once()
 
 		err := meta.AlterCollection(context.Background(), buildAlterCollectionSchemaResult(collectionID, buildSchema(resourceID), 100))

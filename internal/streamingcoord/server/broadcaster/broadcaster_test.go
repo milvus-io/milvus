@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -230,6 +231,29 @@ func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) messa
 		panic(err)
 	}
 	return msg.OverwriteBroadcastHeader(0, rks...)
+}
+
+func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
+	locker := newResourceKeyLocker()
+	rk := message.NewExclusiveCollectionNameResourceKey("db", "collection")
+	guards := locker.Lock(rk)
+	bm := &broadcastTaskManager{
+		lifetime: typeutil.NewLifetime(),
+		mu:       &sync.Mutex{},
+		tasks:    map[uint64]*broadcastTask{},
+	}
+	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
+
+	_, err := bm.broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}, rk), 1, guards)
+
+	require.Error(t, err)
+	require.True(t, IsBroadcastTaskNotCreated(err))
+	require.True(t, streamingstatus.AsStreamingError(err).IsOnShutdown())
+	require.Empty(t, bm.tasks)
+
+	nextGuards, lockErr := locker.FastLock(rk)
+	require.NoError(t, lockErr)
+	nextGuards.Unlock()
 }
 
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {

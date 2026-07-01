@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	streamingbroadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -60,21 +61,25 @@ func validateAlterCollectionFieldAnalyzerMutation(schema *schemapb.CollectionSch
 	if !typeutil.IsStringType(field.GetDataType()) {
 		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
 	}
-	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() || typeutil.IsBm25FunctionInputField(schema, field) {
+	fieldHelper := typeutil.CreateFieldSchemaHelper(field)
+	if fieldHelper.EnableMatch() || typeutil.IsBm25FunctionInputField(schema, field) {
 		return merr.WrapErrParameterInvalidMsg(
 			"can not alter analyzer params for field %s after text match is enabled or BM25 function depends on it",
 			fieldName,
 		)
 	}
+	if fieldHelper.HasAnalyzerParams() && !fieldHelper.EnableAnalyzer() {
+		return merr.WrapErrParameterInvalidMsg("field %s with analyzer_params must also set enable_analyzer to true", fieldName)
+	}
 	return nil
 }
 
 func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) error {
-	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcastAPI, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
-	defer broadcaster.Close()
+	defer broadcastAPI.Close()
 
 	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
@@ -160,6 +165,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		WithBody(body).
 		WithBroadcast(channels).
 		MustBuildBroadcast()
+	addedFileResourceIds := []int64(nil)
 	if analyzerFieldParamMutated {
 		addedFileResourceIds, _ := diffFileResourceIDs(coll.FileResourceIds, schema.FileResourceIds)
 		// Reserve newly referenced file resources immediately before handing the
@@ -170,9 +176,10 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 			return err
 		}
 	}
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
-		// Same as create collection: once Broadcast is called, the task may
-		// already be pending and recovery will hold the reservation until apply.
+	if _, err := broadcastAPI.Broadcast(ctx, msg); err != nil {
+		if streamingbroadcaster.IsBroadcastTaskNotCreated(err) {
+			rollbackAlterCollectionFileResourceRefs(ctx, c.meta, coll.CollectionID, addedFileResourceIds)
+		}
 		return err
 	}
 	return nil
