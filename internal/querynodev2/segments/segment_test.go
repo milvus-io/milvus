@@ -436,6 +436,7 @@ func (suite *SegmentSuite) TestFlushData() {
 		PartitionBasePath: suite.rootPath + "/partition",
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
+		Schema:            suite.collection.Schema(),
 	}
 
 	rowNum := suite.growing.RowNum()
@@ -462,6 +463,7 @@ func (suite *SegmentSuite) TestFlushDataSealedSegmentFails() {
 		PartitionBasePath: suite.rootPath + "/partition",
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
+		Schema:            suite.collection.Schema(),
 	}
 
 	// sealed segment should fail
@@ -478,6 +480,7 @@ func (suite *SegmentSuite) TestFlushDataInvalidOffsets() {
 		PartitionBasePath: suite.rootPath + "/partition",
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
+		Schema:            suite.collection.Schema(),
 	}
 
 	// Test negative start offset
@@ -499,6 +502,7 @@ func (suite *SegmentSuite) TestFlushDataEmptyRange() {
 		PartitionBasePath: suite.rootPath + "/partition",
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
+		Schema:            suite.collection.Schema(),
 	}
 
 	// empty range (start == end) should return nil, nil
@@ -515,6 +519,7 @@ func (suite *SegmentSuite) TestFlushDataPartialRange() {
 		PartitionBasePath: suite.rootPath + "/partition_partial",
 		CollectionID:      suite.collectionID,
 		PartitionID:       suite.partitionID,
+		Schema:            suite.collection.Schema(),
 	}
 
 	rowNum := suite.growing.RowNum()

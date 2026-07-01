@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -351,6 +352,16 @@ class SegmentInternalInterface : public SegmentInterface {
                     FieldId field_id,
                     const std::vector<int64_t>& chunk_ids) const {
         // do nothing
+    }
+
+    // Convenience: prefetch all chunks of a field. Default impl enumerates
+    // [0, num_chunk(field_id)) and forwards to the typed overload.
+    virtual void
+    prefetch_chunks(milvus::OpContext* op_ctx, FieldId field_id) const {
+    }
+
+    virtual void
+    prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const {
     }
 
     // Apply field nullability to an already-initialized valid_result bitmap.

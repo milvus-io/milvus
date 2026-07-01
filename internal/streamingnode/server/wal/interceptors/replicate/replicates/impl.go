@@ -167,13 +167,19 @@ func (impl *replicatesManagerImpl) beginReplicateMessage(ctx context.Context, ms
 		return nil, status.NewReplicateViolation("cluster id mismatch, current: %s, expected: %s", rh.ClusterID, impl.secondaryState.SourceClusterID())
 	}
 
-	// if the incoming message's time tick is less than the checkpoint's time tick,
-	// it means that the message has been written to the wal, so it can be ignored.
-	// txn message will share same time tick, so we only filter with <, it will be deduplicated by the txnHelper.
+	// If the incoming message's time tick is covered by the checkpoint, it means
+	// that the message has been written to the wal, so it can be ignored.
+	// Txn messages in the current in-flight txn share the same time tick, so keep
+	// the equality case for txnHelper to deduplicate by message id.
 	isTxnBody := msg.TxnContext() != nil && msg.MessageType() != message.MessageTypeBeginTxn
-	if (isTxnBody && rh.TimeTick < impl.secondaryState.GetCheckpoint().TimeTick) || (!isTxnBody && rh.TimeTick <= impl.secondaryState.GetCheckpoint().TimeTick) {
+	if isTxnBody {
+		currentTxn := impl.secondaryState.CurrentTxn()
+		isTxnBody = currentTxn != nil && currentTxn.TxnID == msg.TxnContext().TxnID
+	}
+	checkpoint := impl.secondaryState.GetCheckpoint()
+	if (isTxnBody && rh.TimeTick < checkpoint.TimeTick) || (!isTxnBody && rh.TimeTick <= checkpoint.TimeTick) {
 		return nil, status.NewIgnoreOperation("message is too old, message_id: %s, time_tick: %d, txn: %t, current time tick: %d",
-			rh.MessageID, rh.TimeTick, isTxnBody, impl.secondaryState.GetCheckpoint().TimeTick)
+			rh.MessageID, rh.TimeTick, isTxnBody, checkpoint.TimeTick)
 	}
 
 	if msg.TxnContext() != nil {

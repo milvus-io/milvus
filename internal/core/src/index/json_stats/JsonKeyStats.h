@@ -673,6 +673,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     int64_t num_rows_{0};
     bool is_built_ = false;
     std::string path_;
+    milvus::storage::FileManagerContext file_manager_context_;
     milvus::storage::ChunkManagerPtr rcm_;
     std::shared_ptr<milvus::storage::MemFileManagerImpl> mem_file_manager_;
     std::shared_ptr<milvus::storage::DiskFileManagerImpl> disk_file_manager_;
@@ -685,6 +686,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::set<JsonKey> column_keys_;
     std::shared_ptr<JsonStatsParquetWriter> parquet_writer_;
     std::shared_ptr<BsonInvertedIndex> bson_inverted_index_;
+    std::string shard_;
     // cache slot for bson inverted index when using translator
     std::shared_ptr<milvus::cachinglayer::CacheSlot<BsonInvertedIndex>>
         bson_index_cache_slot_;

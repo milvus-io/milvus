@@ -1070,6 +1070,7 @@ func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
 		storage.WithBufferSize(t.bufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {

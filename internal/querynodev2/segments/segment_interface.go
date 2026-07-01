@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -151,11 +152,18 @@ type FlushConfig struct {
 	CollectionID int64
 	// Partition ID
 	PartitionID int64
+	// Schema is the flush-task schema for the offset range being flushed.
+	// It must not be inferred from the mutable growing segment runtime schema.
+	Schema *schemapb.CollectionSchema
 	// TEXT column field IDs
 	TextFieldIDs []int64
 	// LOB base paths for each TEXT field (same order as TextFieldIDs)
 	// Format: {partition_path}/lobs/{field_id}
 	TextLobPaths []string
+	// TEXT LOB writer thresholds, aligned with DataNode writer settings.
+	TextInlineThreshold     int64
+	TextMaxLobFileBytes     int64
+	TextFlushThresholdBytes int64
 	// BM25 output sparse vector field IDs whose stats should be collected for
 	// the flushed offset range.
 	BM25FieldIDs []int64
@@ -172,6 +180,15 @@ type FlushConfig struct {
 	// it may be resolved from the acknowledged manifest to keep appends
 	// compatible with existing column groups.
 	WriterFormat string
+	// SchemaBasedPattern is passed as writer.split.schema_based.patterns.
+	// When set, C++ uses schema_based writer policy instead of single.
+	SchemaBasedPattern string
+	// SchemaBasedFormats is passed as writer.split.schema_based.formats.
+	// It preserves per-column-group formats when appending to existing manifests.
+	SchemaBasedFormats string
+	// AllowedFieldIDs limits growing flush output to fields compatible with
+	// the target segment layout.
+	AllowedFieldIDs []int64
 }
 
 // FlushResult contains the result of flushing segment data.

@@ -79,7 +79,8 @@ class ManifestGroupTranslator
         bool eager_load,
         const std::string& warmup_policy,
         const std::string& cache_key_suffix = "",
-        int64_t fallback_bytes_per_row = 0);
+        int64_t fallback_bytes_per_row = 0,
+        std::string shard = "");
     ~ManifestGroupTranslator() = default;
 
     /**

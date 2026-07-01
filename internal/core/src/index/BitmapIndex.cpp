@@ -202,7 +202,7 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
                 auto array =
                     reinterpret_cast<const milvus::Array*>(data->RawValue(i));
                 for (size_t j = 0; j < array->length(); ++j) {
-                    auto val = array->template get_data<T>(j);
+                    auto val = array->get_data<T>(j);
                     data_[val].add(offset);
                 }
                 valid_bitset_.set(offset);
@@ -219,14 +219,19 @@ BitmapIndex<T>::BuildArrayFieldNested(
     int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
-        auto array_column = static_cast<const milvus::Array*>(data->Data());
         for (size_t i = 0; i < slice_row_num; ++i) {
             if (!data->is_valid(i)) {
                 continue;
             }
-            auto length = array_column[i].length();
+            // Use RawValue(i), not Data()[i]: nullable array FieldData is stored
+            // compactly (NULL rows occupy no slot), so a logical row index into
+            // Data() runs past the buffer. RawValue() maps logical->physical and
+            // works for both dense and compact data (same as BuildArrayField).
+            auto* array =
+                reinterpret_cast<const milvus::Array*>(data->RawValue(i));
+            auto length = array->length();
             for (size_t j = 0; j < length; ++j) {
-                auto val = array_column[i].template get_data<T>(j);
+                auto val = array->get_data<T>(j);
                 data_[val].add(offset++);
             }
         }

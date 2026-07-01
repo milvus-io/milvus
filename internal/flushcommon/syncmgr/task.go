@@ -213,17 +213,21 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 }
 
 func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storagecommon.ColumnGroup {
-	// column group only needed for storage v2 segment
+	return resolveColumnGroups(segmentInfo, t.schema, t.segmentID, t.calcColumnStats)
+}
+
+func resolveColumnGroups(segmentInfo *metacache.SegmentInfo, schema *schemapb.CollectionSchema, segmentID int64, calcColumnStats func() map[int64]storagecommon.ColumnStats) []storagecommon.ColumnGroup {
+	// column group only needed for storage v2/v3 segments
 	if segmentInfo.GetStorageVersion() != storage.StorageV2 && segmentInfo.GetStorageVersion() != storage.StorageV3 {
 		return nil
 	}
 
 	// empty pack
-	if len(t.pack.insertData) == 0 && t.schema == nil {
+	if schema == nil {
 		return nil
 	}
 
-	allFields := typeutil.GetAllFieldSchemas(t.schema)
+	allFields := typeutil.GetAllFieldSchemas(schema)
 
 	// use previous split if already exists
 	if currentSplit := segmentInfo.GetCurrentSplit(); currentSplit != nil {
@@ -232,7 +236,7 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 			if len(cg.Fields) == 0 {
 				result := storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
 				result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
-				mlog.Info(context.TODO(), "use legacy split policy", mlog.FieldSegmentID(t.segmentID), mlog.Stringers("columnGroups", result))
+				mlog.Info(context.TODO(), "use legacy split policy", mlog.FieldSegmentID(segmentID), mlog.Stringers("columnGroups", result))
 				return result
 			}
 		}
@@ -253,9 +257,13 @@ func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storage
 	}
 
 	policies := storagecommon.DefaultPolicies()
-	result := storagecommon.SplitColumns(allFields, t.calcColumnStats(), policies...)
+	stats := map[int64]storagecommon.ColumnStats{}
+	if calcColumnStats != nil {
+		stats = calcColumnStats()
+	}
+	result := storagecommon.SplitColumns(allFields, stats, policies...)
 	result = storagecommon.FillColumnGroupFormats(result, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
-	mlog.Info(context.TODO(), "sync new split columns", mlog.FieldSegmentID(t.segmentID), mlog.Stringers("columnGroups", result))
+	mlog.Info(context.TODO(), "sync new split columns", mlog.FieldSegmentID(segmentID), mlog.Stringers("columnGroups", result))
 	return result
 }
 

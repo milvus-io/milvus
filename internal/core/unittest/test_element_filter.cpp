@@ -1729,6 +1729,203 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     });
 
+// Discriminator test for the INT8/INT16 stride bug in ArrayView::get_data.
+//
+// INT8/INT16 array elements are PHYSICALLY stored as int32_t (4-byte stride).
+// The element-level query path reads them via ArrayView::get_data<int8_t>/
+// <int16_t>(index) inside UnaryElementFuncForArray (see UnaryExpr.h ~L493).
+// With the buggy 1-byte (int8) / 2-byte (int16) stride, get_data(index>0)
+// reads bytes that belong to element 0 (its high bytes, which are 0 for the
+// small positive values below) instead of the real element. The values here
+// are chosen so element index 1 ALWAYS satisfies the predicate under the
+// correct 4-byte stride, but would read 0 (never satisfying it) under the old
+// wrong stride -- making this a true old-vs-new discriminator with VALUE
+// comparison, not just a count.
+//
+// This is the element QUERY path (ArrayView::get_data), distinct from the
+// index BUILD path (Array::get_data) exercised by BitmapIndexArrayTest.
+template <typename ElemT>
+static void
+RunElementStrideDiscriminatorCase(DataType elem_type,
+                                  proto::schema::DataType proto_elem_type,
+                                  int64_t threshold,
+                                  bool with_sealed) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                     DataType::VECTOR_FLOAT,
+                                     dim,
+                                     knowhere::metric::L2);
+    auto int_array_fid =
+        schema->AddDebugArrayField("structA[elem_array]", elem_type, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    const size_t N = 300;
+    const int array_len = 4;
+
+    // Per (row, elem_idx) the int32 value physically stored in the proto.
+    // All values fit ElemT's range so the get_data narrowing is a no-op and
+    // the brute-force below mirrors it exactly.
+    auto stored_value = [&](int row, int elem) -> int {
+        if (elem_type == DataType::INT8) {
+            switch (elem) {
+                case 0:
+                    return (row % 50) + 10;  // 10..59
+                case 1:
+                    return (row % 28) + 100;  // 100..127 (>threshold always)
+                case 2:
+                    return -((row % 40) + 1);  // -40..-1
+                default:
+                    return (row % 18) + 40;  // 40..57
+            }
+        } else {
+            // INT16: include values outside int8 range to exercise the wider
+            // (4-byte) stride distinctly from int8.
+            switch (elem) {
+                case 0:
+                    return (row % 100) * 7 + 200;  // 200..893
+                case 1:
+                    return (row % 50) * 11 + 3000;  // 3000..3539 (>threshold)
+                case 2:
+                    return -((row % 60) * 9 + 200);  // negative, large
+                default:
+                    return (row % 30) * 13 + 500;  // 500..877
+            }
+        }
+    };
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+            for (int row = 0; row < static_cast<int>(N); row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    array_data->mutable_int_data()->mutable_data()->Add(
+                        stored_value(row, elem));
+                }
+            }
+            break;
+        }
+    }
+
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        auto growing = CreateGrowingSegment(schema, empty_index_meta);
+        growing->PreInsert(N);
+        growing->Insert(0,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        segment = std::move(growing);
+    }
+
+    // Brute-force expected matches: element value (narrowed to ElemT, exactly
+    // as ArrayView::get_data<ElemT> does) strictly greater than threshold.
+    std::set<std::pair<int64_t, int32_t>> expected;
+    int expected_index1_hits = 0;
+    for (int row = 0; row < static_cast<int>(N); row++) {
+        for (int elem = 0; elem < array_len; elem++) {
+            auto v = static_cast<ElemT>(stored_value(row, elem));
+            if (static_cast<int64_t>(v) > threshold) {
+                expected.emplace(row, elem);
+                if (elem == 1) {
+                    expected_index1_hits++;
+                }
+            }
+        }
+    }
+    // Sanity: element index 1 must match for EVERY row. Under the old broken
+    // stride, get_data(1) would read 0 and never produce these hits -- so a
+    // failure here (or a set mismatch below) pinpoints the stride regression.
+    ASSERT_EQ(expected_index1_hits, static_cast<int>(N))
+        << "test setup: element index 1 should always satisfy the predicate";
+
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_is_count(false);
+    query->set_limit(N * array_len + 100);  // high enough to return all matches
+
+    auto* expr = query->mutable_predicates();
+    auto* element_filter = expr->mutable_element_filter_expr();
+    element_filter->set_struct_name("structA");
+
+    auto* element_expr = element_filter->mutable_element_expr();
+    auto* unary_range = element_expr->mutable_unary_range_expr();
+    auto* column_info = unary_range->mutable_column_info();
+    column_info->set_field_id(int_array_fid.get());
+    column_info->set_data_type(proto_elem_type);
+    column_info->set_element_type(proto_elem_type);
+    column_info->set_is_element_level(true);
+    unary_range->set_op(proto::plan::OpType::GreaterThan);
+    unary_range->mutable_value()->set_int64_val(threshold);
+
+    plan_node.add_output_field_ids(int64_fid.get());
+    plan_node.add_output_field_ids(int_array_fid.get());
+
+    auto parser = ProtoParser(schema);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+
+    auto retrieve_results = segment->Retrieve(nullptr,
+                                              plan.get(),
+                                              1L << 63,
+                                              INT64_MAX,
+                                              false,
+                                              folly::CancellationToken(),
+                                              0,
+                                              0);
+    ASSERT_NE(retrieve_results, nullptr);
+    ASSERT_TRUE(retrieve_results->element_level());
+    ASSERT_EQ(retrieve_results->element_indices_size(),
+              retrieve_results->offset_size());
+
+    std::set<std::pair<int64_t, int32_t>> actual;
+    for (int i = 0; i < retrieve_results->offset_size(); i++) {
+        int64_t doc_id = retrieve_results->offset(i);
+        const auto& elem_indices = retrieve_results->element_indices(i);
+        for (int j = 0; j < elem_indices.indices_size(); j++) {
+            actual.emplace(doc_id, elem_indices.indices(j));
+        }
+    }
+
+    // Exact value-level match between the engine (ArrayView::get_data path) and
+    // the hand-computed brute force. The old 1-byte/2-byte stride would mis-read
+    // every element index > 0 and fail this comparison.
+    ASSERT_EQ(actual, expected)
+        << "element-level matches mismatch for "
+        << (elem_type == DataType::INT8 ? "INT8" : "INT16")
+        << (with_sealed ? " sealed" : " growing");
+}
+
+TEST(ElementFilter, Int8ElementStrideDiscriminator) {
+    RunElementStrideDiscriminatorCase<int8_t>(
+        DataType::INT8, proto::schema::DataType::Int8, /*threshold=*/50, true);
+    RunElementStrideDiscriminatorCase<int8_t>(
+        DataType::INT8, proto::schema::DataType::Int8, /*threshold=*/50, false);
+}
+
+TEST(ElementFilter, Int16ElementStrideDiscriminator) {
+    RunElementStrideDiscriminatorCase<int16_t>(DataType::INT16,
+                                               proto::schema::DataType::Int16,
+                                               /*threshold=*/1000,
+                                               true);
+    RunElementStrideDiscriminatorCase<int16_t>(DataType::INT16,
+                                               proto::schema::DataType::Int16,
+                                               /*threshold=*/1000,
+                                               false);
+}
+
 TEST(ElementFilter, RetrieveSortedByPk) {
     // Test find_first_n_element on the is_sorted_by_pk_=true path
     auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();

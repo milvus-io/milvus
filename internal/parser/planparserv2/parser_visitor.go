@@ -196,6 +196,30 @@ func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
 	}
 }
 
+// VisitRawString handles raw string literals (r"..." / R'...'). Unlike
+// VisitString, a backslash is NOT an escape character here: the content between
+// the quotes is taken verbatim, so no convertEscapeSingle/strconv.Unquote pass
+// runs. This removes one layer of backslash halving — e.g. matching a literal
+// '\' in a LIKE pattern is r"\\" instead of "\\\\", aligning with the raw
+// string literals of BigQuery / Spark SQL. The LIKE/regex escape layer still
+// applies on the resulting value (r"\%" -> literal %, same as BigQuery r'\%').
+func (v *ParserVisitor) VisitRawString(ctx *parser.RawStringContext) interface{} {
+	text := ctx.GetText()
+	// text is r"..." or R'...'; drop the one-byte prefix + the surrounding quotes.
+	content := text[2 : len(text)-1]
+	return &ExprWithType{
+		dataType: schemapb.DataType_VarChar,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewString(content),
+				},
+			},
+		},
+		nodeDependent: true,
+	}
+}
+
 func (v *ParserVisitor) parseStringLiteralOrTemplate(ctx parser.IExprContext, argName string) (string, string, bool, error) {
 	if ctx == nil {
 		return "", "", false, merr.WrapErrParameterInvalidMsg("%s is missing", argName)
@@ -225,6 +249,12 @@ func (v *ParserVisitor) parseRegexPatternOrTemplate(ctx parser.IExprContext, arg
 	if _, ok := ctx.(*parser.StringContext); ok {
 		pattern, err := extractRegexPattern(ctx.GetText())
 		return pattern, "", false, err
+	}
+	if raw, ok := ctx.(*parser.RawStringContext); ok {
+		// Raw string: the regex pattern is the content verbatim, no escape
+		// processing — backslashes (\d, \., \\) reach the engine as written.
+		text := raw.GetText()
+		return text[2 : len(text)-1], "", false, nil
 	}
 
 	parsed := ctx.Accept(v)
@@ -1714,14 +1744,106 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	}
 }
 
-// VisitBitXor not supported.
-func (v *ParserVisitor) VisitBitXor(ctx *parser.BitXorContext) interface{} {
-	return merr.WrapErrParameterInvalidMsg("BitXor is not supported: %s", ctx.GetText())
+// visitBitwiseBinaryOp is the shared implementation for VisitBitAnd/VisitBitOr/VisitBitXor.
+func (v *ParserVisitor) visitBitwiseBinaryOp(leftCtx, rightCtx parser.IExprContext, tokenType int, text string) interface{} {
+	var err error
+	left := leftCtx.Accept(v)
+	if err = getError(left); err != nil {
+		return err
+	}
+
+	right := rightCtx.Accept(v)
+	if err = getError(right); err != nil {
+		return err
+	}
+
+	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
+	if leftValueExpr != nil && rightValueExpr != nil {
+		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
+			return merr.WrapErrParameterInvalidMsg("placeholder was not supported between two constants with operator: %s", text)
+		}
+		leftValue, rightValue := getGenericValue(left), getGenericValue(right)
+		switch tokenType {
+		case parser.PlanParserBAND:
+			n, err := BitAnd(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		case parser.PlanParserBOR:
+			n, err := BitOr(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		case parser.PlanParserBXOR:
+			n, err := BitXor(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		default:
+			return merr.WrapErrParameterInvalidMsg("unexpected bitwise op: %s", text)
+		}
+	}
+
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
+	reverse := leftValueExpr != nil
+
+	if leftExpr == nil || rightExpr == nil {
+		return merr.WrapErrParameterInvalidMsg("invalid bitwise expression, left: %s, op: %s, right: %s", leftCtx.GetText(), text, rightCtx.GetText())
+	}
+
+	if err = checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
+		return err
+	}
+	if err = checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
+		return err
+	}
+
+	var dataType schemapb.DataType
+	if leftExpr.expr.GetIsTemplate() {
+		dataType = rightExpr.dataType
+	} else if rightExpr.expr.GetIsTemplate() {
+		dataType = leftExpr.dataType
+	} else {
+		if err = canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
+			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[tokenType], err.Error())
+		}
+		if err = checkValidModArith(arithExprMap[tokenType], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
+			return err
+		}
+		dataType, err = calcDataType(leftExpr, rightExpr, reverse)
+		if err != nil {
+			return err
+		}
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryArithExpr{
+			BinaryArithExpr: &planpb.BinaryArithExpr{
+				Left:  leftExpr.expr,
+				Right: rightExpr.expr,
+				Op:    arithExprMap[tokenType],
+			},
+		},
+		IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+	}
+	return &ExprWithType{
+		expr:          expr,
+		dataType:      dataType,
+		nodeDependent: true,
+	}
 }
 
-// VisitBitAnd not supported.
+// VisitBitXor translates bitwise XOR expression to arithmetic plan.
+func (v *ParserVisitor) VisitBitXor(ctx *parser.BitXorContext) interface{} {
+	return v.visitBitwiseBinaryOp(ctx.Expr(0), ctx.Expr(1), parser.PlanParserBXOR, ctx.GetText())
+}
+
+// VisitBitAnd translates bitwise AND expression to arithmetic plan.
 func (v *ParserVisitor) VisitBitAnd(ctx *parser.BitAndContext) interface{} {
-	return merr.WrapErrParameterInvalidMsg("BitAnd is not supported: %s", ctx.GetText())
+	return v.visitBitwiseBinaryOp(ctx.Expr(0), ctx.Expr(1), parser.PlanParserBAND, ctx.GetText())
 }
 
 // VisitPower parses power expression.
@@ -1749,9 +1871,9 @@ func (v *ParserVisitor) VisitShift(ctx *parser.ShiftContext) interface{} {
 	return merr.WrapErrParameterInvalidMsg("shift is not supported: %s", ctx.GetText())
 }
 
-// VisitBitOr unsupported.
+// VisitBitOr translates bitwise OR expression to arithmetic plan.
 func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
-	return merr.WrapErrParameterInvalidMsg("BitOr is not supported: %s", ctx.GetText())
+	return v.visitBitwiseBinaryOp(ctx.Expr(0), ctx.Expr(1), parser.PlanParserBOR, ctx.GetText())
 }
 
 // getColumnInfoFromJSONIdentifier parse JSON field name and JSON nested path.
@@ -1784,8 +1906,11 @@ func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
 */
 // More tests refer to plan_parser_v2_test.go::Test_JSONExpr
 func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*planpb.ColumnInfo, error) {
-	identifier = decodeUnicode(identifier)
-	fieldName := strings.Split(identifier, "[")[0]
+	// Do NOT decodeUnicode the whole identifier up front: a raw-string key
+	// (r"..." / R'...') is verbatim, so its \uXXXX must survive untouched. Decode
+	// the field name and normal (non-raw) keys individually below instead.
+	rawFieldName := strings.Split(identifier, "[")[0]
+	fieldName := decodeUnicode(rawFieldName)
 	nestedPath := make([]string, 0)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
 	if err != nil {
@@ -1799,12 +1924,20 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 	if fieldName != field.Name {
 		nestedPath = append(nestedPath, fieldName)
 	}
-	jsonKeyStr := identifier[len(fieldName):]
+	jsonKeyStr := identifier[len(rawFieldName):]
 	ss := strings.Split(jsonKeyStr, "][")
 	for i := 0; i < len(ss); i++ {
 		path := strings.Trim(ss[i], "[]")
 		if path == "" {
 			return nil, merr.WrapErrParameterInvalidMsg("invalid identifier: %s", identifier)
+		}
+		// A raw-string key (r"..." / R'...'): drop the r/R prefix and take the
+		// content verbatim — no decodeUnicode, so a literal \uXXXX in the key is
+		// the key, not its decoded rune (issue #43864).
+		isRaw := len(path) >= 2 && (path[0] == 'r' || path[0] == 'R') &&
+			(path[1] == '"' || path[1] == '\'')
+		if isRaw {
+			path = path[1:]
 		}
 		if (strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"")) ||
 			(strings.HasPrefix(path, "'") && strings.HasSuffix(path, "'")) {
@@ -1814,6 +1947,10 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 			}
 			if typeutil.IsArrayType(field.DataType) {
 				return nil, merr.WrapErrQueryPlanMsg("can only access array field with integer index")
+			}
+			if !isRaw {
+				// Normal keys keep the historical \uXXXX decoding behavior.
+				path = decodeUnicode(path)
 			}
 		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
 			return nil, merr.WrapErrParameterInvalidMsg("json key must be enclosed in double quotes or single quotes: \"%s\"", path)

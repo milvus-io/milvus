@@ -17,6 +17,7 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <folly/Unit.h>
 
 #include <optional>
 #include <utility>
@@ -935,7 +936,7 @@ class ShreddingArrayBsonExecutor {
                 reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
             auto array_view = bson.ParseAsArrayAtOffset(0);
             if (!array_view.has_value()) {
-                res[i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
             bool equal = CompareTwoJsonArray(array_view.value(), val_);
@@ -1010,7 +1011,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                 pinned_ngram_index_ = segment->GetNgramIndex(op_ctx_, field_id);
             }
         }
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
@@ -1149,6 +1150,13 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
+
+    void
+    PrefetchRawData() override;
+
+    template <typename T>
+    void
+    PrefetchRawData();
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;

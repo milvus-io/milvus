@@ -53,6 +53,7 @@ etcd:
     # We recommend using version 1.2 and above.
     tlsMinVersion: 1.3
   requestTimeout: 10000 # Etcd operation timeout in milliseconds
+  dialTimeout: 5000 # Timeout in milliseconds for establishing the initial connection to etcd endpoints. Increase it for environments where transient network delays are expected during node scale-out.
   dialKeepAliveTime: 3000 # Interval in milliseconds for gRPC dial keepalive pings sent to etcd endpoints.
   dialKeepAliveTimeout: 2000 # Timeout in milliseconds waiting for keepalive responses before marking the connection as unhealthy.
   use:
@@ -199,6 +200,42 @@ woodpecker:
       maxBlocks: 1000 # Maximum number of blocks in a segment
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
+    quorum:
+      # Quorum Buffer Pools: Define groups of nodes for different purposes
+      # Example configuration below:
+      #   - name: region1 # Name of the region pool
+      #     seeds: [n1,n2,n3] # List of seed node addresses for this pool
+      #   - name: region2 # Name of the region pool
+      #     seeds: [n4,n5,n6] # List of seed node addresses for this pool
+      quorumBufferPools: 
+      quorumSelectStrategy:
+        affinityMode: soft # Affinity mode for node selection rules. Valid values: [soft, hard]
+        replicas: 3 # Number of replicas in the quorum ensemble. Valid values: [3, 5]
+        # Node selection strategy
+        # Valid values: [random, single-az-single-rg, single-az-multi-rg, multi-az-single-rg, multi-az-multi-rg, cross-region, custom]
+        # random: nodes are selected randomly
+        # single-az-single-rg: All nodes in same availability zone and resource group
+        # single-az-multi-rg: Same availability zone, multiple resource groups
+        # multi-az-single-rg: Multiple availability zones, single resource group
+        # multi-az-multi-rg: Multiple availability zones and resource groups
+        # cross-region: Nodes across different regions for maximum durability
+        # custom: Use custom expressions defined below
+        strategy: random
+        # Custom expressions for node selection (only used when strategy is 'custom')
+        # Example configuration below:
+        #   - name: replica-1
+        #     region: "default-region-pool"
+        #     az: "az-1"
+        #     resourceGroup: "rg.*"
+        #   - name: replica-2
+        #     region: "default-region-pool"
+        #     az: "az-2"
+        #     resourceGroup: "rg.*"
+        #   - name: replica-3
+        #     region: "default-region-pool"
+        #     az: "az.*"
+        #     resourceGroup: "rg.*"
+        customPlacement: 
   logstore:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
@@ -223,7 +260,7 @@ woodpecker:
       # Valid values: [auto, enable, disable]
       conditionWrite: auto
   storage:
-    type: minio # The Type of the storage provider. Valid values: [minio, local]
+    type: minio # The Type of the storage provider. Valid values: [minio, local, service]
     rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
@@ -539,6 +576,9 @@ queryNode:
       cacheTtl: 0
       storageUsageTrackingEnabled: false # Enable storage usage tracking for Tiered Storage. Defaults to false.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    mutatePoolSizeFactor: 2 # size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes
+    dynamicPoolSizeFactor: 1 # size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info
+    deletePoolSizeFactor: 1 # size factor (CPUNum * factor) of the DeleteBatch dispatch pool
     storageV2:
       cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
@@ -585,8 +625,8 @@ queryNode:
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   grouping:
-    maxNQ: 16
-    nqMergeRatio: 3 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
+    maxNQ: 64
+    nqMergeRatio: 16 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
     maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
   search:
@@ -610,6 +650,8 @@ queryNode:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
+    dmlMicroBatch:
+      maxMsgNum: 8 # Maximum number of DML messages in one micro-batch drained by query node data sync pipeline. The batcher only drains already buffered messages and does not wait for more messages.
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
@@ -821,6 +863,7 @@ dataNode:
       enable: true # Support skip some timetick message to reduce CPU usage
       skipNum: 4 # Consume one for every n records skipped
       coldTime: 60 # Turn on skip mode after there are only timetick msg for x seconds
+    ioConcurrency: 0 # Concurrency of the datanode object-storage I/O pool (download/upload for compaction and stats tasks). 0 or negative means auto (CPU*2).
   segment:
     # The maximum size of each binlog file in a segment buffered in memory. Binlog files whose size exceeds this value are then flushed to MinIO or S3 service.
     # Unit: Byte
@@ -984,7 +1027,6 @@ common:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
-    bm25Load: 1 # This parameter specify how many times the number of threads is the number of cores in BM25 load pool
     maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
@@ -1494,6 +1536,10 @@ function:
         credential:  # The name in the credential configuration item
         enable: true # Whether to enable Gemini model service
         url:  # Your Gemini embedding url, Default is the official embedding url
+      huggingface:
+        credential:  # The name in the credential configuration item
+        enable: true # Whether to enable Hugging Face text embedding service
+        url:  # Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co
       openai:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable openai model service
@@ -1524,6 +1570,10 @@ function:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable cohere model service
           url:  # Your cohere rerank url, Default is the official rerank url
+        huggingface:
+          credential:  # The name in the credential configuration item
+          enable: true # Whether to enable Hugging Face rerank service
+          url:  # Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co
         siliconflow:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable siliconflow model service

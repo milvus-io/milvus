@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"math"
+	"sort"
 	"strconv"
 	"time"
 
@@ -616,25 +617,37 @@ func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error)
 	return h.s.listLoadedSegments(ctx)
 }
 
-// GetSnapshotTs use the smallest channel checkpoint ts as snapshot ts
-// Note: if channel has tt lag, the snapshot ts also has tt lag
-func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) (uint64, error) {
+// GetSnapshotSeekPositions returns every channel seek position used to create a snapshot.
+// The returned min timestamp is kept as SnapshotInfo.create_ts for compatibility.
+// Note: if channel has tt lag, the snapshot ts also has tt lag.
+func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
 	channels, err := h.s.getChannelsByCollectionID(ctx, collectionID)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
+	if len(channels) == 0 {
+		return nil, 0, merr.WrapErrServiceInternal("no channel found for snapshot")
+	}
+
+	positions := make([]*msgpb.MsgPosition, 0, len(channels))
 	minTs := uint64(math.MaxUint64)
 	for _, channel := range channels {
 		seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
-		if seekPosition != nil && seekPosition.Timestamp < minTs {
-			minTs = seekPosition.Timestamp
+		if seekPosition == nil {
+			return nil, 0, merr.WrapErrServiceInternal("no valid channel seek position for snapshot")
 		}
+		cloned := proto.Clone(seekPosition).(*msgpb.MsgPosition)
+		cloned.ChannelName = channel.GetName()
+		if cloned.GetTimestamp() < minTs {
+			minTs = cloned.GetTimestamp()
+		}
+		positions = append(positions, cloned)
 	}
-	// Check if no valid seek position was found
-	if minTs == math.MaxUint64 {
-		return 0, merr.WrapErrServiceInternal("no valid channel seek position for snapshot")
-	}
-	return minTs, nil
+
+	sort.Slice(positions, func(i, j int) bool {
+		return positions[i].GetChannelName() < positions[j].GetChannelName()
+	})
+	return positions, minTs, nil
 }
 
 // GenSnapshot generates a point-in-time snapshot of a collection's data and metadata.
@@ -649,9 +662,9 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 // Process flow:
 //  1. Retrieve collection schema and partition information
 //  2. Filter user-created partitions (exclude default and auto-created partitions)
-//  3. Generate snapshot timestamp ensuring data consistency
-//  4. Collect index metadata created before snapshot timestamp
-//  5. Select segments with data that started before snapshot timestamp
+//  3. Generate per-channel snapshot seek positions ensuring data consistency
+//  4. Collect current index metadata for the collection
+//  5. Select segments with data that started before each channel seek timestamp
 //  6. Decompress binlog paths for segment data
 //  7. Gather delta logs from compacted segments
 //  8. Build segment descriptions with all binlog and index file paths
@@ -672,13 +685,13 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 //
 // Segment selection criteria:
 // - Must have data (binlogs or deltalogs present)
-// - StartPosition timestamp < snapshot timestamp (data started before snapshot)
+// - StartPosition timestamp < channel seek timestamp (data started before snapshot)
 // - State != Dropped (still valid)
 // - Not importing (stable segments only)
 //
 // Index handling:
-// - Only includes indexes created before snapshot timestamp
-// - Captures vector/scalar indexes with full file paths
+// - Includes collection index definitions
+// - Captures finished segment index files with full paths
 // - Includes text indexes and JSON key indexes
 // - Preserves index parameters and versions
 //
@@ -709,10 +722,17 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		partitionMapping[name] = partitionIDs[idx]
 	}
 
-	// generate snapshot ts with current partition ids
-	snapshotTs, err := h.GetSnapshotTs(ctx, collectionID, partitionIDs...)
+	// generate snapshot seek positions with current partition ids
+	channelSeekPositions, snapshotTs, err := h.GetSnapshotSeekPositions(ctx, collectionID, partitionIDs...)
 	if err != nil {
 		return nil, err
+	}
+	channelSeekTs := make(map[string]uint64, len(channelSeekPositions))
+	for _, position := range channelSeekPositions {
+		if position.GetChannelName() == "" {
+			return nil, merr.WrapErrServiceInternal("empty snapshot channel seek position")
+		}
+		channelSeekTs[position.GetChannelName()] = position.GetTimestamp()
 	}
 
 	indexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
@@ -730,10 +750,22 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	})
 
 	// get segment info
-	segments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+	candidateSegments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-		return segmentHasData && segmentEffectiveTs(info.SegmentInfo) < snapshotTs && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
+		return segmentHasData && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
 	}))
+	segments := make([]*SegmentInfo, 0, len(candidateSegments))
+	for _, info := range candidateSegments {
+		seekTs, ok := channelSeekTs[info.GetInsertChannel()]
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"missing snapshot channel seek position for segment channel %s",
+				info.GetInsertChannel())
+		}
+		if segmentEffectiveTs(info.SegmentInfo) < seekTs {
+			segments = append(segments, info)
+		}
+	}
 
 	if len(segments) == 0 {
 		mlog.Info(ctx, "no segments found for collection when generating snapshot",
@@ -806,9 +838,10 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 
 	return &SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
-			CollectionId: collectionID,
-			PartitionIds: partitionIDs,
-			CreateTs:     int64(snapshotTs),
+			CollectionId:         collectionID,
+			PartitionIds:         partitionIDs,
+			CreateTs:             int64(snapshotTs),
+			ChannelSeekPositions: channelSeekPositions,
 		},
 		Collection: &datapb.CollectionDescription{
 			Schema:              schema,

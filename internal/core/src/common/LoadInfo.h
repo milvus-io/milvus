@@ -43,6 +43,7 @@ struct LoadFieldDataInfo {
     milvus::proto::common::LoadPriority load_priority =
         milvus::proto::common::LoadPriority::HIGH;
     std::vector<int64_t> child_field_ids;
+    std::string shard;
 };
 
 struct LoadDeletedRecordInfo {

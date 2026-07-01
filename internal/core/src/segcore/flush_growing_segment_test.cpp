@@ -238,7 +238,27 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         auto buffer = buffer_result.ValueOrDie();
         return ParseBM25StatsBlob(buffer->data(), buffer->size());
     }
+
+    std::string
+    SerializeSchemaBlob(const SchemaPtr& schema) {
+        auto schema_proto = schema->ToProto();
+        std::string blob;
+        EXPECT_TRUE(schema_proto.SerializeToString(&blob));
+        EXPECT_FALSE(blob.empty());
+        return blob;
+    }
+
+    void
+    SetFlushSchema(CFlushConfig& config, const std::string& schema_blob) {
+        config.schema_blob = schema_blob.data();
+        config.schema_length = static_cast<int64_t>(schema_blob.size());
+    }
 };
+
+#define C_FLUSH_CONFIG_WITH_SCHEMA(config, schema)           \
+    auto config##_schema_blob = SerializeSchemaBlob(schema); \
+    CFlushConfig config{};                                   \
+    SetFlushSchema(config, config##_schema_blob)
 
 // test basic flush with scalar fields
 TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
@@ -264,7 +284,7 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -312,7 +332,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllowsStaleReadVersionOverwrite) {
 
     std::string segment_path = test_dir_ + "/segment_stale_read_version";
 
-    CFlushConfig first_config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(first_config, schema);
     first_config.segment_path = segment_path.c_str();
     first_config.read_version = -1;
     first_config.retry_limit = 3;
@@ -324,7 +344,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllowsStaleReadVersionOverwrite) {
     ASSERT_EQ(first_result.num_rows, 50);
     auto acknowledged_version = first_result.committed_version;
 
-    CFlushConfig orphan_config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(orphan_config, schema);
     orphan_config.segment_path = segment_path.c_str();
     orphan_config.read_version = acknowledged_version;
     orphan_config.retry_limit = 3;
@@ -336,7 +356,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllowsStaleReadVersionOverwrite) {
     ASSERT_EQ(orphan_result.num_rows, 25);
     ASSERT_GT(orphan_result.committed_version, acknowledged_version);
 
-    CFlushConfig retry_config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(retry_config, schema);
     retry_config.segment_path = segment_path.c_str();
     retry_config.read_version = acknowledged_version;
     retry_config.retry_limit = 3;
@@ -379,7 +399,7 @@ TEST_F(FlushGrowingSegmentTest, FlushUsesWriterFormatFromConfig) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_writer_format";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -422,7 +442,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithVectorFields) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_vec";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -466,7 +486,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithStringFields) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_str";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -510,7 +530,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPartialRange) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_partial";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -559,7 +579,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithTextColumnConfig) {
                     dataset.raw_);
 
     // prepare flush config with TEXT column
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_text";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -610,7 +630,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithNullableFields) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_nullable";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -709,7 +729,7 @@ TEST_F(FlushGrowingSegmentTest, FlushOrdinaryFieldSemanticsRoundTrip) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_semantics";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -826,7 +846,7 @@ TEST_F(FlushGrowingSegmentTest, FlushTimestamptzPartialRangeRoundTrip) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_timestamptz";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -919,7 +939,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableScalarTypesPartialRangeRoundTrip) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_nullable_scalars";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -1022,7 +1042,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_vector_array";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -1106,7 +1126,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableVectorArrayRoundTrip) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_nullable_vector_array";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -1187,7 +1207,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
                         dataset.timestamps_.data(),
                         dataset.raw_);
 
-        CFlushConfig config{};
+        C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path =
             test_dir_ + "/segment_vector_array_" + test_case.segment_suffix;
         config.segment_path = segment_path.c_str();
@@ -1265,7 +1285,7 @@ TEST_F(FlushGrowingSegmentTest, FlushStringAndTextRoundTrip) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_string_text";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -1379,7 +1399,7 @@ TEST_F(FlushGrowingSegmentTest, FlushArrayElementTypesRoundTrip) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_arrays";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -1498,7 +1518,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_nullable_vec";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -1566,7 +1586,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_int8_vec";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -1669,7 +1689,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
         segment->Insert(
             0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-        CFlushConfig config{};
+        C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path =
             test_dir_ + "/segment_nullable_" + test_case.segment_suffix;
         config.segment_path = segment_path.c_str();
@@ -1777,7 +1797,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
     segment->PreInsert(N);
     segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
 
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_sparse_vec";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -1866,7 +1886,7 @@ TEST_F(FlushGrowingSegmentTest, FlushBM25StatsRangeAndCompoundManifest) {
     int64_t first_bm25_stats_log_ids[] = {1001};
     int64_t second_bm25_stats_log_ids[] = {1002};
 
-    CFlushConfig first_config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(first_config, schema);
     first_config.segment_path = segment_path.c_str();
     first_config.read_version = -1;
     first_config.retry_limit = 3;
@@ -1889,7 +1909,7 @@ TEST_F(FlushGrowingSegmentTest, FlushBM25StatsRangeAndCompoundManifest) {
     EXPECT_EQ(first_stats->rows_with_token[10], 2);
     EXPECT_EQ(first_stats->rows_with_token[20], 1);
 
-    CFlushConfig second_config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(second_config, schema);
     second_config.segment_path = segment_path.c_str();
     second_config.read_version = first_result.committed_version;
     second_config.retry_limit = 3;
@@ -1982,7 +2002,7 @@ TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_empty";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -2028,7 +2048,7 @@ TEST_F(FlushGrowingSegmentTest, FlushLargeDataMultipleChunks) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_large";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -2076,7 +2096,7 @@ TEST_F(FlushGrowingSegmentTest, FlushMultipleTextColumns) {
                     dataset.raw_);
 
     // prepare flush config with multiple TEXT columns
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_multi_text";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -2129,7 +2149,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithBoolField) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_bool";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -2177,7 +2197,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllNumericTypes) {
                     dataset.raw_);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_numeric";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
@@ -2220,7 +2240,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
                         dataset.timestamps_.data(),
                         dataset.raw_);
 
-        CFlushConfig config{};
+        C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path = test_dir_ + "/segment_fp16";
         config.segment_path = segment_path.c_str();
         config.read_version = -1;
@@ -2259,7 +2279,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
                         dataset.timestamps_.data(),
                         dataset.raw_);
 
-        CFlushConfig config{};
+        C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path = test_dir_ + "/segment_bf16";
         config.segment_path = segment_path.c_str();
         config.read_version = -1;
@@ -2298,7 +2318,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
                         dataset.timestamps_.data(),
                         dataset.raw_);
 
-        CFlushConfig config{};
+        C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path = test_dir_ + "/segment_binary";
         config.segment_path = segment_path.c_str();
         config.read_version = -1;
@@ -2341,7 +2361,7 @@ TEST_F(FlushGrowingSegmentTest, FlushSealedSegmentFails) {
     ASSERT_NE(segment, nullptr);
 
     // prepare flush config
-    CFlushConfig config{};
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_sealed";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;

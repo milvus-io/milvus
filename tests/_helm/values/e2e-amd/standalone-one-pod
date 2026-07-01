@@ -38,6 +38,9 @@ extraConfigFiles:
         useLoonFFI: true
     dataCoord:
       targetVecIndexVersion: 10
+      compaction:
+        bumpSchemaVersion:
+          enabled: true
     queryNode:
       segcore:
         exprEvalBatchSize: 512

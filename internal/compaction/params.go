@@ -26,6 +26,7 @@ import (
 
 type Params struct {
 	StorageVersion            int64                  `json:"storage_version,omitempty"`
+	StorageFormat             string                 `json:"storage_format,omitempty"`
 	BinLogMaxSize             uint64                 `json:"binlog_max_size,omitempty"`
 	UseMergeSort              bool                   `json:"use_merge_sort,omitempty"`
 	MaxSegmentMergeSort       int                    `json:"max_segment_merge_sort,omitempty"`
@@ -46,6 +47,7 @@ func GenParams() Params {
 	}
 	return Params{
 		StorageVersion:            storageVersion,
+		StorageFormat:             paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
@@ -58,6 +60,13 @@ func GenParams() Params {
 		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
 		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}
+}
+
+func (p Params) GetStorageFormat() string {
+	if p.StorageFormat != "" {
+		return p.StorageFormat
+	}
+	return paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 }
 
 func GenerateJSONParams(schema *schemapb.CollectionSchema) (string, error) {

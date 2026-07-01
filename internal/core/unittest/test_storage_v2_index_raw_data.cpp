@@ -173,7 +173,8 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                 storage::FileManagerContext(
                     field_data_meta, index_meta, cm_, fs_));
         auto res = file_manager->CacheRawDataToDisk<float>(config);
-        ASSERT_EQ(res, TestLocalPath + "raw_datas/3/105/raw_data");
+        ASSERT_EQ(res,
+                  file_manager->GetLocalRawDataObjectPrefix() + "raw_data");
     }
 
     {

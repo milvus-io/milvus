@@ -93,6 +93,9 @@ class ChunkedColumnInterface {
     PrefetchChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) const = 0;
 
+    virtual bool
+    CellsLoaded(const int64_t* offsets, int64_t count) const = 0;
+
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViews(milvus::OpContext* op_ctx,

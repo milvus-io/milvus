@@ -170,6 +170,7 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 	writerOpts := []storage.RwOption{
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {

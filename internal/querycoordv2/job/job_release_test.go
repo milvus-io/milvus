@@ -147,6 +147,7 @@ func newReleaseJobDeps(t *testing.T, m *meta.Meta, dist *meta.DistributionManage
 	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
 	targetMgr.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, mock.Anything, mock.Anything).Return(map[string]*meta.DmChannel{}).Maybe()
+	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(int64(0)).Maybe()
 	targetMgr.EXPECT().UpdateCollectionNextTarget(mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().RemoveCollection(mock.Anything, mock.Anything).Return().Maybe()
 	nodeMgr := session.NewNodeManager()

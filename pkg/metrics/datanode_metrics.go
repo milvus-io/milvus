@@ -362,6 +362,64 @@ var (
 		}, []string{nodeIDLabelName, "type"})
 )
 
+// DataNode pool metric descriptors (used by dataNodePoolMetricsCollector).
+var (
+	DataNodePoolCapacityDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.DataNodeRole, "pool_capacity"),
+		"Configured capacity (max goroutines) of the pool",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
+
+	DataNodePoolActiveThreadsDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.DataNodeRole, "pool_active_threads"),
+		"Number of currently running goroutines in the pool",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
+
+	DataNodePoolQueueDepthDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.DataNodeRole, "pool_queue_depth"),
+		"Number of tasks waiting in the pool queue",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
+)
+
+var (
+	dataNodePoolCollectorNodeID    string
+	dataNodePoolCollectorCollectFn func() []PoolStats
+	dataNodePoolCollectorMu        sync.Mutex
+)
+
+// SetDataNodePoolCollectFn sets the callback used by the dataNodePoolMetricsCollector.
+// Called from DataNode.Start() so pool thread-count is exported the same way as QueryNode.
+func SetDataNodePoolCollectFn(nodeID string, fn func() []PoolStats) {
+	dataNodePoolCollectorMu.Lock()
+	defer dataNodePoolCollectorMu.Unlock()
+	dataNodePoolCollectorNodeID = nodeID
+	dataNodePoolCollectorCollectFn = fn
+}
+
+// dataNodePoolMetricsCollector implements prometheus.Collector using the pull model.
+type dataNodePoolMetricsCollector struct{}
+
+func (c *dataNodePoolMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- DataNodePoolCapacityDesc
+	ch <- DataNodePoolActiveThreadsDesc
+	ch <- DataNodePoolQueueDepthDesc
+}
+
+func (c *dataNodePoolMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+	dataNodePoolCollectorMu.Lock()
+	fn := dataNodePoolCollectorCollectFn
+	nodeID := dataNodePoolCollectorNodeID
+	dataNodePoolCollectorMu.Unlock()
+
+	if fn == nil {
+		return
+	}
+	for _, s := range fn() {
+		ch <- prometheus.MustNewConstMetric(DataNodePoolCapacityDesc, prometheus.GaugeValue, float64(s.Cap), nodeID, s.Name)
+		ch <- prometheus.MustNewConstMetric(DataNodePoolActiveThreadsDesc, prometheus.GaugeValue, float64(s.Running), nodeID, s.Name)
+		ch <- prometheus.MustNewConstMetric(DataNodePoolQueueDepthDesc, prometheus.GaugeValue, float64(s.Waiting), nodeID, s.Name)
+	}
+}
+
 var registerDNOnce sync.Once
 
 // RegisterDataNode registers DataNode metrics
@@ -412,6 +470,7 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeBuildIndexLatency)
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
+	registry.MustRegister(&dataNodePoolMetricsCollector{})
 	RegisterLoggingMetrics(registry)
 }
 
