@@ -255,7 +255,8 @@ func (s *ExpressionSuite) searchWithBitwiseExpression() {
 		s.NoError(err)
 		s.Equal(c.resNum, len(searchResult.GetResults().GetScores()),
 			fmt.Sprintf("unexpected match count for bitwise expr: %s", c.expr))
-		log.Info(fmt.Sprintf("=========================Bitwise search done with expr:%s =========================", c.expr))
+		mlog.Info(context.TODO(),
+			fmt.Sprintf("=========================Bitwise search done with expr:%s =========================", c.expr))
 	}
 }
 
