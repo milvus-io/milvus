@@ -79,13 +79,15 @@ TEST(StorageErrorCode, ArrowStatusWithExtendDetailPreservesFineCode) {
 }
 
 // Permanently-failing S3 errors tagged by the producer (object/bucket gone,
-// bad credentials, SDK-judged non-retryable) must classify as the non-retriable
-// StorageError(2044), never the retriable 2045 -- otherwise querynode would
-// retry-storm a read that can never succeed.
+// bad credentials, SDK-judged non-retryable) must classify permanent, never the
+// retriable 2045 -- otherwise querynode would retry-storm a read that can never
+// succeed. not-found keeps its fine-grained code (ObjectNotExist/2017).
 TEST(StorageErrorCode, PermanentS3ExtendCodesAreNotRetriable) {
     using milvus::storage::ArrowStatusToErrorCode;
-    for (auto code : {milvus_storage::ExtendStatusCode::AwsErrorNotFound,
-                      milvus_storage::ExtendStatusCode::AwsErrorAccessDenied,
+    EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
+                  milvus_storage::ExtendStatusCode::AwsErrorNotFound, "gone")),
+              milvus::ErrorCode::ObjectNotExist);
+    for (auto code : {milvus_storage::ExtendStatusCode::AwsErrorAccessDenied,
                       milvus_storage::ExtendStatusCode::AwsErrorNonRetryable}) {
         auto ec = ArrowStatusToErrorCode(
             milvus_storage::MakeExtendError(code, "permanent"));
