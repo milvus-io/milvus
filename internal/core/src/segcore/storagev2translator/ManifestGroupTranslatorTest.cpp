@@ -239,7 +239,8 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             field_metas.size(),
             milvus::proto::common::LoadPriority::LOW,
             /*eager_load=*/true,
-            /*warmup_policy=*/"");
+            /*warmup_policy=*/"",
+            /*support_eviction=*/true);
     }
 
     SchemaPtr schema_;
