@@ -65,6 +65,9 @@ type SegmentInfo struct {
 	// recomputed lazily on the first GetEarliestTs() call after clone.
 	earliestTs      atomic.Uint64
 	lastWrittenTime time.Time
+
+	pendingL0ManifestUpdates []*l0ManifestUpdate
+	pendingMutationErr       error
 }
 
 func (s *SegmentInfo) GetResidualSegmentSize() int64 {

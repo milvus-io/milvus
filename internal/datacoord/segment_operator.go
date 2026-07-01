@@ -28,7 +28,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -222,6 +224,152 @@ func mergeSegmentMutations(dst map[int64][]SegmentOperator, src map[int64][]Segm
 	}
 }
 
+type l0ManifestUpdate struct {
+	segmentID            int64
+	deltalogs            []*datapb.FieldBinlog
+	storageConfig        *indexpb.StorageConfig
+	committedV3Manifests map[int64]string
+	segment              *SegmentInfo
+	manifestPath         string
+	entries              []packed.DeltaLogEntry
+}
+
+func (u *l0ManifestUpdate) prepare(segment *SegmentInfo) (bool, error) {
+	u.segment = segment
+	u.deltalogs = cloneFieldBinlogs(u.deltalogs)
+	if len(u.deltalogs) == 0 {
+		return false, nil
+	}
+
+	if u.segment.GetManifestPath() == "" {
+		if err := binlog.CompressFieldBinlogs(u.deltalogs); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	if u.committedV3Manifests != nil {
+		u.manifestPath = u.committedV3Manifests[u.segmentID]
+	}
+	if u.manifestPath != "" {
+		return true, nil
+	}
+
+	entries, err := buildL0V3DeltaLogEntries(u.segmentID, u.deltalogs)
+	if err != nil {
+		return false, err
+	}
+	if len(entries) == 0 {
+		return false, nil
+	}
+	u.entries = entries
+	return true, nil
+}
+
+func (u *l0ManifestUpdate) commitManifest() error {
+	if u.segment.GetManifestPath() == "" || u.manifestPath != "" || len(u.entries) == 0 {
+		return nil
+	}
+	manifestPath, err := packed.AddDeltaLogsToManifestOverwrite(u.segment.GetManifestPath(), u.storageConfig, u.entries)
+	if err != nil {
+		return err
+	}
+	u.manifestPath = manifestPath
+	return nil
+}
+
+func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
+	updates = lo.Filter(updates, func(update *l0ManifestUpdate, _ int) bool {
+		return update.segment.GetManifestPath() != ""
+	})
+	if len(updates) == 0 {
+		return nil
+	}
+
+	groups := make(map[int64][]*l0ManifestUpdate)
+	for _, update := range updates {
+		groups[update.segmentID] = append(groups[update.segmentID], update)
+	}
+
+	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
+	if poolSize < 1 {
+		poolSize = 1
+	}
+	if poolSize > len(groups) {
+		poolSize = len(groups)
+	}
+
+	pool := conc.NewPool[struct{}](poolSize)
+	defer pool.Release()
+
+	futures := make([]*conc.Future[struct{}], 0, len(groups))
+	for _, group := range groups {
+		group := group
+		futures = append(futures, pool.Submit(func() (struct{}, error) {
+			return struct{}{}, commitL0ManifestUpdateGroup(group)
+		}))
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		if update.committedV3Manifests != nil && update.manifestPath != "" {
+			update.committedV3Manifests[update.segmentID] = update.manifestPath
+		}
+	}
+	return nil
+}
+
+func commitL0ManifestUpdateGroup(updates []*l0ManifestUpdate) error {
+	for _, update := range updates {
+		if update.manifestPath != "" {
+			if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if len(update.entries) == 0 {
+			continue
+		}
+		if err := update.commitManifest(); err != nil {
+			return err
+		}
+		if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (u *l0ManifestUpdate) apply() (BinlogIncrement, bool, error) {
+	deltalogs := u.deltalogs
+	if u.segment.GetManifestPath() != "" {
+		if err := updateManifestPathIfNewer(u.segment, u.manifestPath); err != nil {
+			return BinlogIncrement{}, false, err
+		}
+		deltalogs = cloneAndClearBinlogPaths(deltalogs)
+	}
+
+	if len(deltalogs) == 0 {
+		return BinlogIncrement{}, false, nil
+	}
+	u.segment.Deltalogs = mergeFieldBinlogs(u.segment.GetDeltalogs(), deltalogs)
+	u.segment.deltaRowcount.Store(-1)
+	return BinlogIncrement{Deltalogs: u.segment.Deltalogs}, true, nil
+}
+
+func cloneFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	cloned := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
+	for _, fieldBinlog := range fieldBinlogs {
+		if fieldBinlog == nil {
+			cloned = append(cloned, nil)
+			continue
+		}
+		cloned = append(cloned, typeutil.Clone(fieldBinlog))
+	}
+	return cloned
+}
+
 func AddL0DeltalogsAndUpdateManifestOperator(
 	segmentID int64,
 	deltalogs []*datapb.FieldBinlog,
@@ -230,48 +378,22 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 ) map[int64][]SegmentOperator {
 	return map[int64][]SegmentOperator{
 		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
-			if len(deltalogs) == 0 {
+			update := &l0ManifestUpdate{
+				segmentID:            segmentID,
+				deltalogs:            deltalogs,
+				storageConfig:        storageConfig,
+				committedV3Manifests: committedV3Manifests,
+			}
+			ok, err := update.prepare(segment)
+			if err != nil {
+				segment.pendingMutationErr = err
 				return BinlogIncrement{}, false
 			}
-
-			if segment.GetManifestPath() == "" {
-				if err := binlog.CompressFieldBinlogs(deltalogs); err != nil {
-					mlog.Warn(context.TODO(), "meta update: compress L0 deltalog failed", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-					return BinlogIncrement{}, false
-				}
-			} else {
-				manifestPath := ""
-				if committedV3Manifests != nil {
-					manifestPath = committedV3Manifests[segmentID]
-				}
-				if manifestPath == "" {
-					entries, err := buildL0V3DeltaLogEntries(segmentID, deltalogs)
-					if err != nil {
-						mlog.Warn(context.TODO(), "meta update: build L0 V3 delta entries failed", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-						return BinlogIncrement{}, false
-					}
-					if len(entries) == 0 {
-						return BinlogIncrement{}, false
-					}
-					manifestPath, err = packed.AddDeltaLogsToManifestOverwrite(segment.GetManifestPath(), storageConfig, entries)
-					if err != nil {
-						mlog.Warn(context.TODO(), "meta update: commit L0 V3 delta manifest failed", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-						return BinlogIncrement{}, false
-					}
-					if committedV3Manifests != nil {
-						committedV3Manifests[segmentID] = manifestPath
-					}
-				}
-				if err := updateManifestPathIfNewer(segment, manifestPath); err != nil {
-					mlog.Warn(context.TODO(), "meta update: update L0 V3 manifest failed", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-					return BinlogIncrement{}, false
-				}
-				clearBinlogPaths(deltalogs)
+			if !ok {
+				return BinlogIncrement{}, false
 			}
-
-			segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
-			segment.deltaRowcount.Store(-1)
-			return BinlogIncrement{Deltalogs: segment.Deltalogs}, true
+			segment.pendingL0ManifestUpdates = append(segment.pendingL0ManifestUpdates, update)
+			return BinlogIncrement{}, true
 		}},
 	}
 }

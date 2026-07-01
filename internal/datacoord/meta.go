@@ -96,6 +96,9 @@ type meta struct {
 	collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo] // collection id to collection info
 
 	segments *CachedSegmentsInfo // segment id to segment info
+	// Serializes local read-modify-write operators so external side effects
+	// such as L0 manifest commits observe the latest in-memory segment state.
+	updateSegmentsMu lock.Mutex
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -1081,9 +1084,15 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 		return nil
 	}
 
+	m.updateSegmentsMu.Lock()
+	defer m.updateSegmentsMu.Unlock()
+
 	type mutatedEntry struct {
-		segID int64
-		clone *SegmentInfo
+		segID   int64
+		key     string
+		version int64
+		clone   *SegmentInfo
+		inc     BinlogIncrement
 	}
 	type newEntry struct {
 		segID int64
@@ -1096,8 +1105,13 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 	var noop bool
 
 	err := retry.Do(ctx, func() error {
-		txn := m.segmentPersist.Txn(ctx)
+		noop = false
+		results = nil
+		lastMutated = nil
+		lastNew = nil
+
 		mutated := make([]mutatedEntry, 0, len(mutations))
+		l0ManifestUpdates := make([]*l0ManifestUpdate, 0)
 		for segID, fns := range mutations {
 			cur, version := m.segments.GetSegmentWithVersion(segID)
 			if cur == nil {
@@ -1110,6 +1124,9 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 			shouldWrite := true
 			for _, fn := range fns {
 				fnInc, ok := fn(clone)
+				if clone.pendingMutationErr != nil {
+					return retry.Unrecoverable(clone.pendingMutationErr)
+				}
 				if !ok {
 					shouldWrite = false
 					break
@@ -1120,12 +1137,31 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 				continue
 			}
 			key := m.segmentKey(clone.GetCollectionID(), clone.GetPartitionID(), segID)
-			if err := txn.Update(key, clone.SegmentInfo, version, inc); err != nil {
-				return retry.Unrecoverable(err)
-			}
-			mutated = append(mutated, mutatedEntry{segID: segID, clone: clone})
+			l0ManifestUpdates = append(l0ManifestUpdates, clone.pendingL0ManifestUpdates...)
+			mutated = append(mutated, mutatedEntry{segID: segID, key: key, version: version, clone: clone, inc: inc})
 		}
 
+		if err := commitL0ManifestUpdates(l0ManifestUpdates); err != nil {
+			return retry.Unrecoverable(err)
+		}
+		for i := range mutated {
+			for _, update := range mutated[i].clone.pendingL0ManifestUpdates {
+				inc, ok, err := update.apply()
+				if err != nil {
+					return retry.Unrecoverable(err)
+				}
+				if ok {
+					mutated[i].inc.Union(inc)
+				}
+			}
+		}
+
+		txn := m.segmentPersist.Txn(ctx)
+		for _, entry := range mutated {
+			if err := txn.Update(entry.key, entry.clone.SegmentInfo, entry.version, entry.inc); err != nil {
+				return retry.Unrecoverable(err)
+			}
+		}
 		newEntries := make([]newEntry, 0, len(newSegments))
 		for _, seg := range newSegments {
 			key := m.segmentKey(seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID())
@@ -2927,7 +2963,7 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 	// Collect segments to drop (read-only from cache for key construction and filtering).
 	var segRefs []segKeyed
 	for _, segment := range segments {
-		if segment.GetDmlPosition().GetTimestamp() <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
+		if segmentEffectiveDmlTs(segment.SegmentInfo) <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
 			segRefs = append(segRefs, segKeyed{
 				id:  segment.GetID(),
 				key: m.segmentKey(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()),
