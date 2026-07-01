@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -459,6 +460,77 @@ func TestWarmupPolicy(t *testing.T) {
 		assert.False(t, IsCollectionWarmupKey("other_key"))
 		assert.False(t, IsCollectionWarmupKey(""))
 	})
+}
+
+func TestEvictableHelpers(t *testing.T) {
+	props := []*commonpb.KeyValuePair{{Key: EvictableEnabledKey, Value: "false"}}
+	enabled, exist := IsEvictableEnabled(props...)
+	assert.True(t, exist)
+	assert.False(t, enabled)
+
+	enabled, exist = GetEvictableByKey(EvictableScalarFieldKey, &commonpb.KeyValuePair{Key: EvictableScalarFieldKey, Value: "true"})
+	assert.True(t, exist)
+	assert.True(t, enabled)
+
+	assert.True(t, IsFieldEvictableKey(EvictableEnabledKey))
+	assert.True(t, IsCollectionEvictableKey(EvictableScalarFieldKey))
+	assert.True(t, IsCollectionEvictableKey(EvictableScalarIndexKey))
+	assert.True(t, IsCollectionEvictableKey(EvictableVectorFieldKey))
+	assert.True(t, IsCollectionEvictableKey(EvictableVectorIndexKey))
+	assert.True(t, IsEvictableKey(EvictableEnabledKey))
+	assert.True(t, IsEvictableKey(EvictableVectorIndexKey))
+	assert.False(t, IsCollectionEvictableKey(EvictableEnabledKey))
+	assert.False(t, IsFieldEvictableKey(EvictableScalarFieldKey))
+	assert.False(t, IsEvictableKey("evictable.unknown"))
+
+	assert.NoError(t, ValidateEvictableEnabled("true"))
+	assert.NoError(t, ValidateEvictableEnabled("false"))
+	assert.Error(t, ValidateEvictableEnabled("sometimes"))
+}
+
+func TestFieldHasEvictableKey(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:    100,
+				Name:       "plain",
+				TypeParams: []*commonpb.KeyValuePair{{Key: EvictableEnabledKey, Value: "false"}},
+			},
+			{
+				FieldID: 101,
+				Name:    "without_evictable",
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:    200,
+				Name:       "struct_with_evictable",
+				TypeParams: []*commonpb.KeyValuePair{{Key: EvictableEnabledKey, Value: "false"}},
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 201, Name: "nested_without_evictable"},
+				},
+			},
+			{
+				FieldID: 300,
+				Name:    "struct_without_evictable",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:    301,
+						Name:       "nested_with_evictable",
+						TypeParams: []*commonpb.KeyValuePair{{Key: EvictableEnabledKey, Value: "true"}},
+					},
+				},
+			},
+		},
+	}
+
+	assert.True(t, FieldHasEvictableKey(schema, 100))
+	assert.False(t, FieldHasEvictableKey(schema, 101))
+	assert.True(t, FieldHasEvictableKey(schema, 200))
+	assert.False(t, FieldHasEvictableKey(schema, 201))
+	assert.False(t, FieldHasEvictableKey(schema, 300))
+	assert.True(t, FieldHasEvictableKey(schema, 301))
+	assert.False(t, FieldHasEvictableKey(schema, 999))
 }
 
 func TestQueryMode(t *testing.T) {

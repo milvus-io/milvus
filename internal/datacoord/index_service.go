@@ -282,10 +282,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
-	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
-	// exclude the warmup policy param also, similar to mmap.enable param
-	typeParams = DeleteParams(typeParams, []string{common.WarmupKey})
+	// Exclude runtime configurable params because they do not affect index build identity.
+	typeParams := DeleteParams(req.GetTypeParams(), runtimeConfigTypeParamKeys())
 	index := &model.Index{
 		CollectionID:    req.GetCollectionID(),
 		FieldID:         req.GetFieldID(),
@@ -355,6 +353,25 @@ func ValidateIndexParams(index *model.Index) error {
 	}
 	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
+	}
+	if err := validateEvictableIndexParams(index.IndexParams); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid evictable index params: %s", err.Error())
+	}
+	if err := validateEvictableIndexParams(index.UserIndexParams); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid evictable user index params: %s", err.Error())
+	}
+	return nil
+}
+
+func runtimeConfigTypeParamKeys() []string {
+	return []string{common.MmapEnabledKey, common.WarmupKey, common.EvictableEnabledKey}
+}
+
+func validateEvictableIndexParams(params []*commonpb.KeyValuePair) error {
+	for _, param := range params {
+		if param.GetKey() == common.EvictableEnabledKey {
+			return common.ValidateEvictableEnabled(param.GetValue())
+		}
 	}
 	return nil
 }
@@ -450,6 +467,9 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 	}
 
 	reqIndexParamMap := funcutil.KeyValuePair2Map(req.GetParams())
+	if err := validateEvictableIndexParams(req.GetParams()); err != nil {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid evictable index params: %s", err.Error())), nil
+	}
 
 	for _, index := range indexes {
 		if len(req.GetParams()) > 0 {

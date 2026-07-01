@@ -348,8 +348,8 @@ func checkIdenticalJSON(index *model.Index, req *indexpb.CreateIndexRequest) boo
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
-	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey, common.WarmupKey})
-	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey, common.WarmupKey})
+	metaTypeParams := DeleteParams(fieldIndex.TypeParams, runtimeConfigTypeParamKeys())
+	reqTypeParams := DeleteParams(req.TypeParams, runtimeConfigTypeParamKeys())
 	if len(metaTypeParams) != len(reqTypeParams) {
 		return false
 	}

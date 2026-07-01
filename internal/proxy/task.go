@@ -2019,9 +2019,18 @@ func hasWarmupProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func hasEvictableProp(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if common.IsEvictableKey(p.GetKey()) {
+			return true
+		}
+	}
+	return false
+}
+
 func hasPropInDeletekeys(keys []string) string {
 	for _, key := range keys {
-		if key == common.MmapEnabledKey || common.IsWarmupKey(key) {
+		if key == common.MmapEnabledKey || common.IsWarmupKey(key) || common.IsEvictableKey(key) {
 			return key
 		}
 	}
@@ -2182,7 +2191,8 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 {
 		hasMmap := hasMmapProp(t.Properties...)
 		hasWarmup := hasWarmupProp(t.Properties...)
-		if hasMmap || hasWarmup {
+		hasEvictable := hasEvictableProp(t.Properties...)
+		if hasMmap || hasWarmup || hasEvictable {
 			loaded, err := isCollectionLoaded(ctx, t.mixCoord, t.CollectionID)
 			if err != nil {
 				return err
@@ -2194,6 +2204,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				}
 				if hasWarmup {
 					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup properties if collection loaded")
+				}
+				if hasEvictable {
+					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter evictable properties if collection loaded")
 				}
 			}
 		}
@@ -2261,7 +2274,26 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				}
 			}
 		}
+
+		// Validate evictable enabled for all evictable keys.
+		if hasEvictableProp(t.Properties...) {
+			for _, prop := range t.Properties {
+				if common.IsFieldEvictableKey(prop.GetKey()) {
+					return merr.WrapErrParameterInvalidMsg("evictable key '%s' is only allowed at field level, use evictable.scalarField/evictable.scalarIndex/evictable.vectorField/evictable.vectorIndex at collection level", prop.GetKey())
+				}
+				if common.IsCollectionEvictableKey(prop.GetKey()) {
+					if err := common.ValidateEvictableEnabled(prop.GetValue()); err != nil {
+						return merr.WrapErrParameterInvalidMsg("invalid evictable value for key %s: %s", prop.GetKey(), err.Error())
+					}
+				}
+			}
+		}
 	} else if len(t.GetDeleteKeys()) > 0 {
+		for _, key := range t.GetDeleteKeys() {
+			if common.IsFieldEvictableKey(key) {
+				return merr.WrapErrParameterInvalidMsg("evictable key '%s' is only allowed at field level, use evictable.scalarField/evictable.scalarIndex/evictable.vectorField/evictable.vectorIndex at collection level", key)
+			}
+		}
 		key := hasPropInDeletekeys(t.DeleteKeys)
 		if key != "" {
 			loaded, err := isCollectionLoaded(ctx, t.mixCoord, t.CollectionID)
@@ -2404,6 +2436,7 @@ var allowedAlterProps = []string{
 	common.MaxCapacityKey,
 	common.FieldDescriptionKey,
 	common.WarmupKey,
+	common.EvictableEnabledKey,
 	common.WarmupScalarFieldKey,
 	common.WarmupScalarIndexKey,
 	common.WarmupVectorFieldKey,
@@ -2413,6 +2446,7 @@ var allowedAlterProps = []string{
 var allowedDropProps = []string{
 	common.MmapEnabledKey,
 	common.WarmupKey,
+	common.EvictableEnabledKey,
 	common.WarmupScalarFieldKey,
 	common.WarmupScalarIndexKey,
 	common.WarmupVectorFieldKey,
@@ -2511,6 +2545,18 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalidMsg(err.Error())
 			}
 
+		case common.EvictableEnabledKey:
+			loaded, err := isCollectionLoadedFn()
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter evictable if collection loaded")
+			}
+			if err := common.ValidateEvictableEnabled(prop.Value); err != nil {
+				return merr.WrapErrParameterInvalidMsg(err.Error())
+			}
+
 		case common.MaxLengthKey:
 			IsStringType := false
 			fieldName := ""
@@ -2565,7 +2611,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
 		}
 
-		if updatedKey == common.MmapEnabledKey || common.IsFieldWarmupKey(updatedKey) {
+		if updatedKey == common.MmapEnabledKey || common.IsFieldWarmupKey(updatedKey) || common.IsFieldEvictableKey(updatedKey) {
 			loaded, err := isCollectionLoadedFn()
 			if err != nil {
 				return err

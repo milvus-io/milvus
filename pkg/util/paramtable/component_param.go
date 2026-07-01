@@ -3560,6 +3560,10 @@ type queryNodeConfig struct {
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
 	TieredWarmupVectorField         ParamItem `refreshable:"true"`
 	TieredWarmupVectorIndex         ParamItem `refreshable:"true"`
+	TieredEvictableScalarField      ParamItem `refreshable:"false"`
+	TieredEvictableScalarIndex      ParamItem `refreshable:"false"`
+	TieredEvictableVectorField      ParamItem `refreshable:"false"`
+	TieredEvictableVectorIndex      ParamItem `refreshable:"false"`
 	TieredMemoryLowWatermarkRatio   ParamItem `refreshable:"false"`
 	TieredMemoryHighWatermarkRatio  ParamItem `refreshable:"false"`
 	TieredDiskLowWatermarkRatio     ParamItem `refreshable:"false"`
@@ -3858,6 +3862,42 @@ Defaults to "sync".`,
 		Export:       true,
 	}
 	p.TieredWarmupVectorIndex.Init(base.mgr)
+
+	p.TieredEvictableScalarField = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictable.scalarField",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether scalar field raw data participates in Tiered Storage strategy-based eviction by default. This only has runtime effect when evictionEnabled is true.",
+		Export:       true,
+	}
+	p.TieredEvictableScalarField.Init(base.mgr)
+
+	p.TieredEvictableScalarIndex = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictable.scalarIndex",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether scalar indexes and the system PK index participate in Tiered Storage strategy-based eviction by default. This only has runtime effect when evictionEnabled is true.",
+		Export:       true,
+	}
+	p.TieredEvictableScalarIndex.Init(base.mgr)
+
+	p.TieredEvictableVectorField = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictable.vectorField",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether vector field raw data participates in Tiered Storage strategy-based eviction by default. This only has runtime effect when evictionEnabled is true.",
+		Export:       true,
+	}
+	p.TieredEvictableVectorField.Init(base.mgr)
+
+	p.TieredEvictableVectorIndex = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictable.vectorIndex",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether vector indexes participate in Tiered Storage strategy-based eviction by default. This only has runtime effect when evictionEnabled is true.",
+		Export:       true,
+	}
+	p.TieredEvictableVectorIndex.Init(base.mgr)
 
 	p.TieredEvictionEnabled = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionEnabled",

@@ -73,6 +73,12 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     const auto& field_meta = schema_->operator[](field_id);
     load_index_info.field_type = field_meta.get_data_type();
     load_index_info.element_type = field_meta.get_element_type();
+    auto [has_evictable_setting, evictable_enabled] =
+        schema_->EvictableEnabled(field_id,
+                                  IsVectorDataType(field_meta.get_data_type()),
+                                  /*is_index=*/true);
+    load_index_info.support_eviction =
+        has_evictable_setting ? evictable_enabled : true;
 
     // Set index metadata
     load_index_info.index_id = field_index_info->indexid();
@@ -116,6 +122,15 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
         // Extract warmup policy from index params
         if (kv_pair.key() == "warmup") {
             load_index_info.warmup_policy = kv_pair.value();
+        }
+        if (kv_pair.key() == EVICTABLE_ENABLED_KEY) {
+            std::string lower;
+            std::transform(kv_pair.value().begin(),
+                           kv_pair.value().end(),
+                           std::back_inserter(lower),
+                           ::tolower);
+            load_index_info.support_eviction = (lower == "true");
+            continue;
         }
         load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
@@ -199,6 +214,11 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
     if (field_has_warmup) {
         info->set_warmup_policy(field_warmup_policy);
     }
+    auto [field_has_evictable, field_evictable_enabled] =
+        schema_->EvictableEnabled(
+            field_id, /*is_vector=*/false, /*is_index=*/false);
+    info->set_support_eviction(field_has_evictable ? field_evictable_enabled
+                                                   : true);
 
     // Propagate base_path for unified (basePath + relativeFiles) model
     if (!text_index_stats.base_path().empty()) {
@@ -238,6 +258,11 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
     if (field_has_warmup) {
         info->set_warmup_policy(field_warmup_policy);
     }
+    auto [field_has_evictable, field_evictable_enabled] =
+        schema_->EvictableEnabled(
+            field_id, /*is_vector=*/false, /*is_index=*/false);
+    info->set_support_eviction(field_has_evictable ? field_evictable_enabled
+                                                   : true);
 
     if (!json_key_stats.base_path().empty()) {
         info->set_base_path(json_key_stats.base_path());

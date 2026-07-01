@@ -692,6 +692,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         bson_index_cache_slot_;
 
     milvus::proto::common::LoadPriority load_priority_;
+    bool support_eviction_{true};
     // some meta cache for searching
     // json_path -> [json_path_int, json_path_string, ...], only for shredding columns
     std::unordered_map<std::string, std::set<std::string>> key_field_map_;

@@ -554,6 +554,13 @@ queryNode:
         scalarIndex: sync
         vectorField: disable # cache warmup for vector field raw data is by default disabled.
         vectorIndex: sync
+      evictable:
+        # Whether resources participate in Tiered Storage strategy-based eviction by default.
+        # These settings only have runtime effect when evictionEnabled is true.
+        scalarField: true
+        scalarIndex: true
+        vectorField: true
+        vectorIndex: true
       # If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
       # eviction is necessary and the amount of data to evict from memory/disk.
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk

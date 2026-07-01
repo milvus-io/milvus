@@ -78,6 +78,7 @@ class ManifestGroupTranslator
         milvus::proto::common::LoadPriority load_priority,
         bool eager_load,
         const std::string& warmup_policy,
+        bool support_eviction,
         const std::string& cache_key_suffix = "",
         int64_t fallback_bytes_per_row = 0,
         std::string shard = "");

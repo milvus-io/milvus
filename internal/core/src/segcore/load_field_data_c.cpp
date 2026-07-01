@@ -171,6 +171,16 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
 }
 
 void
+SetFieldSupportEviction(CLoadFieldDataInfo c_load_field_data_info,
+                        int64_t field_id,
+                        bool support_eviction) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+    info->field_infos[field_id].support_eviction = support_eviction;
+}
+
+void
 SetFieldWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
                      int64_t field_id,
                      CacheWarmupPolicy warmup_policy) {

@@ -355,6 +355,84 @@ func TestGetIndexWarmupPolicy(t *testing.T) {
 	})
 }
 
+func TestIsDataEvictableEnable(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("field TypeParams takes priority", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+		enable := isDataEvictableEnable(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableEnabledKey, Value: "false"},
+			},
+		})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to scalar config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+		enable := isDataEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_Int64})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to vector config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorField.SwapTempValue("true")
+		enable := isDataEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector})
+		assert.False(t, enable)
+	})
+}
+
+func TestIsIndexEvictableEnable(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("index params take priority", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
+		enable := isIndexEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_Int64}, &querypb.FieldIndexInfo{
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableEnabledKey, Value: "false"}},
+		})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to scalar index config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarIndex.SwapTempValue("true")
+		enable := isIndexEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_Int64}, &querypb.FieldIndexInfo{})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to vector index config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableVectorIndex.SwapTempValue("true")
+		enable := isIndexEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}, &querypb.FieldIndexInfo{})
+		assert.False(t, enable)
+	})
+}
+
+func TestIsScalarStatsEvictableEnable(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("follows field TypeParams", func(t *testing.T) {
+		enable := isScalarStatsEvictableEnable(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EvictableEnabledKey, Value: "false"},
+			},
+		})
+		assert.False(t, enable)
+	})
+
+	t.Run("fallback to scalar field config", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("false")
+		defer paramtable.Get().QueryNodeCfg.TieredEvictableScalarField.SwapTempValue("true")
+		enable := isScalarStatsEvictableEnable(&schemapb.FieldSchema{DataType: schemapb.DataType_VarChar})
+		assert.False(t, enable)
+	})
+}
+
 func TestGetScalarDataWarmupPolicy(t *testing.T) {
 	paramtable.Init()
 

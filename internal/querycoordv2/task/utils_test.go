@@ -809,6 +809,97 @@ func TestApplyIndexWarmupSettingAutoWarmup(t *testing.T) {
 	})
 }
 
+func TestApplyCollectionEvictableSetting(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, DataType: schemapb.DataType_Int64},
+			{FieldID: 2, DataType: schemapb.DataType_FloatVector},
+			{
+				FieldID:    3,
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableEnabledKey, Value: "true"}},
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:    10,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableEnabledKey, Value: "true"}},
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 11, DataType: schemapb.DataType_Int64},
+				},
+			},
+			{
+				FieldID: 20,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 21, DataType: schemapb.DataType_Int64},
+					{FieldID: 22, DataType: schemapb.DataType_FloatVector},
+					{
+						FieldID:    23,
+						DataType:   schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.EvictableEnabledKey, Value: "true"}},
+					},
+				},
+			},
+		},
+	}
+	collectionProps := []*commonpb.KeyValuePair{
+		{Key: common.EvictableScalarFieldKey, Value: "false"},
+		{Key: common.EvictableVectorFieldKey, Value: "true"},
+	}
+
+	result := applyCollectionEvictableSetting(schema, collectionProps)
+
+	assertEvictable := func(field *schemapb.FieldSchema, expected bool) {
+		evictable, exist := common.IsEvictableEnabled(field.GetTypeParams()...)
+		assert.True(t, exist, "field %d should have evictable setting", field.GetFieldID())
+		assert.Equal(t, expected, evictable, "field %d evictable mismatch", field.GetFieldID())
+	}
+	assertEvictable(result.GetFields()[0], false)
+	assertEvictable(result.GetFields()[1], true)
+	assertEvictable(result.GetFields()[2], true)
+
+	structEvictable, exist := common.IsEvictableEnabled(result.GetStructArrayFields()[0].GetTypeParams()...)
+	assert.True(t, exist)
+	assert.True(t, structEvictable)
+	assertEvictable(result.GetStructArrayFields()[0].GetFields()[0], true)
+	assertEvictable(result.GetStructArrayFields()[1].GetFields()[0], false)
+	assertEvictable(result.GetStructArrayFields()[1].GetFields()[1], true)
+	assertEvictable(result.GetStructArrayFields()[1].GetFields()[2], true)
+}
+
+func TestApplyIndexEvictableSetting(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, DataType: schemapb.DataType_Int64},
+			{FieldID: 2, DataType: schemapb.DataType_FloatVector},
+			{FieldID: 3, DataType: schemapb.DataType_Int64},
+		},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{FieldID: 1, IndexParams: []*commonpb.KeyValuePair{}},
+			{FieldID: 2, IndexParams: []*commonpb.KeyValuePair{}},
+			{FieldID: 3, IndexParams: []*commonpb.KeyValuePair{{Key: common.EvictableEnabledKey, Value: "true"}}},
+		},
+	}
+	collectionProps := []*commonpb.KeyValuePair{
+		{Key: common.EvictableScalarIndexKey, Value: "false"},
+		{Key: common.EvictableVectorIndexKey, Value: "true"},
+	}
+
+	applyIndexEvictableSetting(loadInfo, schema, collectionProps)
+
+	evictable, exist := common.IsEvictableEnabled(loadInfo.GetIndexInfos()[0].GetIndexParams()...)
+	assert.True(t, exist)
+	assert.False(t, evictable)
+	evictable, exist = common.IsEvictableEnabled(loadInfo.GetIndexInfos()[1].GetIndexParams()...)
+	assert.True(t, exist)
+	assert.True(t, evictable)
+	evictable, exist = common.IsEvictableEnabled(loadInfo.GetIndexInfos()[2].GetIndexParams()...)
+	assert.True(t, exist)
+	assert.True(t, evictable)
+}
+
 func TestUtils(t *testing.T) {
 	suite.Run(t, new(UtilsSuite))
 }
