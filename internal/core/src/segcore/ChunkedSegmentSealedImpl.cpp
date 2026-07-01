@@ -1523,8 +1523,11 @@ ChunkedSegmentSealedImpl::PublishRuntimeStateLocked(
     if (runtime == nullptr) {
         return;
     }
-    MutatePublishedStateLocked(
-        [&](PublishedSegmentState& state) { state.runtime = runtime; });
+    auto current = CapturePublishedState();
+    PublishState(BuildNextPublishedState(
+        current,
+        MakeStateDelta(
+            current->schema, current->load_info, runtime, current->commit_ts)));
 }
 
 void
@@ -1925,6 +1928,13 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         // Synthetic timestamps: constant mode (all 0; rows always visible).
         // No data is materialized, saving ~8 GB for 1B-row external tables.
         insert_record_.init_timestamps_constant(num_rows, 0);
+        auto timestamps = std::make_shared<TimestampData>();
+        timestamps->InitConstant(num_rows, 0);
+        if (runtime != nullptr) {
+            runtime->timestamps = timestamps;
+            runtime->timestamp_index = std::make_shared<const TimestampIndex>();
+            runtime->timestamp_index_slot.reset();
+        }
     }
 
     // Row count + readiness

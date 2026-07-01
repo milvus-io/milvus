@@ -4070,9 +4070,52 @@ TEST(SealedSegmentCowState, ExternalSyntheticFieldsUseStagedLoadInfoRows) {
         staged_load_info, schema, runtime.get());
 
     ASSERT_TRUE(runtime->fields.count(pk) > 0);
+    ASSERT_NE(runtime->timestamps, nullptr);
+    EXPECT_EQ(runtime->timestamps->size(), 7);
+    EXPECT_EQ((*runtime->timestamps)[0], 0);
+    EXPECT_EQ((*runtime->timestamps)[6], 0);
 
     auto published = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(published, nullptr);
     ASSERT_NE(published->load_info, nullptr);
     EXPECT_EQ(published->load_info->GetNumOfRows(), 3);
+}
+
+TEST(SealedSegmentCowState,
+     PublishRuntimeStateRecomputesExternalSystemFieldReady) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_external_source("s3://bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo published_proto;
+    published_proto.set_segmentid(1002);
+    published_proto.set_num_of_rows(7);
+    sealed->SetLoadInfo(published_proto);
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    SegmentLoadInfo staged_load_info(published_proto, schema);
+    sealed->TestSynthesizeExternalSystemFields(
+        staged_load_info, schema, runtime.get());
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto next = sealed->TestBuildNextPublishedState(
+        current,
+        ChunkedSegmentSealedImpl::MakeStateDelta(
+            current->schema,
+            current->load_info,
+            sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
+            current->commit_ts));
+
+    ASSERT_NE(next, nullptr);
+    EXPECT_TRUE(next->system_field_ready);
+    ASSERT_NE(next->runtime, nullptr);
+    ASSERT_NE(next->runtime->timestamps, nullptr);
+    EXPECT_EQ(next->runtime->timestamps->size(), 7);
+    EXPECT_EQ((*next->runtime->timestamps)[0], 0);
 }
