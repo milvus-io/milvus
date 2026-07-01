@@ -282,6 +282,96 @@ func (s *SnapshotSuite) TestRestoreSnapshot() {
 	})
 }
 
+func (s *SnapshotSuite) TestRestoreExternalSnapshot() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		targetCollectionName := fmt.Sprintf("restored_%s", s.randString(6))
+		metadataURI := "s3://bucket/files/snapshots/meta.json"
+		expectedJobID := int64(2001)
+
+		s.mock.EXPECT().RestoreExternalSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.RestoreExternalSnapshotRequest) (*milvuspb.RestoreExternalSnapshotResponse, error) {
+			s.Equal(targetCollectionName, req.GetTargetCollectionName())
+			s.Equal(metadataURI, req.GetSnapshotMetadataUri())
+			return &milvuspb.RestoreExternalSnapshotResponse{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				JobId:  expectedJobID,
+			}, nil
+		}).Once()
+
+		jobID, err := s.client.RestoreExternalSnapshot(ctx,
+			NewRestoreExternalSnapshotOption(targetCollectionName, metadataURI))
+		s.NoError(err)
+		s.Equal(expectedJobID, jobID)
+	})
+
+	s.Run("failure", func() {
+		targetCollectionName := fmt.Sprintf("restored_%s", s.randString(6))
+		metadataURI := "s3://bucket/files/snapshots/meta.json"
+
+		s.mock.EXPECT().RestoreExternalSnapshot(mock.Anything, mock.Anything).Return((*milvuspb.RestoreExternalSnapshotResponse)(nil), errors.New("mocked error")).Once()
+
+		jobID, err := s.client.RestoreExternalSnapshot(ctx,
+			NewRestoreExternalSnapshotOption(targetCollectionName, metadataURI))
+		s.Error(err)
+		s.Equal(int64(0), jobID)
+	})
+
+	s.Run("nil option", func() {
+		jobID, err := s.client.RestoreExternalSnapshot(ctx, nil)
+		s.Error(err)
+		s.Equal(int64(0), jobID)
+	})
+}
+
+func (s *SnapshotSuite) TestExportSnapshot() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		dbName := "source_db"
+		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
+		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
+		targetS3Path := "s3://bucket/export-root"
+		expectedURI := "s3://bucket/export-root/snapshots/100/metadata/1.json"
+
+		s.mock.EXPECT().ExportSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
+			s.Equal(snapshotName, req.GetName())
+			s.Equal(dbName, req.GetDbName())
+			s.Equal(collectionName, req.GetCollectionName())
+			s.Equal(targetS3Path, req.GetTargetS3Path())
+			return &milvuspb.ExportSnapshotResponse{
+				Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				SnapshotMetadataUri: expectedURI,
+			}, nil
+		}).Once()
+
+		metadataURI, err := s.client.ExportSnapshot(ctx,
+			NewExportSnapshotOption(snapshotName, collectionName, targetS3Path).WithDbName(dbName))
+		s.NoError(err)
+		s.Equal(expectedURI, metadataURI)
+	})
+
+	s.Run("failure", func() {
+		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
+		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
+
+		s.mock.EXPECT().ExportSnapshot(mock.Anything, mock.Anything).Return((*milvuspb.ExportSnapshotResponse)(nil), errors.New("mocked error")).Once()
+
+		metadataURI, err := s.client.ExportSnapshot(ctx,
+			NewExportSnapshotOption(snapshotName, collectionName, "s3://bucket/export-root"))
+		s.Error(err)
+		s.Empty(metadataURI)
+	})
+
+	s.Run("nil option", func() {
+		metadataURI, err := s.client.ExportSnapshot(ctx, nil)
+		s.Error(err)
+		s.Empty(metadataURI)
+	})
+}
+
 func (s *SnapshotSuite) TestSnapshotOptions() {
 	s.Run("CreateSnapshotOption", func() {
 		collectionName := "test_collection"
@@ -368,6 +458,43 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 		s.Equal(sourceDb, req.GetDbName())
 		s.Equal(targetCollection, req.GetTargetCollectionName())
 		s.Equal(targetDb, req.GetTargetDbName())
+	})
+
+	s.Run("RestoreExternalSnapshotOption", func() {
+		dbName := "target_db"
+		targetCollection := "restored_collection"
+		metadataURI := "s3://bucket/files/snapshots/meta.json"
+		externalSpec := `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`
+
+		opt := NewRestoreExternalSnapshotOption(targetCollection, metadataURI).
+			WithDbName(dbName).
+			WithExternalSpec(externalSpec)
+
+		req := opt.Request()
+		s.NotNil(req.GetBase())
+		s.Equal(dbName, req.GetDbName())
+		s.Equal(targetCollection, req.GetTargetCollectionName())
+		s.Equal(metadataURI, req.GetSnapshotMetadataUri())
+		s.Equal(externalSpec, req.GetExternalSpec())
+	})
+
+	s.Run("ExportSnapshotOption", func() {
+		dbName := "source_db"
+		collectionName := "source_collection"
+		snapshotName := "test_snapshot"
+		targetS3Path := "s3://bucket/export-root"
+		externalSpec := `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`
+
+		opt := NewExportSnapshotOption(snapshotName, collectionName, targetS3Path).
+			WithDbName(dbName).
+			WithExternalSpec(externalSpec)
+
+		req := opt.Request()
+		s.Equal(snapshotName, req.GetName())
+		s.Equal(dbName, req.GetDbName())
+		s.Equal(collectionName, req.GetCollectionName())
+		s.Equal(targetS3Path, req.GetTargetS3Path())
+		s.Equal(externalSpec, req.GetExternalSpec())
 	})
 }
 

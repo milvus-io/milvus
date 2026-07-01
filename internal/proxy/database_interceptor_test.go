@@ -45,6 +45,39 @@ func TestDatabaseInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("external snapshot requests get db from metadata", func(t *testing.T) {
+		md := metadata.Pairs(util.HeaderDBName, "db")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		testCases := []struct {
+			name  string
+			req   proto.Message
+			dbFun func(proto.Message) string
+		}{
+			{
+				name: "restore external snapshot",
+				req:  &milvuspb.RestoreExternalSnapshotRequest{},
+				dbFun: func(req proto.Message) string {
+					return req.(*milvuspb.RestoreExternalSnapshotRequest).GetDbName()
+				},
+			},
+			{
+				name: "export snapshot",
+				req:  &milvuspb.ExportSnapshotRequest{},
+				dbFun: func(req proto.Message) string {
+					return req.(*milvuspb.ExportSnapshotRequest).GetDbName()
+				},
+			},
+		}
+
+		for _, testCase := range testCases {
+			t.Run(testCase.name, func(t *testing.T) {
+				_, err := interceptor(ctx, testCase.req, &grpc.UnaryServerInfo{}, handler)
+				assert.NoError(t, err)
+				assert.Equal(t, "db", testCase.dbFun(testCase.req))
+			})
+		}
+	})
+
 	t.Run("test ok for all request", func(t *testing.T) {
 		availableReqs := []proto.Message{
 			&milvuspb.CreateCollectionRequest{},
@@ -105,6 +138,8 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.AddCollectionStructFieldRequest{},
 			&milvuspb.AlterCollectionSchemaRequest{},
 			&milvuspb.RunAnalyzerRequest{},
+			&milvuspb.RestoreExternalSnapshotRequest{},
+			&milvuspb.ExportSnapshotRequest{},
 			&milvuspb.RefreshExternalCollectionRequest{},
 			&milvuspb.ListRefreshExternalCollectionJobsRequest{},
 		}

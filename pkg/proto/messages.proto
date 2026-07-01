@@ -619,6 +619,9 @@ message RestoreSnapshotMessageHeader {
     int64 job_id = 3;            // Pre-allocated job ID for idempotency
     int64 source_collection_id = 4; // Source collection ID for per-collection snapshot name lookup
     int64 pin_id = 5;            // Pin ID claimed on source snapshot at phase 0, transferred to the copy segment job
+    bool external = 6;           // True for external snapshot restore
+    string snapshot_s3_location = 7; // Metadata file path for external snapshot restore
+    string external_spec = 8; // Optional external storage spec for external snapshot restore
 }
 
 // RestoreSnapshotMessageBody is the body of restore snapshot message.

@@ -83,6 +83,28 @@ func TestTraceLogInterceptor(t *testing.T) {
 			NewPassword: "FOO123456",
 		})
 		assert.NotContains(t, strings.ToLower(fmt.Sprint(f2.Interface)), "password")
+
+		externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+		f3 := GetRequestFieldWithoutSensitiveInfo(&milvuspb.RestoreExternalSnapshotRequest{
+			DbName:               "db",
+			TargetCollectionName: "restored",
+			SnapshotMetadataUri:  "s3://bucket/export-root/snapshots/100/metadata/1.json",
+			ExternalSpec:         externalSpec,
+		})
+		assert.NotContains(t, fmt.Sprint(f3.Interface), "AKIAEXAMPLE")
+		assert.NotContains(t, fmt.Sprint(f3.Interface), "SUPERSECRET")
+		assert.Contains(t, fmt.Sprint(f3.Interface), "***")
+
+		f4 := GetRequestFieldWithoutSensitiveInfo(&milvuspb.ExportSnapshotRequest{
+			DbName:         "db",
+			CollectionName: "source",
+			Name:           "snapshot",
+			TargetS3Path:   "s3://bucket/export-root",
+			ExternalSpec:   externalSpec,
+		})
+		assert.NotContains(t, fmt.Sprint(f4.Interface), "AKIAEXAMPLE")
+		assert.NotContains(t, fmt.Sprint(f4.Interface), "SUPERSECRET")
+		assert.Contains(t, fmt.Sprint(f4.Interface), "***")
 	}
 
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "3")
