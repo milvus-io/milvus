@@ -575,8 +575,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     build_config.erase(VEC_OPT_FIELDS);
     auto stat = index_.Build(id_map_dataset, build_config);
     if (stat != knowhere::Status::success)
-        ThrowInfo(knowhere::IsInputError(stat) ? ErrorCode::InvalidParameter
-                                               : ErrorCode::IndexBuildError,
+        ThrowInfo(KnowhereBuildStatusToErrorCode(stat),
                   "failed to build disk index, {}",
                   KnowhereStatusString(stat));
 
@@ -703,8 +702,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
     auto stat = index_.Build(dataset, build_config);
     if (stat != knowhere::Status::success)
-        ThrowInfo(knowhere::IsInputError(stat) ? ErrorCode::InvalidParameter
-                                               : ErrorCode::IndexBuildError,
+        ThrowInfo(KnowhereBuildStatusToErrorCode(stat),
                   "failed to build index, {}",
                   KnowhereStatusString(stat));
 

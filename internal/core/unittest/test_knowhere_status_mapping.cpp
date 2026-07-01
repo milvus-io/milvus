@@ -80,3 +80,40 @@ TEST(KnowhereStatusMapping, TransientErrorsMapToRetriableCodes) {
         milvus::KnowhereStatusToErrorCode(knowhere::Status::disk_file_error),
         milvus::ErrorCode::FileReadFailed);
 }
+
+// KnowhereBuildStatusToErrorCode is the build/add-path variant: it reuses the
+// same classification but reports the generic KnowhereError bucket as
+// IndexBuildError, while every finer code passes through unchanged. In
+// particular a build-time OOM / disk read failure stays retriable instead of
+// collapsing into a permanent build error.
+TEST(KnowhereStatusMapping,
+     BuildVariantKeepsFineCodesAndFallsBackToIndexBuild) {
+    // Generic inner errors -> IndexBuildError (build context preserved).
+    EXPECT_EQ(milvus::KnowhereBuildStatusToErrorCode(
+                  knowhere::Status::faiss_inner_error),
+              milvus::ErrorCode::IndexBuildError);
+    EXPECT_EQ(milvus::KnowhereBuildStatusToErrorCode(
+                  knowhere::Status::knowhere_inner_error),
+              milvus::ErrorCode::IndexBuildError);
+
+    // Transient failures keep their retriable codes (NOT IndexBuildError).
+    EXPECT_EQ(
+        milvus::KnowhereBuildStatusToErrorCode(knowhere::Status::malloc_error),
+        milvus::ErrorCode::MemAllocateFailed);
+    EXPECT_EQ(milvus::KnowhereBuildStatusToErrorCode(
+                  knowhere::Status::disk_file_error),
+              milvus::ErrorCode::FileReadFailed);
+
+    // Caller input still surfaces as InvalidParameter.
+    EXPECT_EQ(
+        milvus::KnowhereBuildStatusToErrorCode(knowhere::Status::invalid_args),
+        milvus::ErrorCode::InvalidParameter);
+
+    // Capability / data statuses keep their precise (non-input) codes.
+    EXPECT_EQ(milvus::KnowhereBuildStatusToErrorCode(
+                  knowhere::Status::not_implemented),
+              milvus::ErrorCode::Unsupported);
+    EXPECT_EQ(milvus::KnowhereBuildStatusToErrorCode(
+                  knowhere::Status::invalid_serialized_index_type),
+              milvus::ErrorCode::DataFormatBroken);
+}
