@@ -545,6 +545,36 @@ func TestRewrite_NullableArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
 	}
 }
 
+func TestRewrite_ArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	for _, exprStr := range []string{
+		`ArrayInt[0] in [1] and ArrayInt[0] == 2`,
+		`not (ArrayInt[0] in [1] and ArrayInt[0] == 2)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "indexed array must not fold to valid false when the index can be out of range: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "indexed array under NOT must not fold to valid true when the index can be out of range: %s", exprStr)
+	}
+}
+
+func TestRewrite_StructArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithStructArrayT(t)
+
+	for _, exprStr := range []string{
+		`struct_array[0][sub_int] in [1] and struct_array[0][sub_int] == 2`,
+		`not (struct_array[0][sub_int] in [1] and struct_array[0][sub_int] == 2)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "indexed struct array must not fold to valid false when the element can be missing: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "indexed struct array under NOT must not fold to valid true when the element can be missing: %s", exprStr)
+	}
+}
+
 func TestRewrite_Or_In_Or_NotEqual_Nullable_NotDoesNotBecomeIsNull(t *testing.T) {
 	helper := buildSchemaHelperForRewriteNullableT(t)
 
