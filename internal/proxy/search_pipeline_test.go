@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -76,6 +78,15 @@ func (s *SearchPipelineSuite) SetupTest() {
 
 func (s *SearchPipelineSuite) TearDownTest() {
 	s.span.End()
+}
+
+func (s *SearchPipelineSuite) TestBuildChainFromFunctionChainRerankMeta() {
+	repr, err := chain.ProtoChainToRepr(l2LimitFunctionChain(10))
+	s.Require().NoError(err)
+
+	fc, err := buildChainFromMeta(&functionChainRerankMeta{repr: repr}, nil, nil, nil, memory.NewGoAllocator())
+	s.Require().NoError(err)
+	s.NotNil(fc)
 }
 
 func (s *SearchPipelineSuite) TestSerializeBucketKeyPreservesRequestedOrder() {
@@ -258,6 +269,57 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 
 	_, err = op.run(context.Background(), s.span, reduced[0], []string{"IP"})
 	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Int64},
+		},
+	}
+	nq := int64(2)
+	topk := int64(10)
+	limit := int64(3)
+
+	reduceOp := searchReduceOperator{
+		context.Background(),
+		schema.Fields[0],
+		nq,
+		topk,
+		0,
+		1,
+		[]int64{1},
+		[]*planpb.QueryInfo{{}},
+		nil,
+		false,
+	}
+
+	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "ts", 101, false)
+	reduced, err := reduceOp.run(context.Background(), s.span, []*internalpb.SearchResults{data})
+	s.Require().NoError(err)
+
+	repr, err := chain.ProtoChainToRepr(l2LimitFunctionChain(limit))
+	s.Require().NoError(err)
+
+	op := rerankOperator{
+		nq:           nq,
+		topK:         topk,
+		roundDecimal: -1,
+		collSchema:   schema,
+		rerankMeta:   &functionChainRerankMeta{repr: repr},
+	}
+
+	outputs, err := op.run(context.Background(), s.span, reduced[0], []string{"IP"})
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+
+	result := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{limit, limit}, result.GetTopks())
+	s.Equal(limit, result.GetTopK())
+	s.Len(result.GetScores(), int(nq*limit))
+	s.Len(result.GetIds().GetIntId().GetData(), int(nq*limit))
 }
 
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_CollapsesElementLevelResultsByRowID() {

@@ -175,12 +175,23 @@ func (fc *FuncChain) Execute(input *DataFrame) (*DataFrame, error) {
 // ExecuteWithContext executes the chain with context for cancellation support.
 // Supports multiple inputs when the first operator is MergeOp.
 func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFrame) (*DataFrame, error) {
+	return fc.ExecuteWithOptions(ctx, ExecuteOptions{}, inputs...)
+}
+
+// ExecuteWithOptions executes the chain with optional optimization metadata.
+// FuncChain remains the only executor; OptimizationPlan only guides execution.
+func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions, inputs ...*DataFrame) (*DataFrame, error) {
 	if len(inputs) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("at least one input is required")
 	}
 
 	// Validate chain before execution
 	if err := fc.Validate(); err != nil {
+		return nil, err
+	}
+
+	plan, err := fc.buildOptimizationPlan(opts)
+	if err != nil {
 		return nil, err
 	}
 
@@ -198,6 +209,13 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 				return nil, merr.Wrapf(err, "%s failed", mergeOp.Name())
 			}
 			startIdx = 1
+			if plan != nil {
+				result, err = fc.pruneIfNeeded(result, plan.PruneAfter[0], plan.SystemColumnPolicy, inputs)
+				if err != nil {
+					fc.releaseIfOwned(result, inputs)
+					return nil, err
+				}
+			}
 		} else {
 			if len(inputs) > 1 {
 				return nil, merr.WrapErrParameterInvalidMsg("chain expects 1 input but got %d (first operator is not MergeOp)", len(inputs))
@@ -223,6 +241,15 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 		default:
 		}
 
+		if plan != nil {
+			var err error
+			result, err = fc.pruneIfNeeded(result, plan.PruneBefore[i], plan.SystemColumnPolicy, inputs)
+			if err != nil {
+				fc.releaseIfOwned(result, inputs)
+				return nil, err
+			}
+		}
+
 		newResult, err := op.Execute(funcCtx, result)
 		if err != nil {
 			fc.releaseIfOwned(result, inputs)
@@ -234,9 +261,29 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFram
 			fc.releaseIfOwned(result, inputs)
 		}
 		result = newResult
+
+		if plan != nil {
+			result, err = fc.pruneIfNeeded(result, plan.PruneAfter[i], plan.SystemColumnPolicy, inputs)
+			if err != nil {
+				fc.releaseIfOwned(result, inputs)
+				return nil, err
+			}
+		}
 	}
 
 	return result, nil
+}
+
+func (fc *FuncChain) pruneIfNeeded(df *DataFrame, keep ColumnSet, policy SystemColumnPolicy, inputs []*DataFrame) (*DataFrame, error) {
+	pruned, err := PruneDataFrame(df, keep, policy)
+	if err != nil {
+		fc.releaseIfOwned(df, inputs)
+		return nil, err
+	}
+	if pruned != df {
+		fc.releaseIfOwned(df, inputs)
+	}
+	return pruned, nil
 }
 
 // releaseIfOwned releases df if it's not one of the original inputs.
@@ -283,9 +330,9 @@ func (fc *FuncChain) Select(columns ...string) *FuncChain {
 	return fc.Add(NewSelectOp(columns))
 }
 
-// Sort sorts the DataFrame by a column, breaking ties by $id ascending.
-func (fc *FuncChain) Sort(column string, desc bool) *FuncChain {
-	return fc.Add(NewSortOpWithTieBreak(column, desc, types.IDFieldName))
+// Sort sorts the DataFrame by a column, breaking ties by tieBreakCol ascending.
+func (fc *FuncChain) Sort(column string, desc bool, tieBreakCol string) *FuncChain {
+	return fc.Add(newSortOp(column, desc, tieBreakCol))
 }
 
 // Limit limits the number of rows in the DataFrame.

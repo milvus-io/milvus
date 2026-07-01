@@ -137,7 +137,7 @@ func buildBoostScoreChain(
 	}
 
 	boostChain.Select(boostReduceColumns(df.ColumnNames())...)
-	boostChain.Sort(types.ScoreFieldName, true)
+	boostChain.Sort(types.ScoreFieldName, true, types.IDFieldName)
 	return boostChain, nil
 }
 
@@ -166,7 +166,7 @@ func appendFunctionScoreColumn(boostChain *chain.FuncChain, boostScoreColumns []
 		return boostScoreColumns[0], nil
 	}
 
-	functionCombineExpr, err := expr.NewScoreCombineExpr(functionMode, nil, expr.WithNullPolicy(expr.ScoreCombineNullSkip))
+	functionCombineExpr, err := expr.NewNumCombineExpr(functionMode, nil, expr.WithNullPolicy(expr.NumCombineNullSkip))
 	if err != nil {
 		return "", err
 	}
@@ -175,7 +175,7 @@ func appendFunctionScoreColumn(boostChain *chain.FuncChain, boostScoreColumns []
 }
 
 func appendFinalBoostScore(boostChain *chain.FuncChain, functionScoreCol string, boostMode string) error {
-	finalCombineExpr, err := expr.NewScoreCombineExpr(boostMode, nil, expr.WithNullPolicy(expr.ScoreCombineNullSkip))
+	finalCombineExpr, err := expr.NewNumCombineExpr(boostMode, nil, expr.WithNullPolicy(expr.NumCombineNullSkip))
 	if err != nil {
 		return err
 	}

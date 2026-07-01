@@ -215,11 +215,11 @@ func (op *MergeOp) ExecuteMulti(ctx *types.FuncContext, inputs []*DataFrame) (*D
 	case MergeStrategyWeighted:
 		return op.mergeWeighted(ctx, inputs)
 	case MergeStrategyMax:
-		return op.mergeScoreCombine(ctx, inputs, maxMergeFunc)
+		return op.mergeNumCombine(ctx, inputs, maxMergeFunc)
 	case MergeStrategySum:
-		return op.mergeScoreCombine(ctx, inputs, sumMergeFunc)
+		return op.mergeNumCombine(ctx, inputs, sumMergeFunc)
 	case MergeStrategyAvg:
-		return op.mergeScoreCombine(ctx, inputs, avgMergeFunc)
+		return op.mergeNumCombine(ctx, inputs, avgMergeFunc)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("merge_op: unsupported strategy %s", op.strategy)
 	}
@@ -418,8 +418,8 @@ func avgMergeFunc(existing, new float32, count int) (float32, int) {
 	return existing + new, count + 1
 }
 
-// mergeScoreCombine implements max/sum/avg score merge.
-func (op *MergeOp) mergeScoreCombine(ctx *types.FuncContext, inputs []*DataFrame, mergeFunc scoreMergeFunc) (*DataFrame, error) {
+// mergeNumCombine implements max/sum/avg score merge.
+func (op *MergeOp) mergeNumCombine(ctx *types.FuncContext, inputs []*DataFrame, mergeFunc scoreMergeFunc) (*DataFrame, error) {
 	return op.mergeWithScoreCollector(ctx, inputs, func(inputs []*DataFrame, chunkIdx int) (map[any]float32, map[any]idLocation, error) {
 		idScores, idCounts, idLocs, err := op.collectCombinedScores(inputs, chunkIdx, mergeFunc)
 		if err != nil {
