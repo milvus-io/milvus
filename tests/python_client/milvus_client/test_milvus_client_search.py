@@ -440,10 +440,15 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "float vector index does not support metric type"}
-        self.create_collection(client, collection_name, default_dim, metric_type="invalid",
-                               check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: "float vector index does not support metric type"}
+        self.create_collection(
+            client,
+            collection_name,
+            default_dim,
+            metric_type="invalid",
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/29880")
@@ -557,8 +562,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         not_exist_field_name = "not_exist_field"
         null_expr = not_exist_field_name + " " + null_expr_op
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"field {not_exist_field_name} not exist"}
+        error = {ct.err_code: 1100, ct.err_msg: f"field {not_exist_field_name} not exist"}
         self.search(
             client,
             collection_name,
@@ -3672,12 +3676,17 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
             limit=default_limit,
         )
         not_supported_hints = "not_supported_hints"
-        error = {ct.err_code: 0,
-                 ct.err_msg: f"hints: {not_supported_hints} not supported"}
-        search_params = {'hints': not_supported_hints,
-                         'params': cf.get_search_params_params('IVF_FLAT')}
-        self.search(client, collection_name, data=[search_vector], filter='id >= 10',
-                    search_params=search_params, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 0, ct.err_msg: f"hints: {not_supported_hints} not supported"}
+        search_params = {"hints": not_supported_hints, "params": cf.get_search_params_params("IVF_FLAT")}
+        self.search(
+            client,
+            collection_name,
+            data=[search_vector],
+            filter="id >= 10",
+            search_params=search_params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -7813,7 +7822,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_provider", ["invalid_provider", "openai", "huggingface", "", None, 123])
+    @pytest.mark.parametrize("invalid_provider", ["invalid_provider", "openai", "", None, 123])
     def test_milvus_client_search_with_model_rerank_invalid_provider(
         self, setup_collection, invalid_provider, tei_reranker_endpoint
     ):

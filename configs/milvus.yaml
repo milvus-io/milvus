@@ -1447,6 +1447,10 @@ function:
         credential:  # The name in the credential configuration item
         enable: true # Whether to enable Gemini model service
         url:  # Your Gemini embedding url, Default is the official embedding url
+      huggingface:
+        credential:  # The name in the credential configuration item
+        enable: true # Whether to enable Hugging Face text embedding service
+        url:  # Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co
       openai:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable openai model service
@@ -1473,6 +1477,10 @@ function:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable cohere model service
           url:  # Your cohere rerank url, Default is the official rerank url
+        huggingface:
+          credential:  # The name in the credential configuration item
+          enable: true # Whether to enable Hugging Face rerank service
+          url:  # Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co
         siliconflow:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable siliconflow model service

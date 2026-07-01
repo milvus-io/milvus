@@ -41,6 +41,7 @@ const (
 	voyageaiProviderName    string = "voyageai"
 	aliProviderName         string = "ali"
 	zillizProviderName      string = "zilliz"
+	huggingFaceProviderName string = "huggingface"
 
 	queryKeyName string = "queries"
 )
@@ -94,6 +95,8 @@ func newProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelExtraIn
 			case zillizProviderName:
 				conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 				return newZillizProvider(params, conf, extraInfo)
+			case huggingFaceProviderName:
+				return newHuggingFaceProvider(params, conf, credentials, extraInfo)
 			default:
 				return nil, merr.WrapErrParameterInvalidMsg("unknown rerank model provider:%s", param.Value)
 			}

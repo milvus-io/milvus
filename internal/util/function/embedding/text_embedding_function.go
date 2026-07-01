@@ -48,6 +48,7 @@ const (
 	teiProvider          string = "tei"
 	zillizProvider       string = "zilliz"
 	geminiProvider       string = "gemini"
+	huggingFaceProvider  string = "huggingface"
 )
 
 func hasEmptyString(texts []string) bool {
@@ -140,8 +141,10 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 		embP, newProviderErr = NewZillizEmbeddingProvider(base.outputFields[0], functionSchema, conf, extraInfo)
 	case geminiProvider:
 		embP, newProviderErr = NewGeminiEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
+	case huggingFaceProvider:
+		embP, newProviderErr = NewHuggingFaceEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg("unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, zillizProvider, geminiProvider)
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, zillizProvider, geminiProvider, huggingFaceProvider)
 	}
 
 	if newProviderErr != nil {
