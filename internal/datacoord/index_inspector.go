@@ -161,7 +161,7 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
 			i.enqueueUnindexedTaskSegments(ctx, WithCollection(collectionID))
 		case <-getBuildIndexOverflowChSingleton():
-			log.Warn("build index notify channel overflow, reconcile all unindexed segments")
+			mlog.Warn(ctx, "build index notify channel overflow, reconcile all unindexed segments")
 			i.enqueueUnindexedTaskSegments(ctx)
 		case segID := <-getBuildIndexChSingleton():
 			mlog.Info(ctx, "receive new flushed segment", mlog.FieldSegmentID(segID))
@@ -249,7 +249,7 @@ func (i *indexInspector) processPendingIndexSegments(ctx context.Context) {
 	for _, segID := range segIDs {
 		segment := i.meta.GetSegment(ctx, segID)
 		if segment == nil {
-			log.Ctx(ctx).Warn("segment is not exist, no need to build index", zap.Int64("segmentID", segID))
+			mlog.Warn(ctx, "segment is not exist, no need to build index", mlog.FieldSegmentID(segID))
 			continue
 		}
 		if !i.canCreateIndexForSegmentNow(segment) {
@@ -280,9 +280,9 @@ func (i *indexInspector) processPendingIndexSegmentsForCollection(ctx context.Co
 			continue
 		}
 		if err := i.createIndexesForSegment(ctx, segment); err != nil {
-			log.Ctx(ctx).Warn("create index for segment fail, wait for retry",
-				zap.Int64("segmentID", segID),
-				zap.Error(err))
+			mlog.Warn(ctx, "create index for segment fail, wait for retry",
+				mlog.FieldSegmentID(segID),
+				mlog.Err(err))
 			i.requeuePendingIndexSegments(segID)
 			continue
 		}
