@@ -520,8 +520,33 @@ func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
 	}
 }
 
+func (opt *rowBasedDataOption) WithPartition(partitionName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPartition(partitionName)
+	return opt
+}
+
 func (opt *rowBasedDataOption) WithNamespace(namespace string) *rowBasedDataOption {
 	opt.columnBasedDataOption.WithNamespace(namespace)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithPartialUpdate(partialUpdate bool) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPartialUpdate(partialUpdate)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithArrayAppend(fieldName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithArrayAppend(fieldName)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithArrayRemove(fieldName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithArrayRemove(fieldName)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.FieldPartialUpdateOp_OpType) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithFieldPartialOp(fieldName, op)
 	return opt
 }
 

@@ -219,6 +219,7 @@ func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
 func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
 	collName := "namespace_row_write_option"
 	namespace := "tenant_a"
+	partition := "partition_a"
 	coll := &entity.Collection{
 		Schema: entity.NewSchema().WithName(collName).
 			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
@@ -227,17 +228,21 @@ func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
 	rows := []any{map[string]any{"id": int64(1), "name": "alice"}}
 
 	var insertOpt InsertOption = NewRowBasedInsertOption(collName, rows...).
+		WithPartition(partition).
 		WithNamespace(namespace)
 	insertReq, err := insertOpt.InsertRequest(coll)
 	s.Require().NoError(err)
+	s.Equal(partition, insertReq.GetPartitionName())
 	s.Equal(namespace, insertReq.GetNamespace())
 	s.EqualValues(1, insertReq.GetNumRows())
 	s.Len(insertReq.GetFieldsData(), 2)
 
 	var upsertOpt UpsertOption = NewRowBasedInsertOption(collName, rows...).
+		WithPartition(partition).
 		WithNamespace(namespace)
 	upsertReq, err := upsertOpt.UpsertRequest(coll)
 	s.Require().NoError(err)
+	s.Equal(partition, upsertReq.GetPartitionName())
 	s.Equal(namespace, upsertReq.GetNamespace())
 	s.EqualValues(1, upsertReq.GetNumRows())
 	s.Len(upsertReq.GetFieldsData(), 2)

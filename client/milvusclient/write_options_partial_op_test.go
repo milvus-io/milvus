@@ -153,11 +153,12 @@ func TestRowBasedUpsertEmitsFieldOps(t *testing.T) {
 		map[string]any{"id": int64(1), "tags": []int64{10}},
 		map[string]any{"id": int64(2), "tags": []int64{20, 30}},
 	}
-	opt := NewRowBasedInsertOption(coll.Name, rows...)
-	opt.WithArrayAppend("tags")
+	opt := NewRowBasedInsertOption(coll.Name, rows...).
+		WithArrayAppend("tags")
 
 	req, err := opt.UpsertRequest(coll)
 	require.NoError(t, err)
+	assert.EqualValues(t, len(rows), req.GetNumRows())
 	assert.True(t, req.GetPartialUpdate())
 	tagsOp := findOp(req.GetFieldOps(), "tags")
 	require.NotNil(t, tagsOp)
