@@ -2488,6 +2488,10 @@ func validateAlterAnalyzerFieldParam(collSchema *schemapb.CollectionSchema, fiel
 		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
 	}
 
+	if !typeutil.IsStringType(field.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
+	}
+
 	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, field) {
 		return merr.WrapErrParameterInvalidMsg(
 			"can not alter analyzer params for field %s after text match is enabled or BM25 function depends on it",

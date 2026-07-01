@@ -139,6 +139,7 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
 	fieldName := "text"
+	intFieldName := "count"
 
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
@@ -151,6 +152,10 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 				Name:       fieldName,
 				DataType:   schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+			},
+			{
+				Name:     intFieldName,
+				DataType: schemapb.DataType_Int64,
 			},
 		},
 	}
@@ -206,6 +211,18 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 		FieldName:      fieldName,
 		Properties: []*commonpb.KeyValuePair{
 			{Key: common.EnableAnalyzerKey, Value: "not-bool"},
+		},
+	})
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	require.Equal(t, 1, meta.fileResourceRefCnt[resourceID])
+
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      intFieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
 		},
 	})
 	require.Error(t, merr.CheckRPCCall(resp, err))
