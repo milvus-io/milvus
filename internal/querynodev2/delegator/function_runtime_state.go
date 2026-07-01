@@ -27,15 +27,25 @@ import (
 
 type functionRuntimeState struct {
 	mu                sync.RWMutex
+	schemaVersion     int32
 	functionFieldType map[UniqueID]schemapb.FunctionType
 }
 
 func buildFunctionRuntimeState(schema *schemapb.CollectionSchema) (*functionRuntimeState, error) {
-	state := &functionRuntimeState{
-		functionFieldType: make(map[UniqueID]schemapb.FunctionType),
+	functionFieldType, err := buildFunctionFieldTypes(schema)
+	if err != nil {
+		return nil, err
 	}
+	return &functionRuntimeState{
+		schemaVersion:     schema.GetVersion(),
+		functionFieldType: functionFieldType,
+	}, nil
+}
+
+func buildFunctionFieldTypes(schema *schemapb.CollectionSchema) (map[UniqueID]schemapb.FunctionType, error) {
+	functionFieldType := make(map[UniqueID]schemapb.FunctionType)
 	if schema == nil {
-		return state, nil
+		return functionFieldType, nil
 	}
 
 	for _, fn := range schema.GetFunctions() {
@@ -47,11 +57,54 @@ func buildFunctionRuntimeState(schema *schemapb.CollectionSchema) (*functionRunt
 			return nil, err
 		}
 		for _, outputFieldID := range outputFieldIDs {
-			state.functionFieldType[outputFieldID] = fn.GetType()
+			functionFieldType[outputFieldID] = fn.GetType()
 		}
 	}
 
-	return state, nil
+	return functionFieldType, nil
+}
+
+// isStale reports whether the runtime state lags behind the given schema
+// snapshot's logical schema version.
+func (s *functionRuntimeState) isStale(schema *schemapb.CollectionSchema) bool {
+	if s == nil || schema == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.schemaVersion < schema.GetVersion()
+}
+
+// ensureFuncState realigns the runtime state with the given schema snapshot when the
+// snapshot carries a newer logical schema version. The collection snapshot can be
+// advanced by paths that never run the delegator's UpdateSchema side effects
+// (e.g. segment load via collectionManager.PutOrRef), so search-time function
+// lookup must not depend on the UpdateSchema event alone. Version-monotonic:
+// a stale schema never rolls the state back.
+func (s *functionRuntimeState) ensureFuncState(schema *schemapb.CollectionSchema) error {
+	if s == nil || schema == nil {
+		return nil
+	}
+	version := schema.GetVersion()
+	s.mu.RLock()
+	fresh := s.schemaVersion >= version
+	s.mu.RUnlock()
+	if fresh {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.schemaVersion >= version {
+		return nil
+	}
+	functionFieldType, err := buildFunctionFieldTypes(schema)
+	if err != nil {
+		return err
+	}
+	s.functionFieldType = functionFieldType
+	s.schemaVersion = version
+	return nil
 }
 
 func functionRuntimeOutputFieldIDs(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) ([]int64, error) {
@@ -106,10 +159,18 @@ func (s *functionRuntimeState) swap(newState *functionRuntimeState) *functionRun
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// A concurrent search may have lazily refreshed the state from a newer
+	// collection snapshot (ensureFuncState); never swap in an older schema version.
+	if newState.schemaVersion < s.schemaVersion {
+		return newState
+	}
+
 	oldState := &functionRuntimeState{
+		schemaVersion:     s.schemaVersion,
 		functionFieldType: s.functionFieldType,
 	}
 	s.functionFieldType = newState.functionFieldType
+	s.schemaVersion = newState.schemaVersion
 	return oldState
 }
 
