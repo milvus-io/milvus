@@ -23,9 +23,11 @@ package metrics
 */
 import "C"
 
-import "unsafe"
+import (
+	"unsafe"
 
-import _ "github.com/milvus-io/milvus/internal/util/cgo"
+	_ "github.com/milvus-io/milvus/internal/util/cgo"
+)
 
 type CacheShardDiskUsageStats struct {
 	DataType  string
