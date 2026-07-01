@@ -1858,7 +1858,6 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         const auto& schema = *flush_schema;
         auto& insert_record = growing_segment->get_insert_record();
 
-        int64_t total_rows = end_offset - start_offset;
         std::unordered_set<int64_t> bm25_field_ids;
         std::unordered_map<int64_t, int64_t> bm25_stats_log_ids;
         for (size_t i = 0; i < config->num_bm25_fields; i++) {
@@ -2100,7 +2099,6 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         // this avoids copying all data into a single contiguous buffer
         int64_t size_per_chunk = field_infos[0].vec_base->get_size_per_chunk();
         int64_t current_offset = start_offset;
-        int64_t rows_written = 0;
 
         while (current_offset < end_offset) {
             int64_t chunk_id = current_offset / size_per_chunk;
@@ -2157,7 +2155,6 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             }
 
             current_offset += batch_rows;
-            rows_written += batch_rows;
         }
 
         // close writer — returns ColumnGroups + LobFiles, does NOT commit
