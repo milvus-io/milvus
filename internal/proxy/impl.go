@@ -141,6 +141,15 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	var aliasName []string
 
 	if globalMetaCache != nil {
+		// bump_defence: a defence-update push carries the collection's current gated field
+		// set; apply it (orthogonal to the msgType-driven cache invalidation below). The
+		// gated set is a *MetaCache-specific feature, so type-assert rather than widen the
+		// Cache interface (which would force a mock regen across the proxy test suite).
+		if request.GetDefenceUpdate() {
+			if mc, ok := globalMetaCache.(*MetaCache); ok {
+				mc.SetGatedFields(collectionID, request.GetDefenceGatedFields())
+			}
+		}
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:
 			// remove collection by name first, otherwise the drop collection remove version will be failed.

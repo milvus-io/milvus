@@ -360,6 +360,11 @@ type MetaCache struct {
 	collInfo  map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
 	aliasInfo map[string]map[string]*aliasEntry     // database -> alias -> entry
 
+	// bump_defence gated fields: collectionID -> set of fieldIDs whose backfill round is
+	// not yet ready. A search/query targeting a gated field is rejected (retriable).
+	// Maintained by the coordinator push (InvalidateCollectionMetaCache, defence_update).
+	gatedFields map[UniqueID]map[int64]struct{}
+
 	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
 	privilegeInfos map[string]struct{}                   // privileges cache
 	userToRoles    map[string]map[string]struct{}        // user to role cache
@@ -424,6 +429,7 @@ func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 		privilegeInfos:          map[string]struct{}{},
 		userToRoles:             map[string]map[string]struct{}{},
 		collectionCacheVersion:  make(map[UniqueID]uint64),
+		gatedFields:             make(map[UniqueID]map[int64]struct{}),
 		partitionCache:          NewVersionCache[string, *partitionInfo](),
 		collLevelPartitionCache: NewVersionCache[string, *partitionInfos](),
 		stopCh:                  make(chan struct{}),
@@ -431,6 +437,36 @@ func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 	}
 	metaCache.backgroundGCLoop(metaCache.stopCh)
 	return metaCache, nil
+}
+
+// SetGatedFields replaces the bump_defence gated field set for a collection (empty list
+// releases all gates). Driven by the coordinator push (InvalidateCollectionMetaCache with
+// defence_update=true).
+func (m *MetaCache) SetGatedFields(collectionID UniqueID, fieldIDs []int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(fieldIDs) == 0 {
+		delete(m.gatedFields, collectionID)
+		return
+	}
+	set := make(map[int64]struct{}, len(fieldIDs))
+	for _, id := range fieldIDs {
+		set[id] = struct{}{}
+	}
+	m.gatedFields[collectionID] = set
+}
+
+// IsFieldGated reports whether a field of a collection is currently gated by bump_defence
+// (its backfill round is not yet ready on all in-scope segments).
+func (m *MetaCache) IsFieldGated(collectionID UniqueID, fieldID int64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	set, ok := m.gatedFields[collectionID]
+	if !ok {
+		return false
+	}
+	_, gated := set[fieldID]
+	return gated
 }
 
 func (m *MetaCache) getCollection(database, collectionName string, collectionID UniqueID) (*collectionInfo, bool) {

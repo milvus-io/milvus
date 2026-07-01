@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // CommitBackfillResult fetches the Spark-produced BackfillResult JSON from
@@ -72,6 +73,56 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	if err != nil {
 		log.Warn(ctx, "CommitBackfillResult failed to describe collection", mlog.Err(err), mlog.FieldCollectionID(result.CollectionID))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
+	}
+
+	// bump_defence (registration C): register a gate for this Spark round's columns
+	// (result.NewFieldNames — the round's first-source field set) over its committed
+	// segments, BEFORE the dataView-changing broadcast. Spark targets a regular
+	// collection (unbound fields), so the round is keyed by the result artifact, and the
+	// scope is the explicit committed segment list + per-segment V_commit (Spark does not
+	// bump schema_version). roundID is derived from the result path so retries are
+	// idempotent. (v1 enforces the anns/vector path; the scalar data_loaded witness via
+	// V_commit is the deferred branch.)
+	if s.backfillGate != nil && len(result.NewFieldNames) > 0 {
+		newNames := make(map[string]struct{}, len(result.NewFieldNames))
+		for _, n := range result.NewFieldNames {
+			newNames[n] = struct{}{}
+		}
+		var vectorFieldIDs, scalarFieldIDs []int64
+		for _, f := range coll.GetSchema().GetFields() {
+			if _, ok := newNames[f.GetName()]; !ok {
+				continue
+			}
+			if typeutil.IsVectorType(f.GetDataType()) {
+				vectorFieldIDs = append(vectorFieldIDs, f.GetFieldID())
+			} else {
+				scalarFieldIDs = append(scalarFieldIDs, f.GetFieldID())
+			}
+		}
+		segVCommit := make(map[int64]int64, len(result.Segments))
+		for segIDStr, seg := range result.Segments {
+			segID, perr := strconv.ParseInt(segIDStr, 10, 64)
+			if perr != nil {
+				continue
+			}
+			// v3: committed manifest version (the gate compares the loaded manifest version
+			// against it). v2: -1 -- no faithful post-commit data version is sourced yet, so
+			// the gate stays conservative (fail-closed, never premature) until it is; sourcing
+			// a real v2 data version here is the remaining follow-up.
+			segVCommit[segID] = seg.Version
+		}
+		if len(vectorFieldIDs)+len(scalarFieldIDs) > 0 {
+			// Allocate a globally-unique roundID (never hash-derive a key — a hash is not
+			// guaranteed unique and two distinct rounds could collide). Idempotency on a
+			// retried commit is handled by the registry via the result path as the round's
+			// source.
+			roundID, aerr := s.allocator.AllocID(ctx)
+			if aerr != nil {
+				log.Warn(ctx, "failed to allocate bump_defence roundID; skip registration", mlog.Err(aerr))
+			} else if rerr := s.backfillGate.RegisterSegmentList(ctx, result.CollectionID, roundID, req.GetResultPath(), vectorFieldIDs, scalarFieldIDs, segVCommit); rerr != nil {
+				log.Warn(ctx, "failed to register bump_defence for external backfill", mlog.Err(rerr))
+			}
+		}
 	}
 
 	// Split items across multiple broadcast messages so a single

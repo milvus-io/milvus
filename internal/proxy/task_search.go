@@ -572,6 +572,13 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 
+		// bump_defence: reject if the anns field is gated (its backfill round is not yet
+		// ready on all in-scope segments). Retriable -> the SDK polls until the gate is
+		// revoked. (*MetaCache-specific; type-assert to avoid widening the Cache interface.)
+		if mc, ok := globalMetaCache.(*MetaCache); ok && mc.IsFieldGated(t.CollectionID, queryInfo.GetQueryFieldId()) {
+			return merr.WrapErrServiceFieldBackfillInProgress(t.CollectionID, queryInfo.GetQueryFieldId())
+		}
+
 		subSearchInfo := classifyHybridSubSearch(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType)
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
 		collapseConfig, elementScopeProvided, sanitizedSearchParams, err := parseAndRemoveElementScope(queryInfo.GetSearchParams())

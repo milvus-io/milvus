@@ -44,6 +44,12 @@ message InvalidateCollMetaCacheRequest {
   string collection_name = 3;
   int64 collectionID = 4;
   string partition_name = 5;
+  // bump_defence: when defence_update is true, the proxy SETS this collection's gated
+  // field set to defence_gated_fields (search/query on a gated field is rejected until
+  // the backfill round is ready; empty list = all gates released). When false, the gated
+  // set is left untouched, so ordinary cache invalidations do not clear active gates.
+  bool defence_update = 6;
+  repeated int64 defence_gated_fields = 7;
 }
 
 message InvalidateShardLeaderCacheRequest {
