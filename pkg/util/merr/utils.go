@@ -192,8 +192,11 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrNodeNotMatch.code():
 		return commonpb.ErrorCode_NodeIDNotMatch
 
-	case ErrPartitionNotFound.code(), ErrReplicaNotFound.code():
+	case ErrPartitionNotFound.code(), ErrNamespaceNotFound.code(), ErrReplicaNotFound.code():
 		return commonpb.ErrorCode_MetaFailed
+
+	case ErrNamespaceAlreadyExists.code():
+		return commonpb.ErrorCode_IllegalArgument
 
 	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrChannelDroppedSentinel.code(), ErrNodeNotAvailable.code():
 		// ErrChannelDroppedSentinel is an internal-only signal that is currently
@@ -734,6 +737,22 @@ func WrapErrPartitionNotLoaded(partition any, msg ...string) error {
 
 func WrapErrPartitionNotFullyLoaded(partition any, msg ...string) error {
 	err := wrapFields(ErrPartitionNotFullyLoaded, value("partition", partition))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrNamespaceNotFound(namespace any, msg ...string) error {
+	err := wrapFields(ErrNamespaceNotFound, value("namespace", namespace))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrNamespaceAlreadyExists(namespace any, msg ...string) error {
+	err := wrapFields(ErrNamespaceAlreadyExists, value("namespace", namespace))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

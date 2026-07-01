@@ -143,6 +143,13 @@ service RootCoord {
      */
     rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
     rpc ShowPartitionsInternal(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
+
+    rpc CreateNamespace(milvus.CreateNamespaceRequest) returns (CreateNamespaceResponse) {}
+    rpc DescribeNamespace(milvus.DescribeNamespaceRequest) returns (milvus.DescribeNamespaceResponse) {}
+    rpc ListNamespaces(milvus.ListNamespacesRequest) returns (milvus.ListNamespacesResponse) {}
+    rpc DropNamespace(milvus.DropNamespaceRequest) returns (milvus.DropNamespaceResponse) {}
+    rpc HasNamespace(milvus.HasNamespaceRequest) returns (milvus.HasNamespaceResponse) {}
+
     rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}
     rpc GetPChannelInfo(GetPChannelInfoRequest) returns (GetPChannelInfoResponse) {}
 
@@ -331,4 +338,10 @@ message ShowCollectionIDsResponse {
 message CreatePartitionResponse {
   common.Status status = 1;
   int64 partitionID = 2;
+}
+
+message CreateNamespaceResponse {
+  common.Status status = 1;
+  milvus.NamespaceInfo namespace = 2;
+  int64 partitionID = 3;
 }
