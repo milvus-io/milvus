@@ -495,8 +495,7 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
              config.value("build_id", "unknown"));
     auto stat = index_.Build(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
-        ThrowInfo(knowhere::IsInputError(stat) ? ErrorCode::InvalidParameter
-                                               : ErrorCode::IndexBuildError,
+        ThrowInfo(KnowhereBuildStatusToErrorCode(stat),
                   "failed to build index, {}",
                   KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
@@ -710,8 +709,7 @@ VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
     knowhere::TimeRecorder rc("AddWithDataset", 1);
     auto stat = index_.Add(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
-        ThrowInfo(knowhere::IsInputError(stat) ? ErrorCode::InvalidParameter
-                                               : ErrorCode::IndexBuildError,
+        ThrowInfo(KnowhereBuildStatusToErrorCode(stat),
                   "failed to append index, {}",
                   KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
