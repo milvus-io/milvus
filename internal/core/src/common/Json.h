@@ -257,6 +257,14 @@ class Json {
                                : doc().at_pointer(pointer).get_number_type();
     }
 
+    value_result<simdjson::ondemand::number>
+    at_numeric(std::string_view pointer) const {
+        if (pointer.empty()) {
+            return doc().get_number();
+        }
+        return doc().at_pointer(pointer).get_number();
+    }
+
     template <typename T>
     value_result<T>
     at(std::string_view pointer) const {

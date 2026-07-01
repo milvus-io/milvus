@@ -1528,6 +1528,19 @@ class SegmentExpr : public Expr {
         return false;
     };
 
+    VectorPtr
+    MoveOrSliceBitmap(TargetBitmap& cached_res,
+                      TargetBitmap& cached_valid_res,
+                      int64_t pos,
+                      int64_t size) {
+        TargetBitmap result;
+        TargetBitmap valid_result;
+        result.append(cached_res, pos, size);
+        valid_result.append(cached_valid_res, pos, size);
+        return std::make_shared<ColumnVector>(std::move(result),
+                                              std::move(valid_result));
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
