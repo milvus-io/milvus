@@ -705,36 +705,40 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-#define UnaryRangeJSONCompare(cmp)                                  \
-    do {                                                            \
-        auto x = data[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                            \
-            if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                auto x = data[offset].template at<double>(pointer); \
-                res[i] = !x.error() && (cmp);                       \
-                break;                                              \
-            }                                                       \
-            res[i] = false;                                         \
-            break;                                                  \
-        }                                                           \
-        res[i] = (cmp);                                             \
+// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
+// number in a single parse.  Branches on actual type to preserve int64
+// precision; uint64 and double values fall back to double comparison,
+// consistent with the Tantivy index and JSON-stats paths.
+// - 'cmp' must reference 'value' (auto-typed as int64_t or double).
+// Missing path and type mismatch are UNKNOWN/NULL under JSON 3VL semantics.
+#define UnaryRangeJSONCompare(cmp)                                     \
+    do {                                                               \
+        if constexpr (std::is_same_v<GetType, int64_t>) {              \
+            auto x_num = data[offset].at_numeric(pointer);             \
+            if (x_num.error()) {                                       \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto n = x_num.value();                                    \
+            if (n.is_int64()) {                                        \
+                auto value = n.get_int64();                            \
+                res[i] = (cmp);                                        \
+            } else {                                                   \
+                auto value = n.is_uint64()                             \
+                                 ? static_cast<double>(n.get_uint64()) \
+                                 : n.get_double();                     \
+                res[i] = (cmp);                                        \
+            }                                                          \
+        } else {                                                       \
+            auto x = data[offset].template at<GetType>(pointer);       \
+            if (x.error()) {                                           \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value();                                    \
+            res[i] = (cmp);                                            \
+        }                                                              \
     } while (false)
-
-#define UnaryRangeJSONCompareNotEqual(cmp)                          \
-    do {                                                            \
-        auto x = data[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                            \
-            if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                auto x = data[offset].template at<double>(pointer); \
-                res[i] = x.error() || (cmp);                        \
-                break;                                              \
-            }                                                       \
-            res[i] = true;                                          \
-            break;                                                  \
-        }                                                           \
-        res[i] = (cmp);                                             \
-    } while (false)
-
     int processed_cursor = 0;
     auto execute_sub_batch =
         [ op_type, pointer, &processed_cursor, &
@@ -765,7 +769,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() > val);
+                        UnaryRangeJSONCompare(value > val);
                     }
                 }
                 break;
@@ -787,7 +791,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() >= val);
+                        UnaryRangeJSONCompare(value >= val);
                     }
                 }
                 break;
@@ -809,7 +813,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() < val);
+                        UnaryRangeJSONCompare(value < val);
                     }
                 }
                 break;
@@ -831,7 +835,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() <= val);
+                        UnaryRangeJSONCompare(value <= val);
                     }
                 }
                 break;
@@ -851,15 +855,15 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         continue;
                     }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        auto doc = data[i].doc();
+                        auto doc = data[offset].doc();
                         auto array = doc.at_pointer(pointer).get_array();
                         if (array.error()) {
-                            res[i] = false;
+                            res[i] = valid_res[i] = false;
                             continue;
                         }
                         res[i] = CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompare(x.value() == val);
+                        UnaryRangeJSONCompare(value == val);
                     }
                 }
                 break;
@@ -879,15 +883,15 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         continue;
                     }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        auto doc = data[i].doc();
+                        auto doc = data[offset].doc();
                         auto array = doc.at_pointer(pointer).get_array();
                         if (array.error()) {
-                            res[i] = false;
+                            res[i] = valid_res[i] = false;
                             continue;
                         }
                         res[i] = !CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompareNotEqual(x.value() != val);
+                        UnaryRangeJSONCompare(value != val);
                     }
                 }
                 break;
@@ -911,8 +915,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(milvus::query::Match(
-                            ExprValueType(x.value()), val, op_type));
+                        UnaryRangeJSONCompare(
+                            milvus::query::Match(value, val, op_type));
                     }
                 }
                 break;
@@ -937,8 +941,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(
-                            matcher(ExprValueType(x.value())));
+                        UnaryRangeJSONCompare(matcher(ExprValueType(value)));
                     }
                 }
                 break;
@@ -1016,9 +1019,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         Assert(index != nullptr);
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
-            std::make_shared<TargetBitmap>(active_count_, true);
+            std::make_shared<TargetBitmap>(active_count_);
         TargetBitmapView res_view(*cached_index_chunk_res_);
         TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        TargetBitmap field_valid(active_count_, true);
+        TargetBitmapView field_valid_view(field_valid);
         int64_t valid_processed_size = 0;
         for (size_t i = 0;
              i < num_data_chunk_ && valid_processed_size < active_count_;
@@ -1039,7 +1044,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 i,
                 0,
                 size,
-                valid_res_view + valid_processed_size);
+                field_valid_view + valid_processed_size);
             valid_processed_size += size;
         }
 
@@ -1053,6 +1058,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 using ValType = decltype(ValType);
                 TargetBitmap target_res(active_count_, false);
                 TargetBitmapView target_res_view(target_res);
+                TargetBitmap target_valid(active_count_, true);
+                TargetBitmapView target_valid_view(target_valid);
                 ShreddingExecutor<ColType, ValType> executor(
                     op_type, pointer, val);
                 index->ExecutorForShreddingData<ColType>(op_ctx_,
@@ -1060,8 +1067,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                                                          executor,
                                                          nullptr,
                                                          target_res_view,
-                                                         target_res_view);
+                                                         target_valid_view);
                 res_view.inplace_or_with_count(target_res_view, active_count_);
+                valid_res_view.inplace_or_with_count(target_valid_view,
+                                                     active_count_);
                 LOG_DEBUG(
                     "using shredding data's field: {} with value {}, count {} "
                     "for segment {}",
@@ -1104,6 +1113,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 if (!target_field.empty()) {
                     TargetBitmap target_res(active_count_, false);
                     TargetBitmapView target_res_view(target_res);
+                    TargetBitmap target_valid(active_count_, true);
+                    TargetBitmapView target_valid_view(target_valid);
                     ShreddingArrayBsonExecutor executor(op_type, pointer, val);
                     index->template ExecutorForShreddingData<std::string_view>(
                         op_ctx_,
@@ -1111,9 +1122,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                         executor,
                         nullptr,
                         target_res_view,
-                        target_res_view);
+                        target_valid_view);
                     res_view.inplace_or_with_count(target_res_view,
                                                    active_count_);
+                    valid_res_view.inplace_or_with_count(target_valid_view,
+                                                         active_count_);
                     LOG_DEBUG("using shredding array field: {}, count {}",
                               target_field,
                               res_view.count());
@@ -1122,15 +1135,19 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         }
 
         // process shared data
-        auto shared_executor = [op_type, val, array_index, &res_view](
-                                   milvus::BsonView bson,
-                                   uint32_t row_id,
-                                   uint32_t value_offset) {
+        auto shared_executor = [op_type,
+                                val,
+                                array_index,
+                                &res_view,
+                                &valid_res_view](milvus::BsonView bson,
+                                                 uint32_t row_id,
+                                                 uint32_t value_offset) {
             auto set_unknown = [&](uint32_t row_id) {
-                res_view[row_id] = false;
+                res_view[row_id] = valid_res_view[row_id] = false;
             };
             auto set_known = [&](uint32_t row_id, bool value) {
                 res_view[row_id] = value;
+                valid_res_view[row_id] = true;
             };
             if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                 Assert(op_type == proto::plan::OpType::Equal ||
@@ -1265,20 +1282,21 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
             index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
 
-        // for NotEqual: flip the result
+        // for NotEqual: flip the Equal result, then mask out UNKNOWN rows.
         if (expr_->op_type_ == proto::plan::OpType::NotEqual) {
             cached_index_chunk_res_->flip();
         }
+        valid_res_view.inplace_and(field_valid_view, active_count_);
         res_view.inplace_and(valid_res_view, active_count_);
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    auto res = MoveOrSliceBitmap(*cached_index_chunk_res_,
+                                 *cached_index_chunk_valid_res_,
+                                 current_data_global_pos_,
+                                 real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename T>
