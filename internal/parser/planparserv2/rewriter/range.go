@@ -206,7 +206,7 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 				}
 			}
 
-			if isEmpty && hasNullableFieldSemantics(g.col) {
+			if isEmpty && !canFoldBoolDomainToConstant(g.col) {
 				continue
 			}
 
@@ -608,7 +608,7 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				}
 			}
 			if isEmpty {
-				if hasNullableFieldSemantics(g.col) {
+				if !canFoldBoolDomainToConstant(g.col) {
 					continue
 				}
 				// Empty intersection → constant false
