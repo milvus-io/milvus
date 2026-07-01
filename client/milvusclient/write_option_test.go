@@ -216,6 +216,33 @@ func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
 	s.Equal(namespace, upsertReq.GetNamespace())
 }
 
+func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
+	collName := "namespace_row_write_option"
+	namespace := "tenant_a"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("name").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64)),
+	}
+	rows := []any{map[string]any{"id": int64(1), "name": "alice"}}
+
+	var insertOpt InsertOption = NewRowBasedInsertOption(collName, rows...).
+		WithNamespace(namespace)
+	insertReq, err := insertOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(namespace, insertReq.GetNamespace())
+	s.EqualValues(1, insertReq.GetNumRows())
+	s.Len(insertReq.GetFieldsData(), 2)
+
+	var upsertOpt UpsertOption = NewRowBasedInsertOption(collName, rows...).
+		WithNamespace(namespace)
+	upsertReq, err := upsertOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(namespace, upsertReq.GetNamespace())
+	s.EqualValues(1, upsertReq.GetNumRows())
+	s.Len(upsertReq.GetFieldsData(), 2)
+}
+
 func TestRowBasedDataOption(t *testing.T) {
 	suite.Run(t, new(ColumnBasedDataOptionSuite))
 }

@@ -520,6 +520,11 @@ func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
 	}
 }
 
+func (opt *rowBasedDataOption) WithNamespace(namespace string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithNamespace(namespace)
+	return opt
+}
+
 func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
 	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
