@@ -4106,11 +4106,10 @@ TEST(SealedSegmentCowState,
     auto current = sealed->TestGetPublishedStateSnapshot();
     auto next = sealed->TestBuildNextPublishedState(
         current,
-        ChunkedSegmentSealedImpl::MakeStateDelta(
-            current->schema,
-            current->load_info,
-            sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
-            current->commit_ts));
+        {current->schema,
+         current->load_info,
+         sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
+         current->commit_ts});
 
     ASSERT_NE(next, nullptr);
     EXPECT_TRUE(next->system_field_ready);
