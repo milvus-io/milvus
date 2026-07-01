@@ -1714,10 +1714,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     SynthesizeExternalSystemFields(const SegmentLoadInfo& segment_load_info,
                                    const SchemaPtr& schema_snapshot,
-                                   RuntimeResourceState* runtime = nullptr);
+                                   RuntimeResourceState* runtime);
 
     void
-    SynthesizeExternalSystemFields(RuntimeResourceState* runtime = nullptr);
+    SynthesizeExternalSystemFields(RuntimeResourceState* runtime);
 
     void
     LoadColumnGroups(
@@ -2127,12 +2127,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    TestSynthesizeExternalSystemFields(
-        const SegmentLoadInfo& segment_load_info,
-        const SchemaPtr& schema_snapshot,
-        RuntimeResourceState* runtime = nullptr) {
+    TestSynthesizeExternalSystemFields(const SegmentLoadInfo& segment_load_info,
+                                       const SchemaPtr& schema_snapshot,
+                                       RuntimeResourceState* runtime) {
         SynthesizeExternalSystemFields(
             segment_load_info, schema_snapshot, runtime);
+    }
+
+    void
+    TestSynthesizeExternalSystemFields(RuntimeResourceState* runtime) {
+        SynthesizeExternalSystemFields(runtime);
     }
 #endif
 };

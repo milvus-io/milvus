@@ -4118,3 +4118,85 @@ TEST(SealedSegmentCowState,
     EXPECT_EQ(next->runtime->timestamps->size(), 7);
     EXPECT_EQ((*next->runtime->timestamps)[0], 0);
 }
+
+TEST(SealedSegmentCowState,
+     ExternalPublicLoadColumnGroupsUsesStagedRuntimeForSyntheticFields) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_external_source("s3://bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo published_proto;
+    published_proto.set_segmentid(1003);
+    published_proto.set_num_of_rows(3);
+    sealed->SetLoadInfo(published_proto);
+
+    proto::segcore::SegmentLoadInfo staged_proto;
+    staged_proto.set_segmentid(1003);
+    staged_proto.set_num_of_rows(7);
+    SegmentLoadInfo staged_load_info(staged_proto, schema);
+
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    sealed->TestSynthesizeExternalSystemFields(
+        staged_load_info, schema, runtime.get());
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto next = sealed->TestBuildNextPublishedState(
+        current,
+        {current->schema,
+         current->load_info,
+         sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
+         current->commit_ts});
+
+    ASSERT_NE(next, nullptr);
+    ASSERT_NE(next->runtime, nullptr);
+    auto it = next->runtime->fields.find(pk);
+    ASSERT_TRUE(it != next->runtime->fields.end());
+    ASSERT_NE(it->second, nullptr);
+    EXPECT_TRUE(next->system_field_ready);
+}
+
+TEST(SealedSegmentCowState, ExternalSynthesizeRequiresRuntime) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_external_source("s3://bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo published_proto;
+    published_proto.set_segmentid(1004);
+    published_proto.set_num_of_rows(3);
+    sealed->SetLoadInfo(published_proto);
+
+    SegmentLoadInfo staged_load_info(published_proto, schema);
+    EXPECT_ANY_THROW(sealed->TestSynthesizeExternalSystemFields(
+        staged_load_info, schema, nullptr));
+}
+
+TEST(SealedSegmentCowState, ExternalWrapperSynthesizeRequiresRuntime) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_external_source("s3://bucket/data");
+    schema->set_external_spec(R"({"format":"parquet"})");
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo published_proto;
+    published_proto.set_segmentid(1005);
+    published_proto.set_num_of_rows(3);
+    sealed->SetLoadInfo(published_proto);
+
+    EXPECT_ANY_THROW(sealed->TestSynthesizeExternalSystemFields(nullptr));
+}

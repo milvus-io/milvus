@@ -1635,8 +1635,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
                                            milvus::OpContext* op_ctx) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto snapshot = CapturePublishedState();
-    LoadColumnGroups(
-        manifest_path, *snapshot->load_info, snapshot->schema, op_ctx, nullptr);
+    auto runtime = CloneMutableRuntimeResourceState();
+    LoadColumnGroups(manifest_path,
+                     *snapshot->load_info,
+                     snapshot->schema,
+                     op_ctx,
+                     runtime.get());
+    PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
 }
 
 void
@@ -1863,17 +1868,18 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     RuntimeResourceState* runtime) {
-    auto get_runtime_or_published_column =
+    AssertInfo(runtime != nullptr,
+               "runtime must not be null when synthesizing external system "
+               "fields for segment {}",
+               id_);
+
+    auto get_runtime_column =
         [&](FieldId field_id) -> std::shared_ptr<ChunkedColumnInterface> {
-        if (runtime != nullptr) {
-            auto it = runtime->fields.find(field_id);
-            if (it != runtime->fields.end()) {
-                return it->second;
-            }
-            return nullptr;
+        auto it = runtime->fields.find(field_id);
+        if (it != runtime->fields.end()) {
+            return it->second;
         }
-        auto snapshot = CapturePublishedState();
-        return get_column(snapshot->runtime, field_id);
+        return nullptr;
     };
     int64_t num_rows = segment_load_info.GetNumOfRows();
     if (num_rows == 0) {
@@ -1882,9 +1888,6 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
             update_row_count(0);
             // Initialize empty timestamps so system fields remain query-visible.
             insert_record_.init_timestamps_from_owned({}, TimestampIndex());
-        }
-        if (runtime == nullptr) {
-            PublishSystemFieldStateLocked();
         }
         return;
     }
@@ -1895,12 +1898,7 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         //    This is lazy; data is only materialized if DataOfChunk/Span is called.
         auto virtual_pk =
             std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
-        if (runtime != nullptr) {
-            runtime->fields.insert_or_assign(pk_field_id, virtual_pk);
-        } else {
-            fields_.wlock()->emplace(pk_field_id, virtual_pk);
-            PublishFieldDataReadyLocked(pk_field_id);
-        }
+        runtime->fields.insert_or_assign(pk_field_id, virtual_pk);
 
         // 2. PK to offset index using VirtualPKOffsetMap (zero storage).
         //    Virtual PK = (seg_id << 32) | offset, so pk to offset is a simple
@@ -1909,7 +1907,7 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         insert_record_.set_virtual_pk_offset_map(id_, num_rows);
     } else {
         AssertInfo(
-            get_runtime_or_published_column(pk_field_id) != nullptr,
+            get_runtime_column(pk_field_id) != nullptr,
             "external primary key column {} is not loaded for segment {}",
             pk_field_id.get(),
             id_);
@@ -1921,7 +1919,7 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         // timestamps too; otherwise a delete-before-reinsert sequence would
         // incorrectly hide the reinserted row.
         AssertInfo(
-            get_runtime_or_published_column(TimestampFieldID) != nullptr,
+            get_runtime_column(TimestampFieldID) != nullptr,
             "source timestamp column is not loaded for milvus-table segment {}",
             id_);
     } else {
@@ -1930,26 +1928,25 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
         insert_record_.init_timestamps_constant(num_rows, 0);
         auto timestamps = std::make_shared<TimestampData>();
         timestamps->InitConstant(num_rows, 0);
-        if (runtime != nullptr) {
-            runtime->timestamps = timestamps;
-            runtime->timestamp_index = std::make_shared<const TimestampIndex>();
-            runtime->timestamp_index_slot.reset();
-        }
+        runtime->timestamps = timestamps;
+        runtime->timestamp_index = std::make_shared<const TimestampIndex>();
+        runtime->timestamp_index_slot.reset();
     }
 
-    // Row count + readiness
+    // Row count
     {
         std::unique_lock lck(mutex_);
         update_row_count(num_rows);
-    }
-    if (runtime == nullptr) {
-        PublishSystemFieldStateLocked();
     }
 }
 
 void
 ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields(
     RuntimeResourceState* runtime) {
+    AssertInfo(runtime != nullptr,
+               "runtime must not be null when synthesizing external system "
+               "fields for segment {}",
+               id_);
     auto snapshot = CapturePublishedState();
     SynthesizeExternalSystemFields(
         *snapshot->load_info, snapshot->schema, runtime);
@@ -2579,7 +2576,7 @@ ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
     auto snapshot = CapturePublishedState();
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
+    if (auto column = get_column(snapshot->runtime, field_id)) {
         return column->Span(op_ctx, chunk_id);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
@@ -2595,7 +2592,7 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
     auto snapshot = CapturePublishedState();
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
+    if (auto column = get_column(snapshot->runtime, field_id)) {
         return column->ArrayViews(op_ctx, chunk_id, offset_len);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
@@ -2611,7 +2608,7 @@ ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     auto snapshot = CapturePublishedState();
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
+    if (auto column = get_column(snapshot->runtime, field_id)) {
         return column->VectorArrayViews(op_ctx, chunk_id, offset_len);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
@@ -2627,7 +2624,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
     auto snapshot = CapturePublishedState();
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
+    if (auto column = get_column(snapshot->runtime, field_id)) {
         return column->StringViews(op_ctx, chunk_id, offset_len);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
@@ -2643,7 +2640,7 @@ ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
     auto snapshot = CapturePublishedState();
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
+    if (auto column = get_column(snapshot->runtime, field_id)) {
         return column->StringViewsByOffsets(op_ctx, chunk_id, offsets);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
@@ -2659,7 +2656,7 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
     auto snapshot = CapturePublishedState();
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
+    if (auto column = get_column(snapshot->runtime, field_id)) {
         return column->ArrayViewsByOffsets(op_ctx, chunk_id, offsets);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
@@ -2799,7 +2796,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
             "Field Data is not loaded: " + std::to_string(field_id.get()));
         AssertInfo(num_rows_.has_value(), "Can't get row count value");
         auto row_count = num_rows_.value();
-        auto vec_data = get_column(field_id);
+        auto vec_data = get_column(snapshot->runtime, field_id);
         AssertInfo(
             vec_data != nullptr, "vector field {} not loaded", field_id.get());
 
@@ -2908,7 +2905,7 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
         const bool* valid_data = nullptr;
         if (field_meta.is_nullable()) {
             if (!vec_index->HasValidData()) {
-                auto column = get_column(field_id);
+                auto column = get_column(snapshot->runtime, field_id);
                 if (column != nullptr) {
                     CheckVectorOutputCellsLoaded(
                         id_, field_id, field_meta, column.get(), ids, count);
@@ -3275,11 +3272,12 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
         return;
     }
 
-    auto schema_snapshot = CaptureSchemaSnapshot();
+    auto snapshot = CapturePublishedState();
+    auto schema_snapshot = snapshot->schema;
     auto pk_field_id =
         schema_snapshot->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-    auto pk_column = get_column(pk_field_id);
+    auto pk_column = get_column(snapshot->runtime, pk_field_id);
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
     switch (schema_snapshot->get_fields().at(pk_field_id).get_data_type()) {
@@ -3755,7 +3753,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                       auto pk_field_id =
                           schema->get_primary_field_id().value_or(FieldId(-1));
                       AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-                      auto pk_column = get_column(pk_field_id);
+                      auto runtime = CaptureRuntimeResourceState();
+                      auto pk_column = get_column(runtime, pk_field_id);
                       AssertInfo(pk_column != nullptr,
                                  "primary key column not loaded");
                       auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
@@ -6540,6 +6539,20 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     milvus::OpContext* op_ctx,
     bool is_replace) {
     auto snapshot = CapturePublishedState();
+    if (snapshot->schema->is_external_collection()) {
+        auto runtime = CloneMutableRuntimeResourceState();
+        LoadColumnGroups(column_groups,
+                         properties,
+                         cg_field_ids,
+                         *snapshot->load_info,
+                         snapshot->schema,
+                         eager_load,
+                         op_ctx,
+                         is_replace,
+                         runtime.get());
+        PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
+        return;
+    }
     LoadColumnGroups(column_groups,
                      properties,
                      cg_field_ids,
