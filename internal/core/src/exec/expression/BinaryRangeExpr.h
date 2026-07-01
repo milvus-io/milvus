@@ -198,33 +198,23 @@ struct BinaryRangeElementFuncForArray {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (index < 0) {
+                res[i] = false;
+                continue;
+            }
+            if (index >= src[offset].length()) {
+                res[i] = false;
+                valid_res[i] = false;
+                continue;
+            }
+            auto value = src[offset].get_data<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 <= value && value < val2;
             } else if constexpr (!lower_inclusive && upper_inclusive) {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 < value && value <= val2;
             } else {
-                if (index >= src[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 < value && value < val2;
             }
         }

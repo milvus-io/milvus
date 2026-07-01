@@ -586,8 +586,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
+            if (index < 0) {                                    \
+                res[i] = false;                                 \
+                continue;                                       \
+            }                                                   \
             if (index >= data[offset].length()) {               \
                 res[i] = false;                                 \
+                valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
             auto value = data[offset].get_data<GetType>(index); \
