@@ -10,6 +10,7 @@ linters:
     - decorder
     - depguard
     - durationcheck
+    - exhaustive
     - forbidigo
     - gocritic
     - gosec
@@ -21,6 +22,13 @@ linters:
     - unconvert
     - whitespace
   settings:
+    exhaustive:
+      # Opt-in: only switches annotated with `//exhaustive:enforce` are checked,
+      # so this does not flag the many intentional partial switches across the
+      # codebase. Used to guard the generated SegcoreCode classification switch
+      # (pkg/util/merr/segcore.go) so a new C++ error code cannot ship
+      # unclassified.
+      explicit-exhaustive-switch: true
     depguard:
       rules:
         main:
