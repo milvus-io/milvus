@@ -452,6 +452,8 @@ func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string)
 	metrics.QueryCoordResourceGroupReplicaTotal.DeletePartialMatch(prometheus.Labels{
 		metrics.ResourceGroupLabelName: rgName,
 	})
+	metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
+	metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName)
 
 	mlog.Info(context.TODO(), "remove resource group",
 		mlog.String("rgName", rgName),
@@ -1173,6 +1175,9 @@ func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error
 
 // setupInMemResourceGroup setup resource group in memory.
 func (rm *ResourceManager) setupInMemResourceGroup(r *ResourceGroup) {
+	metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(r.GetName()).Add(0)
+	metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(r.GetName()).Add(0)
+
 	// clear old metrics and nodeIDMap entries.
 	// Use GetAllNodes (bypasses label filter) to ensure all physical nodes are cleaned up,
 	// even when the RG's label filter has changed.

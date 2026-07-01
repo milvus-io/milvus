@@ -25,9 +25,12 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestRegisterMetrics(t *testing.T) {
@@ -46,6 +49,31 @@ func TestRegisterMetrics(t *testing.T) {
 		RegisterStreamingNode(r)
 		RegisterLoggingMetrics(r)
 	})
+}
+
+func TestRegisterQueryCoordInitializesLoadDemandMetrics(t *testing.T) {
+	QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	QueryCoordLoadDemandDiskBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	t.Cleanup(func() {
+		QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+		QueryCoordLoadDemandDiskBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	})
+
+	registry := prometheus.NewRegistry()
+	RegisterQueryCoord(registry)
+
+	require.NoError(t, testutil.GatherAndCompare(
+		registry,
+		strings.NewReader(`# HELP milvus_querycoord_load_demand_disk_bytes cumulative estimated disk bytes required by load configuration changes successfully broadcast after resource precheck
+# TYPE milvus_querycoord_load_demand_disk_bytes counter
+milvus_querycoord_load_demand_disk_bytes{rg="__default_resource_group"} 0
+# HELP milvus_querycoord_load_demand_memory_bytes cumulative estimated memory bytes required by load configuration changes successfully broadcast after resource precheck
+# TYPE milvus_querycoord_load_demand_memory_bytes counter
+milvus_querycoord_load_demand_memory_bytes{rg="__default_resource_group"} 0
+`),
+		"milvus_querycoord_load_demand_memory_bytes",
+		"milvus_querycoord_load_demand_disk_bytes",
+	))
 }
 
 func TestGetRegisterer(t *testing.T) {
