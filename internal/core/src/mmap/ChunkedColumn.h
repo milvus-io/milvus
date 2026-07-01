@@ -393,6 +393,13 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         return meta->num_rows_until_chunk_;
     }
 
+#ifdef MILVUS_UNIT_TEST
+    bool
+    TestSupportEviction() const {
+        return slot_->meta()->support_eviction;
+    }
+#endif
+
  protected:
     bool nullable_{false};
     DataType data_type_{DataType::NONE};

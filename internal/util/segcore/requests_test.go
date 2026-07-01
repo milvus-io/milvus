@@ -23,6 +23,7 @@ func TestLoadFieldDataRequest(t *testing.T) {
 					},
 				},
 			},
+			SupportEviction: true,
 		}},
 		RowCount: 100,
 		MMapDir:  "1234567890",

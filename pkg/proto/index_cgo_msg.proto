@@ -134,6 +134,7 @@ message LoadTextIndexInfo {
   int32 current_scalar_index_version = 11;
   string warmup_policy = 12;  // "disable", "sync", or "async"; empty means use global config
   string base_path = 13;  // remote base path; files are relative to this path
+  bool support_eviction = 14;
 }
 
 message LoadJsonKeyIndexInfo {
@@ -150,4 +151,5 @@ message LoadJsonKeyIndexInfo {
   int64 stats_size = 11;
   string warmup_policy = 12;  // "disable", "sync", or "async"; empty means use global config
   string base_path = 13;  // remote base path; files are relative to this path
+  bool support_eviction = 14;
 }
