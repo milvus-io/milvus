@@ -96,9 +96,6 @@ type meta struct {
 	collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo] // collection id to collection info
 
 	segments *CachedSegmentsInfo // segment id to segment info
-	// Serializes local read-modify-write operators so external side effects
-	// such as L0 manifest commits observe the latest in-memory segment state.
-	updateSegmentsMu lock.Mutex
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -1084,9 +1081,6 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 		return nil
 	}
 
-	m.updateSegmentsMu.Lock()
-	defer m.updateSegmentsMu.Unlock()
-
 	type mutatedEntry struct {
 		segID   int64
 		key     string
@@ -1103,6 +1097,7 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 	var lastNew []newEntry
 	var results []SegmentTxnResult
 	var noop bool
+	committedL0Manifests := make(map[int64]string)
 
 	err := retry.Do(ctx, func() error {
 		noop = false
@@ -1141,8 +1136,18 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]Seg
 			mutated = append(mutated, mutatedEntry{segID: segID, key: key, version: version, clone: clone, inc: inc})
 		}
 
+		for _, update := range l0ManifestUpdates {
+			if update.manifestPath == "" {
+				update.manifestPath = committedL0Manifests[update.segmentID]
+			}
+		}
 		if err := commitL0ManifestUpdates(l0ManifestUpdates); err != nil {
 			return retry.Unrecoverable(err)
+		}
+		for _, update := range l0ManifestUpdates {
+			if update.manifestPath != "" {
+				committedL0Manifests[update.segmentID] = update.manifestPath
+			}
 		}
 		for i := range mutated {
 			for _, update := range mutated[i].clone.pendingL0ManifestUpdates {

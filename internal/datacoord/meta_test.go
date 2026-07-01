@@ -95,6 +95,60 @@ func (t failCommitTxn) Put(key string, value []byte)                           {
 func (t failCommitTxn) Remove(key string)                                      {}
 func (t failCommitTxn) Commit() ([]TxnResult, error)                           { return nil, t.err }
 
+type failOnceCASPersist struct {
+	inner     OptimisticTxnPersist
+	remaining atomic.Int32
+}
+
+func newFailOnceCASPersist(inner OptimisticTxnPersist) *failOnceCASPersist {
+	p := &failOnceCASPersist{inner: inner}
+	p.remaining.Store(1)
+	return p
+}
+
+func (p *failOnceCASPersist) Txn(ctx context.Context) Txn {
+	return &failOnceCASTxn{
+		inner:   p.inner.Txn(ctx),
+		persist: p,
+	}
+}
+
+func (p *failOnceCASPersist) Scan(ctx context.Context, prefix string) ([]string, [][]byte, []int64, error) {
+	return p.inner.Scan(ctx, prefix)
+}
+
+type failOnceCASTxn struct {
+	inner   Txn
+	persist *failOnceCASPersist
+}
+
+func (t *failOnceCASTxn) Insert(key string, value []byte) {
+	t.inner.Insert(key, value)
+}
+
+func (t *failOnceCASTxn) Update(key string, value []byte, expectedVersion int64) {
+	t.inner.Update(key, value, expectedVersion)
+}
+
+func (t *failOnceCASTxn) Delete(key string) {
+	t.inner.Delete(key)
+}
+
+func (t *failOnceCASTxn) Put(key string, value []byte) {
+	t.inner.Put(key, value)
+}
+
+func (t *failOnceCASTxn) Remove(key string) {
+	t.inner.Remove(key)
+}
+
+func (t *failOnceCASTxn) Commit() ([]TxnResult, error) {
+	if t.persist.remaining.CompareAndSwap(1, 0) {
+		return nil, ErrCASFailed
+	}
+	return t.inner.Commit()
+}
+
 type failScanPersist struct {
 	err error
 }
@@ -3010,12 +3064,17 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *t
 
 	var mu sync.Mutex
 	calls := make([]string, 0, 2)
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
 	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
 		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			mu.Lock()
-			defer mu.Unlock()
 			calls = append(calls, manifestPath)
-			if len(calls) == 1 {
+			idx := len(calls)
+			mu.Unlock()
+			entered <- struct{}{}
+			<-release
+			if idx == 1 {
 				return manifest8, nil
 			}
 			return manifest9, nil
@@ -3042,18 +3101,74 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *t
 		defer wg.Done()
 		errs <- meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(200, makeDelta(9002), &indexpb.StorageConfig{}, nil))
 	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			require.FailNow(t, "manifest updates did not run concurrently")
+		}
+	}
+	close(release)
 	wg.Wait()
 	close(errs)
 
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	require.Equal(t, []string{oldManifest, manifest8}, calls)
+	require.Equal(t, []string{oldManifest, oldManifest}, calls)
 
 	updated := meta.GetSegment(context.TODO(), 200)
 	require.Equal(t, manifest9, updated.GetManifestPath())
 	require.Len(t, updated.GetDeltalogs(), 1)
 	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 2)
+}
+
+func TestAddL0DeltalogsAndUpdateManifestOperatorReusesManifestAfterCASRetry(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/200"
+	oldManifest := packed.MarshalManifestPath(basePath, 7)
+	newManifest := packed.MarshalManifestPath(basePath, 8)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           200,
+		CollectionID: 1,
+		PartitionID:  10,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: oldManifest,
+	})))
+	meta.segmentPersist = NewSegmentTxnWrapper(newFailOnceCASPersist(meta.segmentPersist.inner))
+
+	var calls atomic.Int32
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+			calls.Add(1)
+			require.Equal(t, oldManifest, manifestPath)
+			require.Len(t, deltaLogs, 1)
+			require.Equal(t, basePath+"/_delta/9001", deltaLogs[0].Path)
+			return newManifest, nil
+		},
+	).Build()
+	defer patch.UnPatch()
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
+		200,
+		[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{
+			LogID:      9001,
+			LogPath:    basePath + "/_delta/9001",
+			EntriesNum: 3,
+		}}}},
+		&indexpb.StorageConfig{},
+		nil,
+	))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, calls.Load())
+
+	updated := meta.GetSegment(context.TODO(), 200)
+	require.Equal(t, newManifest, updated.GetManifestPath())
+	require.Len(t, updated.GetDeltalogs(), 1)
+	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 1)
+	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 }
 
 func TestAddL0DeltalogsAndUpdateManifestOperatorRequiresLogPath(t *testing.T) {
