@@ -86,6 +86,13 @@ impl IndexReaderWrapper {
             .clone();
         let mut token_stream = tokenizer.token_stream(q);
         use tantivy::query::{FuzzyTermQuery, Occur};
+        // reject out-of-range distances instead of silently truncating via `as u8`.
+        if max_edit_distance > 2 {
+            return Err(TantivyBindingError::InvalidArgument(format!(
+                "max_edit_distance {} exceeds the fuzzy limit of 2",
+                max_edit_distance
+            )));
+        }
         let distance = max_edit_distance as u8;
         let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
         while token_stream.advance() {
@@ -317,5 +324,11 @@ mod tests {
             .fuzzy_match_query("alergy aple", 1, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res, vec![0, 2].into_iter().collect::<HashSet<u32>>());
+
+        // an out-of-range distance is rejected, not silently truncated to 0.
+        res.clear();
+        assert!(reader
+            .fuzzy_match_query("alergy", 3, &mut res as *mut _ as *mut c_void)
+            .is_err());
     }
 }

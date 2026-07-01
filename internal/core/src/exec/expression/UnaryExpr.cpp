@@ -2014,11 +2014,14 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     uint32_t max_edit_distance = 0;
     if (op_type == proto::plan::OpType::TextMatchFuzzy) {
-        int64_t distance = 0;
-        // max_edit_distance is stored in the first extra value.
-        if (expr_->extra_values_.size() > 0) {
-            distance = GetValueFromProto<int64_t>(expr_->extra_values_[0]);
+        // max_edit_distance is required for text_match_fuzzy and rides in the
+        // first extra value; a missing value means a malformed plan.
+        if (expr_->extra_values_.empty()) {
+            throw SegcoreError(
+                ErrorCode::InvalidParameter,
+                "max_edit_distance is required for text_match_fuzzy");
         }
+        int64_t distance = GetValueFromProto<int64_t>(expr_->extra_values_[0]);
         // tantivy's fuzzy automaton only supports an edit distance of 0, 1 or 2.
         // The parser already enforces this; re-check here in case of a raw proto.
         if (distance < 0 || distance > 2) {
