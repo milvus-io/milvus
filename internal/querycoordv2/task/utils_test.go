@@ -106,6 +106,38 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 	}
 }
 
+func (s *UtilsSuite) TestPackLoadSegmentRequestForceSyncWarmup() {
+	ctx := context.Background()
+
+	action := NewSegmentAction(1, ActionTypeGrow, "test-ch", 100)
+	task, err := NewSegmentTask(
+		ctx,
+		time.Second,
+		nil,
+		1,
+		newReplicaDefaultRG(10),
+		commonpb.LoadPriority_LOW,
+		action,
+	)
+	s.NoError(err)
+	task.SetForceSyncWarmup(true)
+
+	req := packLoadSegmentRequest(
+		task,
+		action,
+		&schemapb.CollectionSchema{},
+		nil,
+		&querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		},
+		&querypb.SegmentLoadInfo{},
+		nil,
+	)
+
+	s.True(req.GetForceSyncWarmup())
+	s.True(req.GetInfos()[0].GetForceSyncWarmup())
+}
+
 func (s *UtilsSuite) TestPackLoadSegmentRequestMmapDuplicateBug() {
 	// This test demonstrates the bug where mmap.enabled is appended twice to field TypeParams
 	ctx := context.Background()

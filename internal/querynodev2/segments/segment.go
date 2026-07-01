@@ -991,7 +991,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
-	fieldWarmupPolicy := getFieldWarmupPolicy(fieldSchema)
+	fieldWarmupPolicy := getLoadFieldWarmupPolicy(s.LoadInfo(), fieldSchema)
 
 	req := &segcore.LoadFieldDataRequest{
 		Fields: []segcore.LoadFieldDataInfo{{
@@ -1142,13 +1142,18 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
 	// Add warmup policy to index_params if not already present
 	// C++ will pass it to Knowhere for index loading
-	if existingWarmup, exists := indexParams[common.WarmupKey]; exists {
+	if loadInfo.GetForceSyncWarmup() {
+		indexParams[common.WarmupKey] = common.WarmupSync
+		mlog.Info(ctx, "force sync warmup for index load",
+			mlog.FieldSegmentID(loadInfo.GetSegmentID()),
+			mlog.FieldFieldID(indexInfo.GetFieldID()))
+	} else if existingWarmup, exists := indexParams[common.WarmupKey]; exists {
 		mlog.Info(ctx, "warmup policy already in index params (from QueryCoord)",
 			mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 			mlog.FieldFieldID(indexInfo.GetFieldID()),
 			mlog.String("warmup", existingWarmup))
 	} else {
-		warmupPolicy := getIndexWarmupPolicy(fieldSchema, indexInfo)
+		warmupPolicy := getLoadIndexWarmupPolicy(loadInfo, fieldSchema, indexInfo)
 		mlog.Info(ctx, "warmup policy from getIndexWarmupPolicy",
 			mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 			mlog.FieldFieldID(indexInfo.GetFieldID()),
@@ -1308,7 +1313,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}
 
 	// JSON key stats should based on scala field's warmup policy
-	warmupPolicy := getScalarDataWarmupPolicy(f)
+	warmupPolicy := getLoadScalarDataWarmupPolicy(s.LoadInfo(), f)
 
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
 		FieldID:      jsonKeyStats.GetFieldID(),
@@ -1464,6 +1469,63 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 		return err
 	}
 	s.syncFieldJSONStatsFromLoadInfo(ctx, s.LoadInfo())
+	return nil
+}
+
+func (s *LocalSegment) Prewarm(ctx context.Context, fieldIDs []int64) error {
+	if !s.ptrLock.PinIfNotReleased() {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during prewarm")
+	}
+	defer s.ptrLock.Unpin()
+
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("PrewarmSegment-%d", s.ID()))
+	defer sp.End()
+
+	logger := mlog.With(
+		mlog.FieldCollectionID(s.Collection()),
+		mlog.FieldPartitionID(s.Partition()),
+		mlog.FieldSegmentID(s.ID()),
+		mlog.Int64s("fieldIDs", fieldIDs),
+	)
+	logger.Info(ctx, "start prewarming segment")
+
+	var fieldIDsPtr *C.int64_t
+	if len(fieldIDs) > 0 {
+		fieldIDsPtr = (*C.int64_t)(unsafe.Pointer(&fieldIDs[0]))
+	}
+
+	guard := segcore.NewCancellationGuard(ctx)
+	defer guard.Close()
+
+	var status C.CStatus
+	_, _ = GetWarmupPool().Submit(func() (any, error) {
+		start := time.Now()
+		defer func() {
+			metrics.QueryNodeCGOCallLatency.WithLabelValues(
+				paramtable.GetStringNodeID(),
+				"PrewarmSegment",
+				"Sync",
+			).Observe(float64(time.Since(start).Milliseconds()))
+		}()
+		traceCtx := ParseCTraceContext(ctx)
+		status = C.PrewarmSegment(
+			traceCtx.ctx,
+			s.ptr,
+			fieldIDsPtr,
+			C.int64_t(len(fieldIDs)),
+			(C.CLoadCancellationSource)(guard.Source()),
+		)
+		return nil, nil
+	}).Await()
+
+	if err := HandleCStatus(ctx, &status, "PrewarmSegment failed",
+		mlog.FieldCollectionID(s.Collection()),
+		mlog.FieldPartitionID(s.Partition()),
+		mlog.FieldSegmentID(s.ID())); err != nil {
+		return err
+	}
+
+	logger.Info(ctx, "prewarm segment done")
 	return nil
 }
 

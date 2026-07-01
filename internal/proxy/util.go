@@ -3014,6 +3014,11 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 	case *milvuspb.LoadPartitionsRequest:
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
+	case *milvuspb.PrewarmRequest:
+		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
+	case *milvuspb.DescribePrewarmTaskRequest:
+		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLPartition, 1, nil
 	case *milvuspb.ReleasePartitionsRequest:
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLPartition, 1, nil
@@ -3081,6 +3086,14 @@ func GetFailedResponse(req any, err error) any {
 		}
 	case *milvuspb.QueryRequest:
 		return &milvuspb.QueryResults{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.PrewarmRequest:
+		return &milvuspb.PrewarmResponse{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.DescribePrewarmTaskRequest:
+		return &milvuspb.DescribePrewarmTaskResponse{
 			Status: merr.Status(err),
 		}
 	case *milvuspb.CreateCollectionRequest, *milvuspb.DropCollectionRequest,

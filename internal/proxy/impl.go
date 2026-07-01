@@ -1757,6 +1757,109 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 	return lpt.result, nil
 }
 
+// Prewarm preloads namespace partition data into query node memory/cache.
+func (node *Proxy) Prewarm(ctx context.Context, request *milvuspb.PrewarmRequest) (*milvuspb.PrewarmResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.PrewarmResponse{Status: merr.Status(err)}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Prewarm")
+	defer sp.End()
+	method := "Prewarm"
+	tr := timerecord.NewTimeRecorder(method)
+	pt := &prewarmTask{
+		ctx:            ctx,
+		Condition:      NewTaskCondition(ctx),
+		PrewarmRequest: request,
+		mixCoord:       node.mixCoord,
+	}
+
+	mlog.Debug(ctx, rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(pt); err != nil {
+		mlog.Warn(ctx,
+			rpcFailedToEnqueue(method),
+			mlog.Err(err))
+
+		return &milvuspb.PrewarmResponse{Status: merr.Status(err)}, nil
+	}
+
+	mlog.Debug(ctx,
+		rpcEnqueued(method),
+		mlog.Uint64("BeginTS", pt.BeginTs()),
+		mlog.Uint64("EndTS", pt.EndTs()))
+
+	if err := pt.WaitToFinish(); err != nil {
+		mlog.Warn(ctx,
+			rpcFailedToWaitToFinish(method),
+			mlog.Err(err),
+			mlog.Uint64("BeginTS", pt.BeginTs()),
+			mlog.Uint64("EndTS", pt.EndTs()))
+
+		return &milvuspb.PrewarmResponse{Status: merr.Status(err)}, nil
+	}
+
+	mlog.Debug(ctx,
+		rpcDone(method),
+		mlog.Uint64("BeginTS", pt.BeginTs()),
+		mlog.Uint64("EndTS", pt.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return pt.result, nil
+}
+
+func (node *Proxy) DescribePrewarmTask(ctx context.Context, request *milvuspb.DescribePrewarmTaskRequest) (*milvuspb.DescribePrewarmTaskResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DescribePrewarmTaskResponse{
+			Status: merr.Status(err),
+			TaskID: request.GetTaskID(),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribePrewarmTask")
+	defer sp.End()
+	method := "DescribePrewarmTask"
+	tr := timerecord.NewTimeRecorder(method)
+	mlog.Debug(ctx, rpcReceived(method), mlog.String("taskID", request.GetTaskID()))
+
+	resp, err := node.mixCoord.DescribePrewarmTask(ctx, &querypb.DescribePrewarmTaskRequest{
+		Base:   commonpbutil.UpdateMsgBase(request.GetBase()),
+		TaskID: request.GetTaskID(),
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		mlog.Warn(ctx, "failed to describe prewarm task", mlog.String("taskID", request.GetTaskID()), mlog.Err(err))
+		return &milvuspb.DescribePrewarmTaskResponse{
+			Status: merr.Status(err),
+			TaskID: request.GetTaskID(),
+		}, nil
+	}
+
+	mlog.Debug(ctx, rpcDone(method), mlog.String("taskID", request.GetTaskID()))
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.DescribePrewarmTaskResponse{
+		Status:       merr.Success(),
+		TaskID:       resp.GetTaskID(),
+		State:        toMilvusPrewarmTaskState(resp.GetState()),
+		Progress:     resp.GetProgress(),
+		ErrorMessage: resp.GetErrorMessage(),
+	}, nil
+}
+
+func toMilvusPrewarmTaskState(state querypb.PrewarmTaskState) milvuspb.PrewarmTaskState {
+	switch state {
+	case querypb.PrewarmTaskState_PrewarmTaskStatePending:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStatePending
+	case querypb.PrewarmTaskState_PrewarmTaskStateWarming:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStateWarming
+	case querypb.PrewarmTaskState_PrewarmTaskStateCompleted:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStateCompleted
+	case querypb.PrewarmTaskState_PrewarmTaskStateFailed:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStateFailed
+	default:
+		return milvuspb.PrewarmTaskState_PrewarmTaskStateUnknown
+	}
+}
+
 // ReleasePartitions release specific partitions from query nodes.
 func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {

@@ -22,6 +22,10 @@ service QueryCoord {
 
     rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {
     }
+    rpc Prewarm(PrewarmRequest) returns (PrewarmResponse) {
+    }
+    rpc DescribePrewarmTask(DescribePrewarmTaskRequest) returns (DescribePrewarmTaskResponse) {
+    }
     rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {
     }
     rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {
@@ -122,6 +126,8 @@ service QueryNode {
     rpc UnsubDmChannel(UnsubDmChannelRequest) returns (common.Status) {
     }
     rpc LoadSegments(LoadSegmentsRequest) returns (common.Status) {
+    }
+    rpc Prewarm(PrewarmRequest) returns (common.Status) {
     }
     rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {
     }
@@ -279,6 +285,49 @@ message LoadPartitionsRequest {
     repeated index.IndexInfo index_info_list = 10;
     repeated int64 load_fields = 11;
     common.LoadPriority priority = 12;
+    bool force_sync_warmup = 13;
+}
+
+message PrewarmRequest {
+    reserved 7, 10, 11;
+    common.MsgBase base = 1;
+    int64 dbID = 2;
+    int64 collectionID = 3;
+    repeated int64 partitionIDs = 4;
+    schema.CollectionSchema schema = 5;
+    optional string namespace = 6;
+    repeated int64 segmentIDs = 8;
+    common.LoadPriority priority = 9;
+    bool force_sync_warmup = 12;
+    int32 replica_number = 13;
+    repeated string resource_groups = 14;
+}
+
+enum PrewarmTaskState {
+    PrewarmTaskStateUnknown = 0;
+    PrewarmTaskStatePending = 1;
+    PrewarmTaskStateWarming = 2;
+    PrewarmTaskStateCompleted = 3;
+    PrewarmTaskStateFailed = 4;
+}
+
+message PrewarmResponse {
+    common.Status status = 1;
+    string taskID = 2;
+    optional string namespace = 3;
+}
+
+message DescribePrewarmTaskRequest {
+    common.MsgBase base = 1;
+    string taskID = 2;
+}
+
+message DescribePrewarmTaskResponse {
+    common.Status status = 1;
+    string taskID = 2;
+    PrewarmTaskState state = 3;
+    int32 progress = 4;
+    string error_message = 5;
 }
 
 message ReleasePartitionsRequest {
@@ -415,6 +464,7 @@ message SegmentLoadInfo {
     // passing to C++ segcore to overwrite the in-memory timestamp column
     // (enabling correct MVCC visibility and TTL evaluation).
     uint64 commit_timestamp = 28;
+    bool force_sync_warmup = 29;
 }
 
 message FieldIndexInfo {
@@ -467,6 +517,7 @@ message LoadSegmentsRequest {
     LoadScope load_scope = 12;
     repeated index.IndexInfo index_info_list = 13;
     bool lazy_load = 14;
+    bool force_sync_warmup = 15;
 }
 
 message ReleaseSegmentsRequest {
@@ -743,6 +794,7 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    bool force_sync_warmup = 11;
 }
 
 message PartitionLoadInfo {
@@ -754,6 +806,7 @@ message PartitionLoadInfo {
     map<int64, int64> field_indexID =
         5;  // Deprecated: No longer used; kept for compatibility.
     int32 recover_times = 7;
+    bool force_sync_warmup = 8;
 }
 
 message ChannelNodeInfo {
