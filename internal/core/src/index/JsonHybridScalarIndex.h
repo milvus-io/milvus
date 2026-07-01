@@ -151,14 +151,6 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         return exists_bitset_.clone();
     }
 
-    const TargetBitmap
-    NotIn(size_t n, const T* values) override {
-        auto result = HybridScalarIndex<T>::NotIn(n, values);
-        auto null_rows = HybridScalarIndex<T>::IsNull();
-        result |= null_rows;
-        return result;
-    }
-
     void
     WriteEntries(storage::IndexEntryWriter* writer) override {
         HybridScalarIndex<T>::WriteEntries(writer);
