@@ -133,6 +133,36 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
+	case *milvuspb.CreateNamespaceRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.DescribeNamespaceRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.ListNamespacesRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.DropNamespaceRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.HasNamespaceRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.GetNamespaceStatsRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
 	case *milvuspb.GetLoadingProgressRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)

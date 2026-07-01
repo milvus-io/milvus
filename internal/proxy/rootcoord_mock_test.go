@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -849,6 +850,154 @@ func (coord *MixCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sho
 
 func (coord *MixCoordMock) ShowPartitionsInternal(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	return coord.ShowPartitions(ctx, req)
+}
+
+func (coord *MixCoordMock) CreateNamespace(ctx context.Context, req *milvuspb.CreateNamespaceRequest, opts ...grpc.CallOption) (*rootcoordpb.CreateNamespaceResponse, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &rootcoordpb.CreateNamespaceResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+			},
+		}, nil
+	}
+	coord.collMtx.RLock()
+	defer coord.collMtx.RUnlock()
+
+	collID, exist := coord.collName2ID[req.CollectionName]
+	if !exist {
+		return &rootcoordpb.CreateNamespaceResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName))}, nil
+	}
+
+	coord.partitionMtx.Lock()
+	defer coord.partitionMtx.Unlock()
+
+	if _, exists := coord.collID2Partitions[collID].partitionName2ID[req.NamespaceName]; exists {
+		return &rootcoordpb.CreateNamespaceResponse{Status: merr.Status(merr.WrapErrNamespaceAlreadyExists(req.NamespaceName))}, nil
+	}
+
+	ts := uint64(time.Now().Nanosecond())
+	partitionID := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	coord.collID2Partitions[collID].partitionName2ID[req.NamespaceName] = partitionID
+	coord.collID2Partitions[collID].partitionID2Name[partitionID] = req.NamespaceName
+	coord.collID2Partitions[collID].partitionID2Meta[partitionID] = partitionMeta{
+		createdTimestamp:    ts,
+		createdUtcTimestamp: ts,
+	}
+
+	return &rootcoordpb.CreateNamespaceResponse{
+		Status: merr.Success(),
+		Namespace: &milvuspb.NamespaceInfo{
+			CollectionName:      req.CollectionName,
+			NamespaceName:       req.NamespaceName,
+			CreatedTimestamp:    ts,
+			CreatedUtcTimestamp: ts,
+			State:               "Ready",
+		},
+		PartitionID: partitionID,
+	}, nil
+}
+
+func (coord *MixCoordMock) DescribeNamespace(ctx context.Context, req *milvuspb.DescribeNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error) {
+	info, err := coord.getNamespaceInfo(req.GetCollectionName(), req.GetNamespaceName())
+	if err != nil {
+		return &milvuspb.DescribeNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	return &milvuspb.DescribeNamespaceResponse{Status: merr.Success(), Namespace: info}, nil
+}
+
+func (coord *MixCoordMock) ListNamespaces(ctx context.Context, req *milvuspb.ListNamespacesRequest, opts ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error) {
+	coord.collMtx.RLock()
+	defer coord.collMtx.RUnlock()
+
+	collID, exist := coord.collName2ID[req.CollectionName]
+	if !exist {
+		return &milvuspb.ListNamespacesResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName))}, nil
+	}
+
+	coord.partitionMtx.RLock()
+	defer coord.partitionMtx.RUnlock()
+
+	partitionMap := coord.collID2Partitions[collID]
+	names := make([]string, 0, len(partitionMap.partitionName2ID))
+	for name := range partitionMap.partitionName2ID {
+		if name == Params.CommonCfg.DefaultPartitionName.GetValue() {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	namespaces := make([]*milvuspb.NamespaceInfo, 0, len(names))
+	for _, name := range names {
+		id := partitionMap.partitionName2ID[name]
+		meta := partitionMap.partitionID2Meta[id]
+		namespaces = append(namespaces, &milvuspb.NamespaceInfo{
+			CollectionName:      req.CollectionName,
+			NamespaceName:       name,
+			CreatedTimestamp:    meta.createdTimestamp,
+			CreatedUtcTimestamp: meta.createdUtcTimestamp,
+			State:               "Ready",
+		})
+	}
+	return &milvuspb.ListNamespacesResponse{Status: merr.Success(), Namespaces: namespaces}, nil
+}
+
+func (coord *MixCoordMock) DropNamespace(ctx context.Context, req *milvuspb.DropNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error) {
+	info, err := coord.getNamespaceInfo(req.GetCollectionName(), req.GetNamespaceName())
+	if err != nil {
+		return &milvuspb.DropNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	status, err := coord.DropPartition(ctx, &milvuspb.DropPartitionRequest{
+		DbName:         req.GetDbName(),
+		CollectionName: req.GetCollectionName(),
+		PartitionName:  req.GetNamespaceName(),
+	})
+	if err = merr.CheckRPCCall(status, err); err != nil {
+		if errors.Is(err, merr.ErrPartitionNotFound) {
+			err = merr.WrapErrNamespaceNotFound(req.GetNamespaceName())
+		}
+		return &milvuspb.DropNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	return &milvuspb.DropNamespaceResponse{Status: merr.Success(), Namespace: info}, nil
+}
+
+func (coord *MixCoordMock) HasNamespace(ctx context.Context, req *milvuspb.HasNamespaceRequest, opts ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error) {
+	_, err := coord.getNamespaceInfo(req.GetCollectionName(), req.GetNamespaceName())
+	if err != nil {
+		if errors.Is(err, merr.ErrNamespaceNotFound) {
+			return &milvuspb.HasNamespaceResponse{Status: merr.Success(), Value: false}, nil
+		}
+		return &milvuspb.HasNamespaceResponse{Status: merr.Status(err)}, nil
+	}
+	return &milvuspb.HasNamespaceResponse{Status: merr.Success(), Value: true}, nil
+}
+
+func (coord *MixCoordMock) getNamespaceInfo(collectionName, namespaceName string) (*milvuspb.NamespaceInfo, error) {
+	coord.collMtx.RLock()
+	defer coord.collMtx.RUnlock()
+
+	collID, exist := coord.collName2ID[collectionName]
+	if !exist {
+		return nil, merr.WrapErrCollectionNotFound(collectionName)
+	}
+
+	coord.partitionMtx.RLock()
+	defer coord.partitionMtx.RUnlock()
+
+	partitionID, exist := coord.collID2Partitions[collID].partitionName2ID[namespaceName]
+	if !exist || namespaceName == Params.CommonCfg.DefaultPartitionName.GetValue() {
+		return nil, merr.WrapErrNamespaceNotFound(namespaceName)
+	}
+	meta := coord.collID2Partitions[collID].partitionID2Meta[partitionID]
+	return &milvuspb.NamespaceInfo{
+		CollectionName:      collectionName,
+		NamespaceName:       namespaceName,
+		CreatedTimestamp:    meta.createdTimestamp,
+		CreatedUtcTimestamp: meta.createdUtcTimestamp,
+		State:               "Ready",
+	}, nil
 }
 
 //func (coord *RootCoordMock) CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
