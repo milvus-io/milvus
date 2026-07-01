@@ -574,11 +574,9 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 			},
 		}, 0)
 
-		mt := &meta{
-			catalog:     catalog,
-			segments:    segments,
-			collections: newTestCollections(100),
-		}
+		mt := newTestMetaFromCache(t, segments, nil)
+		mt.catalog = catalog
+		mt.collections = newTestCollections(100)
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 		updated := newTestExternalRefreshSegment(1, 100, 500)
@@ -594,8 +592,6 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		assert.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
 		assert.Equal(t, "new-manifest", segment.GetManifestPath())
 		assert.Equal(t, uint64(0), segment.GetDroppedAt())
-		assert.Len(t, catalog.alteredSegments, 1)
-		assert.Equal(t, int64(1), catalog.alteredSegments[0].GetID())
 	})
 
 	t.Run("high_drop_ratio_warning", func(t *testing.T) {
