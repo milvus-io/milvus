@@ -440,8 +440,13 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (term_set->Empty() || index >= data[offset].length()) {
+            if (term_set->Empty() || index < 0) {
                 res[i] = false;
+                continue;
+            }
+            if (index >= data[offset].length()) {
+                res[i] = false;
+                valid_res[i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
