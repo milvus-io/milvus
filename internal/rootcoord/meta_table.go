@@ -1097,8 +1097,8 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 			if mt.fileResourceRefCnt[fileResourceID] > 0 {
 				mt.fileResourceRefCnt[fileResourceID]--
 			} else {
-				log.Warn("AlterCollection: file resource refCnt underflow",
-					zap.Int64("collectionID", newColl.CollectionID), zap.Int64("fileResourceID", fileResourceID))
+				mlog.Warn(ctx, "AlterCollection: file resource refCnt underflow",
+					mlog.Int64("collectionID", newColl.CollectionID), mlog.Int64("fileResourceID", fileResourceID))
 			}
 		}
 	}

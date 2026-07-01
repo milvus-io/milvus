@@ -416,7 +416,7 @@ func TestGetPendingCreateCollectionResources(t *testing.T) {
 	paramtable.Init()
 
 	metrics := newBroadcasterMetrics()
-	ackScheduler := newAckCallbackScheduler(log.With())
+	ackScheduler := newAckCallbackScheduler(mlog.With())
 
 	createCollectionMsg := func(collectionID int64, fileResourceIDs []int64) message.BroadcastMutableMessage {
 		return message.NewCreateCollectionMessageBuilderV1().
