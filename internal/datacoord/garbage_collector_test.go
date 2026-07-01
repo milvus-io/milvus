@@ -1406,6 +1406,13 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(nil)
+	catalog.On("DropSegmentIndex",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(nil).Maybe()
 
 	channelCPs := newChannelCps()
 	channelCPs.checkpoints["dmlChannel"] = &msgpb.MsgPosition{
