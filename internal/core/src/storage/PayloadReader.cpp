@@ -175,7 +175,11 @@ PayloadReader::init(const uint8_t* data,
 
         std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
         st = arrow_reader->GetRecordBatchReader(&rb_reader);
-        AssertInfo(st.ok(), "get record batch reader");
+        if (!st.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(st),
+                      "failed to get record batch reader: {}",
+                      st.ToString());
+        }
 
         if (is_field_data) {
             auto total_num_rows = file_meta->num_rows();
@@ -190,7 +194,11 @@ PayloadReader::init(const uint8_t* data,
 
             for (arrow::Result<std::shared_ptr<arrow::RecordBatch>>
                      maybe_batch : *rb_reader) {
-                AssertInfo(maybe_batch.ok(), "get batch record success");
+                if (!maybe_batch.ok()) {
+                    ThrowInfo(ArrowStatusToErrorCode(maybe_batch.status()),
+                              "failed to read record batch: {}",
+                              maybe_batch.status().ToString());
+                }
                 auto array = maybe_batch.ValueOrDie()->column(column_index);
                 // to read
                 field_data_->FillFieldData(array);
