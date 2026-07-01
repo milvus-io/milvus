@@ -2788,14 +2788,38 @@ SegmentGrowingImpl::LoadColumnGroup(
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
 
-    std::vector<int64_t> all_row_groups(chunk_reader->total_number_of_chunks());
+    AssertInfo(row_limit >= 0,
+               "load column group row limit should be non-negative, got {}",
+               row_limit);
+    auto chunk_rows_result = chunk_reader->get_chunk_rows();
+    AssertInfo(chunk_rows_result.ok(),
+               "get chunk rows failed, segment {}, column group index {}, "
+               "error: {}",
+               get_segment_id(),
+               index,
+               chunk_rows_result.status().ToString());
 
-    std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+    auto chunk_rows = std::move(chunk_rows_result).ValueOrDie();
+    std::vector<int64_t> row_groups_to_load;
+    row_groups_to_load.reserve(chunk_rows.size());
+    auto rows_to_read = int64_t{0};
+    for (auto chunk_index = size_t{0};
+         chunk_index < chunk_rows.size() && rows_to_read < row_limit;
+         ++chunk_index) {
+        row_groups_to_load.push_back(static_cast<int64_t>(chunk_index));
+        rows_to_read += static_cast<int64_t>(chunk_rows[chunk_index]);
+    }
+    AssertInfo(rows_to_read >= row_limit,
+               "column group {} has fewer rows than checkpoint row count, "
+               "loaded rows {}, expected rows {}",
+               index,
+               rows_to_read,
+               row_limit);
 
     // create parallel degree split strategy
     auto strategy =
         std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
-    auto split_result = strategy->split(all_row_groups);
+    auto split_result = strategy->split(row_groups_to_load);
 
     auto& thread_pool =
         ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
@@ -2819,8 +2843,7 @@ SegmentGrowingImpl::LoadColumnGroup(
     // segment checkpoint. Only load rows covered by SegmentLoadInfo so WAL
     // replay can append the remaining rows at the expected offsets.
     int64_t loaded_rows = 0;
-    for (auto& future : part_futures) {
-        auto part_result = future.get();
+    storage::ProcessFuturesInOrder(part_futures, [&](auto part_result) {
         for (auto& record_batch : part_result) {
             if (loaded_rows >= row_limit) {
                 break;
@@ -2854,7 +2877,7 @@ SegmentGrowingImpl::LoadColumnGroup(
             }
             loaded_rows += rows_to_load;
         }
-    }
+    });
 
     LOG_INFO("Finished loading segment {} column group {}", id_, index);
     return field_data_map;
