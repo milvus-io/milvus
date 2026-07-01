@@ -16,6 +16,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -29,12 +30,28 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Utils.h"
 #include "plan/PlanNode.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::query {
+
+inline ColumnVectorPtr
+GetColumnVectorForTest(const VectorPtr& result) {
+    if (auto convert_vector = std::dynamic_pointer_cast<ColumnVector>(result)) {
+        return convert_vector;
+    }
+
+    if (result != nullptr &&
+        std::string_view(typeid(*result).name()) ==
+            std::string_view(typeid(ColumnVector).name())) {
+        return std::static_pointer_cast<ColumnVector>(result);
+    }
+
+    return milvus::exec::GetColumnVector(result);
+}
 
 class ExecPlanNodeVisitor : public PlanNodeVisitor {
  public:
@@ -191,7 +208,7 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
     AssertInfo(
         row->childrens().size() == 1,
         "query expr operator's result vector's children size not equal one");
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
     AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType query_view(view);
@@ -227,7 +244,7 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
     AssertInfo(
         row->childrens().size() == 1,
         "query expr operator's result vector's children size not equal one");
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
     AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType query_view(view);
