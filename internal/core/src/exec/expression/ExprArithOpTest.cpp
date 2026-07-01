@@ -1875,6 +1875,111 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloat) {
         }
     }
 }
+
+TEST_P(ExprTest, TestJsonBinaryArithMissingPathIsUnknown) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    std::vector<std::string> json_strs = {
+        R"({"a": 1, "arr": [1]})",
+        R"({"a": 2, "arr": []})",
+        R"({})",
+        R"({"a": "bad", "arr": "bad"})",
+        R"({"a": null, "arr": null})",
+    };
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_strs.size());
+    for (const auto& json_str : json_strs) {
+        jsons.emplace_back(simdjson::padded_string(json_str));
+    }
+    json_field->add_json_data(jsons);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
+
+    auto run_expr = [&](const expr::TypedExprPtr& expr) {
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final =
+            ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), json_strs.size());
+
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(json_strs.size());
+        for (int64_t i = 0; i < static_cast<int64_t>(json_strs.size()); ++i) {
+            offsets.emplace_back(i);
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP, &offsets);
+        BitsetTypeView offset_view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(offset_view.size(), json_strs.size());
+        std::vector<bool> offset_bits(offset_view.size());
+        for (size_t i = 0; i < offset_view.size(); ++i) {
+            offset_bits[i] = offset_view[i];
+        }
+        return std::pair<BitsetType, std::vector<bool>>(std::move(final),
+                                                        std::move(offset_bits));
+    };
+
+    auto expect_bits = [](const BitsetType& final,
+                          const std::vector<bool>& offset,
+                          const std::vector<bool>& expected) {
+        ASSERT_EQ(final.size(), expected.size());
+        ASSERT_EQ(offset.size(), expected.size());
+        for (size_t i = 0; i < expected.size(); ++i) {
+            EXPECT_EQ(final[i], expected[i]) << "row " << i;
+            EXPECT_EQ(offset[i], expected[i]) << "offset row " << i;
+        }
+    };
+
+    proto::plan::GenericValue two;
+    two.set_int64_val(2);
+    proto::plan::GenericValue one;
+    one.set_int64_val(1);
+    auto not_equal = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        OpType::NotEqual,
+        ArithOpType::Add,
+        two,
+        one);
+    auto [ne_final, ne_offset] = run_expr(not_equal);
+    expect_bits(ne_final, ne_offset, {false, true, false, false, false});
+
+    auto greater_than = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        OpType::GreaterThan,
+        ArithOpType::Add,
+        two,
+        one);
+    auto not_greater_than = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, greater_than);
+    auto [not_gt_final, not_gt_offset] = run_expr(not_greater_than);
+    expect_bits(
+        not_gt_final, not_gt_offset, {true, false, false, false, false});
+
+    proto::plan::GenericValue zero;
+    zero.set_int64_val(0);
+    auto array_length_equal_zero =
+        std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"arr"}),
+            OpType::Equal,
+            ArithOpType::ArrayLength,
+            zero,
+            zero);
+    auto [len_final, len_offset] = run_expr(array_length_equal_zero);
+    expect_bits(len_final, len_offset, {false, true, false, false, false});
+}
+
 TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloatNullable) {
     struct Testcase {
         double right_operand;
