@@ -1345,6 +1345,21 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`15 + JSONField == 16`,
 		`Int64Field + (2**3) > 0`,
 		`1 + FloatField > 100`,
+		// bitwise operators on integer fields
+		`(Int64Field & 4) == 4`,
+		`(Int64Field & 4) != 0`,
+		`(Int32Field | 2) == 3`,
+		`(Int32Field | 2) != 0`,
+		`(Int64Field ^ 7) == 0`,
+		`(Int64Field ^ 7) != 5`,
+		`(Int8Field & 1) == 1`,
+		`(Int16Field | 8) >= 8`,
+		`(Int32Field ^ 15) < 16`,
+		// bitwise on a JSON dynamic field is allowed: the value type is only
+		// known at runtime, so the parser cannot reject it (the executor casts
+		// to int64 and treats non-numeric / missing values as non-matching).
+		`(JSONField["A"] & 4) == 4`,
+		`(JSONField["B"] | 2) != 0`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1363,9 +1378,90 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`Int64Field % 0 == 1`,
 		`FloatField / 0 == 1`,
 		`FloatField % 0 == 1`,
+		// bitwise ops on non-integer types are invalid
+		`(FloatField & 1) == 1`,
+		`(DoubleField | 2) == 3`,
+		`(FloatField ^ 4) == 0`,
+		// folding a bitwise op over float literals is invalid (integer-only)
+		`Int64Field == (1.5 & 1)`,
+		`(2.5 | 1) == Int64Field`,
+		// bitwise ops between two fields are unsupported, consistent with how
+		// +, -, *, /, % reject field-to-field arithmetic (right operand must be
+		// a constant in the BinaryArithOpEvalRange model).
+		`(Int64Field & Int32Field) == 4`,
+		`(Int64Field | Int32Field) != 0`,
+		`(Int64Field ^ Int32Field) == 0`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+// TestExpr_BitwiseArith asserts the generated plan structure for bitwise
+// operators, not merely that the expression parses. A bitwise op over a field
+// must fuse into a BinaryArithOpEvalRangeExpr carrying the matching ArithOpType,
+// right_operand (the mask) and comparison value; a bitwise op over two integer
+// literals must constant-fold into a plain comparison.
+func TestExpr_BitwiseArith(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	type bitwiseCase struct {
+		expr    string
+		arithOp planpb.ArithOpType
+		cmpOp   planpb.OpType
+		mask    int64
+		value   int64
+	}
+	cases := []bitwiseCase{
+		{`(Int64Field & 4) == 4`, planpb.ArithOpType_BitAnd, planpb.OpType_Equal, 4, 4},
+		{`(Int64Field & 6) != 0`, planpb.ArithOpType_BitAnd, planpb.OpType_NotEqual, 6, 0},
+		{`(Int32Field | 2) == 3`, planpb.ArithOpType_BitOr, planpb.OpType_Equal, 2, 3},
+		{`(Int32Field | 8) >= 8`, planpb.ArithOpType_BitOr, planpb.OpType_GreaterEqual, 8, 8},
+		{`(Int64Field ^ 7) == 0`, planpb.ArithOpType_BitXor, planpb.OpType_Equal, 7, 0},
+		{`(Int64Field ^ 7) > 5`, planpb.ArithOpType_BitXor, planpb.OpType_GreaterThan, 7, 5},
+		{`(Int16Field & 1) < 1`, planpb.ArithOpType_BitAnd, planpb.OpType_LessThan, 1, 1},
+		{`(Int8Field | 3) <= 7`, planpb.ArithOpType_BitOr, planpb.OpType_LessEqual, 3, 7},
+		// reverse form (constant on the left) for the symmetric == / != ops
+		{`4 == (Int64Field & 4)`, planpb.ArithOpType_BitAnd, planpb.OpType_Equal, 4, 4},
+		{`0 != (Int32Field | 2)`, planpb.ArithOpType_BitOr, planpb.OpType_NotEqual, 2, 0},
+	}
+	for _, c := range cases {
+		expr, err := ParseExpr(helper, c.expr, nil)
+		assert.NoError(t, err, c.expr)
+		bao := expr.GetBinaryArithOpEvalRangeExpr()
+		assert.NotNil(t, bao, c.expr)
+		if bao == nil {
+			continue
+		}
+		assert.Equal(t, c.arithOp, bao.GetArithOp(), c.expr)
+		assert.Equal(t, c.cmpOp, bao.GetOp(), c.expr)
+		assert.Equal(t, c.mask, bao.GetRightOperand().GetInt64Val(), c.expr)
+		assert.Equal(t, c.value, bao.GetValue().GetInt64Val(), c.expr)
+	}
+
+	// Constant folding: a bitwise op over two integer literals collapses to a
+	// constant, so the comparison degrades to a plain UnaryRange on the field.
+	type foldCase struct {
+		expr     string
+		expected int64
+	}
+	foldCases := []foldCase{
+		{`Int64Field == (7 & 3)`, 3}, // 7 & 3 = 3
+		{`Int64Field == (5 | 2)`, 7}, // 5 | 2 = 7
+		{`Int64Field == (6 ^ 3)`, 5}, // 6 ^ 3 = 5
+	}
+	for _, c := range foldCases {
+		expr, err := ParseExpr(helper, c.expr, nil)
+		assert.NoError(t, err, c.expr)
+		ure := expr.GetUnaryRangeExpr()
+		assert.NotNil(t, ure, c.expr)
+		if ure == nil {
+			continue
+		}
+		assert.Equal(t, planpb.OpType_Equal, ure.GetOp(), c.expr)
+		assert.Equal(t, c.expected, ure.GetValue().GetInt64Val(), c.expr)
 	}
 }
 

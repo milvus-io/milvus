@@ -174,10 +174,14 @@ func filterArray(pool memory.Allocator, data arrow.Array, mask *array.Boolean) (
 
 // NewFilterOpFromRepr creates a FilterOp from an OperatorRepr.
 func NewFilterOpFromRepr(repr *OperatorRepr) (Operator, error) {
+	return NewFilterOpFromReprWithContext(repr, types.FunctionBuildContext{})
+}
+
+func NewFilterOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuildContext) (Operator, error) {
 	if repr.Function == nil {
 		return nil, merr.WrapErrParameterMissingMsg("filter_op: function is required")
 	}
-	fn, err := FunctionFromRepr(repr.Function)
+	fn, err := FunctionFromReprWithContext(repr.Function, buildCtx)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("filter function: %v", err)
 	}

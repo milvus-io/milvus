@@ -34,6 +34,9 @@ enum ArithOpType {
   Div = 4;
   Mod = 5;
   ArrayLength = 6;
+  BitAnd = 7;
+  BitOr = 8;
+  BitXor = 9;
 };
 
 enum VectorType {

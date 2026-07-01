@@ -456,9 +456,11 @@ class Schema {
     ConvertToArrowSchema() const;
 
     /// Convert to Arrow schema with field ID strings as field names,
-    /// used by Loon FFI / milvus-storage Reader.
+    /// used by Loon FFI / milvus-storage Reader. Internal StorageV3 TEXT
+    /// column groups store encoded LOB references as binary bytes, so callers
+    /// loading those column groups can request TEXT fields as Binary.
     const ArrowSchemaPtr
-    ConvertToLoonArrowSchema() const;
+    ConvertToLoonArrowSchema(bool text_lob_as_binary = false) const;
 
     // Mirrors pkg/util/typeutil.StorageColumnResolver in Go. Keep both sides
     // aligned when changing external physical-column rules.

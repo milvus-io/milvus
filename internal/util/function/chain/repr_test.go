@@ -24,8 +24,12 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
 // MockFunctionExpr is a mock implementation of FunctionExpr for testing.
@@ -72,180 +76,420 @@ func (m *MockBooleanFunctionExpr) Execute(ctx *types.FuncContext, inputs []*arro
 
 func init() {
 	// Register mock_filter function for testing
-	types.RegisterFunction("mock_filter", func(params map[string]interface{}) (types.FunctionExpr, error) {
+	types.RegisterFunction("mock_filter", func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 		return &MockBooleanFunctionExpr{name: "mock_filter"}, nil
 	})
 }
 
-func TestParseFuncChainRepr_BasicOperators(t *testing.T) {
-	jsonStr := `{
-		"name": "test-chain",
-		"stage": "L2_rerank",
-		"operators": [
+func TestParseFuncChainProto_BasicOperators(t *testing.T) {
+	pb := &schemapb.FunctionChain{
+		Name:  "test-chain",
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
 			{
-				"type": "filter",
-				"function": {
-					"name": "mock_filter",
-					"params": {}
+				Op: "filter",
+				Expr: &schemapb.FunctionChainExpr{
+					Name:   "mock_filter",
+					Args:   []*schemapb.FunctionChainExprArg{columnArg("score")},
+					Params: map[string]*schemapb.FunctionParamValue{},
 				},
-				"inputs": ["score"]
 			},
 			{
-				"type": "select",
-				"params": {
-					"columns": ["id", "score", "name"]
-				}
+				Op: "select",
+				Params: map[string]*schemapb.FunctionParamValue{
+					"columns": arrayParam(stringParam("id"), stringParam("score"), stringParam("name")),
+				},
 			},
 			{
-				"type": "sort",
-				"params": {
-					"column": "score",
-					"desc": true
-				}
+				Op:     "sort",
+				Inputs: []string{"score"},
+				Params: map[string]*schemapb.FunctionParamValue{
+					"desc": boolParam(true),
+				},
 			},
 			{
-				"type": "limit",
-				"params": {
-					"limit": 10,
-					"offset": 5
-				}
-			}
-		]
-	}`
+				Op: "limit",
+				Params: map[string]*schemapb.FunctionParamValue{
+					"limit":  intParam(10),
+					"offset": intParam(5),
+				},
+			},
+		},
+	}
 
-	chain, err := ParseFuncChainRepr(jsonStr, memory.NewGoAllocator())
+	chain, err := ParseFuncChainProto(pb, memory.NewGoAllocator())
 	assert.NoError(t, err)
 	assert.NotNil(t, chain)
 	assert.Equal(t, "test-chain", chain.name)
 	assert.Equal(t, types.StageL2Rerank, chain.Stage())
 	assert.Len(t, chain.operators, 4)
 
-	// Verify operator types
 	assert.IsType(t, &FilterOp{}, chain.operators[0])
 	assert.IsType(t, &SelectOp{}, chain.operators[1])
 	assert.IsType(t, &SortOp{}, chain.operators[2])
 	assert.IsType(t, &LimitOp{}, chain.operators[3])
 }
 
-func TestParseFuncChainRepr_InvalidRepr(t *testing.T) {
-	jsonStr := `{ invalid json }`
-	_, err := ParseFuncChainRepr(jsonStr, memory.NewGoAllocator())
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse JSON")
-}
-
-func TestParseFuncChainRepr_UnknownOperator(t *testing.T) {
-	jsonStr := `{
-		"stage": "L2_rerank",
-		"operators": [
-			{
-				"type": "unknown_op"
-			}
-		]
-	}`
-
-	_, err := ParseFuncChainRepr(jsonStr, memory.NewGoAllocator())
+func TestParseFuncChainProto_UnknownOperator(t *testing.T) {
+	_, err := ParseFuncChainProto(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
+			{Op: "unknown_op"},
+		},
+	}, memory.NewGoAllocator())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown operator type")
 }
 
-func TestParseFuncChainRepr_MissingStage(t *testing.T) {
-	jsonStr := `{
-		"operators": [
+func TestParseFuncChainProto_MissingStage(t *testing.T) {
+	_, err := ParseFuncChainProto(&schemapb.FunctionChain{
+		Ops: []*schemapb.FunctionChainOp{
 			{
-				"type": "select",
-				"params": {"columns": ["test"]}
-			}
-		]
-	}`
-
-	_, err := ParseFuncChainRepr(jsonStr, memory.NewGoAllocator())
+				Op: "select",
+				Params: map[string]*schemapb.FunctionParamValue{
+					"columns": arrayParam(stringParam("test")),
+				},
+			},
+		},
+	}, memory.NewGoAllocator())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "stage is required")
+	assert.Contains(t, err.Error(), "unsupported function chain stage")
 }
 
-func TestParseFuncChainRepr_MissingParams(t *testing.T) {
+func TestParseFuncChainProto_MissingParams(t *testing.T) {
 	testCases := []struct {
-		name    string
-		jsonStr string
-		errMsg  string
+		name   string
+		chain  *schemapb.FunctionChain
+		errMsg string
 	}{
 		{
 			name: "filter missing function",
-			jsonStr: `{
-				"stage": "L2_rerank",
-				"operators": [{"type": "filter", "params": {}}]
-			}`,
+			chain: &schemapb.FunctionChain{
+				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+				Ops:   []*schemapb.FunctionChainOp{{Op: "filter"}},
+			},
 			errMsg: "filter_op: function is required",
 		},
 		{
 			name: "filter missing inputs",
-			jsonStr: `{
-				"stage": "L2_rerank",
-				"operators": [{"type": "filter", "function": {"name": "mock_filter", "params": {}}}]
-			}`,
+			chain: &schemapb.FunctionChain{
+				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+				Ops: []*schemapb.FunctionChainOp{{
+					Op:   "filter",
+					Expr: &schemapb.FunctionChainExpr{Name: "mock_filter"},
+				}},
+			},
 			errMsg: "filter_op: inputs is required",
 		},
 		{
 			name: "sort missing column",
-			jsonStr: `{
-				"stage": "L2_rerank",
-				"operators": [{"type": "sort", "params": {}}]
-			}`,
+			chain: &schemapb.FunctionChain{
+				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+				Ops:   []*schemapb.FunctionChainOp{{Op: "sort"}},
+			},
 			errMsg: "sort_op: column is required",
 		},
 		{
 			name: "select missing columns",
-			jsonStr: `{
-				"stage": "L2_rerank",
-				"operators": [{"type": "select", "params": {}}]
-			}`,
+			chain: &schemapb.FunctionChain{
+				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+				Ops:   []*schemapb.FunctionChainOp{{Op: "select"}},
+			},
 			errMsg: "select_op: columns is required",
 		},
 		{
 			name: "limit invalid limit",
-			jsonStr: `{
-				"stage": "L2_rerank",
-				"operators": [{"type": "limit", "params": {"limit": 0}}]
-			}`,
+			chain: &schemapb.FunctionChain{
+				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+				Ops: []*schemapb.FunctionChainOp{{
+					Op: "limit",
+					Params: map[string]*schemapb.FunctionParamValue{
+						"limit": intParam(0),
+					},
+				}},
+			},
 			errMsg: "limit_op: limit must be positive",
 		},
 		{
 			name: "map missing function",
-			jsonStr: `{
-				"stage": "L2_rerank",
-				"operators": [{"type": "map"}]
-			}`,
+			chain: &schemapb.FunctionChain{
+				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+				Ops:   []*schemapb.FunctionChainOp{{Op: "map"}},
+			},
 			errMsg: "map operator requires function",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseFuncChainRepr(tc.jsonStr, memory.NewGoAllocator())
+			_, err := ParseFuncChainProto(tc.chain, memory.NewGoAllocator())
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), tc.errMsg)
 		})
 	}
 }
 
-func TestParseFuncChainRepr_UnknownFunction(t *testing.T) {
-	jsonStr := `{
-		"stage": "L2_rerank",
-		"operators": [
+func TestParseFuncChainProto_UnknownFunction(t *testing.T) {
+	_, err := ParseFuncChainProto(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
 			{
-				"type": "map",
-				"function": {
-					"name": "UNKNOWN_FUNC",
-					"params": {}
-				}
-			}
-		]
-	}`
-
-	_, err := ParseFuncChainRepr(jsonStr, memory.NewGoAllocator())
+				Op: "map",
+				Expr: &schemapb.FunctionChainExpr{
+					Name:   "UNKNOWN_FUNC",
+					Params: map[string]*schemapb.FunctionParamValue{},
+				},
+			},
+		},
+	}, memory.NewGoAllocator())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown function")
+}
+
+func TestParseFuncChainProto_RoundDecimalFunction(t *testing.T) {
+	chain, err := ParseFuncChainProto(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
+			{
+				Op:      types.OpTypeMap,
+				Outputs: []string{types.ScoreFieldName},
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "round_decimal",
+					Args: []*schemapb.FunctionChainExprArg{columnArg(types.ScoreFieldName)},
+					Params: map[string]*schemapb.FunctionParamValue{
+						"decimal": intParam(2),
+					},
+				},
+			},
+		},
+	}, memory.NewGoAllocator())
+	require.NoError(t, err)
+	require.NotNil(t, chain)
+	assert.Len(t, chain.operators, 1)
+	assert.IsType(t, &MapOp{}, chain.operators[0])
+}
+
+func TestProtoOpToReprDerivesInputsFromExprArgs(t *testing.T) {
+	repr, err := ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op: types.OpTypeMap,
+		Expr: &schemapb.FunctionChainExpr{
+			Name: "expr",
+			Args: []*schemapb.FunctionChainExprArg{
+				columnArg("$score"),
+				literalArg(intParam(100)),
+				columnArg("tag"),
+				columnArg("$score"),
+			},
+			Params: map[string]*schemapb.FunctionParamValue{
+				"expr": stringParam("($0 > $1) && ($2 != \"dog\")"),
+			},
+		},
+		Outputs: []string{"new_score"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repr)
+	assert.Equal(t, []string{"$score", "tag"}, repr.Inputs)
+	assert.Equal(t, []string{"new_score"}, repr.Outputs)
+	require.NotNil(t, repr.Function)
+	assert.Equal(t, "expr", repr.Function.Name)
+	require.Len(t, repr.Function.Args, 4)
+	assert.Equal(t, "($0 > $1) && ($2 != \"dog\")", repr.Function.Params["expr"].GetStringValue())
+}
+
+func TestProtoChainToReprBuildsInfo(t *testing.T) {
+	repr, err := ProtoChainToRepr(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
+			{
+				Op: types.OpTypeMap,
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "decay",
+					Args: []*schemapb.FunctionChainExprArg{columnArg("ts")},
+				},
+				Outputs: []string{"score1"},
+			},
+			{
+				Op: types.OpTypeMap,
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "sum",
+					Args: []*schemapb.FunctionChainExprArg{
+						columnArg("score1"),
+						columnArg("$score"),
+					},
+				},
+				Outputs: []string{"$score"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repr)
+	assert.Equal(t, []string{"ts", "$score"}, repr.Info.RequiredInputs)
+	assert.Equal(t, []string{"score1", "$score"}, repr.Info.WrittenNames)
+	require.Len(t, repr.Info.Ops, 2)
+	assert.Equal(t, []string{"ts"}, repr.Info.Ops[0].ReadNames)
+	assert.Equal(t, []string{"score1"}, repr.Info.Ops[0].WriteNames)
+	assert.Equal(t, []string{"score1", "$score"}, repr.Info.Ops[1].ReadNames)
+	assert.Equal(t, []string{"$score"}, repr.Info.Ops[1].WriteNames)
+}
+
+func TestProtoStageToReprStage(t *testing.T) {
+	tests := []struct {
+		stage    schemapb.FunctionChainStage
+		expected string
+	}{
+		{schemapb.FunctionChainStage_FunctionChainStageIngestion, types.StageIngestion},
+		{schemapb.FunctionChainStage_FunctionChainStagePreProcess, types.StagePreProcess},
+		{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, types.StageL0Rerank},
+		{schemapb.FunctionChainStage_FunctionChainStageL1Rerank, types.StageL1Rerank},
+		{schemapb.FunctionChainStage_FunctionChainStageL2Rerank, types.StageL2Rerank},
+		{schemapb.FunctionChainStage_FunctionChainStagePostProcess, types.StagePostProcess},
+	}
+	for _, tc := range tests {
+		t.Run(tc.stage.String(), func(t *testing.T) {
+			stage, err := ProtoStageToReprStage(tc.stage)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, stage)
+		})
+	}
+
+	_, err := ProtoStageToReprStage(schemapb.FunctionChainStage_FunctionChainStageUnspecified)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported function chain stage")
+}
+
+func TestIsFunctionChainSystemName(t *testing.T) {
+	assert.True(t, IsFunctionChainSystemName("$score"))
+	assert.True(t, IsFunctionChainSystemName("$id"))
+	assert.False(t, IsFunctionChainSystemName("score"))
+	assert.False(t, IsFunctionChainSystemName(""))
+}
+
+func TestFunctionChainExprArgInput(t *testing.T) {
+	input, err := FunctionChainExprArgInput(columnArg(" ts "))
+	require.NoError(t, err)
+	assert.Equal(t, "ts", input)
+
+	input, err = FunctionChainExprArgInput(literalArg(stringParam("value")))
+	require.NoError(t, err)
+	assert.Empty(t, input)
+
+	_, err = FunctionChainExprArgInput(nil)
+	assert.ErrorContains(t, err, "function chain expr arg is nil")
+
+	_, err = FunctionChainExprArgInput(columnArg(" "))
+	assert.ErrorContains(t, err, "column name is empty")
+
+	_, err = FunctionChainExprArgInput(&schemapb.FunctionChainExprArg{})
+	assert.ErrorContains(t, err, "function chain expr arg is unset")
+}
+
+func TestProtoConversionErrors(t *testing.T) {
+	_, err := ProtoChainToRepr(nil)
+	assert.ErrorContains(t, err, "function chain proto is nil")
+
+	_, err = ProtoOpToRepr(nil)
+	assert.ErrorContains(t, err, "op proto is nil")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{Op: " "})
+	assert.ErrorContains(t, err, "op name is empty")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{Op: "map", Inputs: []string{" "}})
+	assert.ErrorContains(t, err, "input name is empty")
+
+	_, _, err = ProtoExprToRepr(&schemapb.FunctionChainExpr{Name: " "})
+	assert.ErrorContains(t, err, "expr name is empty")
+}
+
+func TestFunctionFromReprWithContextPassesTypedConfigAndContext(t *testing.T) {
+	funcName := "mock_context_function"
+	extraInfo := &models.ModelExtraInfo{ClusterID: "cluster-1", DBName: "db-1", BatchFactor: 7}
+	params := map[string]*schemapb.FunctionParamValue{"name": stringParam("custom")}
+	args := []*schemapb.FunctionChainExprArg{columnArg("text"), literalArg(intParam(10))}
+
+	called := false
+	err := types.RegisterFunction(funcName, func(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
+		called = true
+		assert.Same(t, extraInfo, ctx.ModelExtraInfo)
+		assert.Equal(t, funcName, cfg.Name)
+		assert.Same(t, params["name"], cfg.Params["name"])
+		require.Len(t, cfg.Args, 2)
+		assert.Same(t, args[0], cfg.Args[0])
+		assert.Same(t, args[1], cfg.Args[1])
+		return &MockFunctionExpr{name: cfg.Name}, nil
+	})
+	require.NoError(t, err)
+
+	fn, err := FunctionFromReprWithContext(&FunctionRepr{
+		Name:   funcName,
+		Params: params,
+		Args:   args,
+	}, types.FunctionBuildContext{ModelExtraInfo: extraInfo})
+	require.NoError(t, err)
+	require.NotNil(t, fn)
+	assert.True(t, called)
+	assert.Equal(t, funcName, fn.Name())
+}
+
+func TestFunctionFromReprWithContextRejectsLiteralArgsByDefault(t *testing.T) {
+	_, err := FunctionFromReprWithContext(&FunctionRepr{
+		Name: chainexpr.NumCombineFuncName,
+		Args: []*schemapb.FunctionChainExprArg{
+			columnArg("score"),
+			literalArg(intParam(10)),
+		},
+	}, types.FunctionBuildContext{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "num_combine: literal expr arg[1] is not supported")
+}
+
+func TestFunctionFromReprWithContextErrors(t *testing.T) {
+	_, err := FunctionFromReprWithContext(nil, types.FunctionBuildContext{})
+	assert.ErrorContains(t, err, "function repr is nil")
+
+	_, err = FunctionFromReprWithContext(&FunctionRepr{}, types.FunctionBuildContext{})
+	assert.ErrorContains(t, err, "function name is required")
+}
+
+func TestFuncChainFromReprWithContextPassesBuildContext(t *testing.T) {
+	funcName := "mock_chain_context_function"
+	extraInfo := &models.ModelExtraInfo{ClusterID: "cluster-2", DBName: "db-2", BatchFactor: 11}
+	params := map[string]*schemapb.FunctionParamValue{"flag": boolParam(true)}
+	args := []*schemapb.FunctionChainExprArg{columnArg("score")}
+
+	called := false
+	err := types.RegisterFunction(funcName, func(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
+		called = true
+		assert.Same(t, extraInfo, ctx.ModelExtraInfo)
+		assert.Equal(t, funcName, cfg.Name)
+		assert.Same(t, params["flag"], cfg.Params["flag"])
+		require.Len(t, cfg.Args, 1)
+		assert.Same(t, args[0], cfg.Args[0])
+		return &MockFunctionExpr{name: cfg.Name}, nil
+	})
+	require.NoError(t, err)
+
+	repr := &ChainRepr{
+		Name:  "context-chain",
+		Stage: types.StageL2Rerank,
+		Operators: []OperatorRepr{
+			{
+				Type: types.OpTypeMap,
+				Function: &FunctionRepr{
+					Name:   funcName,
+					Params: params,
+					Args:   args,
+				},
+				Inputs:  []string{"score"},
+				Outputs: []string{"new_score"},
+			},
+		},
+	}
+
+	chain, err := FuncChainFromReprWithContext(repr, memory.NewGoAllocator(), types.FunctionBuildContext{ModelExtraInfo: extraInfo})
+	require.NoError(t, err)
+	require.NotNil(t, chain)
+	assert.True(t, called)
+	assert.Len(t, chain.operators, 1)
 }
 
 func TestFuncChainFromRepr(t *testing.T) {
@@ -257,36 +501,72 @@ func TestFuncChainFromRepr(t *testing.T) {
 				Type: types.OpTypeFilter,
 				Function: &FunctionRepr{
 					Name:   "mock_filter",
-					Params: map[string]interface{}{},
+					Params: map[string]*schemapb.FunctionParamValue{},
 				},
 				Inputs: []string{"score"},
 			},
 			{
 				Type: types.OpTypeSelect,
-				Params: map[string]interface{}{
-					"columns": []string{"a", "b"},
+				Params: map[string]*schemapb.FunctionParamValue{
+					"columns": arrayParam(stringParam("a"), stringParam("b")),
 				},
 			},
 			{
-				Type: types.OpTypeSort,
-				Params: map[string]interface{}{
-					"column": "a",
-					"desc":   true,
+				Type:   types.OpTypeSort,
+				Inputs: []string{"a"},
+				Params: map[string]*schemapb.FunctionParamValue{
+					"desc": boolParam(true),
 				},
 			},
 			{
 				Type: types.OpTypeLimit,
-				Params: map[string]interface{}{
-					"limit":  int64(100),
-					"offset": int64(10),
+				Params: map[string]*schemapb.FunctionParamValue{
+					"limit":  intParam(100),
+					"offset": intParam(10),
 				},
 			},
 		},
 	}
 
-	chain, err := funcChainFromRepr(repr, memory.NewGoAllocator())
+	chain, err := FuncChainFromRepr(repr, memory.NewGoAllocator())
 	assert.NoError(t, err)
 	assert.NotNil(t, chain)
 	assert.Equal(t, "repr-chain", chain.name)
 	assert.Len(t, chain.operators, 4)
+}
+
+func columnArg(name string) *schemapb.FunctionChainExprArg {
+	return &schemapb.FunctionChainExprArg{Arg: &schemapb.FunctionChainExprArg_Column{Column: &schemapb.FunctionChainColumnArg{Name: name}}}
+}
+
+func literalArg(value *schemapb.FunctionParamValue) *schemapb.FunctionChainExprArg {
+	return &schemapb.FunctionChainExprArg{Arg: &schemapb.FunctionChainExprArg_Literal{Literal: value}}
+}
+
+func boolParam(value bool) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: value}}
+}
+
+func intParam(value int64) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: value}}
+}
+
+func doubleParam(value float64) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_DoubleValue{DoubleValue: value}}
+}
+
+func stringParam(value string) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_StringValue{StringValue: value}}
+}
+
+func bytesParam(value []byte) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_BytesValue{BytesValue: value}}
+}
+
+func arrayParam(values ...*schemapb.FunctionParamValue) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_ArrayValue{ArrayValue: &schemapb.FunctionParamArray{Values: values}}}
+}
+
+func objectParam(fields map[string]*schemapb.FunctionParamValue) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_ObjectValue{ObjectValue: &schemapb.FunctionParamObject{Fields: fields}}}
 }

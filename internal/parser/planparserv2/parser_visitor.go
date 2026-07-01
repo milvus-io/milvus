@@ -1794,14 +1794,106 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	}
 }
 
-// VisitBitXor not supported.
-func (v *ParserVisitor) VisitBitXor(ctx *parser.BitXorContext) interface{} {
-	return merr.WrapErrParameterInvalidMsg("BitXor is not supported: %s", ctx.GetText())
+// visitBitwiseBinaryOp is the shared implementation for VisitBitAnd/VisitBitOr/VisitBitXor.
+func (v *ParserVisitor) visitBitwiseBinaryOp(leftCtx, rightCtx parser.IExprContext, tokenType int, text string) interface{} {
+	var err error
+	left := leftCtx.Accept(v)
+	if err = getError(left); err != nil {
+		return err
+	}
+
+	right := rightCtx.Accept(v)
+	if err = getError(right); err != nil {
+		return err
+	}
+
+	leftValueExpr, rightValueExpr := getValueExpr(left), getValueExpr(right)
+	if leftValueExpr != nil && rightValueExpr != nil {
+		if isTemplateExpr(leftValueExpr) || isTemplateExpr(rightValueExpr) {
+			return merr.WrapErrParameterInvalidMsg("placeholder was not supported between two constants with operator: %s", text)
+		}
+		leftValue, rightValue := getGenericValue(left), getGenericValue(right)
+		switch tokenType {
+		case parser.PlanParserBAND:
+			n, err := BitAnd(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		case parser.PlanParserBOR:
+			n, err := BitOr(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		case parser.PlanParserBXOR:
+			n, err := BitXor(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
+		default:
+			return merr.WrapErrParameterInvalidMsg("unexpected bitwise op: %s", text)
+		}
+	}
+
+	leftExpr, rightExpr := getExpr(left), getExpr(right)
+	reverse := leftValueExpr != nil
+
+	if leftExpr == nil || rightExpr == nil {
+		return merr.WrapErrParameterInvalidMsg("invalid bitwise expression, left: %s, op: %s, right: %s", leftCtx.GetText(), text, rightCtx.GetText())
+	}
+
+	if err = checkDirectComparisonBinaryField(toColumnInfo(leftExpr)); err != nil {
+		return err
+	}
+	if err = checkDirectComparisonBinaryField(toColumnInfo(rightExpr)); err != nil {
+		return err
+	}
+
+	var dataType schemapb.DataType
+	if leftExpr.expr.GetIsTemplate() {
+		dataType = rightExpr.dataType
+	} else if rightExpr.expr.GetIsTemplate() {
+		dataType = leftExpr.dataType
+	} else {
+		if err = canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
+			return merr.WrapErrParameterInvalidMsg("'%s' %s", arithNameMap[tokenType], err.Error())
+		}
+		if err = checkValidModArith(arithExprMap[tokenType], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
+			return err
+		}
+		dataType, err = calcDataType(leftExpr, rightExpr, reverse)
+		if err != nil {
+			return err
+		}
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryArithExpr{
+			BinaryArithExpr: &planpb.BinaryArithExpr{
+				Left:  leftExpr.expr,
+				Right: rightExpr.expr,
+				Op:    arithExprMap[tokenType],
+			},
+		},
+		IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+	}
+	return &ExprWithType{
+		expr:          expr,
+		dataType:      dataType,
+		nodeDependent: true,
+	}
 }
 
-// VisitBitAnd not supported.
+// VisitBitXor translates bitwise XOR expression to arithmetic plan.
+func (v *ParserVisitor) VisitBitXor(ctx *parser.BitXorContext) interface{} {
+	return v.visitBitwiseBinaryOp(ctx.Expr(0), ctx.Expr(1), parser.PlanParserBXOR, ctx.GetText())
+}
+
+// VisitBitAnd translates bitwise AND expression to arithmetic plan.
 func (v *ParserVisitor) VisitBitAnd(ctx *parser.BitAndContext) interface{} {
-	return merr.WrapErrParameterInvalidMsg("BitAnd is not supported: %s", ctx.GetText())
+	return v.visitBitwiseBinaryOp(ctx.Expr(0), ctx.Expr(1), parser.PlanParserBAND, ctx.GetText())
 }
 
 // VisitPower parses power expression.
@@ -1829,9 +1921,9 @@ func (v *ParserVisitor) VisitShift(ctx *parser.ShiftContext) interface{} {
 	return merr.WrapErrParameterInvalidMsg("shift is not supported: %s", ctx.GetText())
 }
 
-// VisitBitOr unsupported.
+// VisitBitOr translates bitwise OR expression to arithmetic plan.
 func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
-	return merr.WrapErrParameterInvalidMsg("BitOr is not supported: %s", ctx.GetText())
+	return v.visitBitwiseBinaryOp(ctx.Expr(0), ctx.Expr(1), parser.PlanParserBOR, ctx.GetText())
 }
 
 // getColumnInfoFromJSONIdentifier parse JSON field name and JSON nested path.

@@ -98,6 +98,44 @@ func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method str
 	})
 }
 
+func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
+	externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+	testCases := []struct {
+		name string
+		req  any
+	}{
+		{
+			name: "restore external snapshot",
+			req: &RestoreExternalSnapshotReq{
+				DbName:               "db",
+				TargetCollectionName: "restored",
+				SnapshotMetadataURI:  "s3://bucket/export-root/snapshots/100/metadata/1.json",
+				ExternalSpec:         externalSpec,
+			},
+		},
+		{
+			name: "export snapshot",
+			req: &ExportSnapshotReq{
+				DbName:         "db",
+				CollectionName: "source",
+				Name:           "snapshot",
+				TargetS3Path:   "s3://bucket/export-root",
+				ExternalSpec:   externalSpec,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			field := getTraceLogRequestFieldWithoutSensitiveInfo(testCase.req)
+			request := fmt.Sprint(field.Interface)
+			assert.NotContains(t, request, "AKIAEXAMPLE")
+			assert.NotContains(t, request, "SUPERSECRET")
+			assert.Contains(t, request, "***")
+		})
+	}
+}
+
 func TestHTTPWrapper(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	postTestCasesTrace := []requestBodyTestCase{}
@@ -2071,11 +2109,15 @@ func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 
 type externalCollectionRESTProxy struct {
 	mockProxyComponent
-	createReq    *milvuspb.CreateCollectionRequest
-	describeResp *milvuspb.DescribeCollectionResponse
-	refreshReq   *milvuspb.RefreshExternalCollectionRequest
-	listReq      *milvuspb.ListRefreshExternalCollectionJobsRequest
-	progressReq  *milvuspb.GetRefreshExternalCollectionProgressRequest
+	createReq                  *milvuspb.CreateCollectionRequest
+	describeResp               *milvuspb.DescribeCollectionResponse
+	refreshReq                 *milvuspb.RefreshExternalCollectionRequest
+	listReq                    *milvuspb.ListRefreshExternalCollectionJobsRequest
+	progressReq                *milvuspb.GetRefreshExternalCollectionProgressRequest
+	restoreReq                 *milvuspb.RestoreExternalSnapshotRequest
+	exportReq                  *milvuspb.ExportSnapshotRequest
+	getRestoreSnapshotStateReq *milvuspb.GetRestoreSnapshotStateRequest
+	listRestoreSnapshotJobsReq *milvuspb.ListRestoreSnapshotJobsRequest
 }
 
 func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
@@ -2145,6 +2187,52 @@ func (m *externalCollectionRESTProxy) ListRefreshExternalCollectionJobs(ctx cont
 				EndTime:        20,
 			},
 		},
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) RestoreExternalSnapshot(ctx context.Context, request *milvuspb.RestoreExternalSnapshotRequest) (*milvuspb.RestoreExternalSnapshotResponse, error) {
+	m.restoreReq = request
+	return &milvuspb.RestoreExternalSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  2001,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) ExportSnapshot(ctx context.Context, request *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
+	m.exportReq = request
+	return &milvuspb.ExportSnapshotResponse{
+		Status:              merr.Success(),
+		SnapshotMetadataUri: request.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) GetRestoreSnapshotState(ctx context.Context, request *milvuspb.GetRestoreSnapshotStateRequest) (*milvuspb.GetRestoreSnapshotStateResponse, error) {
+	m.getRestoreSnapshotStateReq = request
+	return &milvuspb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+		Info: &milvuspb.RestoreSnapshotInfo{
+			JobId:          request.GetJobId(),
+			SnapshotName:   "snapshot_1",
+			DbName:         "default",
+			CollectionName: "restored_collection",
+			State:          milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted,
+			Progress:       100,
+		},
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) ListRestoreSnapshotJobs(ctx context.Context, request *milvuspb.ListRestoreSnapshotJobsRequest) (*milvuspb.ListRestoreSnapshotJobsResponse, error) {
+	m.listRestoreSnapshotJobsReq = request
+	return &milvuspb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+		Jobs: []*milvuspb.RestoreSnapshotInfo{{
+			JobId:          2001,
+			SnapshotName:   "snapshot_1",
+			DbName:         request.GetDbName(),
+			CollectionName: request.GetCollectionName(),
+			State:          milvuspb.RestoreSnapshotState_RestoreSnapshotPending,
+			Progress:       10,
+		}},
 	}, nil
 }
 
@@ -2339,6 +2427,121 @@ func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
 	assert.Equal(t, "external_books", proxy.listReq.GetCollectionName())
 	assert.Contains(t, w.Body.String(), `"state":"RefreshCompleted"`)
 	assert.Contains(t, w.Body.String(), `"externalSpec":"{\"format\":\"parquet\"}"`)
+}
+
+func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, RestoreExternalAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"targetCollectionName": "restored_books",
+		"snapshotMetadataURI": "s3://bucket/files/snapshots/meta.json",
+		"externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.restoreReq.GetDbName())
+	assert.Equal(t, "restored_books", proxy.restoreReq.GetTargetCollectionName())
+	assert.Equal(t, "s3://bucket/files/snapshots/meta.json", proxy.restoreReq.GetSnapshotMetadataUri())
+	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.restoreReq.GetExternalSpec())
+	assert.Contains(t, w.Body.String(), `"jobId":2001`)
+}
+
+func TestExportSnapshotRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, ExportAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1",
+		"targetS3Path": "s3://foreign-bucket/export-root",
+		"externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.exportReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.exportReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.exportReq.GetName())
+	assert.Equal(t, "s3://foreign-bucket/export-root", proxy.exportReq.GetTargetS3Path())
+	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.exportReq.GetExternalSpec())
+	assert.Contains(t, w.Body.String(), `"snapshotMetadataURI":"s3://foreign-bucket/export-root/snapshots/100/metadata/1.json"`)
+}
+
+func TestRestoreSnapshotJobRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, DescribeAction), bytes.NewReader([]byte(`{"jobId":"2001"}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(2001), proxy.getRestoreSnapshotStateReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"collectionName":"restored_collection"`)
+	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotCompleted"`)
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, ListAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "restored_collection"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.listRestoreSnapshotJobsReq.GetDbName())
+	assert.Equal(t, "restored_collection", proxy.listRestoreSnapshotJobsReq.GetCollectionName())
+	assert.Contains(t, w.Body.String(), `"records":[`)
+	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotPending"`)
+}
+
+func TestRestoreSnapshotJobRESTV2InvalidJobID(t *testing.T) {
+	paramtable.Init()
+	testEngine := initHTTPServerV2(&externalCollectionRESTProxy{}, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, DescribeAction), bytes.NewReader([]byte(`{"jobId":"bad"}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.NotZero(t, returnBody.Code)
+	assert.Contains(t, returnBody.Message, "int64 jobId")
+}
+
+func TestRestoreExternalSnapshotRESTV2RequiresMetadataURI(t *testing.T) {
+	paramtable.Init()
+	testEngine := initHTTPServerV2(&externalCollectionRESTProxy{}, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, RestoreExternalAction), bytes.NewReader([]byte(`{
+		"targetCollectionName": "restored_books"
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.NotZero(t, returnBody.Code)
+	assert.Contains(t, returnBody.Message, "missing required parameters")
 }
 
 func TestExternalCollectionJobDescribeRequiresJobIDRESTV2(t *testing.T) {

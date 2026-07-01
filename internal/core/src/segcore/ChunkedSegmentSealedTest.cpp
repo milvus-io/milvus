@@ -42,6 +42,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
 #include "common/OffsetMapping.h"
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
@@ -410,6 +411,24 @@ TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
 
     segment->Reopen(new_schema);
     EXPECT_FALSE(segment->FieldAccessible(sparse));
+}
+
+// #50783 defense-in-depth: GetFieldIndexMeta must throw (AssertInfo) rather than
+// dereference end() for a missing field; assert() is compiled out under NDEBUG.
+TEST(test_chunk_segment, GetFieldIndexMetaThrowsOnMissingField) {
+    std::map<FieldId, FieldIndexMeta> field_metas;
+    FieldId present(100);
+    field_metas.emplace(
+        present,
+        FieldIndexMeta(
+            present, {{"index_type", "IVF_FLAT"}, {"metric_type", "L2"}}, {}));
+    CollectionIndexMeta meta(1024, std::move(field_metas));
+
+    EXPECT_TRUE(meta.HasField(present));
+    EXPECT_NO_THROW(meta.GetFieldIndexMeta(present));
+    EXPECT_FALSE(meta.HasField(FieldId(present.get() + 1)));
+    EXPECT_THROW(meta.GetFieldIndexMeta(FieldId(present.get() + 1)),
+                 SegcoreError);
 }
 
 TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
