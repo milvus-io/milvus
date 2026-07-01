@@ -1834,19 +1834,15 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	}
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg *datapb.SegmentInfo) error {
-		assert.Equal(t, int64(2001), seg.GetID())
-		assert.Equal(t, int64(200), seg.GetCollectionID())
-		assert.Equal(t, int64(20), seg.GetPartitionID())
-		assert.Equal(t, "dst-ch", seg.GetInsertChannel())
-		assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
-		assert.True(t, seg.GetIsImporting())
-		assert.Equal(t, int64(3), seg.GetStorageVersion())
-		return nil
-	}).Once()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
 
-	mt := &meta{ctx: ctx, catalog: catalog, segments: NewCachedSegmentsInfo(), channelCPs: newChannelCps()}
+	mt := &meta{
+		ctx:            ctx,
+		catalog:        catalog,
+		segmentPersist: NewSegmentTxnWrapper(NewOptimisticTxnMemoryPersist()),
+		segments:       NewCachedSegmentsInfo(),
+		channelCPs:     newChannelCps(),
+	}
 	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11}), 0)
 
 	var err error
@@ -1875,6 +1871,15 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7))
 	require.NoError(t, err)
 	assert.True(t, addJobCalled)
+
+	segment := mt.GetSegment(ctx, 2001)
+	require.NotNil(t, segment)
+	assert.Equal(t, int64(200), segment.GetCollectionID())
+	assert.Equal(t, int64(20), segment.GetPartitionID())
+	assert.Equal(t, "dst-ch", segment.GetInsertChannel())
+	assert.Equal(t, commonpb.SegmentState_Importing, segment.GetState())
+	assert.True(t, segment.GetIsImporting())
+	assert.Equal(t, int64(3), segment.GetStorageVersion())
 }
 
 // TestSnapshotManager_HasActivePins_Delegation verifies the manager-layer wrapper
