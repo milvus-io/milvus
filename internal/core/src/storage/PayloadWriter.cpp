@@ -137,7 +137,9 @@ PayloadWriter::finish() {
                                          ->compression_level(3)
                                          ->build(),
                                      arrow_properties);
-    AssertInfo(ast.ok(), ast.ToString());
+    if (!ast.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(ast), "{}", ast.ToString());
+    }
 }
 
 bool

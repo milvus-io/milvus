@@ -158,7 +158,11 @@ ReadMediumType(BinlogReaderPtr reader) {
                "medium type must be parsed from stream header");
     int32_t magic_num;
     auto ret = reader->Read(sizeof(magic_num), &magic_num);
-    AssertInfo(ret.ok(), "read binlog failed: {}", ret.what());
+    if (!ret.ok()) {
+        // ret is already a classified SegcoreError (e.g. DataFormatBroken for a
+        // truncated binlog); preserve its code instead of collapsing to 2001.
+        ThrowInfo(ret.get_error_code(), "read binlog failed: {}", ret.what());
+    }
     AssertInfo(magic_num == MAGIC_NUM, "invalid magic num: {}", magic_num);
 }
 
@@ -1684,9 +1688,11 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
             GetReaderProperties(),
             GetArrowReaderProperties());
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create file row group reader: " +
-                       result.status().ToString());
+        if (!result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                      "[StorageV2] Failed to create file row group reader: " +
+                          result.status().ToString());
+        }
         auto reader = result.ValueOrDie();
         auto row_group_meta_data_vector =
             reader->file_metadata()->GetRowGroupMetadataVector();
@@ -1737,10 +1743,13 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         auto field_schema = reader->schema()->field(col_offset)->Copy();
         auto arrow_schema = arrow::schema({field_schema});
         auto status = reader->Close();
-        AssertInfo(status.ok(),
-                   "[StorageV2] failed to close file reader when get arrow "
-                   "schema from file: " +
-                       column_group_file + " with error: " + status.ToString());
+        if (!status.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(status),
+                      "[StorageV2] failed to close file reader when get arrow "
+                      "schema from file: " +
+                          column_group_file +
+                          " with error: " + status.ToString());
+        }
 
         // split row groups for parallel reading
         auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
@@ -2564,17 +2573,23 @@ GetFieldIDList(FieldId column_group_id,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
         GetReaderProperties(),
         GetArrowReaderProperties());
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: " +
-                   result.status().ToString());
+    if (!result.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                  "[StorageV2] Failed to create file row group reader: " +
+                      result.status().ToString());
+    }
     auto file_reader = result.ValueOrDie();
     field_id_list =
         file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
             column_group_id.get());
     auto status = file_reader->Close();
-    AssertInfo(status.ok(),
-               "failed to close file reader when get field id list from {}",
-               filepath);
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "failed to close file reader when get field id list from {}: "
+                  "{}",
+                  filepath,
+                  status.ToString());
+    }
     return field_id_list;
 }
 
