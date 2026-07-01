@@ -7522,7 +7522,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_provider", ["invalid_provider", "openai", "huggingface", "", None, 123])
+    @pytest.mark.parametrize("invalid_provider", ["invalid_provider", "openai", "", None, 123])
     def test_milvus_client_search_with_model_rerank_invalid_provider(self, setup_collection, invalid_provider,
                                                                      tei_reranker_endpoint):
         """

@@ -39,6 +39,7 @@ const (
 	voyageaiProviderName    string = "voyageai"
 	aliProviderName         string = "ali"
 	zillizProviderName      string = "zilliz"
+	huggingFaceProviderName string = "huggingface"
 )
 
 func parseMaxBatch(maxBatch string) (int, error) {
@@ -92,6 +93,8 @@ func NewModelProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelEx
 			case zillizProviderName:
 				conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 				return newZillizProvider(params, conf, extraInfo)
+			case huggingFaceProviderName:
+				return newHuggingFaceProvider(params, conf, credentials, extraInfo)
 			default:
 				return nil, merr.WrapErrParameterInvalidMsg("unknown rerank model provider:%s", param.Value)
 			}
