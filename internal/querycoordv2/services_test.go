@@ -2119,9 +2119,37 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 			})
 		}
 	}
-	suite.broker.EXPECT().
-		GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).
-		Return(vChannels, segmentBinlogs, nil).Maybe()
+	getRecoveryInfo := func(_ context.Context, _ int64, partitionIDs ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+		if len(partitionIDs) == 0 {
+			return vChannels, segmentBinlogs, nil
+		}
+		partitionSet := typeutil.NewSet(partitionIDs...)
+		filteredSegments := lo.Filter(segmentBinlogs, func(segment *datapb.SegmentInfo, _ int) bool {
+			return partitionSet.Contain(segment.GetPartitionID())
+		})
+		return vChannels, filteredSegments, nil
+	}
+	for partitionNum := 0; partitionNum <= len(suite.partitions[collection])+1; partitionNum++ {
+		partitionArgs := make([]interface{}, 0, partitionNum)
+		for i := 0; i < partitionNum; i++ {
+			partitionArgs = append(partitionArgs, mock.Anything)
+		}
+		suite.broker.EXPECT().
+			GetRecoveryInfoV2(mock.Anything, collection, partitionArgs...).
+			RunAndReturn(getRecoveryInfo).
+			Maybe()
+	}
+
+	for segmentNum := 0; segmentNum <= len(segmentBinlogs); segmentNum++ {
+		indexArgs := make([]interface{}, 0, segmentNum)
+		for i := 0; i < segmentNum; i++ {
+			indexArgs = append(indexArgs, mock.Anything)
+		}
+		suite.broker.EXPECT().
+			GetIndexInfo(mock.Anything, collection, indexArgs...).
+			Return(nil, nil).
+			Maybe()
+	}
 }
 
 func (suite *ServiceSuite) expectLoadMetaRPCs() {
