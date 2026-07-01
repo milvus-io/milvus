@@ -42,6 +42,35 @@
     } while (0)
 namespace milvus {
 
+// Classify a simdjson error at a *parse / required-structure* boundary into a
+// segcore ErrorCode, so a malformed JSON does not collapse to the generic
+// UnexpectedError(2001). segcore parses JSON read back from storage, so an
+// unrecognized parse failure means the stored bytes are malformed
+// (DataFormatBroken); MEMALLOC / IO are transient; a few codes mean milvus
+// itself mis-sized / mis-used the parser (a bug) and stay UnexpectedError.
+//
+// NOTE: this is for parse / required-structure boundaries only. simdjson's
+// NO_SUCH_FIELD / INCORRECT_TYPE / OUT_OF_BOUNDS are the normal negative result
+// of optional-field / dynamic-type access and MUST NOT be routed here -- those
+// call sites (exist(), path_exists(), at<T>()) keep swallowing them into a
+// bool / nullopt.
+inline ErrorCode
+SimdjsonParseErrorToErrorCode(simdjson::error_code err) {
+    switch (err) {
+        case simdjson::MEMALLOC:
+            return ErrorCode::MemAllocateFailed;  // 2034, retriable OOM
+        case simdjson::IO_ERROR:
+            return ErrorCode::FileReadFailed;  // 2014, retriable
+        case simdjson::CAPACITY:
+        case simdjson::UNINITIALIZED:
+        case simdjson::INSUFFICIENT_PADDING:
+        case simdjson::UNEXPECTED_ERROR:
+            return ErrorCode::UnexpectedError;  // milvus-side misuse / bug
+        default:
+            return ErrorCode::DataFormatBroken;  // 2024, malformed stored JSON
+    }
+}
+
 bool
 isObjectEmpty(simdjson::ondemand::value value);
 bool
@@ -59,14 +88,14 @@ ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
     thread_local simdjson::ondemand::parser parser;
     auto doc = parser.iterate(padded);
     if (doc.error()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(SimdjsonParseErrorToErrorCode(doc.error()),
                   "json parse failed: {}",
                   simdjson::error_message(doc.error()));
     }
 
     auto obj = doc.get_object();
     if (obj.error()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(SimdjsonParseErrorToErrorCode(obj.error()),
                   "ExtractSubJson: input is not a JSON object: {}",
                   simdjson::error_message(obj.error()));
     }
@@ -80,7 +109,7 @@ ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
         // unescaped_key() resolves escape sequences for correct comparison
         auto uk = field.unescaped_key();
         if (uk.error()) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(SimdjsonParseErrorToErrorCode(uk.error()),
                       "ExtractSubJson: failed to decode key: {}",
                       simdjson::error_message(uk.error()));
         }
@@ -89,7 +118,7 @@ ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
             // avoiding any re-serialization overhead
             auto raw = field.value().raw_json();
             if (raw.error()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(SimdjsonParseErrorToErrorCode(raw.error()),
                           "ExtractSubJson: failed to extract value for "
                           "key '{}': {}",
                           uk.value(),
@@ -187,10 +216,12 @@ class Json {
         // as we have allocated the memory with this padding
         auto doc =
             parser.iterate(data_, data_.size() + simdjson::SIMDJSON_PADDING);
-        AssertInfo(doc.error() == simdjson::SUCCESS,
-                   "failed to parse the json {}: {}",
-                   data_,
-                   simdjson::error_message(doc.error()));
+        if (doc.error() != simdjson::SUCCESS) {
+            ThrowInfo(SimdjsonParseErrorToErrorCode(doc.error()),
+                      "failed to parse the json {}: {}",
+                      data_,
+                      simdjson::error_message(doc.error()));
+        }
         return doc;
     }
 
@@ -202,14 +233,16 @@ class Json {
         // as we have allocated the memory with this padding
         auto doc = parser.iterate(
             data_.data() + offset, length, length + simdjson::SIMDJSON_PADDING);
-        AssertInfo(doc.error() == simdjson::SUCCESS,
-                   "failed to parse the json {} offset {}, length {}: {}, "
-                   "total_json:{}",
-                   std::string(data_.data() + offset, length),
-                   offset,
-                   length,
-                   simdjson::error_message(doc.error()),
-                   data_);
+        if (doc.error() != simdjson::SUCCESS) {
+            ThrowInfo(SimdjsonParseErrorToErrorCode(doc.error()),
+                      "failed to parse the json {} offset {}, length {}: {}, "
+                      "total_json:{}",
+                      std::string(data_.data() + offset, length),
+                      offset,
+                      length,
+                      simdjson::error_message(doc.error()),
+                      data_);
+        }
         return doc;
     }
 
@@ -223,10 +256,12 @@ class Json {
         // it's always safe to add the padding,
         // as we have allocated the memory with this padding
         auto doc = parser.parse(data_);
-        AssertInfo(doc.error() == simdjson::SUCCESS,
-                   "failed to parse the json {}: {}",
-                   data_,
-                   simdjson::error_message(doc.error()));
+        if (doc.error() != simdjson::SUCCESS) {
+            ThrowInfo(SimdjsonParseErrorToErrorCode(doc.error()),
+                      "failed to parse the json {}: {}",
+                      data_,
+                      simdjson::error_message(doc.error()));
+        }
         return doc;
     }
 
@@ -237,10 +272,12 @@ class Json {
         // it's always safe to add the padding,
         // as we have allocated the memory with this padding
         auto doc = parser.parse(data_.data() + offset, length);
-        AssertInfo(doc.error() == simdjson::SUCCESS,
-                   "failed to parse the json {}: {}",
-                   std::string(data_.data() + offset, length),
-                   simdjson::error_message(doc.error()));
+        if (doc.error() != simdjson::SUCCESS) {
+            ThrowInfo(SimdjsonParseErrorToErrorCode(doc.error()),
+                      "failed to parse the json {}: {}",
+                      std::string(data_.data() + offset, length),
+                      simdjson::error_message(doc.error()));
+        }
         return doc;
     }
 

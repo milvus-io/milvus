@@ -31,6 +31,7 @@
 
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/jsmn.h"
 #include "index/InvertedIndexTantivy.h"
 
@@ -78,13 +79,13 @@ UnescapeJsonString(const std::string& escaped) {
         quoted[quoted.size() - 1] = '"';
         simdjson::dom::element elem = parser.parse(quoted);
         if (elem.type() != simdjson::dom::element_type::STRING) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::DataFormatBroken,
                       "input is not a JSON string: {}",
                       escaped);
         }
         return std::string(std::string_view(elem.get_string()));
     } catch (const simdjson::simdjson_error& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(SimdjsonParseErrorToErrorCode(e.error()),
                   "Failed to unescape json string (simdjson): {}, {}",
                   escaped,
                   e.what());
