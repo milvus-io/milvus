@@ -440,6 +440,26 @@ func (s *Server) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPa
 	return s.mixCoord.ShowPartitionsInternal(ctx, in)
 }
 
+func (s *Server) CreateNamespace(ctx context.Context, in *milvuspb.CreateNamespaceRequest) (*rootcoordpb.CreateNamespaceResponse, error) {
+	return s.mixCoord.CreateNamespace(ctx, in)
+}
+
+func (s *Server) DescribeNamespace(ctx context.Context, in *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	return s.mixCoord.DescribeNamespace(ctx, in)
+}
+
+func (s *Server) ListNamespaces(ctx context.Context, in *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	return s.mixCoord.ListNamespaces(ctx, in)
+}
+
+func (s *Server) DropNamespace(ctx context.Context, in *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	return s.mixCoord.DropNamespace(ctx, in)
+}
+
+func (s *Server) HasNamespace(ctx context.Context, in *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	return s.mixCoord.HasNamespace(ctx, in)
+}
+
 // AllocTimestamp global timestamp allocator
 func (s *Server) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return s.mixCoord.AllocTimestamp(ctx, in)

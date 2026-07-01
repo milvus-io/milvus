@@ -506,6 +506,26 @@ func (s *mixCoordImpl) ShowPartitionsInternal(ctx context.Context, req *milvuspb
 	return s.rootcoordServer.ShowPartitionsInternal(ctx, req)
 }
 
+func (s *mixCoordImpl) CreateNamespace(ctx context.Context, req *milvuspb.CreateNamespaceRequest) (*rootcoordpb.CreateNamespaceResponse, error) {
+	return s.rootcoordServer.CreateNamespace(ctx, req)
+}
+
+func (s *mixCoordImpl) DescribeNamespace(ctx context.Context, req *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	return s.rootcoordServer.DescribeNamespace(ctx, req)
+}
+
+func (s *mixCoordImpl) ListNamespaces(ctx context.Context, req *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	return s.rootcoordServer.ListNamespaces(ctx, req)
+}
+
+func (s *mixCoordImpl) DropNamespace(ctx context.Context, req *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	return s.rootcoordServer.DropNamespace(ctx, req)
+}
+
+func (s *mixCoordImpl) HasNamespace(ctx context.Context, req *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	return s.rootcoordServer.HasNamespace(ctx, req)
+}
+
 func (s *mixCoordImpl) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return s.rootcoordServer.AllocTimestamp(ctx, req)
 }
