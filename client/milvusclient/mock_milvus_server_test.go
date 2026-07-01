@@ -1558,6 +1558,65 @@ func (_c *MilvusServiceServer_CreateIndex_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// CreateNamespace provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) CreateNamespace(_a0 context.Context, _a1 *milvuspb.CreateNamespaceRequest) (*milvuspb.CreateNamespaceResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateNamespace")
+	}
+
+	var r0 *milvuspb.CreateNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateNamespaceRequest) (*milvuspb.CreateNamespaceResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateNamespaceRequest) *milvuspb.CreateNamespaceResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.CreateNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateNamespaceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_CreateNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateNamespace'
+type MilvusServiceServer_CreateNamespace_Call struct {
+	*mock.Call
+}
+
+// CreateNamespace is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateNamespaceRequest
+func (_e *MilvusServiceServer_Expecter) CreateNamespace(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_CreateNamespace_Call {
+	return &MilvusServiceServer_CreateNamespace_Call{Call: _e.mock.On("CreateNamespace", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_CreateNamespace_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateNamespaceRequest)) *MilvusServiceServer_CreateNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateNamespaceRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_CreateNamespace_Call) Return(_a0 *milvuspb.CreateNamespaceResponse, _a1 error) *MilvusServiceServer_CreateNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_CreateNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateNamespaceRequest) (*milvuspb.CreateNamespaceResponse, error)) *MilvusServiceServer_CreateNamespace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreatePartition provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) CreatePartition(_a0 context.Context, _a1 *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2371,6 +2430,65 @@ func (_c *MilvusServiceServer_DescribeIndex_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// DescribeNamespace provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) DescribeNamespace(_a0 context.Context, _a1 *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeNamespace")
+	}
+
+	var r0 *milvuspb.DescribeNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeNamespaceRequest) *milvuspb.DescribeNamespaceResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeNamespaceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_DescribeNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeNamespace'
+type MilvusServiceServer_DescribeNamespace_Call struct {
+	*mock.Call
+}
+
+// DescribeNamespace is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeNamespaceRequest
+func (_e *MilvusServiceServer_Expecter) DescribeNamespace(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_DescribeNamespace_Call {
+	return &MilvusServiceServer_DescribeNamespace_Call{Call: _e.mock.On("DescribeNamespace", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_DescribeNamespace_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeNamespaceRequest)) *MilvusServiceServer_DescribeNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeNamespaceRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_DescribeNamespace_Call) Return(_a0 *milvuspb.DescribeNamespaceResponse, _a1 error) *MilvusServiceServer_DescribeNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_DescribeNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeNamespaceRequest) (*milvuspb.DescribeNamespaceResponse, error)) *MilvusServiceServer_DescribeNamespace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DescribePrewarmTask provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) DescribePrewarmTask(_a0 context.Context, _a1 *milvuspb.DescribePrewarmTaskRequest) (*milvuspb.DescribePrewarmTaskResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2898,6 +3016,65 @@ func (_c *MilvusServiceServer_DropIndex_Call) Return(_a0 *commonpb.Status, _a1 e
 }
 
 func (_c *MilvusServiceServer_DropIndex_Call) RunAndReturn(run func(context.Context, *milvuspb.DropIndexRequest) (*commonpb.Status, error)) *MilvusServiceServer_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropNamespace provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) DropNamespace(_a0 context.Context, _a1 *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropNamespace")
+	}
+
+	var r0 *milvuspb.DropNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropNamespaceRequest) *milvuspb.DropNamespaceResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DropNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropNamespaceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_DropNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropNamespace'
+type MilvusServiceServer_DropNamespace_Call struct {
+	*mock.Call
+}
+
+// DropNamespace is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropNamespaceRequest
+func (_e *MilvusServiceServer_Expecter) DropNamespace(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_DropNamespace_Call {
+	return &MilvusServiceServer_DropNamespace_Call{Call: _e.mock.On("DropNamespace", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_DropNamespace_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropNamespaceRequest)) *MilvusServiceServer_DropNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropNamespaceRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_DropNamespace_Call) Return(_a0 *milvuspb.DropNamespaceResponse, _a1 error) *MilvusServiceServer_DropNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_DropNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.DropNamespaceRequest) (*milvuspb.DropNamespaceResponse, error)) *MilvusServiceServer_DropNamespace_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4306,6 +4483,65 @@ func (_c *MilvusServiceServer_GetMetrics_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// GetNamespaceStats provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) GetNamespaceStats(_a0 context.Context, _a1 *milvuspb.GetNamespaceStatsRequest) (*milvuspb.GetNamespaceStatsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNamespaceStats")
+	}
+
+	var r0 *milvuspb.GetNamespaceStatsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetNamespaceStatsRequest) (*milvuspb.GetNamespaceStatsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetNamespaceStatsRequest) *milvuspb.GetNamespaceStatsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetNamespaceStatsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetNamespaceStatsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_GetNamespaceStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNamespaceStats'
+type MilvusServiceServer_GetNamespaceStats_Call struct {
+	*mock.Call
+}
+
+// GetNamespaceStats is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetNamespaceStatsRequest
+func (_e *MilvusServiceServer_Expecter) GetNamespaceStats(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_GetNamespaceStats_Call {
+	return &MilvusServiceServer_GetNamespaceStats_Call{Call: _e.mock.On("GetNamespaceStats", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_GetNamespaceStats_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetNamespaceStatsRequest)) *MilvusServiceServer_GetNamespaceStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetNamespaceStatsRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_GetNamespaceStats_Call) Return(_a0 *milvuspb.GetNamespaceStatsResponse, _a1 error) *MilvusServiceServer_GetNamespaceStats_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_GetNamespaceStats_Call) RunAndReturn(run func(context.Context, *milvuspb.GetNamespaceStatsRequest) (*milvuspb.GetNamespaceStatsResponse, error)) *MilvusServiceServer_GetNamespaceStats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPartitionStatistics provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) GetPartitionStatistics(_a0 context.Context, _a1 *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4955,6 +5191,65 @@ func (_c *MilvusServiceServer_HasCollection_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// HasNamespace provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) HasNamespace(_a0 context.Context, _a1 *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasNamespace")
+	}
+
+	var r0 *milvuspb.HasNamespaceResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.HasNamespaceRequest) *milvuspb.HasNamespaceResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.HasNamespaceResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.HasNamespaceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_HasNamespace_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasNamespace'
+type MilvusServiceServer_HasNamespace_Call struct {
+	*mock.Call
+}
+
+// HasNamespace is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.HasNamespaceRequest
+func (_e *MilvusServiceServer_Expecter) HasNamespace(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_HasNamespace_Call {
+	return &MilvusServiceServer_HasNamespace_Call{Call: _e.mock.On("HasNamespace", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_HasNamespace_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.HasNamespaceRequest)) *MilvusServiceServer_HasNamespace_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.HasNamespaceRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_HasNamespace_Call) Return(_a0 *milvuspb.HasNamespaceResponse, _a1 error) *MilvusServiceServer_HasNamespace_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_HasNamespace_Call) RunAndReturn(run func(context.Context, *milvuspb.HasNamespaceRequest) (*milvuspb.HasNamespaceResponse, error)) *MilvusServiceServer_HasNamespace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HasPartition provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) HasPartition(_a0 context.Context, _a1 *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -5541,6 +5836,65 @@ func (_c *MilvusServiceServer_ListIndexedSegment_Call) Return(_a0 *federpb.ListI
 }
 
 func (_c *MilvusServiceServer_ListIndexedSegment_Call) RunAndReturn(run func(context.Context, *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error)) *MilvusServiceServer_ListIndexedSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListNamespaces provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) ListNamespaces(_a0 context.Context, _a1 *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListNamespaces")
+	}
+
+	var r0 *milvuspb.ListNamespacesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListNamespacesRequest) *milvuspb.ListNamespacesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListNamespacesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListNamespacesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_ListNamespaces_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListNamespaces'
+type MilvusServiceServer_ListNamespaces_Call struct {
+	*mock.Call
+}
+
+// ListNamespaces is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListNamespacesRequest
+func (_e *MilvusServiceServer_Expecter) ListNamespaces(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_ListNamespaces_Call {
+	return &MilvusServiceServer_ListNamespaces_Call{Call: _e.mock.On("ListNamespaces", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_ListNamespaces_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListNamespacesRequest)) *MilvusServiceServer_ListNamespaces_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListNamespacesRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_ListNamespaces_Call) Return(_a0 *milvuspb.ListNamespacesResponse, _a1 error) *MilvusServiceServer_ListNamespaces_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_ListNamespaces_Call) RunAndReturn(run func(context.Context, *milvuspb.ListNamespacesRequest) (*milvuspb.ListNamespacesResponse, error)) *MilvusServiceServer_ListNamespaces_Call {
 	_c.Call.Return(run)
 	return _c
 }
