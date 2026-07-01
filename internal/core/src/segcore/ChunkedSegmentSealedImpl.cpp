@@ -136,6 +136,7 @@
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -2462,9 +2463,12 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+            if (!result.ok()) {
+                ThrowInfo(
+                    milvus::storage::ArrowStatusToErrorCode(result.status()),
+                    "[StorageV2] Failed to create file row group reader: " +
+                        result.status().ToString());
+            }
 
             auto reader = result.ValueOrDie();
             FileMetadataLoadResult load_result;
@@ -2496,12 +2500,14 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
             }
 
             auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "[StorageV2] metadata loader {} failed to close "
-                       "file reader for {} with error {}",
-                       debug_key,
-                       file,
-                       status.ToString());
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "[StorageV2] metadata loader {} failed to close "
+                          "file reader for {} with error {}",
+                          debug_key,
+                          file,
+                          status.ToString());
+            }
             return load_result;
         }));
     }
