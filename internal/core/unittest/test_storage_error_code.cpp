@@ -67,9 +67,10 @@ TEST(StorageErrorCode, ArrowStatusWithExtendDetailPreservesFineCode) {
     EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
                   milvus_storage::ExtendStatusCode::PackedStorageIO, "io")),
               milvus::ErrorCode::StorageTransientError);
-    EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
-                  milvus_storage::ExtendStatusCode::PackedFileCorrupted, "bad")),
-              milvus::ErrorCode::DataFormatBroken);
+    EXPECT_EQ(
+        ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::PackedFileCorrupted, "bad")),
+        milvus::ErrorCode::DataFormatBroken);
     EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
                   milvus_storage::ExtendStatusCode::PackedInvalidArgs, "args")),
               milvus::ErrorCode::InvalidParameter);
