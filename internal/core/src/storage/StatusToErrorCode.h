@@ -28,12 +28,17 @@ namespace milvus::storage {
 //
 // "Producer owns classification": milvus-storage classifies its own statuses in
 // milvus_storage::ToSegcoreError, which first unwraps the structured
-// ExtendStatusDetail to read the fine ExtendStatusCode (so a transient
-// PackedStorageIO becomes the retriable StorageTransientError(2045), corrupt
-// packed metadata/file becomes DataFormatBroken, etc.) and otherwise falls back
-// to a coarse arrow-status mapping (IO -> retriable transient, OOM ->
-// MemAllocateFailed, Invalid/Type/Key -> DataFormatBroken). We delegate here
-// rather than keep a second, drifting copy of that mapping in milvus.
+// ExtendStatusDetail to read the fine ExtendStatusCode (PackedStorageIO is a
+// conservatively non-retriable StorageError -- but a dormant branch with no live
+// consumer; corrupt packed metadata/file becomes DataFormatBroken, etc.) and
+// otherwise falls back to a coarse arrow-status mapping. That coarse fallback is
+// the LIVE segcore read path (plain arrow from FileRowGroupReader / v3
+// api::Reader). Object-storage IO retry lives once in the shared S3
+// ArrowFileSystem (AWS SDK), not per read generation, so a propagated IO error
+// already spent that budget; it still maps to retriable
+// StorageTransientError(2045) because querynode can reroute to another
+// replica/node. OOM -> MemAllocateFailed, Invalid/Type/Key -> DataFormatBroken.
+// We delegate here rather than keep a second, drifting copy of that mapping.
 //
 // This lives in its own light header (not Util.h, which pulls in the file
 // managers and forms an include cycle with FileManager.h) so every storage

@@ -60,13 +60,15 @@ TEST(StorageErrorCode, ArrowStatusToErrorCodeMapping) {
 }
 
 // When the producer attaches a structured ExtendStatusDetail, the fine code
-// survives: a transient PackedStorageIO must classify as the RETRIABLE
-// StorageTransientError(2045), never the non-retriable StorageError(2044).
+// survives the boundary. PackedStorageIO is non-retriable StorageError(2044)
+// per review (a dormant branch today: no live consumer routes Packed* codes
+// here); the retriable 2045 belongs to the plain-arrow no-detail path covered
+// above.
 TEST(StorageErrorCode, ArrowStatusWithExtendDetailPreservesFineCode) {
     using milvus::storage::ArrowStatusToErrorCode;
     EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
                   milvus_storage::ExtendStatusCode::PackedStorageIO, "io")),
-              milvus::ErrorCode::StorageTransientError);
+              milvus::ErrorCode::StorageError);
     EXPECT_EQ(
         ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
             milvus_storage::ExtendStatusCode::PackedFileCorrupted, "bad")),
@@ -74,4 +76,20 @@ TEST(StorageErrorCode, ArrowStatusWithExtendDetailPreservesFineCode) {
     EXPECT_EQ(ArrowStatusToErrorCode(milvus_storage::MakeExtendError(
                   milvus_storage::ExtendStatusCode::PackedInvalidArgs, "args")),
               milvus::ErrorCode::InvalidParameter);
+}
+
+// Permanently-failing S3 errors tagged by the producer (object/bucket gone,
+// bad credentials, SDK-judged non-retryable) must classify as the non-retriable
+// StorageError(2044), never the retriable 2045 -- otherwise querynode would
+// retry-storm a read that can never succeed.
+TEST(StorageErrorCode, PermanentS3ExtendCodesAreNotRetriable) {
+    using milvus::storage::ArrowStatusToErrorCode;
+    for (auto code : {milvus_storage::ExtendStatusCode::AwsErrorNotFound,
+                      milvus_storage::ExtendStatusCode::AwsErrorAccessDenied,
+                      milvus_storage::ExtendStatusCode::AwsErrorNonRetryable}) {
+        auto ec = ArrowStatusToErrorCode(
+            milvus_storage::MakeExtendError(code, "permanent"));
+        EXPECT_EQ(ec, milvus::ErrorCode::StorageError);
+        EXPECT_NE(ec, milvus::ErrorCode::StorageTransientError);
+    }
 }

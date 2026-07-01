@@ -135,6 +135,7 @@
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -928,9 +929,12 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+            if (!result.ok()) {
+                ThrowInfo(
+                    milvus::storage::ArrowStatusToErrorCode(result.status()),
+                    "[StorageV2] Failed to create file row group reader: " +
+                        result.status().ToString());
+            }
 
             auto reader = result.ValueOrDie();
             FileMetadataLoadResult load_result;
@@ -962,12 +966,14 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
             }
 
             auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "[StorageV2] metadata loader {} failed to close "
-                       "file reader for {} with error {}",
-                       debug_key,
-                       file,
-                       status.ToString());
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "[StorageV2] metadata loader {} failed to close "
+                          "file reader for {} with error {}",
+                          debug_key,
+                          file,
+                          status.ToString());
+            }
             return load_result;
         }));
     }
@@ -5439,12 +5445,15 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         needed_columns->push_back(schema_->GetPhysicalColumnName(fid));
     }
     auto chunk_reader_result = reader_->get_chunk_reader(index, needed_columns);
-    AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}, "
-               "status msg: {}",
-               get_segment_id(),
-               index,
-               chunk_reader_result.status().ToString());
+    if (!chunk_reader_result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
+                      chunk_reader_result.status()),
+                  "get chunk reader failed, segment {}, column group index {}, "
+                  "status msg: {}",
+                  get_segment_id(),
+                  index,
+                  chunk_reader_result.status().ToString());
+    }
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
