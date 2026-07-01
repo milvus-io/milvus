@@ -257,6 +257,19 @@ KnowhereStatusToErrorCode(knowhere::Status status) {
 }
 #pragma GCC diagnostic pop
 
+// Build/add-path variant of KnowhereStatusToErrorCode. It reuses the same
+// (drift-guarded) classification, but reports the generic KnowhereError bucket
+// as IndexBuildError to preserve the "index build failed" context that the build
+// call sites want. Every finer code passes through unchanged, so a build-time
+// OOM (malloc_error -> MemAllocateFailed) or disk read failure (disk_file_error
+// -> FileReadFailed) stays retriable instead of collapsing into a permanent
+// build error, and capability / corrupt-index statuses keep their precise codes.
+inline ErrorCode
+KnowhereBuildStatusToErrorCode(knowhere::Status status) {
+    auto code = KnowhereStatusToErrorCode(status);
+    return code == ErrorCode::KnowhereError ? ErrorCode::IndexBuildError : code;
+}
+
 inline std::vector<IndexType>
 DISK_INDEX_LIST() {
     static std::vector<IndexType> ret{
