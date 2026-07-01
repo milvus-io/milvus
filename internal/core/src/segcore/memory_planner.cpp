@@ -583,8 +583,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                                    reader_memory_limit,
                                                    read_parallelism);
             AssertInfo(tables_result.ok(),
-                       "[StorageV2] Failed to read batch: {}",
-                       tables_result.status().ToString());
+                       "[StorageV2] Failed to read batch: " +
+                           tables_result.status().ToString());
             auto all_tables = std::move(tables_result).ValueOrDie();
             AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
                        "reader returns less tables than expected, batch rg "
